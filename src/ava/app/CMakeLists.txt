@@ -35,12 +35,13 @@ target_sources(ava_app
     "command_session_tree.cpp"
     "command_sessions.cpp"
     "command_tools.cpp"
+    "command_trust.cpp"
+    "command_reload.cpp"
     "commands.cpp"
     "connect_oauth_callback.cpp"
     "connect_openai.cpp"
     "display_settings.cpp"
     "doctor_support.cpp"
-    "events.cpp"
     "external_editor.cpp"
     "headless_policy.cpp"
     "interactive_run_queue.cpp"
@@ -72,6 +73,10 @@ target_sources(ava_app
     "runtime_json.cpp"
     "runtime_model.cpp"
     "runtime_prompt.cpp"
+    "runtime_prompt_file_references.cpp"
+    "runtime_prompt_state.cpp"
+    "runtime_run_outcomes.cpp"
+    "runtime_event_adapters.cpp"
     "runtime_reasoning.cpp"
     "runtime_retry.cpp"
     "runtime_sessions.cpp"
@@ -80,6 +85,7 @@ target_sources(ava_app
     "subagent_delivery_manager.cpp"
     "runtime_session.cpp"
     "runtime/Session.cpp"
+    "runtime/ExtensionResourcePolicy.cpp"
     "runtime/markdown_files.cpp"
     "runtime/command_names.cpp"
 )
@@ -97,7 +103,7 @@ target_include_directories(ava_app
     "${AVA_GENERATED_INCLUDE_DIR}"
 )
 
-target_link_libraries(ava_app PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(ava_app PUBLIC ava_event ava_http PRIVATE ava_context ava_plugin nlohmann_json::nlohmann_json)
 
 ava_apply_debugging(ava_app)
 ava_apply_warnings(ava_app)

@@ -3,6 +3,7 @@
 #include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/session/assistant_output.h"
@@ -38,8 +39,8 @@ class OverflowOnceProvider final : public ava::provider::Provider
  public:
   explicit OverflowOnceProvider(std::string base_url) : delegate_(std::move(base_url)) { }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpRequest> build_request(ava::provider::ProviderRequest const& request,
-                                                                            std::string_view access_token) const override
+  [[nodiscard]] ava::core::Result<ava::http::HttpRequest> build_request(ava::provider::ProviderRequest const& request,
+                                                                        std::string_view access_token) const override
   {
     ++build_calls_;
     if (build_calls_ == 1)
@@ -51,8 +52,7 @@ class OverflowOnceProvider final : public ava::provider::Provider
 
   [[nodiscard]] std::unique_ptr<ava::provider::StreamParser> create_stream_parser() const override { return delegate_.create_stream_parser(); }
 
-  [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::provider::HttpResponse const& response,
-                                                                                          bool stream) const override
+  [[nodiscard]] ava::core::Result<std::vector<ava::provider::StreamEvent>> parse_response(ava::http::HttpResponse const& response, bool stream) const override
   {
     return delegate_.parse_response(response, stream);
   }
@@ -92,9 +92,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver =
           [&prompts, &outside_path](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -154,9 +152,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .workspace_dir = bash_workspace,
         .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .permission_resolver =
             [&bash_allow_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -197,9 +193,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .workspace_dir = bash_workspace,
         .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .on_stream_event = [&public_bash_stream_events](ava::provider::StreamEvent const& event) -> ava::core::VoidResult {
           public_bash_stream_events.push_back(event);
@@ -261,9 +255,7 @@ void test_agent_loop_permission_resolver_threads_to_tools()
         .workspace_dir = bash_workspace,
         .anchor_set = command_anchors_for_test(bash_workspace, bash_store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .permission_resolver =
             [&bash_fail_prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -302,9 +294,7 @@ void test_agent_loop_question_resolver_threads_to_tools()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .question_resolver = [&prompts](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
         ++prompts;
@@ -331,16 +321,13 @@ void test_agent_loop_non_stream_response()
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
-      .status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
+  ava::tests::FakeTransport transport(
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"status\":\"completed\",\"output_text\":\"plain response with data: literal\"}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = ava::agent::ModelInvocationOptions{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system prompt", .stream = false},
       .access_token = "token",
-      .stream = false,
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
@@ -360,20 +347,17 @@ void test_agent_loop_non_stream_error_prevents_tool_dispatch()
       ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "nonstream-provider-error"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200,
-                                   .headers = {},
-                                   .body = "{\"output\":[{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
-                                           "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"},{\"id\":\"fc_second\","
-                                           "\"type\":\"function_call\",\"call_id\":\"call_duplicate\",\"name\":\"read_file\","
-                                           "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}"}});
+      {ava::http::HttpResponse{.status_code = 200,
+                               .headers = {},
+                               .body = "{\"output\":[{\"id\":\"fc_first\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
+                                       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"},{\"id\":\"fc_second\","
+                                       "\"type\":\"function_call\",\"call_id\":\"call_duplicate\",\"name\":\"read_file\","
+                                       "\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}"}});
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = ava::agent::ModelInvocationOptions{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system prompt", .stream = false},
       .access_token = "token",
-      .stream = false,
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
@@ -418,17 +402,14 @@ void test_agent_loop_invalid_utf8_function_arguments_prevent_dispatch()
   response.push_back(static_cast<char>(0xFF));
   response += "\\\"}\"}]}";
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(response)}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(response)}});
   int permission_resolver_calls = 0;
   int tool_events = 0;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = ava::agent::ModelInvocationOptions{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system prompt", .stream = false},
       .access_token = "token",
-      .stream = false,
       .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const&) { ++tool_events; },
       .permission_resolver =
           [&permission_resolver_calls](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -462,9 +443,7 @@ void test_agent_loop_stream_unended_documented_function_prevents_dispatch()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
@@ -493,9 +472,7 @@ void test_agent_loop_stream_post_terminal_function_prevents_dispatch()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
@@ -531,9 +508,7 @@ void test_agent_loop_compaction_status_metadata()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
@@ -563,9 +538,7 @@ void test_agent_loop_compaction_callback_runs_without_session_mutex()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .compact_context = [&compact_callback_observed, &session_mutex, &session_mutex_was_available](
                              ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const&) -> ava::core::Result<bool> {
@@ -610,9 +583,7 @@ void test_agent_loop_two_provider_tool_turn_phase_and_persistence_order()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .on_tool_event =
           [&ordering, &tool_event_count](ava::agent::ToolTimelineEntry const&) {
@@ -705,9 +676,7 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .take_steering_messages = [&steering_taken]() -> ava::core::Result<std::vector<std::string>> {
         if (steering_taken)
@@ -774,9 +743,7 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .compact_context = [&append_lease, &overflow_compacted, &triggers, &store](ava::session::SessionReadAuthority, std::string_view trigger,
                                                                                  std::vector<std::string> const&) -> ava::core::Result<bool> {

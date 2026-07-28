@@ -46,21 +46,21 @@ bool is_canceled(ava::tools::ToolContext const& context)
   return context.cancel_requested && context.cancel_requested();
 }
 
-ava::agent::ToolDispatchResult safe_tool_failure_result(ava::agent::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
+ava::tools::ToolDispatchResult safe_tool_failure_result(ava::tools::ProviderToolCall const& call, ava::diagnostics::SafeFailure const& failure, bool canceled)
 {
   auto const json = ava::diagnostics::serialize_safe_failure_json(failure);
   auto const message = ava::diagnostics::serialize_safe_failure_human(failure);
-  ava::agent::ToolResultPayload payload;
-  payload.status = canceled ? ava::agent::ToolResultStatus::Canceled : ava::agent::ToolResultStatus::Error;
+  ava::tools::ToolResultPayload payload;
+  payload.status = canceled ? ava::tools::ToolResultStatus::Canceled : ava::tools::ToolResultStatus::Error;
   payload.content = json;
   payload.content_type = "application/json";
   payload.error_category = std::string(ava::diagnostics::to_string(failure.category));
   payload.error_code = std::string(ava::diagnostics::to_string(failure.code));
   payload.error_message = message;
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
+  return ava::tools::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = json, .payload = std::move(payload)};
 }
 
-ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall const& call, ava::core::Error const& error)
+ava::tools::ToolDispatchResult tool_error_result(ava::tools::ProviderToolCall const& call, ava::core::Error const& error)
 {
   bool const canceled = is_canceled_error(error);
   auto const failure = canceled ? ava::diagnostics::canceled_failure(ava::diagnostics::ComponentClass::Mcp)
@@ -68,7 +68,7 @@ ava::agent::ToolDispatchResult tool_error_result(ava::agent::ProviderToolCall co
   return safe_tool_failure_result(call, failure, canceled);
 }
 
-ava::agent::ToolDispatchResult remote_tool_error_result(ava::agent::ProviderToolCall const& call)
+ava::tools::ToolDispatchResult remote_tool_error_result(ava::tools::ProviderToolCall const& call)
 {
   return safe_tool_failure_result(call, ava::diagnostics::external_failure(ava::diagnostics::ComponentClass::Mcp), false);
 }
@@ -101,18 +101,6 @@ ava::core::Error mcp_server_error(ava::core::ErrorCategory category, std::string
   error.with_context("mcp_server", server.id);
   if (!server.source_path.empty())
     error.with_context("config", server.source_path.string());
-  return error;
-}
-
-ava::core::Error strict_model_name_collision(std::string_view model_tool_name, McpServerConfig const& server, std::string_view mcp_name,
-                                             ava::agent::RegisteredTool const& existing)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "strict session MCP tools normalize to a duplicate model tool name");
-  error.with_context("tool", std::string(model_tool_name));
-  error.with_context("mcp_server", server.id);
-  error.with_context("mcp_name", std::string(mcp_name));
-  error.with_context("existing_source", std::string(ava::agent::to_string(existing.source)));
-  error.with_context("existing_source_id", existing.source_id);
   return error;
 }
 
@@ -174,13 +162,13 @@ McpStdioClientOptions client_options_for_context(ava::tools::ToolContext const& 
   return options;
 }
 
-std::string result_json(ava::agent::ProviderToolCall const& call, McpToolBinding const& binding, McpToolCallResult const& result)
+std::string result_json(ava::tools::ProviderToolCall const& call, McpToolBinding const& binding, McpToolCallResult const& result)
 {
   return "{\"tool\":\"" + ava::core::json::escape(call.name) + "\",\"ok\":true,\"server\":\"" + ava::core::json::escape(binding.server.id) +
          "\",\"mcp_tool\":\"" + ava::core::json::escape(binding.tool.name) + "\",\"content\":\"" + ava::core::json::escape(result.content) + "\"}";
 }
 
-std::string resource_result_json(ava::agent::ProviderToolCall const& call, McpResourceBinding const& binding, McpResourceReadResult const& result)
+std::string resource_result_json(ava::tools::ProviderToolCall const& call, McpResourceBinding const& binding, McpResourceReadResult const& result)
 {
   auto const uri = result.uri.empty() ? binding.resource.uri : result.uri;
   auto const mime_type = result.mime_type.empty() ? binding.resource.mime_type : result.mime_type;
@@ -189,19 +177,19 @@ std::string resource_result_json(ava::agent::ProviderToolCall const& call, McpRe
          ava::core::json::escape(result.content) + "\"}";
 }
 
-ava::agent::ToolResultPayload result_payload(std::string const& text)
+ava::tools::ToolResultPayload result_payload(std::string const& text)
 {
-  ava::agent::ToolResultPayload payload;
-  payload.status = ava::agent::ToolResultStatus::Success;
+  ava::tools::ToolResultPayload payload;
+  payload.status = ava::tools::ToolResultStatus::Success;
   payload.content_type = "application/json";
   payload.content = text;
   return payload;
 }
 
-ava::agent::ToolResultPayload resource_result_payload(std::string const& text)
+ava::tools::ToolResultPayload resource_result_payload(std::string const& text)
 {
-  ava::agent::ToolResultPayload payload;
-  payload.status = ava::agent::ToolResultStatus::Success;
+  ava::tools::ToolResultPayload payload;
+  payload.status = ava::tools::ToolResultStatus::Success;
   payload.content_type = "application/json";
   payload.content = text;
   return payload;
@@ -233,7 +221,7 @@ std::string fnv1a64_hex(std::string_view value)
   return suffix;
 }
 
-ava::agent::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& context, ava::agent::ProviderToolCall const& call,
+ava::tools::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& context, ava::tools::ProviderToolCall const& call,
                                                  McpToolBinding const& binding)
 {
   if (is_canceled(context))
@@ -285,10 +273,10 @@ ava::agent::ToolDispatchResult dispatch_mcp_tool(ava::tools::ToolContext const& 
   if (result->is_error)
     return remote_tool_error_result(call);
   auto text = result_json(call, binding, *result);
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
+  return ava::tools::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = result_payload(text)};
 }
 
-ava::agent::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext const& context, ava::agent::ProviderToolCall const& call,
+ava::tools::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext const& context, ava::tools::ProviderToolCall const& call,
                                                      McpResourceBinding const& binding)
 {
   if (is_canceled(context))
@@ -338,7 +326,7 @@ ava::agent::ToolDispatchResult dispatch_mcp_resource(ava::tools::ToolContext con
     return tool_error_result(call, shutdown.error());
 
   auto text = resource_result_json(call, binding, *result);
-  return ava::agent::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = resource_result_payload(text)};
+  return ava::tools::ToolDispatchResult{.call_id = call.id, .name = call.name, .success = true, .result_text = text, .payload = resource_result_payload(text)};
 }
 
 std::string schema_json(std::string_view model_tool_name, McpToolDescription const& tool)
@@ -355,39 +343,58 @@ std::string resource_schema_json(std::string_view model_tool_name, McpServerConf
          "\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}";
 }
 
-ava::agent::RegisteredToolMetadata metadata_for_tool(std::string model_tool_name, McpServerConfig const& server, McpToolDescription const& tool)
+McpBrokeredTool brokered_tool(std::shared_ptr<McpToolBinding const> binding)
 {
-  auto const description = tool.description.empty() ? std::string("MCP tool ") + tool.name + " from " + server.id : tool.description;
-  auto const schema = schema_json(model_tool_name, tool);
-  return ava::agent::RegisteredToolMetadata{.name = std::move(model_tool_name),
-                                            .description = description,
-                                            .schema_json = schema,
-                                            .permission_category = "mcp.tool.call",
-                                            .output_bound_summary = "MCP tool output is bounded by JSON-RPC message size",
-                                            .execution_mode = "mcp_stdio_process",
-                                            .event_rendering_hint = "mcp_tool",
-                                            .description_family = "mcp"};
+  auto const description =
+      binding->tool.description.empty() ? std::string("MCP tool ") + binding->tool.name + " from " + binding->server.id : binding->tool.description;
+  return McpBrokeredTool{.model_tool_name = binding->model_tool_name,
+                         .description = description,
+                         .schema_json = schema_json(binding->model_tool_name, binding->tool),
+                         .permission_category = "mcp.tool.call",
+                         .output_bound_summary = "MCP tool output is bounded by JSON-RPC message size",
+                         .execution_mode = "mcp_stdio_process",
+                         .event_rendering_hint = "mcp_tool",
+                         .description_family = "mcp",
+                         .source_id = binding->server.id,
+                         .mcp_server = binding->server.id,
+                         .mcp_name = binding->tool.name,
+                         .resource_uri = {},
+                         .executor = [binding = std::move(binding)](ava::tools::ToolContext const& tool_context, ava::tools::ProviderToolCall const& call) {
+                           return dispatch_mcp_tool(tool_context, call, *binding);
+                         }};
 }
 
-ava::agent::RegisteredToolMetadata metadata_for_resource(std::string model_tool_name, McpServerConfig const& server, McpResourceDescription const&)
+McpBrokeredTool brokered_resource(std::shared_ptr<McpResourceBinding const> binding)
 {
-  auto const description = "Read an approved MCP resource from " + server.id;
-  auto const schema = resource_schema_json(model_tool_name, server);
-  return ava::agent::RegisteredToolMetadata{.name = std::move(model_tool_name),
-                                            .description = description,
-                                            .schema_json = schema,
-                                            .permission_category = "mcp.resource.read",
-                                            .output_bound_summary = "MCP resource output is bounded by JSON-RPC message size",
-                                            .execution_mode = "mcp_stdio_process",
-                                            .event_rendering_hint = "mcp_resource",
-                                            .description_family = "mcp"};
+  auto const description = "Read an approved MCP resource from " + binding->server.id;
+  return McpBrokeredTool{.model_tool_name = binding->model_tool_name,
+                         .description = description,
+                         .schema_json = resource_schema_json(binding->model_tool_name, binding->server),
+                         .permission_category = "mcp.resource.read",
+                         .output_bound_summary = "MCP resource output is bounded by JSON-RPC message size",
+                         .execution_mode = "mcp_stdio_process",
+                         .event_rendering_hint = "mcp_resource",
+                         .description_family = "mcp",
+                         .source_id = binding->server.id,
+                         .mcp_server = binding->server.id,
+                         .mcp_name = {},
+                         .resource_uri = binding->resource.uri,
+                         .executor = [binding = std::move(binding)](ava::tools::ToolContext const& tool_context, ava::tools::ProviderToolCall const& call) {
+                           return dispatch_mcp_resource(tool_context, call, *binding);
+                         }};
 }
 
 McpConfigLoadOptions config_options_for_context(ava::tools::ToolContext const& context)
 {
   auto options = default_mcp_config_options(context.workspace_dir);
-  if (!context.mcp_global_config_file.empty())
+  if (!context.include_global_mcp_config)
+  {
+    options.global_config_file.clear();
+  }
+  else if (!context.mcp_global_config_file.empty())
+  {
     options.global_config_file = context.mcp_global_config_file;
+  }
   if (!context.include_project_mcp_config)
   {
     options.project_config_file.clear();
@@ -515,7 +522,7 @@ std::string mcp_model_resource_tool_name(std::string_view server_id, std::string
   return mcp_model_tool_name(server_id, "resource_" + fnv1a64_hex(server_id) + "_" + fnv1a64_hex(resource_uri));
 }
 
-ava::core::VoidResult register_enabled_mcp_tools(ava::agent::ToolRegistry& registry, ava::tools::ToolContext const& context)
+ava::core::VoidResult visit_enabled_mcp_tools(ava::tools::ToolContext const& context, McpBrokeredToolVisitor const& visitor)
 {
   auto const exact_composition = context.exact_builtin_tool_names.has_value();
   std::shared_ptr<McpConfig const> config = context.session_mcp_config;
@@ -545,25 +552,11 @@ ava::core::VoidResult register_enabled_mcp_tools(ava::agent::ToolRegistry& regis
     {
       for (auto const& tool : *tools)
       {
-        auto const model_tool_name = mcp_model_tool_name(server.id, tool.name);
-        if (auto const* existing = registry.find(model_tool_name); existing != nullptr)
-        {
-          if (exact_composition)
-            return std::unexpected(strict_model_name_collision(model_tool_name, server, tool.name, *existing));
-          continue;
-        }
-
-        auto binding = std::make_shared<McpToolBinding const>(McpToolBinding{.server = server, .tool = tool, .model_tool_name = model_tool_name});
-        auto registered = registry.register_tool(ava::agent::RegisteredTool{
-            .metadata = metadata_for_tool(model_tool_name, server, tool),
-            .executor = [binding](ava::tools::ToolContext const& tool_context,
-                                  ava::agent::ProviderToolCall const& call) { return dispatch_mcp_tool(tool_context, call, *binding); },
-            .source = ava::agent::ToolSource::Mcp,
-            .source_id = server.id,
-            .brokered_external = true,
-            .requires_lsp_diagnostics = false});
-        if (!registered && exact_composition)
-          return std::unexpected(std::move(registered.error()));
+        auto model_tool_name = mcp_model_tool_name(server.id, tool.name);
+        auto binding = std::make_shared<McpToolBinding const>(McpToolBinding{.server = server, .tool = tool, .model_tool_name = std::move(model_tool_name)});
+        auto descriptor = brokered_tool(std::move(binding));
+        if (auto visited = visitor(descriptor); !visited)
+          return std::unexpected(std::move(visited.error()));
       }
     }
 
@@ -574,32 +567,15 @@ ava::core::VoidResult register_enabled_mcp_tools(ava::agent::ToolRegistry& regis
 
     auto resources = discover_server_resources(context, server);
     if (!resources)
-    {
-      if (exact_composition)
-        return std::unexpected(std::move(resources.error()));
       continue;
-    }
     for (auto const& resource : *resources)
     {
-      auto const model_tool_name = mcp_model_resource_tool_name(server.id, resource.uri);
-      if (auto const* existing = registry.find(model_tool_name); existing != nullptr)
-      {
-        if (exact_composition)
-          return std::unexpected(strict_model_name_collision(model_tool_name, server, resource.uri, *existing));
-        continue;
-      }
-
-      auto binding = std::make_shared<McpResourceBinding const>(McpResourceBinding{.server = server, .resource = resource, .model_tool_name = model_tool_name});
-      auto registered = registry.register_tool(ava::agent::RegisteredTool{
-          .metadata = metadata_for_resource(model_tool_name, server, resource),
-          .executor = [binding](ava::tools::ToolContext const& tool_context,
-                                ava::agent::ProviderToolCall const& call) { return dispatch_mcp_resource(tool_context, call, *binding); },
-          .source = ava::agent::ToolSource::Mcp,
-          .source_id = server.id,
-          .brokered_external = true,
-          .requires_lsp_diagnostics = false});
-      if (!registered && exact_composition)
-        return std::unexpected(std::move(registered.error()));
+      auto model_tool_name = mcp_model_resource_tool_name(server.id, resource.uri);
+      auto binding =
+          std::make_shared<McpResourceBinding const>(McpResourceBinding{.server = server, .resource = resource, .model_tool_name = std::move(model_tool_name)});
+      auto descriptor = brokered_resource(std::move(binding));
+      if (auto visited = visitor(descriptor); !visited)
+        return std::unexpected(std::move(visited.error()));
     }
   }
   return {};

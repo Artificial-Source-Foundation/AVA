@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/core/json.h"
 #include "ava/core/version.h"
@@ -364,17 +365,16 @@ ava::core::Result<OpenAICredential> parse_openai_oauth_token_response(std::strin
                           .source_path = {}};
 }
 
-ava::core::Result<ava::provider::HttpResponse> post_openai_oauth_token_form(std::string body, ava::provider::Transport& transport,
-                                                                            std::string_view failure_message)
+ava::core::Result<ava::http::HttpResponse> post_openai_oauth_token_form(std::string body, ava::http::Transport& transport, std::string_view failure_message)
 {
-  auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
-                                                            .url = std::string(kTokenUrl),
-                                                            .headers = {{"Content-Type", "application/x-www-form-urlencoded"}},
-                                                            .body = std::move(body),
-                                                            .timeout_ms = 60000,
-                                                            .follow_redirects = true,
-                                                            .include_response_headers = false,
-                                                            .resolve_hosts = {}});
+  auto response = transport.send(ava::http::HttpRequest{.method = "POST",
+                                                        .url = std::string(kTokenUrl),
+                                                        .headers = {{"Content-Type", "application/x-www-form-urlencoded"}},
+                                                        .body = std::move(body),
+                                                        .timeout_ms = 60000,
+                                                        .follow_redirects = true,
+                                                        .include_response_headers = false,
+                                                        .resolve_hosts = {}});
   if (!response)
     return std::unexpected(response.error());
   if (response->status_code < 200 || response->status_code >= 300)
@@ -513,14 +513,14 @@ ava::core::Result<OpenAIOAuthSession> make_openai_oauth_session(std::string veri
   return OpenAIOAuthSession{.code_verifier = std::move(verifier), .state = std::move(state), .authorization_url = url};
 }
 
-ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view code, std::string_view verifier, ava::provider::Transport& transport,
+ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view code, std::string_view verifier, ava::http::Transport& transport,
                                                                long long now_seconds)
 {
   return exchange_openai_oauth_code(code, verifier, kRedirectUri, transport, now_seconds);
 }
 
 ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view code, std::string_view verifier, std::string_view redirect_uri,
-                                                               ava::provider::Transport& transport, long long now_seconds)
+                                                               ava::http::Transport& transport, long long now_seconds)
 {
   std::string body = "grant_type=authorization_code";
   body += "&client_id=" + url_encode(kClientId);
@@ -534,16 +534,16 @@ ava::core::Result<OpenAICredential> exchange_openai_oauth_code(std::string_view 
   return parse_openai_oauth_token_response(response->body, now_seconds, "", "");
 }
 
-ava::core::Result<OpenAIOAuthDeviceAuthorization> start_openai_oauth_device_authorization(ava::provider::Transport& transport)
+ava::core::Result<OpenAIOAuthDeviceAuthorization> start_openai_oauth_device_authorization(ava::http::Transport& transport)
 {
-  auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
-                                                            .url = std::string(kDeviceUserCodeUrl),
-                                                            .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
-                                                            .body = "{\"client_id\":\"" + ava::core::json::escape(kClientId) + "\"}",
-                                                            .timeout_ms = 60000,
-                                                            .follow_redirects = true,
-                                                            .include_response_headers = false,
-                                                            .resolve_hosts = {}});
+  auto response = transport.send(ava::http::HttpRequest{.method = "POST",
+                                                        .url = std::string(kDeviceUserCodeUrl),
+                                                        .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
+                                                        .body = "{\"client_id\":\"" + ava::core::json::escape(kClientId) + "\"}",
+                                                        .timeout_ms = 60000,
+                                                        .follow_redirects = true,
+                                                        .include_response_headers = false,
+                                                        .resolve_hosts = {}});
   if (!response)
     return std::unexpected(response.error());
   if (response->status_code < 200 || response->status_code >= 300)
@@ -570,7 +570,7 @@ ava::core::Result<OpenAIOAuthDeviceAuthorization> start_openai_oauth_device_auth
 }
 
 ava::core::Result<std::optional<OpenAICredential>> poll_openai_oauth_device_authorization(OpenAIOAuthDeviceAuthorization const& authorization,
-                                                                                          ava::provider::Transport& transport, long long now_seconds)
+                                                                                          ava::http::Transport& transport, long long now_seconds)
 {
   if (authorization.device_auth_id.empty() || authorization.user_code.empty())
   {
@@ -579,14 +579,14 @@ ava::core::Result<std::optional<OpenAICredential>> poll_openai_oauth_device_auth
 
   std::string body = "{\"device_auth_id\":\"" + ava::core::json::escape(authorization.device_auth_id) + "\",\"user_code\":\"" +
                      ava::core::json::escape(authorization.user_code) + "\"}";
-  auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
-                                                            .url = std::string(kDeviceTokenUrl),
-                                                            .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
-                                                            .body = std::move(body),
-                                                            .timeout_ms = 60000,
-                                                            .follow_redirects = true,
-                                                            .include_response_headers = false,
-                                                            .resolve_hosts = {}});
+  auto response = transport.send(ava::http::HttpRequest{.method = "POST",
+                                                        .url = std::string(kDeviceTokenUrl),
+                                                        .headers = {{"Content-Type", "application/json"}, {"User-Agent", openai_oauth_user_agent()}},
+                                                        .body = std::move(body),
+                                                        .timeout_ms = 60000,
+                                                        .follow_redirects = true,
+                                                        .include_response_headers = false,
+                                                        .resolve_hosts = {}});
   if (!response)
     return std::unexpected(response.error());
   if (response->status_code == 403 || response->status_code == 404)
@@ -615,8 +615,7 @@ ava::core::Result<std::optional<OpenAICredential>> poll_openai_oauth_device_auth
   return std::optional<OpenAICredential>{std::move(*credential)};
 }
 
-ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential, ava::provider::Transport& transport,
-                                                                    long long now_seconds)
+ava::core::Result<OpenAICredential> refresh_openai_oauth_credential(OpenAICredential const& credential, ava::http::Transport& transport, long long now_seconds)
 {
   if (credential.type != OpenAICredentialType::OAuth)
   {

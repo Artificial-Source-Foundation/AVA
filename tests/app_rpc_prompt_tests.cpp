@@ -3,6 +3,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -59,7 +60,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc answer\"}\n\n"
@@ -159,7 +160,7 @@ void test_app_rpc_prompt_imports_image_attachments()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc image answer\"}\n\n"
@@ -216,7 +217,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"rpc upload answer\"}\n\n"
@@ -356,9 +357,9 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
-                                       ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
-                                       ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
+                                       ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"},
+                                       ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"retry later\"}}"}});
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
   runtime_options.enable_transport_retries = true;
@@ -408,7 +409,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"after cancel\"}\n\n"
@@ -465,14 +466,14 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "{\"access_token\":\"rpc-refreshed-access\","
                                                    "\"refresh_token\":\"rpc-rotated-refresh\","
                                                    "\"expires_in\":3600,\"account_id\":\"acct_rpc\"}",
                                        },
-                                       ava::provider::HttpResponse{
+                                       ava::http::HttpResponse{
                                            .status_code = 200,
                                            .headers = {},
                                            .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":"

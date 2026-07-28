@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ava/app/events.h"
+#include "ava/event/events.h"
 #include "ava/agent/question.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
@@ -106,7 +106,7 @@ struct TuiSubmitContext
 {
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
-  ava::app::runtime::EventSink event_sink;
+  ava::event::RuntimeEventSink event_sink;
   std::function<bool()> cancel_requested;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
@@ -141,7 +141,7 @@ struct TuiRuntimeOptions
   std::function<std::optional<std::string>()> token_status_provider;
   std::function<std::optional<std::string>()> active_context_status_provider;
   std::function<std::optional<std::string>()> reasoning_status_provider;
-  std::function<TuiActiveRunQueues(ava::app::EventEnvelopeSink)> create_active_run_queues;
+  std::function<TuiActiveRunQueues(ava::event::EventEnvelopeSink)> create_active_run_queues;
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<ava::session::ImageAttachmentRef>(std::string const&)> on_attach_image;
   std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>()> on_paste_clipboard_image;

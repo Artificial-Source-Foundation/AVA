@@ -1,13 +1,11 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
-#include "ava/agent/mode.h"
-#include "ava/agent/question.h"
-#include "ava/agent/subagent_config.h"
-#include "ava/agent/tool_visibility.h"
 #include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/mode.h"
 #include "ava/core/result.h"
 
 #include <atomic>
@@ -18,10 +16,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace ava::agent {
-class SubagentCoordinator;
-}
 
 namespace ava::lsp {
 class DiagnosticsProvider;
@@ -40,7 +34,7 @@ struct PermissionAuditEvent
 {
   std::string permission_request_id = {};
   ava::permissions::Operation operation;
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   std::string tool_name;
   ava::permissions::PermissionAction action = ava::permissions::PermissionAction::Deny;
   std::string reason;
@@ -74,43 +68,11 @@ struct ToolProgressEvent
 
 using ToolProgressSink = std::function<ava::core::VoidResult(ToolProgressEvent const&)>;
 
-struct TaskSubagentRequest
-{
-  std::string description;
-  std::string prompt;
-  std::string subagent_type;
-  std::string subagent_system_prompt;
-  ava::agent::SubagentToolPreset tool_preset = ava::agent::SubagentToolPreset::Inherit;
-  std::optional<std::string> task_id = std::nullopt;
-  std::string command;
-  bool background = false;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-struct TaskSubagentResult
-{
-  std::string task_id;
-  std::string job_id;
-  std::filesystem::path session_path;
-  std::string subagent_type;
-  std::string state = "completed";
-  std::string final_text;
-  std::string stop_reason;
-  std::size_t provider_iterations = 0;
-  std::size_t tool_calls = 0;
-  std::size_t tool_iterations = 0;
-
-  AVA_DEBUG_PRINT_MEMBERS_ON
-};
-
-using TaskSubagentRunner = std::function<ava::core::Result<TaskSubagentResult>(TaskSubagentRequest const&)>;
-
 struct ToolContext
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path spill_dir = {};
-  ava::agent::Mode mode = ava::agent::Mode::Build;
+  ava::core::Mode mode = ava::core::Mode::Build;
   // Local sealed command execution is enabled by default. Legacy and
   // PromptOnly contexts remain explicit non-executing compatibility modes.
   ava::command::CommandRuntimeOptions command_runtime{.mode = ava::command::CommandRuntimeMode::Enabled};
@@ -126,12 +88,6 @@ struct ToolContext
   bool announce_execution_after_permission = false;
   std::shared_ptr<std::atomic_bool> execution_started = nullptr;
   std::function<bool()> cancel_requested = nullptr;
-  ava::agent::QuestionResolver question_resolver = nullptr;
-  TaskSubagentRunner task_subagent_runner = nullptr;
-  // Exact coordinator/owner pair for public job controls. Child loops clear
-  // both this coordinator and the task runner, then hide both schemas.
-  std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;
-  std::vector<ava::agent::SubagentDefinition> subagents = {};
   std::string permission_tool_name = {};
   std::string permission_actor = {};
   std::string current_tool_name = {};
@@ -169,8 +125,10 @@ struct ToolContext
   std::filesystem::path plugin_project_plugins_dir = {};
   std::filesystem::path plugin_enablement_file = {};
   bool include_project_plugins = true;
+  bool include_plugin_tools = true;
   std::filesystem::path mcp_global_config_file = {};
   std::filesystem::path mcp_project_config_file = {};
+  bool include_global_mcp_config = true;
   bool include_project_mcp_config = true;
   std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
   // Present means compose exactly these built-ins with immutable session MCP
@@ -179,12 +137,12 @@ struct ToolContext
   bool require_descriptor_secure_workspace = false;
   std::vector<std::filesystem::path> skill_global_dirs = {};
   std::vector<std::filesystem::path> skill_project_dirs = {};
+  bool include_global_skills = true;
   bool include_project_skills = true;
   std::string session_id = {};
   std::string provider_id = {};
   std::string model_id = {};
   std::filesystem::path current_dir = {};
-  ava::agent::ToolVisibilityOptions tool_visibility = {};
   std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
   ava::observability::TraceContext trace_context = {};
 

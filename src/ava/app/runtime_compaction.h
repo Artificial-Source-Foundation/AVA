@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/core/result.h"
 
@@ -9,7 +9,7 @@
 namespace ava::app::runtime {
 
 [[nodiscard]] ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                              ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                              ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                               RunOptions const& options, std::vector<std::string> const& replayed_user_messages);
 
 }  // namespace ava::app::runtime

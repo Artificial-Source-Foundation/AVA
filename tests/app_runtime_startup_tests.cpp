@@ -2,13 +2,16 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
@@ -36,6 +39,7 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #ifndef AVA_FAKE_MCP_SERVER_PATH
@@ -45,6 +49,39 @@
 namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
+
+void test_extension_resource_policy_derives_synthetic_paths_and_trust()
+{
+  std::filesystem::path const home = "/synthetic-extension-policy/home-root";
+  ScopedEnvVar home_env("HOME", home.string());
+  ava::config::XdgPaths paths;
+  paths.ava_config_dir = "/synthetic-extension-policy/config-root";
+  paths.ava_state_dir = "/synthetic-extension-policy/state-root";
+  std::filesystem::path const workspace = "/synthetic-extension-policy/workspace-root";
+  auto const expected_global_skill_dirs =
+      std::vector<std::filesystem::path>{paths.ava_config_dir / "skills", home / ".agents" / "skills", home / ".claude" / "skills"};
+  auto const expected_project_skill_dirs =
+      std::vector<std::filesystem::path>{workspace / ".ava" / "skills", workspace / ".agents" / "skills", workspace / ".claude" / "skills"};
+
+  auto const trusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, true);
+  expect(trusted.include_project_resources && trusted.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
+             trusted.plugin_discovery.project_plugins_dir == workspace / ".ava" / "plugins" &&
+             trusted.plugin_enablement_file == paths.ava_state_dir / "plugin-enablement.json" && trusted.mcp_config.workspace_dir == workspace &&
+             trusted.mcp_config.global_config_file == paths.ava_config_dir / "mcp.json" &&
+             trusted.mcp_config.project_config_file == workspace / ".ava" / "mcp.json" && trusted.global_lsp_config_file == paths.ava_config_dir / "lsp.json" &&
+             trusted.project_lsp_config_file == workspace / ".ava" / "lsp.json" && trusted.global_skill_dirs == expected_global_skill_dirs &&
+             trusted.project_skill_dirs == expected_project_skill_dirs,
+         "trusted extension resource policy derives every path from synthetic XDG and workspace inputs");
+
+  auto const untrusted = ava::app::runtime::make_extension_resource_policy(paths, workspace, false);
+  expect(!untrusted.include_project_resources && untrusted.plugin_discovery.global_plugins_dir == trusted.plugin_discovery.global_plugins_dir &&
+             untrusted.plugin_discovery.project_plugins_dir.empty() && untrusted.plugin_enablement_file == trusted.plugin_enablement_file &&
+             untrusted.mcp_config.workspace_dir == trusted.mcp_config.workspace_dir &&
+             untrusted.mcp_config.global_config_file == trusted.mcp_config.global_config_file && untrusted.mcp_config.project_config_file.empty() &&
+             untrusted.global_lsp_config_file == trusted.global_lsp_config_file && untrusted.project_lsp_config_file.empty() &&
+             untrusted.global_skill_dirs == expected_global_skill_dirs && untrusted.project_skill_dirs.empty(),
+         "untrusted extension resource policy preserves synthetic global paths and workspace while omitting every project path");
+}
 
 void test_app_runtime_open_session_and_context_prompt()
 {
@@ -80,6 +117,10 @@ void test_app_runtime_open_session_and_context_prompt()
 
   expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model().model_id == "gpt-5.5",
          "runtime session records created state, mode, and model");
+  auto const resource_policy = ava::app::runtime::make_extension_resource_policy(*session);
+  expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
+             resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
+         "runtime session extension resource policy overload derives paths and the fail-closed trust decision");
   expect(session->context_sources().size() == 3, "runtime session records workspace and global context metadata");
   expect(!session->base_prompt().from_override && !session->base_prompt().source_path && session->base_prompt().byte_count > 0 &&
              session->base_prompt().content_fingerprint != 0,
@@ -110,6 +151,87 @@ void test_app_runtime_open_session_and_context_prompt()
     auto reopened_entries = reopened->store.load();
     expect(reopened_entries && reopened_entries->size() == 1, "runtime reopened session does not append another session_start");
   }
+}
+
+void test_app_runtime_preserves_legacy_subagent_job_tree()
+{
+  auto const root = create_empty_root("app-runtime-legacy-subagent-jobs");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  auto const legacy = paths.ava_state_dir / "subagent-jobs";
+  auto const journal = legacy / "parent.jsonl";
+  auto const sentinel = legacy / "sentinel.bin";
+  std::filesystem::create_directories(legacy);
+  {
+    std::ofstream out(journal, std::ios::binary | std::ios::trunc);
+    out << "legacy journal bytes\n";
+  }
+  {
+    std::ofstream out(sentinel, std::ios::binary | std::ios::trunc);
+    std::string const bytes("sentinel\0bytes", 14);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  ::chmod(legacy.c_str(), 0711);
+  ::chmod(journal.c_str(), 0640);
+  ::chmod(sentinel.c_str(), 0604);
+
+  struct stat before_directory{};
+  struct stat before_journal{};
+  struct stat before_sentinel{};
+  bool const captured =
+      ::lstat(legacy.c_str(), &before_directory) == 0 && ::lstat(journal.c_str(), &before_journal) == 0 && ::lstat(sentinel.c_str(), &before_sentinel) == 0;
+  std::vector<std::string> before_names;
+  for (auto const& entry : std::filesystem::directory_iterator(legacy)) before_names.push_back(entry.path().filename().string());
+  std::ranges::sort(before_names);
+  expect(captured && before_names == std::vector<std::string>({"parent.jsonl", "sentinel.bin"}),
+         "runtime legacy-tree fixture captures exact names and metadata before construction");
+
+  ava::app::runtime::OpenOptions options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto session = ava::app::open_runtime_session(options);
+  expect(session && session->subagent_coordinator() && session->subagent_delivery_manager(),
+         "real runtime session constructs its application coordinator and delivery manager against the seeded XDG state root");
+  if (session)
+  {
+    auto coordinator = session->subagent_coordinator();
+    auto manager = session->subagent_delivery_manager();
+    auto started =
+        coordinator->start(session->store.session_id(), ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_runtime_legacy"}, [](auto const&) {
+          return ava::agent::BackgroundJobCompletion{
+              .state = ava::agent::BackgroundJobState::Completed, .final_text = "runtime result", .stop_reason = "completed"};
+        });
+    auto completed = started ? coordinator->wait(session->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2))
+                             : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(started.error()));
+    expect(completed && completed->job.delivery == ava::agent::SubagentDeliveryState::Direct,
+           "real runtime coordinator executes a foreground process-local job without legacy persistence");
+    manager->shutdown();
+    coordinator->shutdown();
+    session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime legacy fixture"));
+  }
+
+  struct stat after_directory{};
+  struct stat after_journal{};
+  struct stat after_sentinel{};
+  auto exact_metadata = [](struct stat const& before, struct stat const& after) {
+    return before.st_dev == after.st_dev && before.st_ino == after.st_ino && before.st_mode == after.st_mode && before.st_size == after.st_size &&
+           before.st_mtim.tv_sec == after.st_mtim.tv_sec && before.st_mtim.tv_nsec == after.st_mtim.tv_nsec;
+  };
+  bool const metadata_unchanged = ::lstat(legacy.c_str(), &after_directory) == 0 && ::lstat(journal.c_str(), &after_journal) == 0 &&
+                                  ::lstat(sentinel.c_str(), &after_sentinel) == 0 && exact_metadata(before_directory, after_directory) &&
+                                  exact_metadata(before_journal, after_journal) && exact_metadata(before_sentinel, after_sentinel);
+  std::vector<std::string> after_names;
+  for (auto const& entry : std::filesystem::directory_iterator(legacy)) after_names.push_back(entry.path().filename().string());
+  std::ranges::sort(after_names);
+  std::ifstream journal_in(journal, std::ios::binary);
+  std::ifstream sentinel_in(sentinel, std::ios::binary);
+  std::string const journal_bytes((std::istreambuf_iterator<char>(journal_in)), {});
+  std::string const sentinel_bytes((std::istreambuf_iterator<char>(sentinel_in)), {});
+  expect(
+      metadata_unchanged && after_names == before_names && journal_bytes == "legacy journal bytes\n" && sentinel_bytes == std::string("sentinel\0bytes", 14),
+      "real runtime construction, coordinator use, delivery-manager shutdown, and session shutdown leave the legacy tree byte-for-byte and metadata unchanged");
 }
 
 void test_app_active_context_status_tracks_compaction_projection()
@@ -532,7 +654,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                                                                                   .tools_json = {},
                                                                                   .stream = true},
                                                    "token")
-                          : ava::core::Result<ava::provider::HttpRequest>(std::unexpected(messages.error()));
+                          : ava::core::Result<ava::http::HttpRequest>(std::unexpected(messages.error()));
   expect(resumed && entries && first_results == 1 && second_results == 1 && saw_unknown_nonretriable && validation.ok() && request,
          "resume closes only unresolved committed v4 functions, preserves exact bindings, validates replay, and builds the next provider request");
 

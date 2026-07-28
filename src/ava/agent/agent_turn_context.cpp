@@ -107,8 +107,7 @@ ava::core::VoidResult AgentTurnSession::check_canceled(std::string_view boundary
 {
   if (!is_canceled())
     return {};
-  static_cast<void>(
-      with_session_lock(options_, [&] { return options_.append_entry ? append_cancel(options_.append_entry, boundary) : append_cancel(store_, boundary); }));
+  static_cast<void>(with_session_lock(options_, [&] { return append_cancel(options_.append_entry, boundary); }));
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
   error.with_context("boundary", std::string(boundary));
   return std::unexpected(std::move(error));
@@ -116,53 +115,42 @@ ava::core::VoidResult AgentTurnSession::check_canceled(std::string_view boundary
 
 ava::core::Result<std::string> AgentTurnSession::append_user_message(std::string const& text, std::vector<ava::session::ImageAttachmentRef> const& attachments)
 {
-  return with_session_lock(options_, [&] {
-    return options_.append_entry ? ava::agent::append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance)
-                                 : ava::agent::append_user_message(store_, text, attachments, options_.synthetic_user_message_provenance);
-  });
+  return with_session_lock(
+      options_, [&] { return ava::agent::append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance); });
 }
 
 ava::core::VoidResult AgentTurnSession::append_replay_user_message(ActiveTurnUserMessage const& message)
 {
-  return with_session_lock(options_, [&] {
-    return options_.append_entry ? ava::agent::append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id)
-                                 : ava::agent::append_replay_user_message(store_, message.text, message.image_attachments, message.id);
-  });
+  return with_session_lock(options_,
+                           [&] { return ava::agent::append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id); });
 }
 
 ava::core::Result<PersistedAssistantTurn> AgentTurnSession::append_assistant_turn(ParsedAssistantTurn const& turn, ava::provider::TokenUsage const& usage,
                                                                                   std::optional<long double> const& cost_usd)
 {
   return with_session_lock(options_, [&]() -> ava::core::Result<PersistedAssistantTurn> {
-    auto const source_api_family = options_.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.api_family};
+    auto const source_api_family =
+        options_.model.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.api_family};
     auto const source_reasoning_format =
-        options_.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.reasoning_format};
-    return options_.append_batch ? ava::agent::append_assistant_turn(options_.append_batch, turn, options_.provider_id, options_.model_id, usage, cost_usd,
-                                                                     source_api_family, source_reasoning_format)
-                                 : ava::agent::append_assistant_turn(store_, turn, options_.provider_id, options_.model_id, usage, cost_usd, source_api_family,
-                                                                     source_reasoning_format);
+        options_.model.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.reasoning_format};
+    return ava::agent::append_assistant_turn(options_.append_batch, turn, options_.model.provider_id, options_.model.model_id, usage, cost_usd,
+                                             source_api_family, source_reasoning_format);
   });
 }
 
 ava::core::VoidResult AgentTurnSession::append_tool_result(ToolDispatchResult const& dispatch_result, std::optional<std::string_view> assistant_output_entry_id)
 {
-  return with_session_lock(options_, [&] {
-    return options_.append_entry ? ava::agent::append_tool_result(options_.append_entry, dispatch_result, assistant_output_entry_id)
-                                 : ava::agent::append_tool_result(store_, dispatch_result, assistant_output_entry_id);
-  });
+  return with_session_lock(options_, [&] { return ava::agent::append_tool_result(options_.append_entry, dispatch_result, assistant_output_entry_id); });
 }
 
 ava::core::VoidResult AgentTurnSession::append_permission_decision(ava::tools::PermissionAuditEvent const& event)
 {
-  return with_session_lock(options_, [&] {
-    return options_.append_entry ? ava::agent::append_permission_decision(options_.append_entry, event) : ava::agent::append_permission_decision(store_, event);
-  });
+  return with_session_lock(options_, [&] { return ava::agent::append_permission_decision(options_.append_entry, event); });
 }
 
 ava::core::VoidResult AgentTurnSession::append_error(ava::core::Error const& error)
 {
-  return with_session_lock(
-      options_, [&] { return options_.append_entry ? ava::agent::append_error(options_.append_entry, error) : ava::agent::append_error(store_, error); });
+  return with_session_lock(options_, [&] { return ava::agent::append_error(options_.append_entry, error); });
 }
 
 ava::core::Result<BuiltProviderMessages> AgentTurnSession::build_messages(MessageBuildOptions options)
@@ -210,15 +198,15 @@ ava::core::VoidResult AgentTurnExecutor::publish_phase(RunPhase phase) const
 
 MessageBuildOptions AgentTurnExecutor::message_build_options() const
 {
-  auto api_family = options_.api_family;
-  auto reasoning_format = options_.reasoning_format;
+  auto api_family = options_.model.api_family;
+  auto reasoning_format = options_.model.reasoning_format;
   if (api_family.empty())
   {
-    if (options_.provider_id == "openai")
+    if (options_.model.provider_id == "openai")
       api_family = "openai_responses";
-    else if (options_.provider_id == "anthropic")
+    else if (options_.model.provider_id == "anthropic")
       api_family = "anthropic_messages";
-    else if (options_.provider_id == "gemini")
+    else if (options_.model.provider_id == "gemini")
       api_family = "gemini_generate_content";
     else
       api_family = "openai_chat_completions";
@@ -234,13 +222,13 @@ MessageBuildOptions AgentTurnExecutor::message_build_options() const
   active_entry_ids.reserve(active_turn_user_messages_.size());
   for (auto const& message : active_turn_user_messages_) active_entry_ids.push_back(message.id);
   bool const supports_images =
-      std::find(options_.model_input_modalities.begin(), options_.model_input_modalities.end(), "image") != options_.model_input_modalities.end();
+      std::find(options_.model.input_modalities.begin(), options_.model.input_modalities.end(), "image") != options_.model.input_modalities.end();
   return MessageBuildOptions{.max_tool_result_context_bytes = options_.max_tool_result_context_bytes,
-                             .target = HistoryReplayTarget{.provider_id = options_.provider_id,
-                                                           .model_id = options_.model_id,
+                             .target = HistoryReplayTarget{.provider_id = options_.model.provider_id,
+                                                           .model_id = options_.model.model_id,
                                                            .api_family = std::move(api_family),
                                                            .reasoning_format = std::move(reasoning_format),
-                                                           .supports_tools = options_.model_supports_tools,
+                                                           .supports_tools = options_.model.supports_tools,
                                                            .supports_images = supports_images},
                              .active_turn_user_entry_ids = std::move(active_entry_ids)};
 }

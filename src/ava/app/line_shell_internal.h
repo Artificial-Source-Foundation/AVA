@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ava/app/command_palette.h"
-#include "ava/app/events.h"
 #include "ava/app/project_trust.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"
@@ -77,7 +77,7 @@ void append_status_line(std::string& target, std::string line);
 void add_output(LineResult& result, std::string text);
 [[nodiscard]] LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                                      ava::agent::QuestionResolver question_resolver = nullptr, std::vector<CommandHotkey> const& hotkeys = {},
-                                     runtime::EventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
+                                     ava::event::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                                      std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
                                      std::vector<ava::session::ImageAttachmentRef> image_attachments = {});
 

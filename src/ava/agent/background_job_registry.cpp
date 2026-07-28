@@ -273,6 +273,11 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
       record->thread.request_stop();
   }
   changed_.notify_all();
+  if (options_.wait_for_terminal_before_start_returns)
+  {
+    std::unique_lock lock(mutex_);
+    static_cast<void>(changed_.wait_for(lock, std::chrono::seconds(2), [&] { return is_terminal(record->snapshot.state); }));
+  }
   return snapshot;
 }
 

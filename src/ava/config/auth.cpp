@@ -1,10 +1,9 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/config/auth.h"
-
 #include "ava/config/auth_file_store.h"
 #include "ava/config/auth_record.h"
 #include "ava/config/openai_oauth.h"
-
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -264,8 +263,7 @@ ava::core::Result<ProviderCredential> parse_anthropic_oauth_refresh_response(
                             .source_metadata = credential.source_metadata};
 }
 
-ava::core::Result<ProviderCredential> refresh_anthropic_oauth_credential(ProviderCredential const& credential,
-                                                                         ava::provider::Transport& transport,
+ava::core::Result<ProviderCredential> refresh_anthropic_oauth_credential(ProviderCredential const& credential, ava::http::Transport& transport,
                                                                          long long now_seconds)
 {
   if (credential.provider_id != kAnthropicProviderId || credential.credential_type != "oauth") {
@@ -280,15 +278,14 @@ ava::core::Result<ProviderCredential> refresh_anthropic_oauth_credential(Provide
   std::string body = "{\"grant_type\":\"refresh_token\",\"client_id\":\"" +
                      ava::core::json::escape(kAnthropicOAuthClientId) + "\",\"refresh_token\":\"" +
                      ava::core::json::escape(credential.refresh_token) + "\"}";
-  auto response = transport.send(ava::provider::HttpRequest{.method = "POST",
-                                                            .url = std::string(kAnthropicOAuthTokenUrl),
-                                                            .headers = {{"Content-Type", "application/json"},
-                                                                        {"Accept", "application/json"}},
-                                                            .body = std::move(body),
-                                                            .timeout_ms = 60000,
-                                                            .follow_redirects = false,
-                                                            .include_response_headers = false,
-                                                            .resolve_hosts = {}});
+  auto response = transport.send(ava::http::HttpRequest{.method = "POST",
+                                                        .url = std::string(kAnthropicOAuthTokenUrl),
+                                                        .headers = {{"Content-Type", "application/json"}, {"Accept", "application/json"}},
+                                                        .body = std::move(body),
+                                                        .timeout_ms = 60000,
+                                                        .follow_redirects = false,
+                                                        .include_response_headers = false,
+                                                        .resolve_hosts = {}});
   if (!response) return std::unexpected(response.error());
   if (response->status_code < 200 || response->status_code >= 300) {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic OAuth refresh failed");
@@ -298,10 +295,8 @@ ava::core::Result<ProviderCredential> refresh_anthropic_oauth_credential(Provide
   return parse_anthropic_oauth_refresh_response(response->body, credential, now_seconds);
 }
 
-ava::core::Result<ProviderCredential> anthropic_credential_for_request(XdgPaths const& paths,
-                                                                       ProviderCredential const& credential,
-                                                                       ava::provider::Transport& transport,
-                                                                       long long now_seconds)
+ava::core::Result<ProviderCredential> anthropic_credential_for_request(XdgPaths const& paths, ProviderCredential const& credential,
+                                                                       ava::http::Transport& transport, long long now_seconds)
 {
   if (credential.credential_type != "oauth") return credential;
   if (credential.access_token.empty()) {
@@ -427,9 +422,7 @@ ava::core::Result<std::string> openai_access_token_for_request(OpenAICredential 
   return openai_access_token_for_request(credential, unix_time_seconds());
 }
 
-ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths,
-                                                                  OpenAICredential const& credential,
-                                                                  ava::provider::Transport& transport,
+ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths, OpenAICredential const& credential, ava::http::Transport& transport,
                                                                   long long now_seconds)
 {
   if (credential.type == OpenAICredentialType::ApiKey) {
@@ -472,21 +465,19 @@ ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const
   return refreshed;
 }
 
-ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths,
-                                                                  OpenAICredential const& credential,
-                                                                  ava::provider::Transport& transport)
+ava::core::Result<OpenAICredential> openai_credential_for_request(XdgPaths const& paths, OpenAICredential const& credential, ava::http::Transport& transport)
 {
   return openai_credential_for_request(paths, credential, transport, unix_time_seconds());
 }
 
-ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
-    XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport)
+ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(XdgPaths const& paths, std::string_view provider_id,
+                                                                                     ava::http::Transport& transport)
 {
   return provider_credential_for_request(paths, provider_id, transport, unix_time_seconds());
 }
 
-ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(
-    XdgPaths const& paths, std::string_view provider_id, ava::provider::Transport& transport, long long now_seconds)
+ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(XdgPaths const& paths, std::string_view provider_id,
+                                                                                     ava::http::Transport& transport, long long now_seconds)
 {
   if (provider_id == "openai") {
     auto stored = load_openai_credential(paths);

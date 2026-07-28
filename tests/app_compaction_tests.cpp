@@ -1,10 +1,11 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
+#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/commands.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/assistant_output.h"
@@ -37,12 +38,12 @@ class ThrowingRunObserver final : public ava::observability::RunObserver
   void on_event(ava::observability::TraceEvent const&) override { throw std::runtime_error("observer failure"); }
 };
 
-class CancelAfterRequestTransport final : public ava::provider::Transport
+class CancelAfterRequestTransport final : public ava::http::Transport
 {
  public:
-  explicit CancelAfterRequestTransport(ava::provider::HttpResponse response) : response_(std::move(response)) { }
+  explicit CancelAfterRequestTransport(ava::http::HttpResponse response) : response_(std::move(response)) { }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     requests_.push_back(request);
     canceled_ = true;
@@ -50,12 +51,12 @@ class CancelAfterRequestTransport final : public ava::provider::Transport
   }
 
   [[nodiscard]] bool canceled() const noexcept { return canceled_; }
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
-  ava::provider::HttpResponse response_;
+  ava::http::HttpResponse response_;
   bool canceled_ = false;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
 void test_app_compact_provider_summary_success()
@@ -102,7 +103,7 @@ void test_app_compact_provider_summary_success()
       "# Files Read or Modified\nsrc/ava/app/commands.cpp\n# Unresolved Tasks\nNone noted.\n# Next Steps\nRun tests.";
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(summary) + "\"}"}});
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(summary) + "\"}"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
@@ -222,7 +223,7 @@ void test_app_compact_openai_oauth_streaming_summary_success()
                                "\"}\n\n"
                                "data: [DONE]\n\n";
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = sse_body}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = sse_body}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.openai_oauth = true;
@@ -260,7 +261,7 @@ void test_app_compact_provider_failure_leaves_session_untouched()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"boom\"}}"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"boom\"}}"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
@@ -303,7 +304,7 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
     return;
 
   auto run_summary = [&](std::shared_ptr<ava::observability::RunObservation> observation, bool throwing_callback) {
-    ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"summary\"}"}});
+    ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"summary\"}"}});
     unsigned callback_calls = 0;
     ava::app::runtime::RunOptions options;
     options.access_token = "token";
@@ -363,7 +364,7 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
                                                                      .data_json = "{\"text\":\"" + std::string(420, 'c') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  CancelAfterRequestTransport transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"CANCELED SUMMARY\"}"});
+  CancelAfterRequestTransport transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"CANCELED SUMMARY\"}"});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
   run_options.cancel_requested = [&transport] { return transport.canceled(); };
@@ -705,7 +706,7 @@ void test_app_compact_honors_cross_provider_selection()
                                                                      .data_json = "{\"text\":\"cross provider source\"}"}));
 
   ava::provider::OpenAIProvider const active_provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"CROSS PROVIDER SUMMARY"}],"stop_reason":"end_turn"})"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "active-openai-token";
@@ -765,7 +766,7 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"AUTO SUMMARY\"}"},
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"AUTO SUMMARY\"}"},
                                        sse_response(final_text_sse("compacted answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
@@ -823,7 +824,7 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BUDGET SUMMARY\"}"},
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BUDGET SUMMARY\"}"},
                                        sse_response(final_text_sse("budget answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
@@ -869,8 +870,8 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
                                                                      .data_json = "{\"text\":\"" + ava::core::json::escape(emoji_tail) + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"UTF8 SUMMARY\"}"},
-                                       sse_response(final_text_sse("utf8 answer"))});
+  ava::tests::FakeTransport transport(
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"UTF8 SUMMARY\"}"}, sse_response(final_text_sse("utf8 answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
@@ -953,7 +954,7 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
                                                                      .data_json = "{\"text\":\"" + std::string(threshold * 4, 'f') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"DEFAULT SUMMARY\"}"},
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"DEFAULT SUMMARY\"}"},
                                        sse_response(final_text_sse("default compact answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
@@ -993,11 +994,16 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(session->owner_append_route(),
-                                     {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
-                                      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
+                                     {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
+                                      ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
                                       sse_response(final_text_sse("retry after stale"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
+  std::vector<ava::event::RuntimeEvent> events;
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
 
   auto result = ava::app::run_prompt(*session, "retry stale summary", provider, transport, run_options);
   auto entries = session->store.load();
@@ -1010,6 +1016,14 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   expect(entries && std::ranges::any_of(*entries,
                                         [](ava::session::SessionEntry const& entry) { return entry.data_json.find("concurrent change") != std::string::npos; }),
          "auto compaction retry test introduced a concurrent session change");
+  expect(std::ranges::any_of(events,
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
+                               return retry && retry->payload.reason == "stale_compaction_snapshot" && retry->payload.trigger == "auto" &&
+                                      retry->payload.attempt == 2 && retry->payload.max_attempts == 2 && retry->diagnostics.snapshot_entries > 0 &&
+                                      retry->diagnostics.current_entries > retry->diagnostics.snapshot_entries;
+                             }),
+         "stale auto compaction emits RetryEvent with internal snapshot diagnostics for typed live consumers");
 }
 
 void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
@@ -1038,8 +1052,8 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(session->owner_append_route(),
-                                     {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
-                                      ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
+                                     {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
+                                      ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
                                      2);
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
@@ -1071,13 +1085,13 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded the token limit\"}}"},
-       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OVERFLOW SUMMARY\"}"},
+      {ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded the token limit\"}}"},
+       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"OVERFLOW SUMMARY\"}"},
        sse_response(final_text_sse("retry answer"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
-  std::vector<ava::app::runtime::Event> events;
-  run_options.event_sink = [&events](ava::app::runtime::Event const& event) {
+  std::vector<ava::event::RuntimeEvent> events;
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
     events.push_back(event);
     return ava::core::VoidResult{};
   };
@@ -1091,19 +1105,23 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
              compaction->data_json.find("OVERFLOW SUMMARY") != std::string::npos,
          "context overflow retry appends a context_overflow compaction summary");
   expect(std::ranges::any_of(events,
-                             [](ava::app::runtime::Event const& event) {
-                               return event.type == ava::app::runtime::EventType::Retry && event.reason == "context_overflow" && event.attempt == 1 &&
-                                      event.max_attempts == 1;
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
+                               return retry && retry->payload.reason == "context_overflow" && retry->payload.trigger == "context_overflow" &&
+                                      retry->payload.attempt == 1 && retry->payload.max_attempts == 1 && retry->diagnostics.threshold_tokens > 0 &&
+                                      retry->diagnostics.snapshot_entries == 0 && retry->diagnostics.current_entries == 0;
                              }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::CompactionStart && event.trigger == "context_overflow" &&
-                                          event.attempt == 1 && event.max_attempts == 2;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* start = ava::tests::runtime_event_as<ava::event::CompactionStartEvent>(event);
+                                   return start && start->payload.trigger == "context_overflow" && start->payload.attempt == 1 &&
+                                          start->payload.max_attempts == 2;
                                  }) &&
              std::ranges::any_of(events,
-                                 [](ava::app::runtime::Event const& event) {
-                                   return event.type == ava::app::runtime::EventType::CompactionEnd &&
-                                          event.summary_bytes == std::string("OVERFLOW SUMMARY").size() && event.attempt == 1 && event.max_attempts == 2;
+                                 [](ava::event::RuntimeEvent const& event) {
+                                   auto const* end = ava::tests::runtime_event_as<ava::event::CompactionEndEvent>(event);
+                                   return end && end->payload.summary_bytes == std::string("OVERFLOW SUMMARY").size() && end->payload.attempt == 1 &&
+                                          end->payload.max_attempts == 2;
                                  }),
          "context overflow retry emits backend lifecycle events for replaying TUI compaction and retry state");
   expect(transport.requests().size() == 3 && transport.requests()[2].body.find("OVERFLOW SUMMARY") != std::string::npos &&
@@ -1140,8 +1158,8 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"too many tokens for context window\"}}"},
-       ava::provider::HttpResponse{.status_code = 429, .headers = {}, .body = "{\"error\":{\"message\":\"summary quota exhausted\"}}"}});
+      {ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"too many tokens for context window\"}}"},
+       ava::http::HttpResponse{.status_code = 429, .headers = {}, .body = "{\"error\":{\"message\":\"summary quota exhausted\"}}"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
@@ -1173,7 +1191,7 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = "server unavailable"}});
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "server unavailable"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
@@ -1291,9 +1309,9 @@ void test_app_context_overflow_retry_is_bounded()
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit\"}}"},
-       ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BOUNDED SUMMARY\"}"},
-       ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit again\"}}"}});
+      {ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit\"}}"},
+       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"BOUNDED SUMMARY\"}"},
+       ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "{\"error\":{\"message\":\"context length exceeded token limit again\"}}"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 

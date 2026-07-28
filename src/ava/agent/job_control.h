@@ -31,7 +31,7 @@ enum class PublicJobContent
                                                      PublicJobContent content = PublicJobContent::OmitTerminalContent);
 [[nodiscard]] std::string format_public_job_list(std::vector<SubagentCoordinatorJobSnapshot> const& snapshots);
 
-// Stable failure data safe for the job journal and child session. The source
+// Stable failure data safe for process-local job snapshots and the durable child session. The source
 // error's formatted context is deliberately not retained.
 [[nodiscard]] std::string safe_subagent_error_category(ava::core::Error const& error);
 [[nodiscard]] std::string safe_subagent_error_message(ava::core::Error const& error);

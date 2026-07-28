@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/acp/client_tools.h"
 #include "ava/app/acp/session.h"
 #include "ava/app/runtime_credentials.h"
@@ -6,7 +7,6 @@
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/config/session_title_config.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/ids.h"
@@ -539,7 +539,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   auto provider_options = options_.run_options;
   provider_options.request_id = request_id;
   provider_options.exact_builtin_tool_names = acp_builtin_tool_names(*options_.client_capabilities);
-  provider_options.isolate_project_resources = true;
+  provider_options.isolate_ambient_extensions = true;
   provider_options.require_descriptor_secure_workspace = true;
   provider_options.announce_execution_after_permission = true;
   provider_options.redact_permission_audit_arguments = true;
@@ -579,7 +579,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   run_options.exact_builtin_tool_names = acp_builtin_tool_names(*options_.client_capabilities);
   run_options.exact_file_access = options_.run_options.exact_file_access;
   run_options.command_executor = options_.run_options.command_executor;
-  run_options.isolate_project_resources = true;
+  run_options.isolate_ambient_extensions = true;
   run_options.require_descriptor_secure_workspace = true;
   run_options.announce_execution_after_permission = true;
   run_options.redact_permission_audit_arguments = true;
@@ -598,7 +598,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   run_options.image_attachments = std::move(image_attachments);
   run_options.expand_prompt_file_references = false;
   RuntimeSessionUpdateMapper mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = options_.launch_root, .message_id = request_id});
-  run_options.event_sink = [this, &mapper](runtime::Event const& event) -> ava::core::VoidResult {
+  run_options.event_sink = [this, &mapper](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
     auto updates = mapper.map_coalesced_and_encode(event);
     if (!updates)
       return std::unexpected(std::move(updates.error()));
@@ -690,8 +690,7 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
     }
     // AnchorSet preserves its first root as the immutable launch workspace
     // identity used by command containment and ACP tool negotiation.
-    auto opened = ava::core::AnchorSet::open(
-        {options_.launch_root, options_.paths.ava_config_dir, options_.paths.ava_state_dir, options_.paths.sessions_dir});
+    auto opened = ava::core::AnchorSet::open({options_.launch_root, options_.paths.ava_config_dir, options_.paths.ava_state_dir, options_.paths.sessions_dir});
     if (!opened)
     {
       coordinator_startup_error_ = std::move(opened.error());
@@ -717,8 +716,7 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
   {
     auto coordinator = options_.open_options.subagent_coordinator
                            ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
-                           : ava::agent::SubagentCoordinator::create(
-                                 {.ava_state_dir = options_.paths.ava_state_dir, .anchor_set = service_anchor});
+                           : ava::agent::SubagentCoordinator::create();
     if (!coordinator)
     {
       coordinator_startup_error_ = std::move(coordinator.error());

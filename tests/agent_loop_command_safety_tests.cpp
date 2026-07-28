@@ -55,9 +55,7 @@ void test_agent_loop_model_auto_allow_deny_preflight_blocks_auto_allow_without_p
       .workspace_dir = workspace,
       .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .permission_resolver =
           [&interactive_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
@@ -122,11 +120,12 @@ void test_agent_loop_model_command_rejects_authority_workspace_before_permission
       .workspace_dir = workspace,
       .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
-      .ava_authority_roots = std::move(duplicate_roots),
+      .tool_execution =
+          ava::agent::ToolExecutionOptions{
+              .ava_authority_roots = std::move(duplicate_roots),
+          },
       .permission_resolver = [&prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ++prompts;
         return ava::permissions::PermissionResolution::Allow;
@@ -177,9 +176,7 @@ void test_agent_loop_truncates_tool_context()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .max_tool_result_context_bytes = 8 * 1024,
       .append_entry = append_route_for_test(store),

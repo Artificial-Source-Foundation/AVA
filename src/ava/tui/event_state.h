@@ -1,7 +1,10 @@
 #pragma once
 
-#include "ava/app/events.h"
+#include "ava/event/EventEnvelope.h"
+#include "ava/event/EventEnvelopeContext.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/tui/composer.h"
+#include "ava/core/mode.h"
 
 #include <cstddef>
 #include <optional>
@@ -23,6 +26,7 @@ enum class TuiEventRunStatus
 struct PendingToolItem
 {
   std::string call_id;
+  std::string backend_call_id;
   std::string request_id;
   std::string correlation_id;
   ToolTimelineItem item;
@@ -51,7 +55,7 @@ struct TuiEventState
   std::optional<std::string> active_message_id = std::nullopt;
   std::optional<std::string> active_request_id = std::nullopt;
   std::optional<std::string> active_correlation_id = std::nullopt;
-  ava::agent::Mode current_mode = ava::agent::Mode::Build;
+  ava::core::Mode current_mode = ava::core::Mode::Build;
   std::string current_provider_id;
   std::string current_model_id;
   TuiEventRunStatus run_status = TuiEventRunStatus::Idle;
@@ -66,8 +70,8 @@ struct TuiEventState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-void apply_runtime_event(TuiEventState& state, ava::app::runtime::Event const& event);
-void apply_event_envelope(TuiEventState& state, ava::app::EventEnvelope const& envelope);
+void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext const& context = {});
+void apply_control_event_envelope(TuiEventState& state, ava::event::EventEnvelope const& envelope);
 
 enum class PendingTextProjection
 {

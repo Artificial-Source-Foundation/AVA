@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/stream_bridge.h"
 #include "ava/provider/openai_response_parser.h"
@@ -489,10 +490,10 @@ void exercise_contract_sse_validation(ava::provider::OpenAIProvider const& provi
       "\"prefix\"}]}}\n\n"
       "data: [DONE]\n\n");
   auto const reasoning_partial_prefix_non_stream = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"status\":\"completed\",\"output\":[{\"id\":\"rs_prefix\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_"
-                                          "text\",\"text\":\"prefix\"}]}]}"},
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = "{\"status\":\"completed\",\"output\":[{\"id\":\"rs_prefix\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_"
+                                      "text\",\"text\":\"prefix\"}]}]}"},
       false);
   auto const reasoning_duplicate_complete = ava::provider::parse_openai_sse(
       "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_duplicate\",\"type\":\"reasoning\"}}\n\n"

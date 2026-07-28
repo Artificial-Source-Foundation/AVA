@@ -49,7 +49,7 @@ OpenCode was cloned from `https://github.com/anomalyco/opencode` into `docs/refe
 | Tool metadata/registry | `src/ava/agent/tool_metadata.h`, `tool_registry.h`, `tool_visibility.h` |
 | Tools | `src/ava/tools/` |
 | Permissions | `src/ava/permissions/permission.cpp`, `permission_rules.cpp`, headers |
-| Runtime events | `src/ava/app/events.h`, `src/ava/tui/event_state.cpp` |
+| Runtime events | `src/ava/event/`, `src/ava/tui/event_state.cpp` |
 | TUI cards/prompts | `src/ava/tui/tool_cards.cpp`, `composer_permission.cpp` |
 | Tests | `tests/agent_loop_tests.cpp`, `tests/agent_loop_resilience_tests.cpp`, `tests/agent_tool_dispatcher_tests.cpp`, `tests/tools_*_tests.cpp`, `tests/permission_rules_tests.cpp`, `tests/tui_composer_tests.cpp` |
 
@@ -158,7 +158,7 @@ git --no-pager diff --check
 #### Pi/AVA Inspection Summary
 
 - Pi references inspected: `packages/agent/src/agent-loop.ts`, `agent.ts`, `types.ts`, `packages/agent/src/harness/`, `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/tools/`, `bash-executor.ts`, `modes/interactive/components/tool-execution.ts`, `project-trust.ts`, `trust-manager.ts`, and `docs/security.md` under `docs/reference-code/pi/`.
-- AVA references inspected: `src/ava/agent/agent_loop.cpp`, `agent_loop.h`, `assistant_turn.h`, `tool_dispatcher.cpp`, `tool_metadata.h`, `tool_registry.h`, `tool_visibility.h`, `src/ava/tools/`, `src/ava/permissions/`, `src/ava/app/events.h`, `src/ava/tui/event_state.cpp`, `tool_cards.cpp`, `composer_permission.cpp`, and the listed agent/tool/permission/TUI tests.
+- AVA references inspected: `src/ava/agent/agent_loop.cpp`, `agent_loop.h`, `assistant_turn.h`, `tool_dispatcher.cpp`, `tool_metadata.h`, `tool_registry.h`, `tool_visibility.h`, `src/ava/tools/`, `src/ava/permissions/`, `src/ava/event/`, `src/ava/tui/event_state.cpp`, `tool_cards.cpp`, `composer_permission.cpp`, and the listed agent/tool/permission/TUI tests.
 
 #### Completed Work
 
@@ -218,7 +218,7 @@ git --no-pager diff --check
 
 - OpenCode references inspected: `packages/web/src/content/docs/permissions.mdx`, `packages/core/src/permission.ts`, `packages/schema/src/permission.ts`, `packages/schema/src/permission-saved.ts`, `packages/opencode/src/cli/cmd/run/permission.shared.ts`, `footer.permission.tsx`, `tool.ts`, `packages/opencode/src/agent/subagent-permissions.ts`, `packages/web/src/content/docs/agents.mdx`, `packages/core/src/tool/`, `packages/web/src/content/docs/tools.mdx`, `custom-tools.mdx`, `specs/v2/tools.md`, and the listed permission tests under `packages/core/test` and `packages/opencode/test`.
 - Pi references rechecked: agent steering/follow-up queues remain one-at-a-time by default, Pi built-ins remain `read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`, and Pi still defaults to parallel tool execution while providing no operation-level permission popup. AVA keeps default user-facing execution sequential and granular permissions as AVA-superior safety behavior; a later internal backend opt-in covers only preflight-proven builtin read/search calls.
-- AVA references rechecked: `agent_loop`, `tool_dispatcher`, `tool_metadata`, `tool_visibility`, `src/ava/tools`, `src/ava/permissions`, `src/ava/app/events`, `src/ava/tui/event_state.cpp`, `tool_cards.cpp`, `composer_permission.cpp`, and the matching tests.
+- AVA references rechecked: `agent_loop`, `tool_dispatcher`, `tool_metadata`, `tool_visibility`, `src/ava/tools`, `src/ava/permissions`, `src/ava/event/`, `src/ava/tui/event_state.cpp`, `tool_cards.cpp`, `composer_permission.cpp`, and the matching tests.
 
 #### OpenCode Behavior Notes Applied Or Intentionally Exceeded
 

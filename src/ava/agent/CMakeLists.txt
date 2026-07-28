@@ -11,18 +11,26 @@ add_library(ava_agent
   "history_projection.cpp"
   "background_job_registry.cpp"
   "job_control.cpp"
-  "job_journal.cpp"
   "message_builder.cpp"
-  "mode.cpp"
   "provider_output_validation.cpp"
   "question.cpp"
   "stream_bridge.cpp"
   "subagent_config.cpp"
   "subagent_coordinator.cpp"
   "subagent_job.cpp"
+  "tool_dispatch_bash.cpp"
   "tool_dispatch_common.cpp"
+  "tool_dispatch_file.cpp"
+  "tool_dispatch_job.cpp"
+  "tool_dispatch_lsp.cpp"
   "tool_dispatch_patch.cpp"
+  "tool_dispatch_question.cpp"
+  "tool_dispatch_search.cpp"
+  "tool_dispatch_skill.cpp"
+  "tool_dispatch_task.cpp"
+  "tool_dispatch_web.cpp"
   "tool_dispatcher.cpp"
+  "tool_registration.cpp"
   "tool_registry.cpp"
   "tool_result.cpp"
   "tool_scheduler.cpp"
@@ -33,7 +41,7 @@ add_library(ava_agent
 )
 
 target_include_directories(ava_agent PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_agent PUBLIC ava_observability PRIVATE ava_command ava_diagnostics nlohmann_json::nlohmann_json)
+target_link_libraries(ava_agent PUBLIC ava_core ava_http ava_observability PRIVATE ava_command ava_context ava_diagnostics ava_mcp ava_plugin nlohmann_json::nlohmann_json)
 ava_apply_debugging(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_apply_sanitizers(ava_agent)

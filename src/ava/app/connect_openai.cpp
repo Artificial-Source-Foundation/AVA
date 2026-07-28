@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/connect_oauth_callback.h"
 #include "ava/app/connect_openai.h"
@@ -6,7 +7,6 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/core/result.h"
 
 #include <algorithm>
@@ -579,9 +579,8 @@ ava::core::Result<std::string> read_connect_secret(ConnectProviderCredentialOpti
 
 }  // namespace
 
-ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(ava::config::OpenAIOAuthSession const& session,
-                                                                               ava::provider::Transport& transport, long long now_seconds,
-                                                                               std::function<bool()> cancel_requested)
+ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(ava::config::OpenAIOAuthSession const& session, ava::http::Transport& transport,
+                                                                               long long now_seconds, std::function<bool()> cancel_requested)
 {
   auto callback = wait_for_oauth_callback(session.state, cancel_requested);
   if (!callback)
@@ -590,7 +589,7 @@ ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(a
 }
 
 ava::core::Result<ava::config::OpenAICredential> wait_for_openai_device_oauth(ava::config::OpenAIOAuthDeviceAuthorization const& authorization,
-                                                                              ava::provider::Transport& transport, long long now_seconds,
+                                                                              ava::http::Transport& transport, long long now_seconds,
                                                                               std::function<bool()> cancel_requested)
 {
   auto const deadline = std::chrono::steady_clock::now() + std::chrono::minutes(10);
@@ -638,7 +637,7 @@ int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream&
   }
   out << "Waiting for browser callback on http://localhost:1455/auth/callback ...\n";
 
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   auto credential = complete_openai_browser_oauth(*session, transport, unix_time_seconds());
   if (!credential)
   {
@@ -657,7 +656,7 @@ int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream&
 
 int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err)
 {
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
   if (!authorization)
   {

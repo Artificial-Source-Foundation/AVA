@@ -1,8 +1,6 @@
 #include "sys.h"
 #include "ava/agent/subagent_job.h"
 
-#include <algorithm>
-
 namespace ava::agent {
 namespace {
 
@@ -14,12 +12,6 @@ ava::core::Error invalid_enum(std::string_view field, std::string_view value)
 }
 
 }  // namespace
-
-SubagentJobSnapshot const* SubagentJobProjection::find(std::string_view job_id) const noexcept
-{
-  auto const match = std::ranges::find_if(jobs, [&](SubagentJobSnapshot const& job) { return job.identity.job_id == job_id; });
-  return match == jobs.end() ? nullptr : &*match;
-}
 
 std::string_view to_string(SubagentJobMode value) noexcept
 {
@@ -69,20 +61,6 @@ std::string_view to_string(SubagentDeliveryState value) noexcept
   return "unknown";
 }
 
-std::string_view to_string(SubagentTerminalState value) noexcept
-{
-  switch (value)
-  {
-    case SubagentTerminalState::Completed:
-      return "completed";
-    case SubagentTerminalState::Failed:
-      return "failed";
-    case SubagentTerminalState::Canceled:
-      return "canceled";
-  }
-  return "unknown";
-}
-
 ava::core::Result<SubagentJobMode> parse_subagent_job_mode(std::string_view value)
 {
   if (value == "foreground")
@@ -90,17 +68,6 @@ ava::core::Result<SubagentJobMode> parse_subagent_job_mode(std::string_view valu
   if (value == "background")
     return SubagentJobMode::Background;
   return std::unexpected(invalid_enum("mode", value));
-}
-
-ava::core::Result<SubagentTerminalState> parse_subagent_terminal_state(std::string_view value)
-{
-  if (value == "completed")
-    return SubagentTerminalState::Completed;
-  if (value == "failed")
-    return SubagentTerminalState::Failed;
-  if (value == "canceled")
-    return SubagentTerminalState::Canceled;
-  return std::unexpected(invalid_enum("terminal_state", value));
 }
 
 }  // namespace ava::agent

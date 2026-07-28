@@ -1,9 +1,9 @@
 #include "sys.h"
-#include "ava/app/runtime_credentials.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_credentials.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 
 #include <memory>
@@ -12,8 +12,8 @@
 
 namespace ava::app {
 
-ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
-                                                                 ava::provider::Transport& auth_transport, std::string_view purpose)
+ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
+                                                                   runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose)
 {
   if (options.offline)
     return std::unexpected(offline_provider_error(purpose));
@@ -45,7 +45,7 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
 ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::Session const& session, runtime::RunOptions options,
                                                                                std::string_view purpose)
 {
-  auto auth_transport = std::make_unique<ava::provider::CurlCliTransport>();
+  auto auth_transport = std::make_unique<ava::http::CurlCliTransport>();
   auto prepared = prepare_runtime_credentials(session.paths(), session.model().provider_id, std::move(options), *auth_transport, purpose);
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
@@ -54,7 +54,7 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
   if (!provider)
     return std::unexpected(std::move(provider.error()));
 
-  std::unique_ptr<ava::provider::Transport> transport = std::make_unique<ava::provider::CurlCliTransport>();
+  std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
   return RuntimeProviderRunBundle{
       .provider = std::move(*provider), .transport = std::move(transport), .auth_transport = std::move(auth_transport), .options = std::move(*prepared)};
 }

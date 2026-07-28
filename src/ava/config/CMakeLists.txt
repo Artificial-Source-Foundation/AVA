@@ -16,7 +16,7 @@ target_include_directories(ava_config
   PUBLIC "${CMAKE_SOURCE_DIR}/src"
   PRIVATE "${AVA_GENERATED_INCLUDE_DIR}"
 )
-target_link_libraries(ava_config PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(ava_config PUBLIC ava_core ava_http PRIVATE nlohmann_json::nlohmann_json)
 ava_apply_debugging(ava_config)
 ava_apply_warnings(ava_config)
 ava_apply_sanitizers(ava_config)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ava/command/command.h"
-#include "ava/agent/mode.h"
+#include "ava/core/mode.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -112,7 +112,7 @@ enum class Operation
 struct PermissionRequest
 {
   Operation operation;
-  ava::agent::Mode mode;
+  ava::core::Mode mode;
   std::filesystem::path workspace_dir;
   std::filesystem::path target_path;
   std::string command;
@@ -158,7 +158,7 @@ struct PermissionPrompt
   std::string permission_request_id = {};
   std::string tool_call_id = {};
   Operation operation;
-  ava::agent::Mode mode;
+  ava::core::Mode mode;
   std::filesystem::path workspace_dir;
   std::filesystem::path target_path;
   std::string command;

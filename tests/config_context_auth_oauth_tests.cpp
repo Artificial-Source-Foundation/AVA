@@ -1,8 +1,8 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
-#include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
@@ -10,6 +10,7 @@
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatcher.h"
+#include "ava/agent/usage_accounting.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/search_tools.h"
@@ -31,6 +32,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/registry.h"
 #include "ava/context/context_loader.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -343,6 +345,68 @@ void test_context_loader()
   }
 }
 
+void test_markdown_resource_parser_and_reader()
+{
+  auto const lf = ava::context::parse_markdown("---\nname: demo\ndescription: \"quoted value\"\n---\nbody line\n");
+  expect(lf.frontmatter.at("name") == "demo" && lf.frontmatter.at("description") == "quoted value" && lf.body == "body line\n",
+         "markdown parser accepts LF opening delimiter, strips matching quotes, and keeps the body");
+
+  auto const crlf = ava::context::parse_markdown("---\r\nname: crlf\r\n---\r\ncrlf body\r\n");
+  expect(crlf.frontmatter.at("name") == "crlf" && crlf.body == "crlf body\r\n", "markdown parser accepts CRLF opening delimiter and closing newline variants");
+
+  auto const duplicates = ava::context::parse_markdown("---\nname: first\nname: second\n---\n");
+  expect(duplicates.frontmatter.at("name") == "second" && ava::context::markdown_field(duplicates, "name") == "second",
+         "markdown parser keeps the last duplicate frontmatter key");
+
+  constexpr std::string_view kNoFrontmatter = "plain body without delimiter\n";
+  auto const plain = ava::context::parse_markdown(kNoFrontmatter);
+  expect(plain.frontmatter.empty() && plain.body == kNoFrontmatter, "markdown parser preserves full content as body when frontmatter is absent");
+
+  constexpr std::string_view kUnclosed = "---\nname: open\nbody never closed\n";
+  auto const unclosed = ava::context::parse_markdown(kUnclosed);
+  expect(unclosed.frontmatter.empty() && unclosed.body == kUnclosed, "markdown parser preserves full content as body for malformed unclosed frontmatter");
+
+  auto const root = create_empty_root("markdown-resource");
+  auto const file = root / "resource.md";
+  {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << "exact-size";
+  }
+  auto accepted = ava::context::read_resource_file(file, {.max_bytes = 10, .resource_description = "test resource"});
+  expect(accepted && *accepted == "exact-size", "resource reader accepts a file whose size equals max_bytes");
+
+  auto oversized = ava::context::read_resource_file(file, {.max_bytes = 9, .resource_description = "test resource"});
+  expect(
+      !oversized && oversized.error().message() == "test resource is too large" &&
+          std::ranges::any_of(oversized.error().context(),
+                              [](ava::core::ErrorContext const& item) { return item.key == "path" && item.value.find("resource.md") != std::string::npos; }) &&
+          std::ranges::any_of(oversized.error().context(), [](ava::core::ErrorContext const& item) { return item.key == "max_bytes" && item.value == "9"; }),
+      "resource reader rejects oversized files with resource, path, and max_bytes context");
+
+  auto const symlink_path = root / "linked.md";
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(file, symlink_path, symlink_error);
+  expect(!symlink_error, "markdown resource test creates a final symlink");
+  if (!symlink_error)
+  {
+    auto linked = ava::context::read_resource_file(symlink_path, {.max_bytes = 64, .resource_description = "test resource"});
+    expect(!linked && linked.error().message() == "test resource is not a regular file", "resource reader rejects a final-path symlink");
+  }
+
+  auto const directory = root / "directory";
+  std::filesystem::create_directories(directory);
+  auto directory_read = ava::context::read_resource_file(directory, {.max_bytes = 64, .resource_description = "test resource"});
+  expect(!directory_read && directory_read.error().message() == "test resource is not a regular file", "resource reader rejects directories as non-regular");
+
+  auto const fifo_path = root / "blocking.fifo";
+  expect(::mkfifo(fifo_path.c_str(), 0600) == 0, "markdown resource test creates a FIFO fixture");
+  auto const fifo_start = std::chrono::steady_clock::now();
+  auto fifo_read = ava::context::read_resource_file(fifo_path, {.max_bytes = 64, .resource_description = "test resource"});
+  auto const fifo_elapsed = std::chrono::steady_clock::now() - fifo_start;
+  expect(!fifo_read && fifo_read.error().message() == "test resource is not a regular file" && fifo_elapsed < std::chrono::seconds(2),
+         "resource reader rejects FIFOs promptly without blocking");
+}
+
 void test_skill_loader()
 {
   auto const root = create_empty_root("skills");
@@ -350,13 +414,20 @@ void test_skill_loader()
   auto const workspace = root / "workspace";
   auto const global = root / "global" / "skills";
   auto const project = root / "workspace" / ".ava" / "skills";
+  auto const declared = root / "declared" / "plugin-skill.md";
   std::filesystem::create_directories(global / "release");
+  std::filesystem::create_directories(global / "global-only");
   std::filesystem::create_directories(project / "release");
   std::filesystem::create_directories(project / "debugging" / "scripts");
+  std::filesystem::create_directories(declared.parent_path());
 
   {
     std::ofstream file(global / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
     file << "---\nname: release\ndescription: Global release workflow\n---\nGlobal body\n";
+  }
+  {
+    std::ofstream file(global / "global-only" / "SKILL.md", std::ios::binary | std::ios::trunc);
+    file << "---\nname: global-only\ndescription: Global-only workflow\n---\nGlobal-only body\n";
   }
   {
     std::ofstream file(project / "release" / "SKILL.md", std::ios::binary | std::ios::trunc);
@@ -370,10 +441,14 @@ void test_skill_loader()
     std::ofstream file(project / "debugging" / "scripts" / "triage.sh", std::ios::binary | std::ios::trunc);
     file << "echo triage\n";
   }
+  {
+    std::ofstream file(declared, std::ios::binary | std::ios::trunc);
+    file << "Declared plugin body\n";
+  }
 
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = root / "workspace", .global_skill_dirs = {global}, .project_skill_dirs = {project}, .max_file_bytes = 1024});
-  expect(loaded.skills.size() == 2, "skill loader discovers global and project SKILL.md files");
+  expect(loaded.skills.size() == 3, "skill loader discovers global and project SKILL.md files");
   auto const release = std::ranges::find_if(loaded.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "release"; });
   expect(release != loaded.skills.end() && release->description == "Project release workflow" && release->content.find("Project body") != std::string::npos &&
              release->source_type == ava::context::SkillSourceType::Project,
@@ -392,6 +467,25 @@ void test_skill_loader()
                tool_content.find("triage.sh") != std::string::npos,
            "loaded skill tool content includes body, base-dir guidance, and sampled files");
   }
+
+  auto global_disabled = ava::context::load_skills(
+      ava::context::SkillLoadOptions{.workspace_root = workspace,
+                                     .global_skill_dirs = {global},
+                                     .project_skill_dirs = {project},
+                                     .declared_skill_files = {ava::context::DeclaredSkillFileOptions{.path = declared,
+                                                                                                     .name = "declared-plugin-skill",
+                                                                                                     .description = "Declared plugin workflow",
+                                                                                                     .source_type = ava::context::SkillSourceType::Plugin,
+                                                                                                     .preloaded_content = std::nullopt,
+                                                                                                     .max_file_bytes = 1024}},
+                                     .max_file_bytes = 1024,
+                                     .include_global_skills = false,
+                                     .include_project_skills = true});
+  expect(std::ranges::none_of(global_disabled.skills,
+                              [](ava::context::LoadedSkill const& skill) { return skill.source_type == ava::context::SkillSourceType::Global; }) &&
+             std::ranges::any_of(global_disabled.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "debugging"; }) &&
+             std::ranges::any_of(global_disabled.skills, [](ava::context::LoadedSkill const& skill) { return skill.name == "declared-plugin-skill"; }),
+         "skill loader suppresses explicit global directories while retaining independent project and declared skill sources");
 
   std::filesystem::create_directories(project / "invalid");
   {
@@ -798,7 +892,7 @@ void test_openai_oauth_helpers()
     expect(session->authorization_url.find("originator=ava") != std::string::npos, "OpenAI OAuth authorization URL identifies AVA originator");
   }
 
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"expires_in\":120,"
@@ -824,7 +918,7 @@ void test_openai_oauth_helpers()
            "OpenAI OAuth code exchange form-encodes authorization code and verifier");
   }
 
-  ava::tests::FakeTransport device_start_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport device_start_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"device_auth_id\":\"device-123\",\"user_code\":\"ABCD-EFGH\",\"interval\":\"1\"}",
@@ -840,7 +934,7 @@ void test_openai_oauth_helpers()
 
   if (device)
   {
-    ava::tests::FakeTransport pending_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport pending_transport({ava::http::HttpResponse{
         .status_code = 403,
         .headers = {},
         .body = "{}",
@@ -848,13 +942,13 @@ void test_openai_oauth_helpers()
     auto pending = ava::config::poll_openai_oauth_device_authorization(*device, pending_transport, 1000);
     expect(pending && !pending->has_value(), "OpenAI headless OAuth treats 403 polling response as pending");
 
-    ava::tests::FakeTransport approved_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport approved_transport({ava::http::HttpResponse{
                                                       .status_code = 200,
                                                       .headers = {},
                                                       .body = "{\"authorization_code\":\"device code\","
                                                               "\"code_verifier\":\"device-verifier\"}",
                                                   },
-                                                  ava::provider::HttpResponse{
+                                                  ava::http::HttpResponse{
                                                       .status_code = 200,
                                                       .headers = {},
                                                       .body = "{\"access_token\":\"device-access\","
@@ -875,7 +969,7 @@ void test_openai_oauth_helpers()
 
 void test_openai_oauth_refresh()
 {
-  ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport refresh_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"refreshed-access\",\"refresh_token\":\"rotated-refresh\","
@@ -902,7 +996,7 @@ void test_openai_oauth_refresh()
            "OpenAI OAuth refresh form-encodes refresh token and client id");
   }
 
-  ava::tests::FakeTransport preserved_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport preserved_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"preserved-access\",\"expires_at\":2222}",
@@ -918,7 +1012,7 @@ void test_openai_oauth_refresh()
              preserved->account_id == "acct_stable",
          "OpenAI OAuth refresh preserves existing refresh token when response omits rotation");
 
-  ava::tests::FakeTransport id_token_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport id_token_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"id-token-access\",\"refresh_token\":\"id-token-refresh\","
@@ -935,7 +1029,7 @@ void test_openai_oauth_refresh()
   expect(id_token_refreshed && id_token_refreshed->account_id == "acct_123",
          "OpenAI OAuth refresh falls back to id_token account id when account_id is absent");
 
-  ava::tests::FakeTransport malformed_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport malformed_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "not json",
@@ -951,7 +1045,6 @@ void test_openai_oauth_refresh()
          "OpenAI OAuth refresh reports malformed JSON responses clearly");
 
   auto const root = create_empty_root("oauth-refresh");
-
 
   setenv("HOME", (root / "home").c_str(), 1);
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);
@@ -969,7 +1062,7 @@ void test_openai_oauth_refresh()
   expect(loaded && loaded->has_value(), "OpenAI OAuth refresh persistence test loads expired credential");
   if (loaded && *loaded)
   {
-    ava::tests::FakeTransport persist_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport persist_transport({ava::http::HttpResponse{
         .status_code = 200,
         .headers = {},
         .body = "{\"access_token\":\"persisted-access\",\"refresh_token\":\"persisted-refresh\","
@@ -994,7 +1087,7 @@ void test_openai_oauth_refresh()
   loaded = ava::config::load_openai_credential(paths);
   if (loaded && *loaded)
   {
-    ava::tests::FakeTransport failure_transport({ava::provider::HttpResponse{
+    ava::tests::FakeTransport failure_transport({ava::http::HttpResponse{
         .status_code = 400,
         .headers = {},
         .body = "{\"error\":\"invalid_grant\"}",
@@ -1062,7 +1155,7 @@ void test_anthropic_oauth_request_resolution()
     file << "\"account_id\":\"acct_old\",\"source\":\"claude\"}}";
   }
   ::chmod(paths.auth_file.c_str(), S_IRUSR | S_IWUSR);
-  ava::tests::FakeTransport refresh_transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport refresh_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "{\"access_token\":\"refreshed-oauth\",\"refresh_token\":\"rotated-refresh\","
@@ -1550,7 +1643,7 @@ void test_model_and_prompt_config()
                                           .estimated_output_bytes = std::nullopt,
                                           .estimated_total_bytes = std::nullopt,
                                           .estimated = false};
-    auto cost = selected.pricing ? ava::config::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
+    auto cost = selected.pricing ? ava::agent::usage_cost_usd(*selected.pricing, usage) : std::nullopt;
     auto const cost_value = cost.value_or(0.0L);
     auto const custom_off = ava::config::resolve_reasoning_level(selected, "off");
     auto const custom_minimal = ava::config::resolve_reasoning_level(selected, "minimal");
@@ -1568,7 +1661,7 @@ void test_model_and_prompt_config()
                *custom_ultra.provider_level == "turbo" && custom_future.explicit_mapping && custom_future.supported && !custom_future.provider_level &&
                custom_typo.explicit_mapping && !custom_typo.supported,
            "model registry parses local capability, reasoning-level policy, and pricing metadata and calculates cost");
-    expect(!ava::config::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
+    expect(!ava::agent::usage_cost_usd(ava::config::ModelPricing{}, usage), "usage cost remains unknown when pricing rates are absent");
     auto const maximum_price = std::numeric_limits<long double>::max();
     ava::config::ModelPricing const maximum_pricing{.input_per_million = maximum_price,
                                                     .output_per_million = maximum_price,
@@ -1585,7 +1678,7 @@ void test_model_and_prompt_config()
                                                   .estimated_output_bytes = std::nullopt,
                                                   .estimated_total_bytes = std::nullopt,
                                                   .estimated = false};
-    auto const maximum_cost = ava::config::usage_cost_usd(maximum_pricing, maximum_usage);
+    auto const maximum_cost = ava::agent::usage_cost_usd(maximum_pricing, maximum_usage);
     expect(maximum_cost && *maximum_cost == maximum_price, "usage cost calculation saturates overflowing token-price components and totals");
     ava::provider::TokenUsage const cached_usage{.input_tokens = 1000,
                                                  .output_tokens = 0,
@@ -1597,7 +1690,7 @@ void test_model_and_prompt_config()
                                                  .estimated_output_bytes = std::nullopt,
                                                  .estimated_total_bytes = std::nullopt,
                                                  .estimated = false};
-    expect(!ava::config::usage_cost_usd(*selected.pricing, cached_usage), "usage cost remains unknown when present cache usage has no cache pricing");
+    expect(!ava::agent::usage_cost_usd(*selected.pricing, cached_usage), "usage cost remains unknown when present cache usage has no cache pricing");
   }
 
   {
@@ -1688,6 +1781,7 @@ void run_config_context_auth_oauth_tests()
 {
   test_xdg_paths();
   test_context_loader();
+  test_markdown_resource_parser_and_reader();
   test_skill_loader();
   test_auth_record_helpers();
   test_auth_load_and_store();

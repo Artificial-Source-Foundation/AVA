@@ -9,6 +9,10 @@
 #include <string>
 #include <vector>
 
+namespace ava::config {
+struct XdgPaths;
+}  // namespace ava::config
+
 namespace ava::context {
 
 enum class SkillSourceType
@@ -58,6 +62,7 @@ struct SkillLoadOptions
   std::vector<std::filesystem::path> project_skill_dirs = {};
   std::vector<DeclaredSkillFileOptions> declared_skill_files = {};
   std::size_t max_file_bytes = 64 * 1024;
+  bool include_global_skills = true;
   bool include_project_skills = true;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -73,6 +78,7 @@ struct SkillLoadResult
 
 [[nodiscard]] std::string to_string(SkillSourceType source_type);
 [[nodiscard]] std::vector<std::filesystem::path> default_global_skill_dirs();
+[[nodiscard]] std::vector<std::filesystem::path> default_global_skill_dirs(ava::config::XdgPaths const& paths);
 [[nodiscard]] std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::path const& workspace_root);
 [[nodiscard]] ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions options);
 [[nodiscard]] ava::core::Result<LoadedSkill> load_declared_skill_content(DeclaredSkillFileOptions options, std::string content);

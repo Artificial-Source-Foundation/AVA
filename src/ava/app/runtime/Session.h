@@ -10,7 +10,6 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
-#include "ava/plugin/discovery.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -65,7 +64,8 @@ struct InvocationInputs
 //
 // The agent mode and assembled prompt material currently in effect for the
 // session: base-prompt metadata, contributing context and freshness sources,
-// and the resulting system prompt text. This whole bundle is recomputed
+// the ordinary system prompt, and its ambient-extension-free runtime variant.
+// This whole bundle is recomputed
 // whenever the mode or model changes (see apply_runtime_prompt_state and
 // switch_runtime_model) and is otherwise the session's live resolved state.
 //
@@ -79,6 +79,7 @@ struct ResolvedPromptState
   std::vector<ContextSourceMetadata> context_sources;
   std::vector<FreshnessSourceMetadata> freshness_sources;
   std::string system_prompt;
+  std::string ambient_extension_free_system_prompt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -226,6 +227,7 @@ class Session : protected Session_aggregate_base
   std::vector<ContextSourceMetadata> const& context_sources() const { return resolved_prompt_state_.context_sources; }
   std::vector<FreshnessSourceMetadata> const& freshness_sources() const { return resolved_prompt_state_.freshness_sources; }
   std::string const& system_prompt() const { return resolved_prompt_state_.system_prompt; }
+  std::string const& ambient_extension_free_system_prompt() const { return resolved_prompt_state_.ambient_extension_free_system_prompt; }
   bool is_offline() const { return invocation_inputs_.is_offline_; }
   std::vector<std::filesystem::path> const& additional_writable_dirs() const { return invocation_inputs_.additional_writable_dirs; }
   // Resolved once at open time and reused by every runtime history reader.
@@ -251,19 +253,6 @@ class Session : protected Session_aggregate_base
   std::shared_ptr<ava::app::SessionTitleCoordinator> const& session_title_coordinator() const { return resources_.session_title_coordinator; }
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> const& diagnostics() const { return resources_.diagnostics; }
   std::shared_ptr<ava::mcp::McpConfig const> const& mcp_config() const { return resources_.mcp_config; }
-
-  // Build the plugin discovery directories scoped to this session.
-  //
-  // Global plugins resolve under the XDG config dir; project plugins are only
-  // included when the session's project resources are trusted, so an untrusted
-  // workspace never exposes its local plugins to discovery. The result is a
-  // fresh value each call and never touches the filesystem.
-  [[nodiscard]] ava::plugin::PluginDiscoveryOptions skill_plugin_discovery_options() const
-  {
-    return ava::plugin::PluginDiscoveryOptions{
-        .global_plugins_dir = paths().ava_config_dir / "plugins",
-        .project_plugins_dir = project_resources_trusted(project_trust()) ? workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-  }
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

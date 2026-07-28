@@ -14,6 +14,7 @@
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/json.h"
+#include "ava/core/mode.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
@@ -26,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #include <signal.h>
 #include <sys/types.h>
@@ -35,6 +37,12 @@
 #endif
 
 namespace {
+
+using McpDescriptorExecutor = decltype(ava::mcp::McpBrokeredTool::executor);
+static_assert(
+    std::is_invocable_r_v<ava::tools::ToolDispatchResult, McpDescriptorExecutor, ava::tools::ToolContext const&, ava::tools::ProviderToolCall const&>);
+static_assert(
+    !std::is_invocable_v<McpDescriptorExecutor, ava::tools::ToolContext const&, ava::agent::ToolDispatchServices const&, ava::tools::ProviderToolCall const&>);
 
 void write_text(std::filesystem::path const& path, std::string const& text)
 {
@@ -166,7 +174,6 @@ void test_mcp_config_parsing()
 
   auto const root = create_empty_root("mcp-config");
 
-
   auto const workspace = root / "workspace";
   auto const global_path = root / "global" / "mcp.json";
   auto const project_path = workspace / ".ava" / "mcp.json";
@@ -234,7 +241,7 @@ void test_session_mcp_launch_identity_is_logical_and_exact()
   auto prompt = [&](std::string command) {
     return ava::permissions::PermissionPrompt{.permission_request_id = "permreq_mcp_identity",
                                               .operation = ava::permissions::Operation::McpServerLaunch,
-                                              .mode = ava::agent::Mode::Build,
+                                              .mode = ava::core::Mode::Build,
                                               .workspace_dir = workspace,
                                               .target_path = {},
                                               .command = std::move(command),
@@ -287,7 +294,7 @@ void test_mcp_permission_audit_golden_shape()
   ava::tools::PermissionAuditEvent event;
   event.permission_request_id = "permreq_ava080";
   event.operation = ava::permissions::Operation::McpToolCall;
-  event.mode = ava::agent::Mode::Build;
+  event.mode = ava::core::Mode::Build;
   event.tool_name = "mcp_demo_echo";
   event.action = ava::permissions::PermissionAction::Ask;
   event.reason = "MCP tool calls require explicit approval";
@@ -885,7 +892,6 @@ void test_mcp_tool_dispatcher_contains_tool_errors()
 
   auto const text_root = create_empty_root("mcp-dispatcher-canceled-text-error");
 
-
   auto const text_workspace = text_root / "workspace";
   auto const text_project_config = text_workspace / ".ava" / "mcp.json";
   std::filesystem::create_directories(text_workspace);
@@ -1017,9 +1023,10 @@ void test_mcp_strict_session_registry_failures_and_nested_cwd()
       context_for_servers(std::vector<ava::mcp::McpServerConfig>{std::move(first_collision), std::move(second_collision)}));
   auto const collision_details = collision ? std::string{} : collision.error().format();
   expect(!collision && collision_details.find("duplicate model tool name") != std::string::npos &&
-             collision_details.find("mcp_demo_one_echo") != std::string::npos && collision_details.find("demo-one") != std::string::npos &&
-             collision_details.find("demo_one") != std::string::npos,
-         "strict session MCP registry rejects cross-server normalized model-name collisions: " + collision_details);
+             collision_details.find("tool: mcp_demo_one_echo") != std::string::npos && collision_details.find("mcp_server: demo_one") != std::string::npos &&
+             collision_details.find("mcp_name: echo") != std::string::npos && collision_details.find("existing_source: mcp") != std::string::npos &&
+             collision_details.find("existing_source_id: demo-one") != std::string::npos,
+         "strict session MCP registry preserves exact collision diagnostic fields: " + collision_details);
 
   first_collision = fake_server_config(root);
   first_collision.id = "demo-one";
@@ -1114,6 +1121,20 @@ void test_mcp_ordinary_global_and_project_environment_is_inherited()
              inherited_marker.find("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") != std::string::npos,
          inherited ? "ordinary loaded global MCP inherits benign parent variables and replaces parent PATH with the trusted default"
                    : "ordinary loaded global MCP environment discovery failed: " + inherited.error().format());
+
+  std::filesystem::remove(marker);
+  ava::tools::ToolContext suppressed_context;
+  suppressed_context.workspace_dir = workspace;
+  suppressed_context.mcp_global_config_file = global_config;
+  suppressed_context.include_global_mcp_config = false;
+  suppressed_context.include_project_mcp_config = false;
+  suppressed_context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto suppressed = ava::agent::ToolDispatcher::create_strict(std::move(suppressed_context));
+  expect(suppressed && !std::filesystem::exists(marker),
+         suppressed ? "disabled global MCP ignores an explicitly supplied config path"
+                    : "disabled global MCP config unexpectedly affected strict dispatcher creation: " + suppressed.error().format());
 
   auto server = fake_server_config(root);
   server.scope = ava::mcp::McpServerScope::Project;

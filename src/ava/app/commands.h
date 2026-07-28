@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ava/app/command_catalog.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
@@ -18,7 +18,7 @@ namespace ava::app {
 struct CommandRequest
 {
   std::string command;
-  runtime::EventSink event_sink = nullptr;
+  ava::event::RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;

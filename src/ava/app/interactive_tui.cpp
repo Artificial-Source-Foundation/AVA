@@ -209,7 +209,7 @@ int run_tui(ShellState state)
       .active_context_status_provider = [&state]() { return active_context_status_for_session(state.session); },
       .reasoning_status_provider = [&state]() { return ava::app::reasoning_status_for_session(state.session); },
       .create_active_run_queues =
-          [&state](ava::app::EventEnvelopeSink event_sink) {
+          [&state](ava::event::EventEnvelopeSink event_sink) {
             auto const active_job_coordinator = state.session.subagent_coordinator();
             auto const active_job_owner = state.session.store.session_id();
             auto queue = std::make_shared<ava::app::InteractiveRunQueue>(active_job_owner, ava::core::make_id("request"), std::move(event_sink));

@@ -1,5 +1,6 @@
 add_library(ava_context
   "context_loader.cpp"
+  "markdown_resource.cpp"
   "skill_loader.cpp"
 )
 

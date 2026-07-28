@@ -1,14 +1,15 @@
 #include "tests/support/fake_transport.h"
+#include "ava/http/transport.h"
 
 #include <utility>
 
 namespace ava::tests {
 
-FakeTransport::FakeTransport(std::vector<ava::provider::HttpResponse> responses) : responses_(std::move(responses))
+FakeTransport::FakeTransport(std::vector<ava::http::HttpResponse> responses) : responses_(std::move(responses))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> FakeTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> FakeTransport::send(ava::http::HttpRequest const& request)
 {
   requests_.push_back(request);
   if (responses_.empty())
@@ -20,7 +21,7 @@ ava::core::Result<ava::provider::HttpResponse> FakeTransport::send(ava::provider
   return response;
 }
 
-std::vector<ava::provider::HttpRequest> const& FakeTransport::requests() const noexcept
+std::vector<ava::http::HttpRequest> const& FakeTransport::requests() const noexcept
 {
   return requests_;
 }

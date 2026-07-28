@@ -1,21 +1,22 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/agent/agent_loop_session.h"
-#include "ava/agent/background_job_registry.h"
 #include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/model_invocation_options.h"
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/tool_execution_options.h"
+#include "ava/agent/tool_resources.h"
 #include "ava/agent/tool_visibility.h"
 #include "ava/config/model_config.h"
 #include "ava/session/attachments.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/provider.h"
-#include "ava/lsp/lsp_client.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 #include "ava/core/runtime_outcome.h"
@@ -28,15 +29,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace ava::mcp {
-struct McpConfig;
-}
-
-namespace ava::tools {
-class ExactFileAccess;
-class CommandExecutor;
-} // namespace ava::tools
 
 namespace ava::agent {
 
@@ -111,9 +103,7 @@ struct AgentLoopOptions
   // at startup and shared across all turns and subagent loops.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
   Mode mode = Mode::Build;
-  std::string provider_id = "openai";
-  std::string model_id = "gpt-5.5";
-  std::string system_prompt;
+  ModelInvocationOptions model = {};
   std::string access_token;
   std::string credential_type = "bearer";
   bool openai_oauth = false;
@@ -123,29 +113,10 @@ struct AgentLoopOptions
   std::size_t max_assistant_text_bytes = 256 * 1024;
   std::size_t max_tool_argument_bytes = 256 * 1024;
   std::size_t max_tool_result_context_bytes = 8 * 1024;
-  bool stream = true;
-  bool model_supports_tools = true;
-  bool model_supports_streaming = true;
-  bool include_project_resources = true;
-  std::filesystem::path plugin_global_plugins_dir = {};
-  std::filesystem::path plugin_project_plugins_dir = {};
-  std::filesystem::path plugin_enablement_file = {};
-  std::shared_ptr<ava::mcp::McpConfig const> session_mcp_config = nullptr;
-  std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
-  bool require_descriptor_secure_workspace = false;
-  bool announce_execution_after_permission = false;
-  bool redact_permission_audit_arguments = false;
-  bool require_explicit_file_permissions = false;
-  // Runtime-owned AVA config/state/session directories that command sealing
-  // must keep disjoint from the model command workspace.
-  std::vector<std::filesystem::path> ava_authority_roots = {};
-  std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
-  std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
+  ToolResourceOptions tool_resources = {};
+  ToolExecutionOptions tool_execution = {};
   std::vector<SubagentDefinition> subagents = {};
   ToolVisibilityOptions tool_visibility = {};
-  std::vector<std::string> model_input_modalities = {"text"};
-  std::optional<long long> model_max_output_tokens = std::nullopt;
-  std::optional<ava::provider::ProviderReasoningOptions> reasoning = std::nullopt;
   std::function<void(ToolTimelineEntry const&)> on_tool_event = nullptr;
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
@@ -158,15 +129,13 @@ struct AgentLoopOptions
   QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
-  std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::function<ava::core::Result<bool>(ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
-  std::function<ava::core::Result<std::unique_ptr<ava::provider::Transport>>()> background_transport_factory = nullptr;
-  // Production uses one application-scoped coordinator. The raw registry is
-  // retained only as an explicit standalone AgentLoop test seam.
+  std::function<ava::core::Result<std::unique_ptr<ava::http::Transport>>()> background_transport_factory = nullptr;
+  // Production and tests use one application-scoped coordinator as the sole
+  // task-subagent owner. BackgroundJobRegistry remains an internal engine.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
-  std::shared_ptr<BackgroundJobRegistry> background_jobs = nullptr;
   std::mutex* session_mutex = nullptr;
   // Immutable generation routes for records produced by this run. Persistent
   // provider assistant turns require the batch route so v4 staging and its
@@ -184,19 +153,13 @@ struct AgentLoopOptions
   // Called at real loop boundaries; errors abort the loop rather than being
   // swallowed as observer-only state.
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
-  std::optional<ava::config::ModelPricing> model_pricing = std::nullopt;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
-  // Disabled by default. This is independent from runtime::Event/RPC output.
+  // Disabled by default. This is independent from typed runtime-event/RPC output.
   std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.
   ava::observability::TraceContext trace_context = {};
-  // Explicit source/request compatibility identity. Runtime construction sets
-  // both. A direct-loop request may use a family fallback for serialization,
-  // but only these explicit values are persisted as replay provenance.
-  std::string api_family = {};
-  std::string reasoning_format = {};
 
   // Includes provider credentials and callback/runtime ownership state; never
   // stream this aggregate through generated debug output.
@@ -227,11 +190,11 @@ class AgentLoop
   explicit AgentLoop(AgentLoopOptions options);
 
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message, ava::session::SessionStore& store,
-                                                            ava::provider::Provider const& provider, ava::provider::Transport& transport);
+                                                            ava::provider::Provider const& provider, ava::http::Transport& transport);
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn(std::string const& user_message,
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport);
+                                                            ava::http::Transport& transport);
   // Owns AgentLoopOptions, which contains provider credentials.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
@@ -239,7 +202,7 @@ class AgentLoop
   [[nodiscard]] ava::core::Result<AgentLoopResult> run_turn_impl(std::string const& user_message,
                                                                  std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                                  ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                                 ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context);
+                                                                 ava::http::Transport& transport, ava::observability::TraceContext const& trace_context);
 
   AgentLoopOptions options_;
   bool ava_authority_roots_over_limit_ = false;

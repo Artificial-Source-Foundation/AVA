@@ -315,6 +315,12 @@ std::string tui_theme_setting_usage()
   return "usage: /theme [dark|light|plain|custom-name|reset]";
 }
 
+std::string active_tui_theme_summary()
+{
+  auto const active = ava::tui::active_tui_theme();
+  return active.name + " (" + active.badge + ")";
+}
+
 ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::filesystem::path const& path)
 {
   std::ifstream input(path, std::ios::binary);

@@ -1,6 +1,4 @@
 #include "sys.h"
-#include "ava/app/EventEnvelope.h"
-#include "ava/app/EventEnvelopeContext.h"
 #include "ava/agent/question.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime_actions_internal.h"
@@ -27,7 +25,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <curses.h>
 
@@ -198,7 +198,15 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     return RuntimeEventDrainResult::NoEvents;
   for (auto const& event : events)
   {
-    apply_event_envelope(event_state, event);
+    std::visit(
+        [&](auto const& queued) {
+          using Queued = std::remove_cvref_t<decltype(queued)>;
+          if constexpr (std::same_as<Queued, QueuedRuntimeEvent>)
+            apply_runtime_event(event_state, queued.event, queued.context);
+          else
+            apply_control_event_envelope(event_state, queued);
+        },
+        event);
   }
   auto turn_transcript = event_state_transcript_snapshot(event_state, PendingTextProjection::Unparsed);
   {
@@ -297,23 +305,23 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     pending_image_attachments.clear();
     snapshot.pending_attachments.clear();
   }
-  auto& event_bus = state.event_bus;
   auto& event_queue = state.event_queue;
   auto& event_state = state.event_state;
   auto& run_cancel_requested = state.run_cancel_requested;
   auto& close_after_submit = state.close_after_submit;
   auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };
-  event_bus.subscribe(event_queue.sink());
   auto& active_queues = state.active_queues;
   auto& event_context_mutex = state.event_context_mutex;
-  auto& current_request_id = state.current_request_id;
+  auto& current_event_context = state.current_event_context;
+  auto control_sink = event_queue.envelope_sink();
   auto set_current_request_id = [&](std::string request_id) {
     std::lock_guard lock(event_context_mutex);
-    current_request_id = std::move(request_id);
+    current_event_context.request_id = request_id;
+    current_event_context.correlation_id = std::move(request_id);
   };
   if (supports_active_queue && options.create_active_run_queues)
   {
-    active_queues = options.create_active_run_queues([&event_bus](ava::app::EventEnvelope const& event) { return event_bus.publish(event); });
+    active_queues = options.create_active_run_queues(control_sink);
     if (!active_queues->active_request_id.empty())
     {
       set_current_request_id(active_queues->active_request_id);
@@ -326,22 +334,18 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       };
     }
   }
-  auto runtime_event_to_bus_sink = [&]() -> ava::app::runtime::EventSink {
-    return [&](ava::app::runtime::Event const& event) {
-      ava::app::EventEnvelopeContext event_context;
+  auto runtime_event_queue_sink = [&]() -> ava::event::RuntimeEventSink {
+    return [&](ava::event::RuntimeEvent const& event) {
+      ava::event::EventEnvelopeContext context_snapshot;
       {
         std::lock_guard lock(event_context_mutex);
-        if (!current_request_id.empty())
-        {
-          event_context.request_id = current_request_id;
-          event_context.correlation_id = current_request_id;
-        }
+        context_snapshot = current_event_context;
       }
-      return event_bus.publish(ava::app::to_event_envelope(event, event_context));
+      return event_queue.enqueue(event, std::move(context_snapshot));
     };
   };
   auto& event_sink = state.event_sink;
-  event_sink = supports_active_queue ? runtime_event_to_bus_sink() : ava::app::runtime::EventSink{};
+  event_sink = supports_active_queue ? runtime_event_queue_sink() : ava::event::RuntimeEventSink{};
   prompt_coordinator_.set_audit_sink(event_sink);
   state.turn_started_at = std::chrono::steady_clock::now();
   auto const turn_started_at = state.turn_started_at;

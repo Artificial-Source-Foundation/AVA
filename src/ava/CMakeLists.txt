@@ -3,7 +3,9 @@ set(AVA_BACKEND_LIBRARIES
   ava_config
   ava_context
   ava_core
+  ava_event
   ava_diagnostics
+  ava_http
   ava_command
   ava_containment
   ava_lsp
@@ -22,6 +24,8 @@ add_subdirectory(agent)
 add_subdirectory(config)
 add_subdirectory(context)
 add_subdirectory(core)
+add_subdirectory(event)
+add_subdirectory(http)
 add_subdirectory(diagnostics)
 add_subdirectory(command)
 add_subdirectory(containment)

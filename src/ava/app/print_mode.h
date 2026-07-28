@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
 #include "ava/provider/provider.h"
@@ -45,7 +45,7 @@ struct PrintModeOptions
   PrintOutputFormat output_format = PrintOutputFormat::Text;
   HeadlessPermissionPolicyOptions permission_policy;
   std::optional<std::reference_wrapper<ava::provider::Provider const>> provider_override;
-  std::optional<std::reference_wrapper<ava::provider::Transport>> transport_override;
+  std::optional<std::reference_wrapper<ava::http::Transport>> transport_override;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -53,7 +53,7 @@ struct PrintModeOptions
 [[nodiscard]] ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session& session, std::string const& prompt,
-                                                                              ava::provider::Provider const& provider, ava::provider::Transport& transport,
+                                                                              ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                               PrintModeRunOptions const& options, std::ostream& out, std::ostream& err);
 
 [[nodiscard]] int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err);

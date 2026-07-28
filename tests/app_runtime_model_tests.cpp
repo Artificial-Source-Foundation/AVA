@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/input.h"
@@ -721,7 +722,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({ava::provider::HttpResponse{
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
       .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"reasoned answer\"}\n\n"

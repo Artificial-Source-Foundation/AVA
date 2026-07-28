@@ -53,10 +53,23 @@ find_program(PYTHON3_EXECUTABLE python3
   REQUIRED
 )
 
+find_program(FLOCK_EXECUTABLE flock
+  DOC "Path to flock; serializes debug tags and print_members generation."
+)
+if (NOT FLOCK_EXECUTABLE)
+  message(FATAL_ERROR
+    "EnableLibcwd is ON, which requires the flock executable to serialize "
+    "debug tags and print_members generation across concurrent build processes. "
+    "Install util-linux (providing flock), or configure with -DEnableLibcwd=OFF.")
+endif ()
+message(STATUS "Found flock: ${FLOCK_EXECUTABLE}")
+
 #------------------------------------------------------------------------------
 # Create the pseudo target `ctags-json` that generates tags.json
 #
 set(_ava_ctags_json_out "${CMAKE_BINARY_DIR}/generated/ctags/tags.json")
+set(_ava_print_members_dir "${CMAKE_BINARY_DIR}/generated/print_members")
+set(_ava_generation_lock "${_ava_print_members_dir}/generation.lock")
 
 # Ninja decides whether to rerun the print_members generator by comparing the
 # build-log-RECORDED mtime of the generated .cpp outputs against the CURRENT
@@ -86,6 +99,9 @@ add_custom_target(ctags-json
   COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${_ava_ctags_json_out}"
           "${CTAGS_EXECUTABLE}"
+          "${CMAKE_COMMAND}"
+          "${FLOCK_EXECUTABLE}"
+          "${_ava_generation_lock}"
   COMMAND "${CMAKE_COMMAND}" -E touch "${_ava_ctags_json_stamp}"
   DEPENDS "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
@@ -97,29 +113,131 @@ add_custom_target(ctags-json
 # (re)generates them and the `generate-print-members` pseudo-target are declared
 # further down, once the set of output files is known.
 #
-set(_ava_print_members_dir "${CMAKE_BINARY_DIR}/generated/print_members")
+# Exact source signature whose successful printer generation this marker proves.
+set(_ava_print_members_completion
+    "${_ava_print_members_dir}/generation-complete.sources.sha256")
+set(_ava_run_generate_print_members
+    "${CMAKE_SOURCE_DIR}/cmake/scripts/run_generate_print_members.sh")
 
 #------------------------------------------------------------------------------
 # Create the `source_files` list, containing all required print_members.cpp files.
 #
 set(_ava_source_list_file "${_ava_print_members_dir}/source_files")
+# Exact sorted src/ava input list and matching content signatures recorded by
+# generate_ctags_json.sh beside tags.json.
+set(_ava_ctags_json_sources "${_ava_ctags_json_out}.sources")
+set(_ava_ctags_json_sources_sha256 "${_ava_ctags_json_sources}.sha256")
 
 # Determine if we need to run the generator at configure time.
 #
-# This configure-time generation only exists so CMake can discover the set of
-# generated print_members.cpp files (read from source_files) and add them to the
-# ava_debug library below. It therefore runs only when source_files or any listed
-# cpp is absent (e.g. a fresh checkout). Staleness against tags.json -- e.g.
-# after a manual `ctags-json` refresh -- is handled at BUILD time by the
-# add_custom_command(OUTPUT ...) declared further below, so it is intentionally
-# NOT checked here.
+# Configure-time generation exists so CMake can discover the set of generated
+# print_members.cpp files (read from source_files) and add them to the ava_debug
+# library below. It must also refresh stale printers when the src/ava tree has
+# changed since the last tags/printer run -- otherwise an existing build tree
+# keeps obsolete namespace buckets after type moves, renames, or content edits.
+#
+# NEED_GENERATION is set when any of the following hold:
+#  - tags.json, either input manifest, the printer completion marker,
+#    source_files, or a listed generated .cpp is absent
+#  - the current authoritative source enumeration differs from tags.json.sources
+#  - either recorded signature differs from the deterministic source-content
+#    signature
+#
+# Build-time staleness after a manual `ctags-json` (stamp advanced) remains
+# handled by the add_custom_command(OUTPUT ...) edge below. Configure-time and
+# generate-print-members refreshes deliberately leave the stamp untouched so a
+# follow-up plain build does not rerun the generator endlessly.
 set(NEED_GENERATION FALSE)
 
-if (NOT EXISTS "${_ava_source_list_file}")
+# Enumerate the exact sorted source list ctags will see. list_ava_sources.sh is
+# authoritative; the recursive glob below exists only to make plain builds ask
+# CMake to reconfigure after matching files are added or deleted.
+execute_process(
+  COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  RESULT_VARIABLE _ava_list_sources_result
+  OUTPUT_VARIABLE _ava_current_sources_manifest
+  ERROR_VARIABLE _ava_list_sources_error
+)
+if (NOT _ava_list_sources_result EQUAL 0)
+  if (_ava_list_sources_error)
+    message(STATUS "${_ava_list_sources_error}")
+  endif ()
+  message(FATAL_ERROR
+    "Failed to enumerate src/ava sources via cmake/scripts/list_ava_sources.sh "
+    "(exit ${_ava_list_sources_result}).")
+endif ()
+
+# Convert the newline-terminated manifest into a CMake list.
+if (_ava_current_sources_manifest STREQUAL "")
+  set(_ava_current_sources "")
+else()
+  string(REGEX REPLACE "\n$" "" _ava_current_sources_text
+         "${_ava_current_sources_manifest}")
+  string(REPLACE "\n" ";" _ava_current_sources
+         "${_ava_current_sources_text}")
+endif ()
+
+file(GLOB_RECURSE _ava_watched_source_files
+  CONFIGURE_DEPENDS
+  LIST_DIRECTORIES FALSE
+  "${CMAKE_SOURCE_DIR}/src/ava/*.h"
+  "${CMAKE_SOURCE_DIR}/src/ava/*.cpp"
+  "${CMAKE_SOURCE_DIR}/src/ava/*.cxx"
+)
+list(FILTER _ava_watched_source_files EXCLUDE REGEX "/\\.git/")
+
+set(_ava_watched_sources "")
+foreach(_ava_src_abs IN LISTS _ava_watched_source_files)
+  file(RELATIVE_PATH _ava_src_rel "${CMAKE_SOURCE_DIR}" "${_ava_src_abs}")
+  list(APPEND _ava_watched_sources "${_ava_src_rel}")
+endforeach()
+if (NOT "${_ava_watched_sources}" STREQUAL "${_ava_current_sources}")
+  message(FATAL_ERROR
+    "The CONFIGURE_DEPENDS src/ava glob does not match the authoritative "
+    "cmake/scripts/list_ava_sources.sh output.")
+endif ()
+
+# Existing source edits also need to trigger reconfiguration on a plain build.
+# Compute the exact signature text while constructing those configure inputs.
+set(_ava_current_source_files "")
+set(_ava_current_sources_sha256 "")
+foreach(_ava_src_rel IN LISTS _ava_current_sources)
+  set(_ava_src_abs "${CMAKE_SOURCE_DIR}/${_ava_src_rel}")
+  list(APPEND _ava_current_source_files "${_ava_src_abs}")
+  file(SHA256 "${_ava_src_abs}" _ava_src_sha256)
+  string(APPEND _ava_current_sources_sha256
+         "${_ava_src_sha256}  ${_ava_src_rel}\n")
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${_ava_current_source_files})
+
+if (NOT EXISTS "${_ava_ctags_json_out}")
+  message(STATUS "Need generation of print_members.cpp files because ${_ava_ctags_json_out} doesn't exist.")
+  set(NEED_GENERATION TRUE)
+endif ()
+
+if (NOT NEED_GENERATION AND NOT EXISTS "${_ava_ctags_json_sources}")
+  message(STATUS "Need generation of print_members.cpp files because ${_ava_ctags_json_sources} doesn't exist.")
+  set(NEED_GENERATION TRUE)
+endif ()
+
+if (NOT NEED_GENERATION AND NOT EXISTS "${_ava_ctags_json_sources_sha256}")
+  message(STATUS "Need generation of print_members.cpp files because ${_ava_ctags_json_sources_sha256} doesn't exist.")
+  set(NEED_GENERATION TRUE)
+endif ()
+
+if (NOT NEED_GENERATION AND NOT EXISTS "${_ava_print_members_completion}")
+  message(STATUS "Need generation of print_members.cpp files because ${_ava_print_members_completion} doesn't exist.")
+  set(NEED_GENERATION TRUE)
+endif ()
+
+if (NOT NEED_GENERATION AND NOT EXISTS "${_ava_source_list_file}")
   message(STATUS "Need generation of print_members.cpp files because ${_ava_source_list_file} doesn't exist.")
   set(NEED_GENERATION TRUE)
-else()
-  # File exists, read it.
+endif ()
+
+if (NOT NEED_GENERATION)
   file(STRINGS "${_ava_source_list_file}" REL_FILES)
   foreach(REL_FILE IN LISTS REL_FILES)
     if (NOT EXISTS "${_ava_print_members_dir}/${REL_FILE}")
@@ -130,16 +248,63 @@ else()
   endforeach()
 endif ()
 
-# Run the generator if needed.
+# Added/deleted sources: compare the exact live enumerator output to the path
+# manifest generate_ctags_json.sh recorded on its last successful run.
+if (NOT NEED_GENERATION)
+  file(READ "${_ava_ctags_json_sources}" _ava_recorded_sources_manifest)
+  if (NOT "${_ava_current_sources_manifest}" STREQUAL
+          "${_ava_recorded_sources_manifest}")
+    set(NEED_GENERATION TRUE)
+    message(STATUS
+      "Need (re)generation of print_members.cpp files because the src/ava source "
+      "list differs from ${_ava_ctags_json_sources}.")
+  endif ()
+endif ()
+
+# Edited sources (including type namespace moves): compare content signatures,
+# never mtimes, so equal timestamp resolution cannot cause configure loops.
+if (NOT NEED_GENERATION)
+  file(READ "${_ava_ctags_json_sources_sha256}"
+       _ava_recorded_sources_sha256)
+  if (NOT "${_ava_current_sources_sha256}" STREQUAL
+          "${_ava_recorded_sources_sha256}")
+    set(NEED_GENERATION TRUE)
+    message(STATUS
+      "Need (re)generation of print_members.cpp files because the src/ava source "
+      "content signature differs from ${_ava_ctags_json_sources_sha256}.")
+  endif ()
+endif ()
+
+# Only the completion marker proves that printers were generated successfully
+# from the current inputs. In particular, ctags may have advanced both of its
+# manifests before a failed Python run.
+if (NOT NEED_GENERATION)
+  file(READ "${_ava_print_members_completion}"
+       _ava_completed_sources_sha256)
+  if (NOT "${_ava_current_sources_sha256}" STREQUAL
+          "${_ava_completed_sources_sha256}")
+    set(NEED_GENERATION TRUE)
+    message(STATUS
+      "Need (re)generation of print_members.cpp files because the completed "
+      "printer source signature differs from ${_ava_print_members_completion}.")
+  endif ()
+endif ()
+
+# Run the generator if needed. Does NOT advance tags.json.stamp (only the
+# manual ctags-json target does), so a subsequent plain build will not loop
+# through the build-time printer edge.
 if (NOT NEED_GENERATION)
   message(STATUS "Not regenerating print_members.cpp files")
 else ()
-  # Manually run whatever ctags-json does here.
+  # Manually run whatever ctags-json does here (without touching the stamp).
   message(STATUS "Generating ${_ava_ctags_json_out}")
   execute_process(
     COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
             "${_ava_ctags_json_out}"
             "${CTAGS_EXECUTABLE}"
+            "${CMAKE_COMMAND}"
+            "${FLOCK_EXECUTABLE}"
+            "${_ava_generation_lock}"
     RESULT_VARIABLE GEN_RESULT
     OUTPUT_VARIABLE GEN_OUTPUT
     ERROR_VARIABLE GEN_ERROR
@@ -156,14 +321,19 @@ else ()
     message(FATAL_ERROR "Failed to successfully generate the \"${_ava_ctags_json_out}\" file.")
   endif ()
 
-  # Manually run the python script.
+  # Run Python transactionally: the helper invalidates completion before launch
+  # and atomically republishes the exact source signature only after success.
   message(STATUS "Generating print_members.cpp files in ${_ava_print_members_dir}")
-  file(MAKE_DIRECTORY "${_ava_print_members_dir}")
   execute_process(
-    COMMAND "${PYTHON3_EXECUTABLE}"
+    COMMAND "${_ava_run_generate_print_members}"
+            "${PYTHON3_EXECUTABLE}"
             "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
             "${_ava_ctags_json_out}"
             "${_ava_print_members_dir}"
+            "${_ava_ctags_json_sources_sha256}"
+            "${_ava_print_members_completion}"
+            "${FLOCK_EXECUTABLE}"
+            "${_ava_generation_lock}"
     RESULT_VARIABLE GEN_RESULT
     OUTPUT_VARIABLE GEN_OUTPUT
     ERROR_VARIABLE GEN_ERROR
@@ -214,14 +384,19 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ava_source_li
 # add_custom_command requires at least one OUTPUT, and there is nothing to drive.
 if (_ava_generated_source_files)
 add_custom_command(
-  OUTPUT ${_ava_generated_source_files}
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ava_print_members_dir}"
-  COMMAND "${PYTHON3_EXECUTABLE}"
+  OUTPUT ${_ava_generated_source_files} "${_ava_print_members_completion}"
+  COMMAND "${_ava_run_generate_print_members}"
+          "${PYTHON3_EXECUTABLE}"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
           "${_ava_ctags_json_out}"
           "${_ava_print_members_dir}"
+          "${_ava_ctags_json_sources_sha256}"
+          "${_ava_print_members_completion}"
+          "${FLOCK_EXECUTABLE}"
+          "${_ava_generation_lock}"
   DEPENDS "${_ava_ctags_json_stamp}"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+          "${_ava_run_generate_print_members}"
   COMMENT "Generating print_members definitions into ${_ava_print_members_dir}"
   VERBATIM
 )
@@ -246,20 +421,29 @@ add_custom_command(
 #    stamp -- and thus the .cpp edge -- untouched, so the next plain build only
 #    recompiles the freshly-written .cpp without regenerating them.
 #
-# The .sh runs to completion before the .py starts (COMMANDS of one edge run
-# sequentially), so the .py always reads a fully-written tags.json.
+# The ctags command runs to completion before the transactional printer helper
+# starts (COMMANDS of one edge run sequentially), so Python and its eventual
+# completion marker always use fully-published tags manifests.
 add_custom_target(generate-print-members
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ava_print_members_dir}"
   COMMAND "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${_ava_ctags_json_out}"
           "${CTAGS_EXECUTABLE}"
-  COMMAND "${PYTHON3_EXECUTABLE}"
+          "${CMAKE_COMMAND}"
+          "${FLOCK_EXECUTABLE}"
+          "${_ava_generation_lock}"
+  COMMAND "${_ava_run_generate_print_members}"
+          "${PYTHON3_EXECUTABLE}"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
           "${_ava_ctags_json_out}"
           "${_ava_print_members_dir}"
+          "${_ava_ctags_json_sources_sha256}"
+          "${_ava_print_members_completion}"
+          "${FLOCK_EXECUTABLE}"
+          "${_ava_generation_lock}"
   DEPENDS "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_ctags_json.sh"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/list_ava_sources.sh"
           "${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py"
+          "${_ava_run_generate_print_members}"
   COMMENT "Forcing regeneration of tags.json and print_members.cpp files"
   VERBATIM
 )

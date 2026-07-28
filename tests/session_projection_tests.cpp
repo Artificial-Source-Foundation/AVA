@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/session_test_declarations.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/commands.h"
 #include "ava/agent/message_builder.h"
 #include "ava/session/assistant_output.h"
@@ -170,8 +171,8 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
                         imported[6].data_json.find("\"assistant_output_entry_id\":\"out_function\"") != std::string::npos;
   ava::provider::OpenAIProvider const portable_openai_provider("https://api.example.test");
   ava::provider::AnthropicProvider const portable_anthropic_provider("https://anthropic.example.test");
-  std::optional<ava::provider::HttpRequest> portable_openai_request;
-  std::optional<ava::provider::HttpRequest> portable_anthropic_request;
+  std::optional<ava::http::HttpRequest> portable_openai_request;
+  std::optional<ava::http::HttpRequest> portable_anthropic_request;
   if (imported_messages)
   {
     auto openai_request = portable_openai_provider.build_request(

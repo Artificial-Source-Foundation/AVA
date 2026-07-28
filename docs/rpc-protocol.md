@@ -90,7 +90,7 @@ Client request IDs and resolver `request_id`/`correlation_id` values are non-emp
 - Resolver `payload.resolver_request_id`: AVA-owned ephemeral resolver ID used in `permission_reply`/`question_reply`.
 - Permission `payload.permission_request_id`: durable audit identity; it is not the resolver ID.
 - Session-grant `grant_id`: a new process-local revocation handle generated when `allow_session` is accepted. It is neither the resolver ID nor the durable `permission_request_id`; the grant object carries that originating `permission_request_id` as a separate field.
-- Automatic subagent delivery uses an AVA-owned `automatic_delivery_...` run request identity distinct from both the journal `delivery_attempt_...` identity and every client prompt request ID.
+- Automatic subagent delivery uses an AVA-owned `automatic_delivery_...` run request identity distinct from both the coordinator's `delivery_attempt_...` identity and every client prompt request ID.
 - `event_id`, `session_id`, `run_id`, `turn_id`, `message_id`, and tool `call_id` are AVA-owned.
 
 Prompt success contains `session_id`, `final_text`, `stop_reason`, `provider_iterations`, `tool_calls`, and optional `tool_timeline`. Command-dispatch success contains `handled`, `quit`, `output`, `text`, and optional `tool_timeline`. State results contain protocol/session/workspace/mode/model/cancel/reasoning/context metadata. Lists and session/model results are bounded and additive.
@@ -105,7 +105,7 @@ Tool records use `status` (`running`, `success`, `error`, or `canceled` as appli
 
 ### Subagent job snapshot
 
-All model-tool, slash-command, and RPC job controls use the same bounded `schema_version:1` snapshot. It exposes `job_id`, `task_id`, `parent_session_id`, `child_session_id`, `delivery_id`, mode, execution/delivery states, start/update and optional terminal/promotion/cancel/delivery timestamps, cancellation/promotion flags, delivery attempt/accounting counters, and truncation metadata. Wait responses add `timed_out`; list responses add bounded list truncation/count fields.
+All model-tool, slash-command, and RPC job controls use the same bounded `schema_version:1` snapshot. It exposes `job_id`, `task_id`, `parent_session_id`, `child_session_id`, `delivery_id`, mode, execution/delivery states, start/update and optional terminal/promotion/cancel/delivery timestamps, cancellation/promotion flags, delivery attempt/accounting counters, and truncation metadata. Wait responses add `timed_out`; list responses add bounded list truncation/count fields. Job snapshots and pending automatic deliveries are process-local and are not recovered or delivered after AVA closes or crashes.
 
 List and status omit terminal `summary`, `error`, and `message`. Result requests include a bounded completed `summary`; failed results include only stable `status`, sanitized `message`, and `error_category`; canceled/interrupted results include only stable status and a sanitized message. Snapshots never expose filesystem paths, coordinator state/errors, provider bodies, commands/arguments, credentials, or formatted error context. An unfinished result returns stable `job_not_ready`.
 

@@ -3,6 +3,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/rpc/serialization.h"
@@ -642,7 +643,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
       "# Goal\nRemember RPC facts\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
       "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.";
   ava::tests::FakeTransport transport(
-      {ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(rpc_summary) + "\"}"}});
+      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"" + ava::core::json::escape(rpc_summary) + "\"}"}});
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   ThreadSafeStringBuf output_buffer;

@@ -601,7 +601,7 @@ bool path_matches(ConfiguredServer const& server, std::filesystem::path const& p
 class ConfiguredLspProvider final : public DiagnosticsProvider
 {
  public:
-  ConfiguredLspProvider(std::filesystem::path workspace_root, std::shared_ptr<ava::core::AnchorSet const> anchor_set, ava::agent::Mode mode,
+  ConfiguredLspProvider(std::filesystem::path workspace_root, std::shared_ptr<ava::core::AnchorSet const> anchor_set, ava::core::Mode mode,
                         ava::permissions::PermissionResolver permission_resolver, std::vector<ConfiguredServer> servers)
       : workspace_root_(std::move(workspace_root)),
         anchor_set_(std::move(anchor_set)),
@@ -762,7 +762,7 @@ class ConfiguredLspProvider final : public DiagnosticsProvider
 
   std::filesystem::path workspace_root_;
   std::shared_ptr<ava::core::AnchorSet const> anchor_set_;
-  ava::agent::Mode mode_ = ava::agent::Mode::Build;
+  ava::core::Mode mode_ = ava::core::Mode::Build;
   ava::permissions::PermissionResolver permission_resolver_ = nullptr;
   std::vector<ConfiguredServer> servers_;
   std::mutex clients_mutex_;

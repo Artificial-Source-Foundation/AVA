@@ -1,25 +1,24 @@
 #include "sys.h"
-#include "ava/app/runtime_retry.h"
+#include "ava/event/events.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_retry.h"
 #include "ava/session/session_store.h"
 
 #include <mutex>
+#include <string>
+#include <utility>
 
 namespace ava::app::runtime {
 namespace {
 
-Event base_retry_event(Session const& session, RunOptions const& options)
+ava::event::RuntimeEventMetadata runtime_event_metadata(Session const& session, RunOptions const& options)
 {
   auto build = [&] {
-    Event event;
-    event.type = EventType::Retry;
-    event.timestamp = ava::session::now_timestamp();
-    event.session_id = session.store.session_id();
-    event.mode = session.mode();
-    event.provider_id = session.model().provider_id;
-    event.model_id = session.model().model_id;
-    event.trigger = "provider_transport";
-    return event;
+    return ava::event::RuntimeEventMetadata{
+        .timestamp = ava::session::now_timestamp(),
+        .session_id = session.store.session_id(),
+    };
   };
   if (!options.session_mutex)
     return build();
@@ -29,25 +28,33 @@ Event base_retry_event(Session const& session, RunOptions const& options)
 
 }  // namespace
 
-ava::provider::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
+ava::http::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
 {
-  ava::provider::RetryOptions retry_options;
+  ava::http::RetryOptions retry_options;
   retry_options.cancel_requested = options.cancel_requested;
   retry_options.observation = {.observation = options.observation, .context = options.trace_context};
-  retry_options.on_retry = [&session, &options](ava::provider::RetryOptions::Event const& retry) {
-    auto event = base_retry_event(session, options);
-    event.type = retry.countdown_tick ? EventType::RetryTick : EventType::Retry;
-    event.reason = retry.reason;
-    event.status = retry.streaming ? "streaming" : "request";
-    event.attempt = retry.attempt;
-    event.max_attempts = retry.max_attempts;
-    event.delay_ms = retry.delay_ms;
-    event.remaining_ms = retry.remaining_ms;
+  retry_options.response_retry_decision = ava::provider::provider_retry_decision;
+  retry_options.on_retry = [&session, &options](ava::http::RetryOptions::Event const& retry) {
+    ava::event::RetryPayload payload;
     if (retry.status_code > 0)
     {
-      event.text = "HTTP status " + std::to_string(retry.status_code);
+      payload.text = "HTTP status " + std::to_string(retry.status_code);
     }
-    return emit_event(options.event_sink, event);
+    payload.status = retry.streaming ? "streaming" : "request";
+    payload.trigger = "provider_transport";
+    payload.reason = retry.reason;
+    payload.attempt = retry.attempt;
+    payload.max_attempts = retry.max_attempts;
+    payload.delay_ms = retry.delay_ms;
+    payload.remaining_ms = retry.remaining_ms;
+    auto metadata = runtime_event_metadata(session, options);
+    if (retry.countdown_tick)
+    {
+      return ava::event::emit_event(
+          options.event_sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::RetryTickEvent{.payload = std::move(payload), .diagnostics = {}}});
+    }
+    return ava::event::emit_event(options.event_sink,
+                                  ava::event::RuntimeEvent{std::move(metadata), ava::event::RetryEvent{.payload = std::move(payload), .diagnostics = {}}});
   };
   return retry_options;
 }

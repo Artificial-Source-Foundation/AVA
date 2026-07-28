@@ -1,15 +1,14 @@
 #include "sys.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/error.h"
 #include "ava/core/path.h"
 #include "ava/core/string_utils.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdlib>
-#include <fstream>
 #include <map>
 #include <optional>
 #include <set>
@@ -121,116 +120,6 @@ std::string xml_escape(std::string_view value)
   return out;
 }
 
-ava::core::Result<std::string> read_skill_file(std::filesystem::path const& path, std::size_t max_file_bytes)
-{
-  std::error_code status_error;
-  auto const status = std::filesystem::symlink_status(path, status_error);
-  if (status_error || std::filesystem::is_symlink(status) || !std::filesystem::is_regular_file(status))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "skill file is not a regular file");
-    error.with_context("path", path.string());
-    if (status_error)
-      error.with_context("cause", status_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::error_code size_error;
-  auto const size = std::filesystem::file_size(path, size_error);
-  if (size_error || size > max_file_bytes)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "skill file is too large");
-    error.with_context("path", path.string());
-    error.with_context("max_bytes", std::to_string(max_file_bytes));
-    if (size_error)
-      error.with_context("cause", size_error.message());
-    return std::unexpected(std::move(error));
-  }
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to open skill file");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-
-  std::string content;
-  std::array<char, 4096> buffer{};
-  while (file)
-  {
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    if (file.gcount() > 0)
-      content.append(buffer.data(), static_cast<std::size_t>(file.gcount()));
-    if (content.size() > max_file_bytes)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "skill file is too large");
-      error.with_context("path", path.string());
-      error.with_context("max_bytes", std::to_string(max_file_bytes));
-      return std::unexpected(std::move(error));
-    }
-  }
-  if (!file.eof() && file.fail())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading skill file");
-    error.with_context("path", path.string());
-    return std::unexpected(std::move(error));
-  }
-  return content;
-}
-
-struct ParsedSkillMarkdown
-{
-  std::map<std::string, std::string> frontmatter;
-  std::string body;
-};
-
-// FIXME: this is a duplicate of parse_markdown
-ParsedSkillMarkdown parse_skill_markdown(std::string_view content)
-{
-  ParsedSkillMarkdown parsed;
-  if (!(content.starts_with("---\n") || content.starts_with("---\r\n")))
-  {
-    parsed.body = std::string(content);
-    return parsed;
-  }
-
-  auto const body_start = content.starts_with("---\r\n") ? 5 : 4;
-  auto const delimiter = content.find("\n---", body_start);
-  if (delimiter == std::string_view::npos)
-  {
-    parsed.body = std::string(content);
-    return parsed;
-  }
-
-  auto const frontmatter = content.substr(body_start, delimiter - body_start);
-  std::size_t line_start = 0;
-  while (line_start <= frontmatter.size())
-  {
-    auto const line_end = frontmatter.find('\n', line_start);
-    auto line = frontmatter.substr(line_start, line_end == std::string_view::npos ? std::string_view::npos : line_end - line_start);
-    if (!line.empty() && line.back() == '\r')
-      line.remove_suffix(1);
-    if (auto const colon = line.find(':'); colon != std::string_view::npos)
-    {
-      auto key = core::trim(line.substr(0, colon));
-      auto value = core::strip_matching_quotes(core::trim_view(line.substr(colon + 1)));
-      if (!key.empty())
-        parsed.frontmatter[std::move(key)] = value;
-    }
-    if (line_end == std::string_view::npos)
-      break;
-    line_start = line_end + 1;
-  }
-
-  auto after = delimiter + 4;
-  if (after < content.size() && content[after] == '\r')
-    ++after;
-  if (after < content.size() && content[after] == '\n')
-    ++after;
-  parsed.body = std::string(content.substr(after));
-  return parsed;
-}
-
 std::optional<std::string> field(std::map<std::string, std::string> const& frontmatter, std::string_view name)
 {
   auto const it = frontmatter.find(std::string(name));
@@ -253,14 +142,14 @@ void add_or_replace_skill(std::vector<LoadedSkill>& skills, LoadedSkill skill)
 void load_skill_file(std::vector<LoadedSkill>& skills, std::vector<SkillDiagnostic>& diagnostics, std::filesystem::path const& skill_file,
                      SkillSourceType source_type, std::size_t max_file_bytes)
 {
-  auto content = read_skill_file(skill_file, max_file_bytes);
+  auto content = read_resource_file(skill_file, {.max_bytes = max_file_bytes, .resource_description = "skill file"});
   if (!content)
   {
     diagnostics.push_back(SkillDiagnostic{.path = skill_file, .message = content.error().format()});
     return;
   }
 
-  auto parsed = parse_skill_markdown(*content);
+  auto parsed = parse_markdown(*content);
   auto const directory = ava::core::normalized_absolute_path(skill_file.parent_path());
   auto name = field(parsed.frontmatter, "name").value_or(directory.filename().string());
   auto description = field(parsed.frontmatter, "description").value_or("");
@@ -343,15 +232,20 @@ std::string to_string(SkillSourceType source_type)
   return "unknown";
 }
 
-std::vector<std::filesystem::path> default_global_skill_dirs()
+std::vector<std::filesystem::path> default_global_skill_dirs(ava::config::XdgPaths const& paths)
 {
-  std::vector<std::filesystem::path> dirs{ava::config::xdg_paths().ava_config_dir / "skills"};
+  std::vector<std::filesystem::path> dirs{paths.ava_config_dir / "skills"};
   if (auto home = home_dir())
   {
     dirs.push_back(*home / ".agents" / "skills");
     dirs.push_back(*home / ".claude" / "skills");
   }
   return dirs;
+}
+
+std::vector<std::filesystem::path> default_global_skill_dirs()
+{
+  return default_global_skill_dirs(ava::config::xdg_paths());
 }
 
 std::vector<std::filesystem::path> default_project_skill_dirs(std::filesystem::path const& workspace_root)
@@ -374,7 +268,7 @@ ava::core::Result<LoadedSkill> load_declared_skill_content(DeclaredSkillFileOpti
   }
 
   auto const byte_count = content.size();
-  auto parsed = parse_skill_markdown(content);
+  auto parsed = parse_markdown(content);
   auto name = core::trim(options.name);
   auto description = core::trim(options.description);
 
@@ -415,7 +309,7 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
     return load_declared_skill_content(std::move(options), std::move(content));
   }
 
-  auto content = read_skill_file(options.path, options.max_file_bytes);
+  auto content = read_resource_file(options.path, {.max_bytes = options.max_file_bytes, .resource_description = "skill file"});
   if (!content)
     return std::unexpected(std::move(content.error()));
   return load_declared_skill_content(std::move(options), std::move(*content));
@@ -423,7 +317,7 @@ ava::core::Result<LoadedSkill> load_declared_skill_file(DeclaredSkillFileOptions
 
 SkillLoadResult load_skills(SkillLoadOptions options)
 {
-  if (options.global_skill_dirs.empty())
+  if (options.include_global_skills && options.global_skill_dirs.empty())
     options.global_skill_dirs = default_global_skill_dirs();
   if (options.include_project_skills && options.project_skill_dirs.empty())
     options.project_skill_dirs = default_project_skill_dirs(options.workspace_root);
@@ -431,9 +325,12 @@ SkillLoadResult load_skills(SkillLoadOptions options)
     options.max_file_bytes = 64 * 1024;
 
   SkillLoadResult result;
-  for (auto const& dir : options.global_skill_dirs)
+  if (options.include_global_skills)
   {
-    discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Global, options.max_file_bytes);
+    for (auto const& dir : options.global_skill_dirs)
+    {
+      discover_from_root(result.skills, result.diagnostics, dir, SkillSourceType::Global, options.max_file_bytes);
+    }
   }
   if (options.include_project_skills)
   {

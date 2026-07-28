@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/commands.h"
 #include "ava/app/line_shell.h"
 #include "ava/app/line_shell_internal.h"
@@ -10,7 +11,6 @@
 #include "ava/config/auth.h"
 #include "ava/session/compaction.h"
 #include "ava/permissions/permission_rules.h"
-#include "ava/provider/curl_transport.h"
 #include "ava/provider/registry.h"
 #include "ava/core/version.h"
 
@@ -68,7 +68,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     return line_result;
   }
   auto const provider_id = provider_override.empty() ? std::string_view(state.session.model().provider_id) : provider_override;
-  ava::provider::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport;
   auto credential = ava::config::provider_credential_for_request(state.session.paths(), provider_id, transport);
   if (!credential)
   {
@@ -106,7 +106,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
 
 LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver,
                        ava::agent::QuestionResolver question_resolver, std::vector<ava::app::CommandHotkey> const& hotkeys,
-                       ava::app::runtime::EventSink event_sink, std::function<bool()> cancel_requested,
+                       ava::event::RuntimeEventSink event_sink, std::function<bool()> cancel_requested,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {
@@ -132,7 +132,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
       auto const summary_provider_id = config->provider_id;
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
-          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+          [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
             auto command_result = ava::app::run_command(
@@ -178,33 +178,32 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
-      return with_provider_runtime(
-          state, "\nthis command expands to a prompt and needs provider auth.",
-          [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
-            run_options.permission_resolver = permission_resolver;
-            run_options.question_resolver = question_resolver;
-            run_options.event_sink = std::move(event_sink);
-            run_options.cancel_requested = std::move(cancel_requested);
-            run_options.take_steering_messages = std::move(take_steering_messages);
-            auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
-            LineResult prompt_result;
-            if (!result)
-            {
-              add_output(prompt_result, result.error().format());
-              return prompt_result;
-            }
-            prompt_result.ordinary_turn_committed = true;
-            prompt_result.tool_timeline = std::move(result->tool_timeline);
-            if (!result->final_text.empty())
-            {
-              add_output(prompt_result, result->final_text);
-            }
-            else
-            {
-              add_output(prompt_result, "done");
-            }
-            return prompt_result;
-          });
+      return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
+                                   [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
+                                     run_options.permission_resolver = permission_resolver;
+                                     run_options.question_resolver = question_resolver;
+                                     run_options.event_sink = std::move(event_sink);
+                                     run_options.cancel_requested = std::move(cancel_requested);
+                                     run_options.take_steering_messages = std::move(take_steering_messages);
+                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+                                     LineResult prompt_result;
+                                     if (!result)
+                                     {
+                                       add_output(prompt_result, result.error().format());
+                                       return prompt_result;
+                                     }
+                                     prompt_result.ordinary_turn_committed = true;
+                                     prompt_result.tool_timeline = std::move(result->tool_timeline);
+                                     if (!result->final_text.empty())
+                                     {
+                                       add_output(prompt_result, result->final_text);
+                                     }
+                                     else
+                                     {
+                                       add_output(prompt_result, "done");
+                                     }
+                                     return prompt_result;
+                                   });
     }
     return line_result;
   }
@@ -217,7 +216,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   }
 
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
-                               [&](ava::provider::Provider const& provider, ava::provider::Transport& transport, ava::app::runtime::RunOptions run_options) {
+                               [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
                                  run_options.question_resolver = question_resolver;
                                  run_options.event_sink = std::move(event_sink);

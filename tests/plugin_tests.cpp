@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime/Session.h"
@@ -31,6 +32,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #include <fcntl.h>
 #include <signal.h>
@@ -43,6 +45,12 @@
 #endif
 
 namespace {
+
+using PluginDescriptorExecutor = decltype(ava::plugin::PluginBrokeredTool::executor);
+static_assert(
+    std::is_invocable_r_v<ava::tools::ToolDispatchResult, PluginDescriptorExecutor, ava::tools::ToolContext const&, ava::tools::ProviderToolCall const&>);
+static_assert(!std::is_invocable_v<PluginDescriptorExecutor, ava::tools::ToolContext const&, ava::agent::ToolDispatchServices const&,
+                                   ava::tools::ProviderToolCall const&>);
 
 std::string valid_manifest_json(std::string id = "com.example.todo")
 {
@@ -265,14 +273,14 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   ava::app::runtime::InvocationInputs invocation_inputs = {
       .workspace_dir = workspace, .current_dir = workspace, .paths = paths, .sessionless = store ? store->is_ephemeral() : false};
   ava::app::runtime::SessionResources session_resources{
-    .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
+      .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
   return ava::app::runtime::Session_aggregate_base{.invocation_inputs_ = std::move(invocation_inputs),
-                                                    .resolved_prompt_state_ = {},
-                                                    .model_selection_ = {.model = std::move(model)},
-                                                    .trust_state_ = {.project_trust = std::move(trust)},
-                                                    .resources_ = std::move(session_resources),
-                                                    .store = std::move(*store),
-                                                    .created = false};
+                                                   .resolved_prompt_state_ = {},
+                                                   .model_selection_ = {.model = std::move(model)},
+                                                   .trust_state_ = {.project_trust = std::move(trust)},
+                                                   .resources_ = std::move(session_resources),
+                                                   .store = std::move(*store),
+                                                   .created = false};
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)
@@ -1547,6 +1555,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
 
   std::vector<ava::permissions::PermissionPrompt> prompts;
   bool forwarded = false;
+  bool hook_observed_before_forward = false;
   auto sink = ava::app::make_plugin_event_observer_sink(
       ava::app::PluginEventObserverOptions{.workspace_dir = workspace,
                                            .plugin_global_plugins_dir = root / "global-plugins",
@@ -1562,27 +1571,29 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                            .provider_id = "openai",
                                            .model_id = "gpt-test",
                                            .current_dir = workspace},
-      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+      [&forwarded, &hook_observed_before_forward, &plugin_dir](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
+        hook_observed_before_forward = std::filesystem::exists(plugin_dir / "event-request.txt");
         return {};
       });
 
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.call_id = "call_hook";
-  event.tool_name = "demo";
-  event.status = "success";
-  event.text = "ok";
+  ava::event::ToolPayload payload;
+  payload.text = "ok";
+  payload.call_id = "call_hook";
+  payload.tool = "demo";
+  payload.status = "success";
+  auto event = ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
   auto observed = sink(event);
   expect(observed.has_value(), "plugin event observer sink forwards runtime event successfully");
-  expect(forwarded, "plugin event observer forwards to the next runtime event sink");
+  expect(forwarded && hook_observed_before_forward, "plugin event observer runs matching hooks before forwarding to the next typed sink");
   expect(prompts.size() == 2 && prompts[0].operation == ava::permissions::Operation::PluginExecute &&
              prompts[1].operation == ava::permissions::Operation::PluginEventObserve && prompts[1].command == "com.example.events:tool.result",
          "plugin event hooks require plugin.execute and plugin.event.observe permission approval");
   auto const request = read_text(plugin_dir / "event-request.txt");
   expect(request.find("\"type\":\"event.observe\"") != std::string::npos && request.find("\"event\":\"tool_result\"") != std::string::npos &&
-             request.find("\"tool\":\"demo\"") != std::string::npos,
-         "enabled plugin event hook observes matching runtime event aliases");
+             request.find("\"payload\":{\"text\":\"ok\",\"call_id\":\"call_hook\",\"tool\":\"demo\",\"status\":\"success\"}") != std::string::npos &&
+             request.find("\"context\":{\"call_id\":\"call_hook\"") != std::string::npos,
+         "enabled plugin event hook observes the exact typed name, payload, and call id");
 }
 
 void test_plugin_event_hook_failures_report_to_opt_in_sink()
@@ -1609,16 +1620,17 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
              "read line\n"
              "printf '%s\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
-             "read line\n"
-             "printf '%s\n' \"$line\" > event-request.txt\n"
-             "printf '%s\n' '{\"id\":\"ava_event_call_diag\",\"type\":\"tool.result\",\"ok\":true,"
+             "while read line; do\n"
+             "  printf '%s\n' \"$line\" > event-request.txt\n"
+             "  printf '%s\n' '{\"id\":\"ava_event_call_diag\",\"type\":\"tool.result\",\"ok\":true,"
              "\"content\":\"wrong response type\"}'\n"
-             "while read line; do :; done\n");
+             "done\n");
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.eventdiag", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "event hook diagnostic test enables project plugin");
 
   std::vector<CapturedFailure> failures;
   bool forwarded = false;
+  bool fail_downstream = false;
   auto sink = ava::app::make_plugin_event_observer_sink(
       ava::app::PluginEventObserverOptions{
           .workspace_dir = workspace,
@@ -1641,17 +1653,19 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .provider_id = "openai",
           .model_id = "gpt-test",
           .current_dir = workspace},
-      [&forwarded](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+      [&forwarded, &fail_downstream](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
         forwarded = true;
+        if (fail_downstream)
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable downstream event sink failure"));
         return {};
       });
 
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.call_id = "call_diag";
-  event.tool_name = "demo";
-  event.status = "success";
-  event.text = "ok";
+  ava::event::ToolPayload payload;
+  payload.text = "ok";
+  payload.call_id = "call_diag";
+  payload.tool = "demo";
+  payload.status = "success";
+  auto event = ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
   auto observed = sink(event);
   expect(observed.has_value(), "plugin event observer keeps hook failures best-effort");
   expect(forwarded, "plugin event observer forwards runtime events after hook failures");
@@ -1664,6 +1678,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
     expect(failures[0].message.find("plugin event response is malformed") != std::string::npos, "hook failure sink receives error message");
     expect(failures[0].details.find("response_bytes") != std::string::npos, "hook failure sink receives bounded formatted error metadata");
   }
+
+  fail_downstream = true;
+  forwarded = false;
+  auto downstream_failure = sink(event);
+  expect(!downstream_failure && forwarded && downstream_failure.error().category() == ava::core::ErrorCategory::Io &&
+             downstream_failure.error().message() == "stable downstream event sink failure",
+         "plugin event observer remains best-effort for hook failures but propagates the downstream sink failure exactly");
 }
 
 void test_plugin_tool_dispatcher()
@@ -1719,9 +1740,8 @@ void test_plugin_tool_dispatcher()
     ava::test::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json", "plugin tool provider schema matches AVA 0.80 golden fixture");
   }
   {
-    auto no_builtin_context = context;
-    no_builtin_context.tool_visibility.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools;
-    auto const no_builtin_schemas = ava::agent::ToolDispatcher::tool_schemas_json(no_builtin_context);
+    ava::agent::ToolVisibilityOptions const no_builtin_visibility{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools};
+    auto const no_builtin_schemas = ava::agent::ToolDispatcher::tool_schemas_json(context, no_builtin_visibility);
     auto const visible_plugin_schema = std::find_if(no_builtin_schemas.begin(), no_builtin_schemas.end(), [&](std::string const& schema) {
       return schema.find("\"name\":\"" + model_tool_name + "\"") != std::string::npos;
     });

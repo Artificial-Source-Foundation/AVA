@@ -5,7 +5,9 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
-#include "ava/app/EventEnvelope.h"
+
+#include "ava/app/runtime_sessions.h"
+#include "ava/event/events.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/agent/job_control.h"
@@ -444,7 +446,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, added.error()));
     auto const json = permission_rule_added_json(*added);
     auto envelope = resolver_event_envelope("permission_rule_added", command.id, command.id, session_id, json);
-    if (auto written = Output::write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(context.output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
     {
       return std::unexpected(std::move(written.error()));
     }
@@ -473,7 +475,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, removed.error()));
     auto const json = permission_rule_removed_json(*removed);
     auto envelope = resolver_event_envelope("permission_rule_removed", command.id, command.id, session_id, json);
-    if (auto written = Output::write_record(context.output, serialize_event_envelope_jsonl(envelope)); !written)
+    if (auto written = Output::write_record(context.output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
     {
       return std::unexpected(std::move(written.error()));
     }

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
+#include "ava/http/transport.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -180,10 +181,10 @@ ChunkedStreamingTransport::ChunkedStreamingTransport(std::vector<std::string> ch
   for (auto const& chunk : chunks_) response_body_ += chunk;
 }
 
-ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> ChunkedStreamingTransport::send(ava::http::HttpRequest const& request)
 {
   requests_.push_back(request);
-  return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
+  return ava::http::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
 }
 
 bool ChunkedStreamingTransport::supports_streaming() const noexcept
@@ -191,8 +192,8 @@ bool ChunkedStreamingTransport::supports_streaming() const noexcept
   return true;
 }
 
-ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                                                         CancelCallback cancel_requested)
+ava::core::Result<ava::http::HttpResponse> ChunkedStreamingTransport::send_streaming(ava::http::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                                                     CancelCallback cancel_requested)
 {
   requests_.push_back(request);
   for (auto const& chunk : chunks_)
@@ -204,19 +205,19 @@ ava::core::Result<ava::provider::HttpResponse> ChunkedStreamingTransport::send_s
     if (auto delivered = on_body_chunk(chunk); !delivered)
       return std::unexpected(std::move(delivered.error()));
   }
-  return ava::provider::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
+  return ava::http::HttpResponse{.status_code = status_code_, .headers = {}, .body = response_body_};
 }
 
-std::vector<ava::provider::HttpRequest> const& ChunkedStreamingTransport::requests() const noexcept
+std::vector<ava::http::HttpRequest> const& ChunkedStreamingTransport::requests() const noexcept
 {
   return requests_;
 }
 
-BlockingResponseTransport::BlockingResponseTransport(ava::provider::HttpResponse response) : response_(std::move(response))
+BlockingResponseTransport::BlockingResponseTransport(ava::http::HttpResponse response) : response_(std::move(response))
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> BlockingResponseTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> BlockingResponseTransport::send(ava::http::HttpRequest const& request)
 {
   {
     std::lock_guard lock(mutex_);
@@ -244,15 +245,15 @@ void BlockingResponseTransport::release()
   cv_.notify_all();
 }
 
-std::vector<ava::provider::HttpRequest> BlockingResponseTransport::requests() const
+std::vector<ava::http::HttpRequest> BlockingResponseTransport::requests() const
 {
   std::lock_guard lock(mutex_);
   return requests_;
 }
 
-ava::provider::HttpResponse sse_response(std::string body)
+ava::http::HttpResponse sse_response(std::string body)
 {
-  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
+  return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)};
 }
 
 std::string read_file_call_sse(std::string_view path, std::string_view call_id)
@@ -358,13 +359,13 @@ std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<av
   return std::nullopt;
 }
 
-MutatingSummaryTransport::MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses,
+MutatingSummaryTransport::MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::http::HttpResponse> responses,
                                                    std::size_t mutate_requests)
     : append_sink_(std::move(append_sink)), responses_(std::move(responses)), mutate_requests_(mutate_requests)
 {
 }
 
-ava::core::Result<ava::provider::HttpResponse> MutatingSummaryTransport::send(ava::provider::HttpRequest const& request)
+ava::core::Result<ava::http::HttpResponse> MutatingSummaryTransport::send(ava::http::HttpRequest const& request)
 {
   requests_.push_back(request);
   if (requests_.size() <= mutate_requests_)
@@ -387,7 +388,7 @@ ava::core::Result<ava::provider::HttpResponse> MutatingSummaryTransport::send(av
   return response;
 }
 
-std::vector<ava::provider::HttpRequest> const& MutatingSummaryTransport::requests() const noexcept
+std::vector<ava::http::HttpRequest> const& MutatingSummaryTransport::requests() const noexcept
 {
   return requests_;
 }

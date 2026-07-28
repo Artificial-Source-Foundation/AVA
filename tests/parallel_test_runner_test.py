@@ -131,7 +131,8 @@ if descendant_ready:
             sys.executable,
             "-c",
             "import os, pathlib, signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            "pathlib.Path(sys.argv[1]).write_text(f'{os.getpid()}\\\\n', encoding='utf-8'); time.sleep(60)",
+            "p=pathlib.Path(sys.argv[1]); t=p.with_name(f'.{p.name}.{os.getpid()}.tmp'); "
+            "t.write_text(f'{os.getpid()}\\\\n', encoding='utf-8'); os.replace(t, p); time.sleep(60)",
             descendant_ready,
         ],
         stdin=subprocess.DEVNULL,
@@ -140,7 +141,10 @@ if descendant_ready:
         start_new_session=os.environ.get("FAKE_CTEST_DESCENDANT_DETACH") == "1",
     )
 if ready:
-    Path(ready).write_text(f"{os.getpid()}\\n", encoding="utf-8")
+    ready_path = Path(ready)
+    ready_tmp = ready_path.with_name(f".{ready_path.name}.{os.getpid()}.tmp")
+    ready_tmp.write_text(f"{os.getpid()}\\n", encoding="utf-8")
+    os.replace(ready_tmp, ready_path)
 if release:
     deadline = time.monotonic() + 8
     while not Path(release).exists():

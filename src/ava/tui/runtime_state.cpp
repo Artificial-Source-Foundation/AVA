@@ -28,25 +28,38 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
 
 }  // namespace
 
-ava::app::EventEnvelopeSink EventEnvelopeQueue::sink()
+QueuedRuntimeEvent::QueuedRuntimeEvent(ava::event::RuntimeEvent event_in, ava::event::EventEnvelopeContext context_in)
+    : event(std::move(event_in)), context(std::move(context_in))
 {
-  return [this](ava::app::EventEnvelope const& event) -> ava::core::VoidResult {
+}
+
+ava::event::EventEnvelopeSink RuntimeEventQueue::envelope_sink()
+{
+  return [this](ava::event::EventEnvelope const& event) -> ava::core::VoidResult {
     std::lock_guard<std::mutex> lock(mutex);
-    events.push_back(event);
+    events.emplace_back(std::in_place_type<ava::event::EventEnvelope>, event);
     received = true;
     return {};
   };
 }
 
-std::vector<ava::app::EventEnvelope> EventEnvelopeQueue::drain()
+ava::core::VoidResult RuntimeEventQueue::enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context)
 {
   std::lock_guard<std::mutex> lock(mutex);
-  auto drained = std::move(events);
-  events.clear();
+  events.emplace_back(std::in_place_type<QueuedRuntimeEvent>, event, std::move(context));
+  received = true;
+  return {};
+}
+
+std::vector<QueuedTuiEvent> RuntimeEventQueue::drain()
+{
+  std::lock_guard<std::mutex> lock(mutex);
+  auto drained = std::vector<QueuedTuiEvent>{};
+  drained.swap(events);
   return drained;
 }
 
-bool EventEnvelopeQueue::received_any()
+bool RuntimeEventQueue::received_any()
 {
   std::lock_guard<std::mutex> lock(mutex);
   return received;

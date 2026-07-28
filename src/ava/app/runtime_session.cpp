@@ -91,14 +91,12 @@ ava::core::VoidResult reconcile_committed_function_calls(std::shared_ptr<ava::se
       *read_authority, [append_target](ava::session::SessionEntry entry) { return append_target->append(entry); }, limits);
 }
 
-ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_options(runtime::OpenOptions const& options,
-                                                                                         std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
+ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_options(runtime::OpenOptions const& options)
 {
   if (options.subagent_delivery_manager)
     return options.subagent_delivery_manager;
-  auto coordinator = options.subagent_coordinator
-                         ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options.subagent_coordinator)
-                         : ava::agent::SubagentCoordinator::create({.ava_state_dir = options.paths.ava_state_dir, .anchor_set = anchor_set});
+  auto coordinator = options.subagent_coordinator ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options.subagent_coordinator)
+                                                  : ava::agent::SubagentCoordinator::create();
   if (!coordinator)
     return std::unexpected(std::move(coordinator.error()));
   return SubagentDeliveryManager::create({.coordinator = std::move(*coordinator)});
@@ -310,7 +308,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
 
   if (!delivery_manager)
   {
-    auto created_manager = delivery_manager_for_options(options, anchor_set);
+    auto created_manager = delivery_manager_for_options(options);
     if (!created_manager)
       return std::unexpected(std::move(created_manager.error()));
     delivery_manager = std::move(*created_manager);
@@ -336,7 +334,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
                                                      .base_prompt = std::move(prompt_state->base_prompt),
                                                      .context_sources = std::move(prompt_state->context_sources),
                                                      .freshness_sources = std::move(prompt_state->freshness_sources),
-                                                     .system_prompt = std::move(prompt_state->system_prompt)};
+                                                     .system_prompt = std::move(prompt_state->system_prompt),
+                                                     .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   runtime::ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
   runtime::TrustState trust_state{.project_trust = std::move(project_trust)};
   runtime::SessionResources resources{.lease = std::move(lease),
@@ -365,21 +364,8 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
       return std::unexpected(std::move(error));
     }
   }
-  // The exact parent session is now fully initialized and its lease is still
-  // held. Activate only this parent's journal at the final publication point
-  // so a later initialization failure cannot leak an attached owner lease.
   if (!sessionless)
-  {
-    auto activated = session.subagent_coordinator()->activate_parent(session.store.session_id());
-    if (!activated)
-    {
-      auto error = std::move(activated.error());
-      store = std::move(session.store);
-      lease = std::move(session.resources().lease);
-      return std::unexpected(std::move(error));
-    }
     session.subagent_delivery_manager()->attach_parent(session.store.session_id());
-  }
   return session;
 }
 

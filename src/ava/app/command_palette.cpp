@@ -3,6 +3,7 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/plugin/diagnostics.h"
@@ -550,29 +551,10 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
   }
 }
 
-ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
-{
-  auto options = ava::mcp::default_mcp_config_options(session.workspace_dir());
-  options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
-  return options;
-}
-
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
-{
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-}
-
-std::filesystem::path plugin_enablement_file(runtime::Session const& session)
-{
-  return session.paths().ava_state_dir / "plugin-enablement.json";
-}
-
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
                                       std::vector<WorkspacePathCandidate> const& path_completions, ava::session::SessionTreeIndex const* session_tree)
 {
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
   if (!path_completions.empty())
   {
     if (auto index = find_item_index(items, "/read"))
@@ -785,7 +767,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       add_completion(item, 0, subcommand, "MCP command", "MCP");
     }
-    if (auto config = ava::mcp::load_mcp_config(mcp_config_options(session)))
+    if (auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config))
     {
       for (auto const& server : config->servers)
       {
@@ -807,7 +789,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "clear", "Remove this workspace trust decision", "Trust");
   }
 
-  auto const diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
+  auto const diagnostics =
+      ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session.workspace_dir());
   if (auto index = find_item_index(items, "/plugins"))
   {
     auto& item = items[*index];

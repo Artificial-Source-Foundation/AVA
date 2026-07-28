@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/provider.h"
 
@@ -120,12 +121,12 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
   expect(!missing_text, "OpenAI non-stream response requires expected text field");
 
   auto non_stream_tool =
-      provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                          .headers = {},
-                                                          .body = "{\"output_text\":\"Let me read that file.\","
-                                                                  "\"output\":[{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\","
-                                                                  "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}],"
-                                                                  "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output_text\":\"Let me read that file.\","
+                                                              "\"output\":[{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\","
+                                                              "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}],"
+                                                              "\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}"},
                               false);
   expect(non_stream_tool && non_stream_tool->size() == 5 && (*non_stream_tool)[0].type == ava::provider::StreamEventType::TextDelta &&
              (*non_stream_tool)[0].text == "Let me read that file." && (*non_stream_tool)[1].type == ava::provider::StreamEventType::ToolCallStart &&
@@ -134,12 +135,12 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
              (*non_stream_tool)[3].type == ava::provider::StreamEventType::ToolCallEnd && (*non_stream_tool)[4].type == ava::provider::StreamEventType::Done &&
              (*non_stream_tool)[4].usage,
          "OpenAI non-stream Responses API parses mixed text and tool calls");
-  auto non_stream_missing_call_id = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"fc_nonstream_missing\",\"type\":\"function_call\",\"name\":\"read_file\","
-                                          "\"arguments\":\"{}\"}]}"},
-      false);
+  auto non_stream_missing_call_id =
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"fc_nonstream_missing\",\"type\":\"function_call\",\"name\":\"read_file\","
+                                                              "\"arguments\":\"{}\"}]}"},
+                              false);
   expect(non_stream_missing_call_id &&
              std::none_of(non_stream_missing_call_id->begin(), non_stream_missing_call_id->end(),
                           [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
@@ -147,17 +148,17 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
          "OpenAI non-stream function-call items reject a missing logical call_id instead of item.id fallback");
   auto non_stream_missing_arguments =
-      provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                          .headers = {},
-                                                          .body = "{\"output\":[{\"id\":\"fc_nonstream_missing_arguments\",\"type\":\"function_call\","
-                                                                  "\"call_id\":\"opaque-nonstream-missing-arguments\",\"name\":\"read_file\"}]}"},
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"fc_nonstream_missing_arguments\",\"type\":\"function_call\","
+                                                              "\"call_id\":\"opaque-nonstream-missing-arguments\",\"name\":\"read_file\"}]}"},
                               false);
-  auto non_stream_wrong_type_arguments = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"fc_nonstream_wrong_arguments\",\"type\":\"function_call\","
-                                          "\"call_id\":\"opaque-nonstream-wrong-arguments\",\"name\":\"read_file\",\"arguments\":[]}]}"},
-      false);
+  auto non_stream_wrong_type_arguments =
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"fc_nonstream_wrong_arguments\",\"type\":\"function_call\","
+                                                              "\"call_id\":\"opaque-nonstream-wrong-arguments\",\"name\":\"read_file\",\"arguments\":[]}]}"},
+                              false);
   expect(non_stream_missing_arguments && non_stream_wrong_type_arguments &&
              std::none_of(non_stream_missing_arguments->begin(), non_stream_missing_arguments->end(),
                           [](auto const& event) { return event.type == ava::provider::StreamEventType::ToolCallStart; }) &&
@@ -169,31 +170,31 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
          "OpenAI non-stream function-call items require a present string arguments field before dispatch");
   auto non_stream_missing_item_id =
-      provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                          .headers = {},
-                                                          .body = "{\"output\":[{\"type\":\"function_call\",\"call_id\":\"opaque-nonstream-missing-item\","
-                                                                  "\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"type\":\"function_call\",\"call_id\":\"opaque-nonstream-missing-item\","
+                                                              "\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
                               false);
-  auto non_stream_malformed_arguments = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"fc_nonstream_bad_arguments\",\"type\":\"function_call\","
-                                          "\"call_id\":\"opaque-nonstream-bad-arguments\",\"name\":\"read_file\",\"arguments\":\"[\"}]}"},
-      false);
+  auto non_stream_malformed_arguments =
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"fc_nonstream_bad_arguments\",\"type\":\"function_call\","
+                                                              "\"call_id\":\"opaque-nonstream-bad-arguments\",\"name\":\"read_file\",\"arguments\":\"[\"}]}"},
+                              false);
   auto non_stream_duplicate_item = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"fc_duplicate\",\"type\":\"function_call\",\"call_id\":\"call_one\","
-                                          "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_duplicate\",\"type\":\"function_call\","
-                                          "\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = "{\"output\":[{\"id\":\"fc_duplicate\",\"type\":\"function_call\",\"call_id\":\"call_one\","
+                                      "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_duplicate\",\"type\":\"function_call\","
+                                      "\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
       false);
-  auto non_stream_duplicate_call = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"fc_call_one\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
-                                          "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_call_two\",\"type\":\"function_call\","
-                                          "\"call_id\":\"call_duplicate\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
-      false);
+  auto non_stream_duplicate_call =
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"fc_call_one\",\"type\":\"function_call\",\"call_id\":\"call_duplicate\","
+                                                              "\"name\":\"read_file\",\"arguments\":\"{}\"},{\"id\":\"fc_call_two\",\"type\":\"function_call\","
+                                                              "\"call_id\":\"call_duplicate\",\"name\":\"read_file\",\"arguments\":\"{}\"}]}"},
+                              false);
   expect(non_stream_missing_item_id && non_stream_malformed_arguments && non_stream_duplicate_item && non_stream_duplicate_call &&
              std::any_of(non_stream_missing_item_id->begin(), non_stream_missing_item_id->end(),
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }) &&
@@ -205,7 +206,7 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
                          [](auto const& event) { return event.type == ava::provider::StreamEventType::Error; }),
          "OpenAI non-stream function calls require JSON-object arguments and unique item/call identities");
   auto non_stream_reasoning = provider.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 200,
           .headers = {},
           .body = "{\"output\":[{\"id\":\"rs_non_stream\",\"type\":\"reasoning\",\"summary\":[{\"type\":"
@@ -220,12 +221,12 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
              (*non_stream_reasoning)[3].type == ava::provider::StreamEventType::TextDelta && (*non_stream_reasoning)[3].text == "done" &&
              (*non_stream_reasoning)[4].type == ava::provider::StreamEventType::Done,
          "OpenAI non-stream Responses API parses reasoning summary before answer text");
-  auto non_stream_malformed_reasoning = provider.parse_response(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {},
-                                  .body = "{\"output\":[{\"id\":\"rs_missing_summary\",\"type\":\"reasoning\",\"text\":\"safe summary\"},"
-                                          "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}"},
-      false);
+  auto non_stream_malformed_reasoning =
+      provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"output\":[{\"id\":\"rs_missing_summary\",\"type\":\"reasoning\",\"text\":\"safe summary\"},"
+                                                              "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}"},
+                              false);
   auto const malformed_reasoning_end = non_stream_malformed_reasoning
                                            ? std::find_if(non_stream_malformed_reasoning->begin(), non_stream_malformed_reasoning->end(),
                                                           [](auto const& event) { return event.type == ava::provider::StreamEventType::ReasoningEnd; })
@@ -237,18 +238,18 @@ void exercise_contract_terminal_parsing(ava::provider::OpenAIProvider const& pro
       "{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"nested one\"},"
       "{\"type\":\"output_text\",\"text\":\"nested two\"}]}]}");
   expect(nested_text && *nested_text == "nested one\n\nnested two", "OpenAI non-stream response retains all nested output_text parts in message order");
-  auto non_stream_incomplete = provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                                   .headers = {},
-                                                                                   .body = "{\"output_text\":\"partial\",\"status\":\"incomplete\","
-                                                                                           "\"incomplete_details\":{\"reason\":\"content_filter\"}}"},
+  auto non_stream_incomplete = provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                               .headers = {},
+                                                                               .body = "{\"output_text\":\"partial\",\"status\":\"incomplete\","
+                                                                                       "\"incomplete_details\":{\"reason\":\"content_filter\"}}"},
                                                        false);
   expect(non_stream_incomplete && non_stream_incomplete->size() == 2 && (*non_stream_incomplete)[1].type == ava::provider::StreamEventType::Done &&
              (*non_stream_incomplete)[1].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "OpenAI non-stream Responses API preserves incomplete stop reason");
-  auto non_stream_empty_incomplete = provider.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                                         .headers = {},
-                                                                                         .body = "{\"status\":\"incomplete\","
-                                                                                                 "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}"},
+  auto non_stream_empty_incomplete = provider.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                                     .headers = {},
+                                                                                     .body = "{\"status\":\"incomplete\","
+                                                                                             "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}"},
                                                              false);
   expect(non_stream_empty_incomplete && non_stream_empty_incomplete->size() == 1 &&
              (*non_stream_empty_incomplete)[0].type == ava::provider::StreamEventType::Done &&

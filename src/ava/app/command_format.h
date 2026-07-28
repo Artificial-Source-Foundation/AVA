@@ -10,6 +10,7 @@ namespace ava::app {
 struct CommandResult;
 
 void add_output(CommandResult& result, std::string text);
+[[nodiscard]] CommandResult handled_text(std::string text);
 
 [[nodiscard]] std::string display_path(std::filesystem::path const& path, std::filesystem::path const& base);
 [[nodiscard]] std::string sanitize_inline_text(std::string text);

@@ -54,6 +54,10 @@ namespace diagnostics {
 using utils::has_print_on::operator<<;
 } // namespace diagnostics
 
+namespace event {
+using utils::has_print_on::operator<<;
+} // namespace event
+
 namespace lsp {
 using utils::has_print_on::operator<<;
 } // namespace lsp

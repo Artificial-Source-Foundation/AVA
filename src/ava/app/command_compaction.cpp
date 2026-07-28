@@ -1,7 +1,7 @@
 #include "sys.h"
+#include "ava/event/events.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_sessions.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/compaction.h"
@@ -16,23 +16,12 @@
 namespace ava::app {
 namespace {
 
-runtime::Event base_command_event(runtime::Session const& session, runtime::EventType type)
+ava::event::RuntimeEventMetadata command_event_metadata(runtime::Session const& session)
 {
-  runtime::Event event;
-  event.type = type;
-  event.timestamp = ava::session::now_timestamp();
-  event.session_id = session.store.session_id();
-  event.mode = session.mode();
-  event.provider_id = session.model().provider_id;
-  event.model_id = session.model().model_id;
-  return event;
-}
-
-ava::core::VoidResult emit_command_event(CommandRequest const& request, runtime::Event event)
-{
-  if (!request.event_sink)
-    return {};
-  return emit_event(request.event_sink, event);
+  return ava::event::RuntimeEventMetadata{
+      .timestamp = ava::session::now_timestamp(),
+      .session_id = session.store.session_id(),
+  };
 }
 
 bool command_canceled(CommandRequest const& request)
@@ -101,18 +90,22 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     auto prepared = prepare_compaction_context(*entries, *config);
     if (!prepared)
       return fail_compaction(std::move(prepared.error()));
-    auto start_event = base_command_event(session, runtime::EventType::CompactionStart);
-    start_event.provider_id = config->provider_id;
-    start_event.model_id = config->model_id;
-    start_event.trigger = "manual";
-    start_event.reason = "manual";
-    start_event.status = "started";
-    start_event.attempt = attempt + 1;
-    start_event.max_attempts = max_compaction_attempts;
-    start_event.estimated_tokens = prepared->estimated_tokens;
-    start_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
-    start_event.retained_tokens = prepared->retained_tokens;
-    if (auto emitted = emit_command_event(request, std::move(start_event)); !emitted)
+    ava::event::CompactionPayload start_payload{
+        .provider = config->provider_id,
+        .model = config->model_id,
+        .status = "started",
+        .trigger = "manual",
+        .reason = "manual",
+        .attempt = attempt + 1,
+        .max_attempts = max_compaction_attempts,
+        .estimated_tokens = prepared->estimated_tokens,
+        .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+        .retained_tokens = prepared->retained_tokens,
+    };
+    if (auto emitted = ava::event::emit_event(
+            request.event_sink,
+            ava::event::RuntimeEvent{command_event_metadata(session), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
+        !emitted)
     {
       return fail_compaction(std::move(emitted.error()));
     }
@@ -149,16 +142,16 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
         last_current_entries = current_entries->size();
         return {};
       }
-      auto entry = ava::session::make_manual_compaction_entry(
-          ava::session::ManualCompactionRequest{.summary = *summary,
-                                                .instructions = instructions,
-                                                .config = *config,
-                                                .estimated_tokens = prepared->estimated_tokens,
-                                                .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
-                                                .retained_tokens = prepared->retained_tokens,
-                                                .trigger = "manual",
-                                                .recent_context = prepared->recent_context,
-                                                .recent_context_omitted = prepared->recent_context_omitted});
+      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{
+          .summary = *summary,
+          .instructions = instructions,
+          .config = *config,
+          .estimated_tokens = prepared->estimated_tokens,
+          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+          .retained_tokens = prepared->retained_tokens,
+          .trigger = "manual",
+          .recent_context = prepared->recent_context,
+          .recent_context_omitted = prepared->recent_context_omitted});
       if (!entry)
         return std::unexpected(std::move(entry.error()));
       return session.append_owned(std::move(*entry));
@@ -179,20 +172,23 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     }
     if (!snapshot_stale)
     {
-      auto end_event = base_command_event(session, runtime::EventType::CompactionEnd);
-      end_event.provider_id = config->provider_id;
-      end_event.model_id = config->model_id;
-      end_event.trigger = "manual";
-      end_event.reason = "manual";
-      end_event.status = "completed";
-      end_event.attempt = attempt + 1;
-      end_event.max_attempts = max_compaction_attempts;
-      end_event.estimated_tokens = prepared->estimated_tokens;
-      end_event.threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
-      end_event.retained_tokens = prepared->retained_tokens;
-      end_event.post_compaction_tokens = ava::session::estimate_tokens(*summary) + ava::session::estimate_tokens(instructions) + prepared->retained_tokens;
-      end_event.summary_bytes = summary->size();
-      if (auto emitted = emit_command_event(request, std::move(end_event)); !emitted)
+      ava::event::CompactionPayload end_payload{
+          .provider = config->provider_id,
+          .model = config->model_id,
+          .status = "completed",
+          .trigger = "manual",
+          .reason = "manual",
+          .attempt = attempt + 1,
+          .max_attempts = max_compaction_attempts,
+          .estimated_tokens = prepared->estimated_tokens,
+          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+          .retained_tokens = prepared->retained_tokens,
+          .post_compaction_tokens = ava::session::estimate_tokens(*summary) + ava::session::estimate_tokens(instructions) + prepared->retained_tokens,
+          .summary_bytes = summary->size(),
+      };
+      if (auto emitted = ava::event::emit_event(
+              request.event_sink, ava::event::RuntimeEvent{command_event_metadata(session), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
+          !emitted)
       {
         return fail_compaction(std::move(emitted.error()));
       }
@@ -201,15 +197,20 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
     }
     if (attempt + 1 < max_compaction_attempts)
     {
-      auto retry_event = base_command_event(session, runtime::EventType::Retry);
-      retry_event.trigger = "manual";
-      retry_event.reason = "stale_compaction_snapshot";
-      retry_event.status = "started";
-      retry_event.attempt = attempt + 2;
-      retry_event.max_attempts = max_compaction_attempts;
-      retry_event.snapshot_entries = last_snapshot_entries;
-      retry_event.current_entries = last_current_entries;
-      if (auto emitted = emit_command_event(request, std::move(retry_event)); !emitted)
+      ava::event::RetryPayload retry_payload;
+      retry_payload.status = "started";
+      retry_payload.trigger = "manual";
+      retry_payload.reason = "stale_compaction_snapshot";
+      retry_payload.attempt = attempt + 2;
+      retry_payload.max_attempts = max_compaction_attempts;
+      ava::event::RetryDiagnostics retry_diagnostics;
+      retry_diagnostics.snapshot_entries = last_snapshot_entries;
+      retry_diagnostics.current_entries = last_current_entries;
+      if (auto emitted = ava::event::emit_event(
+              request.event_sink,
+              ava::event::RuntimeEvent{command_event_metadata(session),
+                                       ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
+          !emitted)
       {
         return fail_compaction(std::move(emitted.error()));
       }

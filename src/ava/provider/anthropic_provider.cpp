@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/anthropic_request.h"
 #include "ava/provider/provider_utils.h"
@@ -373,7 +374,7 @@ AnthropicProvider::AnthropicProvider(std::string base_url) : base_url_(normalize
 {
 }
 
-ava::core::Result<HttpRequest> AnthropicProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
+ava::core::Result<ava::http::HttpRequest> AnthropicProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
   return build_anthropic_http_request(base_url_, request, access_token);
 }
@@ -383,7 +384,7 @@ std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
   return std::make_unique<AnthropicStreamParser>();
 }
 
-ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request, ProviderAuthContext const& auth) const
+ava::core::VoidResult AnthropicProvider::apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const
 {
   if (auth.credential_type != "oauth")
     return {};
@@ -400,7 +401,7 @@ ava::core::VoidResult AnthropicProvider::apply_auth_options(HttpRequest& request
   return {};
 }
 
-ava::core::Result<std::vector<StreamEvent>> AnthropicProvider::parse_response(HttpResponse const& response, bool stream) const
+ava::core::Result<std::vector<StreamEvent>> AnthropicProvider::parse_response(ava::http::HttpResponse const& response, bool stream) const
 {
   return stream ? parse_anthropic_sse_response(response) : parse_anthropic_response(response);
 }
@@ -469,21 +470,21 @@ ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse_response(ava::http::HttpResponse const& response)
 {
   if (response.status_code < 200 || response.status_code >= 300)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Anthropic HTTP request failed with status " + std::to_string(response.status_code));
     error.with_context("status", std::to_string(response.status_code));
     error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
-    if (auto const retry_after = retry_after_header(response))
+    if (auto const retry_after = ava::http::retry_after_header(response))
       error.with_context("retry_after", *retry_after);
     return std::unexpected(std::move(error));
   }
   return parse_anthropic_sse(response.body);
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> parse_anthropic_response(ava::http::HttpResponse const& response)
 {
   if (response.status_code < 200 || response.status_code >= 300)
     return parse_anthropic_sse_response(response);

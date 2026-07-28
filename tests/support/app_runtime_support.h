@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_store.h"
@@ -62,44 +62,44 @@ class ThreadSafeStringBuf final : public std::streambuf
   std::string::size_type search_pos_{0}; // The position from which wait_contains must search.
 };
 
-class ChunkedStreamingTransport final : public ava::provider::Transport
+class ChunkedStreamingTransport final : public ava::http::Transport
 {
  public:
   explicit ChunkedStreamingTransport(std::vector<std::string> chunks, int status_code = 200);
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
   [[nodiscard]] bool supports_streaming() const noexcept override;
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                                              CancelCallback cancel_requested = nullptr) override;
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send_streaming(ava::http::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                                          CancelCallback cancel_requested = nullptr) override;
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept;
 
  private:
   std::vector<std::string> chunks_;
   int status_code_ = 200;
   std::string response_body_;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
-class BlockingResponseTransport final : public ava::provider::Transport
+class BlockingResponseTransport final : public ava::http::Transport
 {
  public:
-  explicit BlockingResponseTransport(ava::provider::HttpResponse response);
+  explicit BlockingResponseTransport(ava::http::HttpResponse response);
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
   bool wait_for_request(std::chrono::milliseconds timeout) const;
   void release();
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> requests() const;
+  [[nodiscard]] std::vector<ava::http::HttpRequest> requests() const;
 
  private:
-  ava::provider::HttpResponse response_;
+  ava::http::HttpResponse response_;
   mutable std::mutex mutex_;
   mutable std::condition_variable cv_;
   bool requested_ = false;
   bool released_ = false;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
-ava::provider::HttpResponse sse_response(std::string body);
+ava::http::HttpResponse sse_response(std::string body);
 std::string read_file_call_sse(std::string_view path = "note.txt", std::string_view call_id = "call_read");
 std::string write_file_call_sse(std::string_view path, std::string_view content);
 std::string question_call_sse();
@@ -111,19 +111,19 @@ std::size_t count_substrings(std::string_view text, std::string_view needle);
 std::size_t count_compaction_entries(std::vector<ava::session::SessionEntry> const& entries);
 std::optional<ava::session::SessionEntry> latest_compaction_entry(std::vector<ava::session::SessionEntry> const& entries);
 
-class MutatingSummaryTransport final : public ava::provider::Transport
+class MutatingSummaryTransport final : public ava::http::Transport
 {
  public:
-  MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::provider::HttpResponse> responses, std::size_t mutate_requests = 1);
+  MutatingSummaryTransport(ava::agent::SessionAppendSink append_sink, std::vector<ava::http::HttpResponse> responses, std::size_t mutate_requests = 1);
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept;
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept;
 
  private:
   ava::agent::SessionAppendSink append_sink_;
-  std::vector<ava::provider::HttpResponse> responses_;
+  std::vector<ava::http::HttpResponse> responses_;
   std::size_t mutate_requests_ = 1;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
 }  // namespace ava::tests

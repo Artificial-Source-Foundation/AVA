@@ -344,6 +344,15 @@ void test_home_as_workspace_rejected()
     ava::test::request_skip("no writable trusted-home stand-in with a safe ancestor chain available");
     return;
   }
+  // create_directories applies the process umask to 0777. The trusted-home
+  // validator intentionally rejects group-writable roots, so make this fixture
+  // deterministic even when the invoking shell uses umask 0002.
+  if (::chmod(trusted_home.c_str(), S_IRWXU) != 0)
+  {
+    std::filesystem::remove_all(trusted_home, ec);
+    ava::test::request_skip("cannot secure the trusted-home stand-in to mode 0700");
+    return;
+  }
 
   auto project_under_home = trusted_home / "ava-test-project-boundary";
   std::filesystem::create_directories(project_under_home, ec);
@@ -383,7 +392,9 @@ void test_home_as_workspace_rejected()
                                     .limits = limits};
   auto intent = command::CommandIntent::compatibility("ls", limits);
   auto plan = command::seal_command_plan(*intent, opts);
-  expect(!plan, "sealing rejects workspace that equals the trusted real home");
+  expect(!plan && plan.error().category() == ava::core::ErrorCategory::PermissionDenied &&
+             plan.error().message() == "command workspace must not equal or contain the trusted real home directory",
+         "sealing rejects workspace specifically at the trusted-home boundary");
 
   // Positive: a project nested under the trusted home is allowed.
   auto project_anchors = ava::core::AnchorSet::open({project_under_home, synth_base});

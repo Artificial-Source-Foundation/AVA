@@ -1,6 +1,6 @@
 #pragma once
-
 #include "protocol.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"
@@ -23,7 +23,7 @@ struct ProviderHandle
 };
 
 [[nodiscard]] ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                                   runtime::RunOptions options, ava::provider::Transport& auth_transport,
+                                                                                   runtime::RunOptions options, ava::http::Transport& auth_transport,
                                                                                    std::string_view purpose);
 
 [[nodiscard]] ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenOptions const& base_options);

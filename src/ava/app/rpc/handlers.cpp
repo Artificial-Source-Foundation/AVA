@@ -3,6 +3,7 @@
 #include "runtime_navigation.h"
 #include "serialization.h"
 #include "session_operators.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_catalog.h"
 #include "ava/app/runtime_credentials.h"
@@ -15,8 +16,9 @@
 
 namespace ava::app::rpc {
 
-ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id, runtime::RunOptions options,
-                                                                   ava::provider::Transport& auth_transport, std::string_view purpose)
+ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
+                                                                     runtime::RunOptions options, ava::http::Transport& auth_transport,
+                                                                     std::string_view purpose)
 {
   return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
 }

@@ -45,8 +45,8 @@ struct SubagentDeliveryManagerOptions
 
 // Application-owned automatic summary delivery. It retains only detached,
 // callback-free parent runtime capsules and never references frontend/RPC
-// state. The coordinator remains protocol-neutral and merely emits durable
-// terminal notifications into this manager's bounded queue.
+// state. The coordinator remains protocol-neutral and emits process-local
+// terminal notifications into this manager's bounded advisory queue.
 class SubagentDeliveryManager final : public std::enable_shared_from_this<SubagentDeliveryManager>
 {
  public:
@@ -68,7 +68,7 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   [[nodiscard]] ava::core::VoidResult refresh_parent_configuration(runtime::Session const& session);
   void release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation);
   // Marks an explicit runtime attachment, preventing stale detach state from
-  // releasing this visible parent's journal owner.
+  // releasing this visible parent's retained capsule.
   void attach_parent(std::string_view parent_session_id);
   // Called only after application navigation detaches the visible parent.
   // Retains any capsule still needed for a live job or delivery.

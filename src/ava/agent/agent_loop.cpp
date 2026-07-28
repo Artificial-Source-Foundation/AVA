@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 
@@ -67,8 +68,8 @@ ava::observability::TraceOutcome terminal_outcome(ava::core::Error const& error)
 
 AgentLoop::AgentLoop(AgentLoopOptions options) : options_(std::move(options))
 {
-  auto [roots, over_limit] = detail::bounded_deduplicated_authority_roots(std::move(options_.ava_authority_roots));
-  options_.ava_authority_roots = std::move(roots);
+  auto [roots, over_limit] = detail::bounded_deduplicated_authority_roots(std::move(options_.tool_execution.ava_authority_roots));
+  options_.tool_execution.ava_authority_roots = std::move(roots);
   ava_authority_roots_over_limit_ = over_limit;
 }
 
@@ -89,23 +90,23 @@ std::string to_string(ToolTimelineStatus status)
 }
 
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message, ava::session::SessionStore& store,
-                                                       ava::provider::Provider const& provider, ava::provider::Transport& transport)
+                                                       ava::provider::Provider const& provider, ava::http::Transport& transport)
 {
   return run_turn(user_message, {}, store, provider, transport);
 }
 
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_message, std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                        ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                       ava::provider::Transport& transport)
+                                                       ava::http::Transport& transport)
 {
   if (ava_authority_roots_over_limit_)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "AgentLoop received more than 64 distinct AVA authority roots"));
   }
-  if (!store.is_ephemeral() && (!options_.append_entry || !options_.append_batch))
+  if (!options_.append_entry || !options_.append_batch)
   {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
-                                            "persistent AgentLoop requires append and batch authority routes before producing records"));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "AgentLoop requires append and batch authority routes before producing records"));
   }
   if (!options_.session_read_authority)
   {
@@ -120,7 +121,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
     {
       trace_context = options_.trace_context;
       trace_context.session_id = trace_context.session_id.empty() ? store.session_id() : trace_context.session_id;
-      trace_context.provider_id = trace_context.provider_id.empty() ? options_.provider_id : trace_context.provider_id;
+      trace_context.provider_id = trace_context.provider_id.empty() ? options_.model.provider_id : trace_context.provider_id;
       // Empty/failed IDs are still isolated at RunObservation; do not let them
       // prevent the authoritative run.
       if (trace_context.run_id.empty())
@@ -148,7 +149,7 @@ ava::core::Result<AgentLoopResult> AgentLoop::run_turn(std::string const& user_m
 ava::core::Result<AgentLoopResult> AgentLoop::run_turn_impl(std::string const& user_message,
                                                             std::vector<ava::session::ImageAttachmentRef> const& image_attachments,
                                                             ava::session::SessionStore& store, ava::provider::Provider const& provider,
-                                                            ava::provider::Transport& transport, ava::observability::TraceContext const& trace_context)
+                                                            ava::http::Transport& transport, ava::observability::TraceContext const& trace_context)
 {
   detail::AgentTurnExecutor executor(options_, user_message, image_attachments, store, provider, transport, trace_context);
   return executor.run();

@@ -109,7 +109,6 @@ set(AVA_TESTS_SOURCES
   "core_mode_json_permissions_tests.cpp"
   "diagnostics_tests.cpp"
   "events_tests.cpp"
-  "job_journal_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
   "permission_rules_tests.cpp"
@@ -177,6 +176,7 @@ target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
 target_compile_definitions(ava_tests PRIVATE AVA_M1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/fixtures/eval/m1")
 target_compile_definitions(ava_tests PRIVATE AVA_RPC_V1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/rpc-v1")
+target_compile_definitions(ava_tests PRIVATE AVA_RUNTIME_EVENTS_V1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/runtime-events-v1")
 target_compile_definitions(ava_tests PRIVATE AVA_ACP_V1_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/acp-v1")
 target_compile_definitions(ava_tests PRIVATE AVA_TESTS_BINARY_DIR="${CMAKE_BINARY_DIR}")
 ava_apply_warnings(ava_tests)
@@ -214,7 +214,6 @@ set(AVA_TEST_SUITES
   agent_loop
   agent_tool_dispatcher
   tool_scheduler
-  job_journal
   lsp
   plugin
   mcp
@@ -230,9 +229,9 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   # Keep pre-main libcwd diagnostics quiet without replacing the caller's
   # rcfile policy. ava_tests itself routes all output produced from main.
   # AVA_NO_DEBUG_OUTPUT makes ava::app::debug_init() skip NAMESPACE_DEBUG::init()
-  # entirely so no libcwd output can reach stdout/stderr; a developer who wants
-  # per-suite log files sets AVA_DEBUG_OUTPUT_DIR and runs ava_tests directly
-  # (LibcwdTestOutput then routes to ava_tests.<suite>.libcwd.log).
+  # when no private output was requested, so libcwd cannot contaminate the test
+  # protocol. A nonempty inherited AVA_DEBUG_OUTPUT_DIR overrides suppression
+  # after LibcwdTestOutput installs its validated per-suite private stream.
   set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
     ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endforeach()
@@ -525,11 +524,41 @@ add_test(
           -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/ctags-json-detection
           -P ${CMAKE_CURRENT_SOURCE_DIR}/ctags_json_detection_test.cmake)
 
+add_test(
+  NAME ava_build.generate_ctags_json_sources
+  COMMAND ${CMAKE_COMMAND}
+          -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/generate-ctags-json-sources
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_ctags_json_sources_test.cmake)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
 endif()
 if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_build.generate_print_members_completion
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DAVA_TEST_ROOT=${CMAKE_BINARY_DIR}/generate-print-members-completion
+            -DPYTHON3_EXECUTABLE=${Python3_EXECUTABLE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_print_members_completion_test.cmake)
+
+  add_test(
+    NAME ava_tests.module_dependency_rules
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/module_dependency_rules_test.py
+            --source ${CMAKE_SOURCE_DIR}
+            --policy ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/module_dependency_rules.json)
+  set_tests_properties(ava_tests.module_dependency_rules PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.module_dependency_rules_self_test
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/module_dependency_rules_test.py
+            --self-test)
+  set_tests_properties(ava_tests.module_dependency_rules_self_test PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
   add_test(
     NAME ava_cli.doctor_support
     COMMAND ${Python3_EXECUTABLE}

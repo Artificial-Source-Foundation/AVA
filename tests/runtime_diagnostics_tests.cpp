@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/diagnostics/artifact_store.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/provider/openai_provider.h"
@@ -399,7 +400,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   auto provider_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(provider_paths, false);
   auto provider_session = provider_diagnostics ? open_diagnostic_session(provider_root, *provider_diagnostics)
                                                : ava::core::Result<ava::app::runtime::Session>(std::unexpected(provider_diagnostics.error()));
-  ava::tests::FakeTransport provider_transport({ava::provider::HttpResponse{.status_code = 500, .headers = {}, .body = std::string(provider_canary)}});
+  ava::tests::FakeTransport provider_transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = std::string(provider_canary)}});
   ava::app::runtime::RunOptions provider_options;
   provider_options.access_token = "token";
   auto provider_result = provider_session ? ava::app::run_prompt(*provider_session, "fail", provider, provider_transport, provider_options)
@@ -420,7 +421,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   ava::app::runtime::RunOptions tool_options;
   tool_options.access_token = "token";
   tool_options.observation = std::make_shared<ava::observability::RunObservation>(supplied_observer);
-  tool_options.event_sink = [](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+  tool_options.event_sink = [](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "TOOL_FAILURE_CANARY_PRIVATE_6202"));
   };
   ava::tests::FakeTransport tool_transport({});
@@ -439,7 +440,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
                                             : ava::core::Result<ava::app::runtime::Session>(std::unexpected(session_diagnostics.error()));
   ava::app::runtime::RunOptions session_options;
   session_options.access_token = "token";
-  session_options.event_sink = [](ava::app::runtime::Event const&) -> ava::core::VoidResult {
+  session_options.event_sink = [](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "SESSION_FAILURE_CANARY_PRIVATE_6203"));
   };
   ava::tests::FakeTransport session_transport({});

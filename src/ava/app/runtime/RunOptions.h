@@ -2,7 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/observability/run_observer.h"
-#include "ava/app/events.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/question.h"
 #include "ava/agent/run_phase.h"
@@ -35,7 +35,9 @@ struct RunOptions
   bool stream = true;
   bool enable_transport_retries = false;
   std::optional<std::vector<std::string>> exact_builtin_tool_names = std::nullopt;
-  bool isolate_project_resources = false;
+  // Suppress ambient plugins, skills, LSP, plugin hooks, and subagent catalogs;
+  // preserve explicit session MCP unless disable_session_mcp is set.
+  bool isolate_ambient_extensions = false;
   // Integration-only runs may explicitly suppress even a session-local
   // immutable MCP composition; ordinary ACP isolation retains its approved MCP.
   bool disable_session_mcp = false;
@@ -45,7 +47,7 @@ struct RunOptions
   bool require_explicit_file_permissions = false;
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
-  EventSink event_sink = nullptr;
+  ava::event::RuntimeEventSink event_sink = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;

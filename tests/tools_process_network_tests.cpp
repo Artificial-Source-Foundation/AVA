@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/containment/containment.h"
+#include "ava/http/transport.h"
 #include "ava/agent/mode.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
@@ -10,10 +11,10 @@
 #include "ava/permissions/permission.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
 #include "ava/core/path.h"
-#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -108,33 +109,33 @@ class RecordingCommandExecutor final : public ava::tools::CommandExecutor
   bool fail = false;
 };
 
-class StaticTransport final : public ava::provider::Transport
+class StaticTransport final : public ava::http::Transport
 {
  public:
-  explicit StaticTransport(ava::provider::HttpResponse response) : response_(std::move(response)) { }
+  explicit StaticTransport(ava::http::HttpResponse response) : response_(std::move(response)) { }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     requests.push_back(request);
     return response_;
   }
 
-  std::vector<ava::provider::HttpRequest> requests;
+  std::vector<ava::http::HttpRequest> requests;
 
  private:
-  ava::provider::HttpResponse response_;
+  ava::http::HttpResponse response_;
 };
 
-class CancelAwareTransport final : public ava::provider::Transport
+class CancelAwareTransport final : public ava::http::Transport
 {
  public:
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     requests.push_back(request);
-    return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
+    return ava::http::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request, CancelCallback cancel_requested) override
   {
     requests.push_back(request);
     saw_cancel_callback = static_cast<bool>(cancel_requested);
@@ -142,11 +143,11 @@ class CancelAwareTransport final : public ava::provider::Transport
     {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
     }
-    return ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
+    return ava::http::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain"}}, .body = "ok"};
   }
 
   bool saw_cancel_callback = false;
-  std::vector<ava::provider::HttpRequest> requests;
+  std::vector<ava::http::HttpRequest> requests;
 };
 
 void test_bash_tool()
@@ -919,7 +920,7 @@ void test_webfetch_tool()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  StaticTransport transport(ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "abcdef"});
+  StaticTransport transport(ava::http::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "abcdef"});
   int prompts = 0;
   ava::tools::ToolContext const context{
       .workspace_dir = workspace,
@@ -939,7 +940,7 @@ void test_webfetch_tool()
          "webfetch requires permission and bounds fetched text content");
 
   StaticTransport multiline_transport(
-      ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "one\ntwo\nthree\nfour\n"});
+      ava::http::HttpResponse{.status_code = 200, .headers = {{"content-type", "text/plain; charset=utf-8"}}, .body = "one\ntwo\nthree\nfour\n"});
   auto fetched_lines = ava::tools::webfetch(
       context, "https://example.com/page",
       ava::tools::WebFetchOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 2, .timeout_ms = 5000, .transport = &multiline_transport});
@@ -948,9 +949,9 @@ void test_webfetch_tool()
              fetched_lines->next_offset_line == 4,
          "webfetch supports line offset and limit continuation metadata");
 
-  StaticTransport html_transport(ava::provider::HttpResponse{.status_code = 200,
-                                                             .headers = {{"content-type", "text/html; charset=utf-8"}},
-                                                             .body = "<html><body><h1>Title</h1><script>hidden()</script><p>A&amp;B</p></body></html>"});
+  StaticTransport html_transport(ava::http::HttpResponse{.status_code = 200,
+                                                         .headers = {{"content-type", "text/html; charset=utf-8"}},
+                                                         .body = "<html><body><h1>Title</h1><script>hidden()</script><p>A&amp;B</p></body></html>"});
   auto html_text = ava::tools::webfetch(
       context, "https://example.com/page",
       ava::tools::WebFetchOptions{.max_bytes = 1024, .timeout_ms = 5000, .format = ava::tools::WebFetchFormat::Text, .transport = &html_transport});
@@ -958,7 +959,7 @@ void test_webfetch_tool()
              html_text->content.find("hidden") == std::string::npos && html_transport.requests[0].headers.at("Accept").find("text/plain") != std::string::npos,
          "webfetch supports text output for HTML responses with basic tag stripping");
 
-  StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"});
+  StaticTransport unused_transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "unused"});
   auto invalid_scheme = ava::tools::webfetch(context, "file:///etc/passwd", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!invalid_scheme && unused_transport.requests.empty(), "webfetch rejects non-http URLs before transport use");
 
@@ -974,7 +975,7 @@ void test_webfetch_tool()
   auto hex_ipv4 = ava::tools::webfetch(context, "http://0x7f000001/", ava::tools::WebFetchOptions{.transport = &unused_transport});
   expect(!hex_ipv4 && unused_transport.requests.empty(), "webfetch rejects hexadecimal IPv4 literal hosts");
 
-  StaticTransport digit_domain_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "domain ok"});
+  StaticTransport digit_domain_transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "domain ok"});
   ava::tools::ToolContext const permissive_network_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
@@ -1001,7 +1002,7 @@ void test_webfetch_tool()
   expect(!denied_fetch && denied_fetch.error().format().find("resolution: deny") != std::string::npos && unused_transport.requests.empty(),
          "webfetch fails closed when network permission resolver denies before transport use");
 
-  StaticTransport binary_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {{"content-type", "application/octet-stream"}}, .body = "abc"});
+  StaticTransport binary_transport(ava::http::HttpResponse{.status_code = 200, .headers = {{"content-type", "application/octet-stream"}}, .body = "abc"});
   auto binary = ava::tools::webfetch(context, "https://example.com/page", ava::tools::WebFetchOptions{.transport = &binary_transport});
   expect(!binary && binary.error().message().find("binary") != std::string::npos, "webfetch rejects binary response content types");
 
@@ -1033,12 +1034,12 @@ void test_websearch_tool()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  StaticTransport transport(
-      ava::provider::HttpResponse{.status_code = 200,
-                                  .headers = {{"content-type", "application/json"}},
-                                  .body = "{\"Heading\":\"AVA\",\"AbstractText\":\"Native C++ agent\",\"AbstractURL\":\"https://ava.example/\","
-                                          "\"RelatedTopics\":[{\"Text\":\"AVA docs\",\"FirstURL\":\"https://ava.example/docs\"},"
-                                          "{\"Topics\":[{\"Text\":\"AVA releases\",\"FirstURL\":\"https://ava.example/releases\"}]}]}"});
+  StaticTransport transport(ava::http::HttpResponse{.status_code = 200,
+                                                    .headers = {{"content-type", "application/json"}},
+                                                    .body =
+                                                        "{\"Heading\":\"AVA\",\"AbstractText\":\"Native C++ agent\",\"AbstractURL\":\"https://ava.example/\","
+                                                        "\"RelatedTopics\":[{\"Text\":\"AVA docs\",\"FirstURL\":\"https://ava.example/docs\"},"
+                                                        "{\"Topics\":[{\"Text\":\"AVA releases\",\"FirstURL\":\"https://ava.example/releases\"}]}]}"});
   int prompts = 0;
   ava::tools::ToolContext const context{
       .workspace_dir = workspace,
@@ -1058,7 +1059,7 @@ void test_websearch_tool()
              transport.requests[0].timeout_ms == 7000 && transport.requests[0].follow_redirects,
          "websearch requires permission, queries a bounded search endpoint, and parses structured results");
 
-  StaticTransport unused_transport(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"});
+  StaticTransport unused_transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"});
   auto invalid_query = ava::tools::websearch(context, "\n", ava::tools::WebSearchOptions{.transport = &unused_transport});
   expect(!invalid_query && unused_transport.requests.empty(), "websearch rejects empty/control queries before transport use");
 

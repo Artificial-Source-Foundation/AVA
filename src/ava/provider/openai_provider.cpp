@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/openai_response_parser_detail.h"
 
@@ -17,7 +18,7 @@ std::unique_ptr<StreamParser> OpenAIProvider::create_stream_parser() const
   return std::make_unique<OpenAIStreamParser>();
 }
 
-ava::core::Result<std::vector<StreamEvent>> OpenAIProvider::parse_response(HttpResponse const& response, bool stream) const
+ava::core::Result<std::vector<StreamEvent>> OpenAIProvider::parse_response(ava::http::HttpResponse const& response, bool stream) const
 {
   if (stream)
     return parse_openai_sse_response(response);

@@ -3,7 +3,7 @@
 #include "resolvers.h"
 #include "serialization.h"
 #include "serialization_json.h"
-#include "ava/app/EventEnvelope.h"
+#include "ava/event/events.h"
 #include "ava/core/ids.h"
 
 #include <utility>
@@ -274,7 +274,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
     // output first and briefly checks the exact map entry under pending_state before stream I/O.
     auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             permission_request_payload_json(request_id, prompt));
-    auto const record = serialize_event_envelope_jsonl(envelope);
+    auto const record = ava::event::serialize_event_envelope_jsonl(envelope);
     auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
       std::lock_guard lock(pending_state.mutex);
       return request_is_pending(pending_state.permission_requests, request_id, pending);
@@ -330,7 +330,7 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
     // Serialize before locking. The gate establishes whether publication or cancellation won.
     auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
                                             question_request_payload_json(request_id, prompt));
-    auto const record = serialize_event_envelope_jsonl(envelope);
+    auto const record = ava::event::serialize_event_envelope_jsonl(envelope);
     auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
       std::lock_guard lock(pending_state.mutex);
       return request_is_pending(pending_state.question_requests, request_id, pending);

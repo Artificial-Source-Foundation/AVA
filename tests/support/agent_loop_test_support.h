@@ -1,6 +1,7 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
+#include "ava/agent/model_invocation_options.h"
 #include "ava/provider/provider.h"
 
 #include <chrono>
@@ -22,24 +23,26 @@ class TraceCollector final : public ava::observability::RunObserver
   std::vector<ava::observability::TraceEvent> events;
 };
 
-ava::provider::HttpResponse sse_response(std::string const& body);
+ava::http::HttpResponse sse_response(std::string const& body);
 std::string tool_call_sse(std::string_view id, std::string_view name, std::string_view arguments_json);
+ava::agent::ModelInvocationOptions model_invocation_options(std::string system_prompt = "system prompt", std::string provider_id = "openai",
+                                                            std::string model_id = "gpt-5.5");
 
-class SharedFakeTransport final : public ava::provider::Transport
+class SharedFakeTransport final : public ava::http::Transport
 {
  public:
-  SharedFakeTransport(std::shared_ptr<std::vector<ava::provider::HttpResponse>> responses, std::shared_ptr<std::vector<ava::provider::HttpRequest>> requests,
+  SharedFakeTransport(std::shared_ptr<std::vector<ava::http::HttpResponse>> responses, std::shared_ptr<std::vector<ava::http::HttpRequest>> requests,
                       std::shared_ptr<std::mutex> mutex);
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
 
  private:
-  std::shared_ptr<std::vector<ava::provider::HttpResponse>> responses_;
-  std::shared_ptr<std::vector<ava::provider::HttpRequest>> requests_;
+  std::shared_ptr<std::vector<ava::http::HttpResponse>> responses_;
+  std::shared_ptr<std::vector<ava::http::HttpRequest>> requests_;
   std::shared_ptr<std::mutex> mutex_;
 };
 
-class BlockingBackgroundTransport final : public ava::provider::Transport
+class BlockingBackgroundTransport final : public ava::http::Transport
 {
  public:
   struct State
@@ -49,23 +52,23 @@ class BlockingBackgroundTransport final : public ava::provider::Transport
     bool request_seen = false;
     bool release = false;
     bool cancel_observed = false;
-    std::vector<ava::provider::HttpRequest> requests;
+    std::vector<ava::http::HttpRequest> requests;
 
     void release_success();
     void notify();
     [[nodiscard]] bool wait_for_request(std::chrono::milliseconds timeout);
     [[nodiscard]] bool wait_for_cancel(std::chrono::milliseconds timeout);
-    [[nodiscard]] std::vector<ava::provider::HttpRequest> requests_snapshot();
+    [[nodiscard]] std::vector<ava::http::HttpRequest> requests_snapshot();
   };
 
-  BlockingBackgroundTransport(std::shared_ptr<State> state, ava::provider::HttpResponse response);
+  BlockingBackgroundTransport(std::shared_ptr<State> state, ava::http::HttpResponse response);
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request, CancelCallback cancel_requested) override;
 
  private:
   std::shared_ptr<State> state_;
-  ava::provider::HttpResponse response_;
+  ava::http::HttpResponse response_;
 };
 
 }  // namespace agent_loop_test

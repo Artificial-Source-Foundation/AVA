@@ -16,7 +16,9 @@ void run_app_event_serialization_tests()
 
 void run_app_runtime_tests()
 {
+  test_extension_resource_policy_derives_synthetic_paths_and_trust();
   test_app_runtime_open_session_and_context_prompt();
+  test_app_runtime_preserves_legacy_subagent_job_tree();
   test_app_active_context_status_tracks_compaction_projection();
   test_app_runtime_no_session_mode();
   test_app_runtime_session_startup_options();
@@ -29,6 +31,7 @@ void run_app_runtime_tests()
   test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
   test_app_runtime_plugin_install_remove_commands();
   test_app_context_reports_lsp_config_load_errors();
+  test_app_run_prompt_isolates_ambient_extensions();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_expands_file_references();
   test_app_run_prompt_sends_imported_image_attachment();

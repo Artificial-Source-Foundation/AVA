@@ -1,5 +1,5 @@
 #pragma once
-
+#include "ava/http/transport.h"
 #include "ava/app/acp/protocol.h"
 #include "ava/app/acp/transport.h"
 #include "ava/app/runtime_credentials.h"
@@ -76,20 +76,20 @@ struct CapturingSequenceState
   std::vector<std::string> request_bodies;
 };
 
-class CapturingSequenceTransport final : public ava::provider::Transport
+class CapturingSequenceTransport final : public ava::http::Transport
 {
  public:
-  CapturingSequenceTransport(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::provider::HttpResponse> responses);
+  CapturingSequenceTransport(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::http::HttpResponse> responses);
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override;
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override;
 
  private:
   std::shared_ptr<CapturingSequenceState> state_;
-  std::vector<ava::provider::HttpResponse> responses_;
+  std::vector<ava::http::HttpResponse> responses_;
 };
 
 ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_ptr<CapturingSequenceState> state,
-                                                                  std::vector<ava::provider::HttpResponse> responses);
+                                                                  std::vector<ava::http::HttpResponse> responses);
 
 struct RunPhaseBarrier
 {
@@ -104,7 +104,7 @@ struct RunPhaseBarrier
   void release();
 };
 
-ava::provider::HttpResponse acp_text_response(std::string_view text = "recorded");
+ava::http::HttpResponse acp_text_response(std::string_view text = "recorded");
 std::string read_acp_test_file(std::filesystem::path const& path);
 void configure_acp_tool_test_model(std::filesystem::path const& root);
 

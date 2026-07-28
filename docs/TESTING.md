@@ -28,10 +28,11 @@ Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-polic
 
 In libcwd-enabled builds, set `AVA_DEBUG_OUTPUT_DIR` to an absolute path to capture `ava_tests` libcwd output without contaminating normal stdout or stderr. The final directory is created when absent and otherwise validated as a current-user, non-symlink directory with exact mode 0700. Logs are private mode-0600 files named `ava_tests.<suite>.libcwd.log` (`all` for no argument and `invalid` for invalid arguments); each invocation truncates its deterministic file, while distinct CTest suites can write in parallel without colliding. The setting is ignored by libcwd-disabled builds.
 
-The caller's `LIBCWD_RCFILE_NAME` and `LIBCWD_RCFILE_OVERRIDE_NAME` remain authoritative for channel selection. CTest suppresses only pre-main startup output, by setting `LIBCWD_NO_STARTUP_MSGS=1`. And, if `AVA_DEBUG_OUTPUT_DIR` isn't set, later output by setting `AVA_NO_DEBUG_OUTPUT=1`. Use the same startup environment for direct invocations when completely quiet pre-main behavior is required:
+The caller's `LIBCWD_RCFILE_NAME` and `LIBCWD_RCFILE_OVERRIDE_NAME` remain authoritative for channel selection. CTest sets `LIBCWD_NO_STARTUP_MSGS=1` for pre-main silence and `AVA_NO_DEBUG_OUTPUT=1` for later output. A nonempty inherited `AVA_DEBUG_OUTPUT_DIR` explicitly overrides the latter only after `ava_tests` installs its validated private stream. The equivalent direct invocation is:
 
 ```sh
-LIBCWD_NO_STARTUP_MSGS=1 AVA_DEBUG_OUTPUT_DIR=/absolute/private/debug-logs ./build/ava_tests session
+LIBCWD_NO_STARTUP_MSGS=1 AVA_NO_DEBUG_OUTPUT=1 \
+  AVA_DEBUG_OUTPUT_DIR=/absolute/private/debug-logs ./build/tests/ava_tests session
 ```
 
 Treat these logs as private diagnostic artifacts because enabled channels may contain process or test details.
@@ -167,7 +168,7 @@ Pi's reference tree has broad Jest/Vitest coverage across provider protocols, co
 | --- | --- | --- |
 | Provider protocol regressions | `ava_tests.provider_openai`, `ava_tests.provider_anthropic`, `ava_tests.provider_gemini`, `ava_tests.config_context_auth_oauth`, and `ava_tests.provider_live_smoke` | Local protocol tests must pass. Live provider cases are credential-gated and classified in the matrix below. |
 | Headless/RPC automation | `ava_cli.headless_print_*`, `ava_cli.headless_rpc_*`, `ava_cli.headless_tool_visibility`, `ava_cli.headless_performance_smoke`, `ava_cli.headless_e2e_model_smoke` | Fake-provider smokes must pass in default CTest; live credentials are not required. |
-| Subagent/background jobs | `ava_tests.agent_loop` task-subagent and `BackgroundJobRegistry` tests; opt-in live task/coding dogfood when credentials are present | Foreground/background task delegation, automatically allowed/audited launch, foreground nested permission UI, fail-closed background nested Ask behavior, custom subagent config, cancellation, and retained job snapshots must remain covered by deterministic tests. |
+| Subagent/background jobs | `ava_tests.subagent_coordinator`, `ava_tests.subagent_delivery_manager`, `ava_tests.agent_loop`, and `BackgroundJobRegistry` tests; opt-in live task/coding dogfood when credentials are present | Foreground/background delegation, process locality, hidden-start publication, retention/hard caps, same-process delivery/deduplication, retry exhaustion, exact parent authority, promotion/cancellation races, and shutdown must remain covered by deterministic tests. Restart recovery is intentionally absent. |
 | TUI/editor/renderer | `ava_tests.tui_composer`; 15 gated tmux scenarios: `ava_tui.tmux_smoke_suspend_resume`, `ava_tui.tmux_smoke_keybind_conflict`, `ava_tui.tmux_smoke_theme_env`, `ava_tui.tmux_smoke_theme_persisted`, `ava_tui.tmux_smoke_active_run`, `ava_tui.tmux_smoke_restore_followup`, `ava_tui.tmux_smoke_streaming_scroll`, `ava_tui.tmux_smoke_main_startup_trust_keybinds`, `ava_tui.tmux_smoke_main_models_selectors`, `ava_tui.tmux_smoke_main_editor_input`, `ava_tui.tmux_smoke_main_slash_completions`, `ava_tui.tmux_smoke_main_permission_flow`, `ava_tui.tmux_smoke_main_question_flow`, `ava_tui.tmux_smoke_main_session_mgmt`, and `ava_tui.tmux_smoke_main_paste_scrollback_attach`; four direct PTY CTests: `ava_tui.kitty_image_smoke`, `ava_tui.iterm2_image_smoke`, `ava_tui.terminal_lifecycle_smoke`, and `ava_tui.osc8_smoke` | Deterministic renderer/editor tests are required; PTY smokes are run when prerequisites exist and otherwise skip with code 77. |
 | Virtual-terminal decision | AVA does not add a Pi-style TypeScript virtual terminal for MVP. Renderer tests assert visible rows/widths and tmux/PTY captures assert real terminal behavior. | Revisit a screen-model parser only if tmux/PTY smoke flakes or cannot cover a terminal protocol that renderer tests cannot prove. |
 | Performance thresholds | `ava_tests.tui_composer` large-render budgets and `ava_cli.headless_performance_smoke` | Treat budget failures as release regressions unless the threshold is intentionally raised with profiling evidence. |
@@ -221,7 +222,7 @@ The `ava_tests` binary covers:
 - model and prompt configuration
 - provider request/SSE parsing, including OpenAI Responses function-call starts from `response.output_item.added`, Anthropic native tools/thinking/cache usage, Gemini GenerateContent request/response and SSE vectors, DeepSeek/Kimi/Moonshot-compatible reasoning-content vectors, and OpenRouter-compatible request/error vectors
 - permission audit persistence, file/search/bash/webfetch/LSP tools, bash process-group cleanup, spill files, and atomic file writes
-- tool dispatcher and agent loop
+- tool dispatcher and agent loop, including process-local subagent coordinator and automatic-delivery manager coverage
 - command registry discovery/invocation for built-ins, prompt commands, skills, plugin commands, and MCP prompts
 - plugin manifest/discovery/enablement, out-of-process plugin runner behavior, plugin tools/commands/static resources/events, diagnostics, containment, failure cases, and the checked-in sample plugin workflow
 - MCP stdio config, initialize, tool listing/calls, prompt listing/get, tool broker registration, diagnostics, and fake-server success/error/exit cases

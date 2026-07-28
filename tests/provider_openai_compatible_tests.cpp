@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/provider_openai_test_suite.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/provider.h"
 #include "ava/provider/registry.h"
@@ -236,12 +237,12 @@ void test_openai_compatible_parsing()
 
   ava::provider::OpenAICompatibleProvider const moonshot(
       ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://moonshot.example.test", .provider_name = "Moonshot"});
-  auto const non_stream = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                              .headers = {},
-                                                                              .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"think\","
-                                                                                      "\"content\":\"done\"},\"finish_reason\":\"stop\"}],"
-                                                                                      "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6,"
-                                                                                      "\"total_tokens\":11,\"cached_tokens\":1}}"},
+  auto const non_stream = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                          .headers = {},
+                                                                          .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"think\","
+                                                                                  "\"content\":\"done\"},\"finish_reason\":\"stop\"}],"
+                                                                                  "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6,"
+                                                                                  "\"total_tokens\":11,\"cached_tokens\":1}}"},
                                                   false);
   expect(non_stream && non_stream->size() == 5 && (*non_stream)[0].type == ava::provider::StreamEventType::ReasoningStart &&
              (*non_stream)[1].type == ava::provider::StreamEventType::ReasoningDelta && (*non_stream)[1].text == "think" &&
@@ -251,12 +252,12 @@ void test_openai_compatible_parsing()
          "OpenAI-compatible non-stream response parses reasoning_content, text, usage, and stop reason");
 
   auto const reasoning_only_length =
-      moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                          .headers = {},
-                                                          .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"budget used\","
-                                                                  "\"content\":\"\"},\"finish_reason\":\"length\"}],"
-                                                                  "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":32,"
-                                                                  "\"completion_tokens_details\":{\"reasoning_tokens\":32}}}"},
+      moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                      .headers = {},
+                                                      .body = "{\"choices\":[{\"message\":{\"reasoning_content\":\"budget used\","
+                                                              "\"content\":\"\"},\"finish_reason\":\"length\"}],"
+                                                              "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":32,"
+                                                              "\"completion_tokens_details\":{\"reasoning_tokens\":32}}}"},
                               false);
   expect(reasoning_only_length && reasoning_only_length->size() == 4 && (*reasoning_only_length)[0].type == ava::provider::StreamEventType::ReasoningStart &&
              (*reasoning_only_length)[1].type == ava::provider::StreamEventType::ReasoningDelta &&
@@ -266,19 +267,19 @@ void test_openai_compatible_parsing()
              (*reasoning_only_length)[3].finish_reason == ava::provider::ProviderFinishReason::MaxTokens,
          "OpenAI-compatible non-stream parser preserves reasoning-only length responses as terminal provider turns");
 
-  auto const filtered = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                            .headers = {},
-                                                                            .body = "{\"choices\":[{\"finish_reason\":\"content_filter\"}],"
-                                                                                    "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}"},
+  auto const filtered = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                        .headers = {},
+                                                                        .body = "{\"choices\":[{\"finish_reason\":\"content_filter\"}],"
+                                                                                "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}"},
                                                 false);
   expect(filtered && filtered->size() == 1 && (*filtered)[0].type == ava::provider::StreamEventType::Done &&
              (*filtered)[0].finish_reason == ava::provider::ProviderFinishReason::Refusal,
          "OpenAI-compatible non-stream parser treats filtered empty responses as completed provider turns");
-  auto const empty_stop = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                              .headers = {},
-                                                                              .body = "{\"choices\":[{\"message\":{\"content\":\"\"},"
-                                                                                      "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,"
-                                                                                      "\"completion_tokens\":0,\"total_tokens\":2}}"},
+  auto const empty_stop = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                          .headers = {},
+                                                                          .body = "{\"choices\":[{\"message\":{\"content\":\"\"},"
+                                                                                  "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,"
+                                                                                  "\"completion_tokens\":0,\"total_tokens\":2}}"},
                                                   false);
   expect(empty_stop && empty_stop->size() == 1 && (*empty_stop)[0].type == ava::provider::StreamEventType::Done && (*empty_stop)[0].usage &&
              (*empty_stop)[0].usage->input_tokens == 2 && (*empty_stop)[0].usage->output_tokens == 0 &&
@@ -286,29 +287,29 @@ void test_openai_compatible_parsing()
          "OpenAI-compatible non-stream parser accepts empty completed output with usage");
 
   auto const unicode_text = std::string("rocket ") + "\xF0\x9F\x9A\x80" + " bad " + "\xEF\xBF\xBD";
-  auto const unicode = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                           .headers = {},
-                                                                           .body = "{\"choices\":[{\"message\":{\"content\":"
-                                                                                   "\"rocket \\ud83d\\ude80 bad \\ud800\"},\"finish_reason\":\"stop\"}]}"},
+  auto const unicode = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                       .headers = {},
+                                                                       .body = "{\"choices\":[{\"message\":{\"content\":"
+                                                                               "\"rocket \\ud83d\\ude80 bad \\ud800\"},\"finish_reason\":\"stop\"}]}"},
                                                false);
   expect(unicode && unicode->size() == 2 && (*unicode)[0].type == ava::provider::StreamEventType::TextDelta && (*unicode)[0].text == unicode_text &&
              (*unicode)[1].type == ava::provider::StreamEventType::Done,
          "OpenAI-compatible non-stream parser preserves surrogate pairs and replaces dangling surrogates");
 
-  auto const unknown_finish = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                                  .headers = {},
-                                                                                  .body = "{\"choices\":[{\"message\":{\"content\":\"done\"},"
-                                                                                          "\"finish_reason\":\"provider_custom\"}]}"},
+  auto const unknown_finish = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                              .headers = {},
+                                                                              .body = "{\"choices\":[{\"message\":{\"content\":\"done\"},"
+                                                                                      "\"finish_reason\":\"provider_custom\"}]}"},
                                                       false);
   expect(unknown_finish && unknown_finish->size() == 2 && (*unknown_finish)[1].type == ava::provider::StreamEventType::Done &&
              (*unknown_finish)[1].finish_reason == ava::provider::ProviderFinishReason::Error,
          "OpenAI-compatible non-stream parser preserves unknown finish reasons");
 
-  auto const non_stream_tool = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200,
-                                                                                   .headers = {},
-                                                                                   .body = "{\"choices\":[{\"message\":{\"tool_calls\":[{"
-                                                                                           "\"id\":\"call_9\",\"function\":{\"name\":\"read_file\","
-                                                                                           "\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}"},
+  auto const non_stream_tool = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200,
+                                                                               .headers = {},
+                                                                               .body = "{\"choices\":[{\"message\":{\"tool_calls\":[{"
+                                                                                       "\"id\":\"call_9\",\"function\":{\"name\":\"read_file\","
+                                                                                       "\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}"},
                                                        false);
   expect(non_stream_tool && non_stream_tool->size() == 4 && (*non_stream_tool)[0].type == ava::provider::StreamEventType::ToolCallStart &&
              (*non_stream_tool)[0].tool_call_id == "call_9" && (*non_stream_tool)[0].tool_name == "read_file" &&
@@ -317,7 +318,7 @@ void test_openai_compatible_parsing()
              (*non_stream_tool)[3].finish_reason == ava::provider::ProviderFinishReason::ToolCalls,
          "OpenAI-compatible non-stream parser emits tool call events");
 
-  ava::provider::HttpResponse const missing_id_response{
+  ava::http::HttpResponse const missing_id_response{
       .status_code = 200,
       .headers = {},
       .body = R"({"choices":[{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":"{}"}}]},"finish_reason":"tool_calls"}]})"};
@@ -344,11 +345,11 @@ void test_openai_compatible_parsing()
              (*merged_stream_fragment)[0].tool_call_id == first_stream_id,
          "OpenAI-compatible stream parsers use distinct fallbacks while same-parser index fragments retain one ID");
 
-  auto const malformed = moonshot.parse_response(ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"choices\":[]}"}, false);
+  auto const malformed = moonshot.parse_response(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"choices\":[]}"}, false);
   expect(!malformed && malformed.error().category() == ava::core::ErrorCategory::Provider, "OpenAI-compatible non-stream parser rejects missing messages");
 
   auto const http_error = moonshot.parse_response(
-      ava::provider::HttpResponse{
+      ava::http::HttpResponse{
           .status_code = 500,
           .headers = {},
           .body =
@@ -424,7 +425,7 @@ void test_openai_compatible_parsing()
   expect(second_finish && second_finish->empty(), "OpenAI-compatible parser finish resets terminal state");
 
   auto const error =
-      moonshot.parse_response(ava::provider::HttpResponse{.status_code = 400, .headers = {}, .body = "Your request exceeded model token limit"}, true);
+      moonshot.parse_response(ava::http::HttpResponse{.status_code = 400, .headers = {}, .body = "Your request exceeded model token limit"}, true);
   expect(!error && error.error().format().find("provider_error_kind: context_overflow") != std::string::npos,
          "OpenAI-compatible HTTP errors reuse normalized context-overflow classification");
 }
@@ -634,7 +635,7 @@ void test_builtin_openai_compatible_provider_contracts()
       continue;
     auto parsed =
         (*compatible)
-            ->parse_response(ava::provider::HttpResponse{.status_code = error_case.status_code, .headers = error_case.headers, .body = error_case.body}, false);
+            ->parse_response(ava::http::HttpResponse{.status_code = error_case.status_code, .headers = error_case.headers, .body = error_case.body}, false);
     expect(!parsed && parsed.error().format().find("provider_error_kind: " + ava::provider::to_string(error_case.expected_kind)) != std::string::npos,
            error_case.label + " is normalized with the expected compatible provider error kind");
     if (!parsed && !error_case.required_context.empty())

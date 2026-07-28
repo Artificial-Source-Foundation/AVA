@@ -6,9 +6,10 @@
 # checks the combined output against a fixed set of regular expressions. For every step
 # that carries an expectation, the step passes only when its exit status is zero
 # AND exactly the expected substrings are present (no missing, no unexpected).
-# Steps without an expectation (the warm-up `make` and the `touch`/`rm` probes)
+# Steps without an expectation (the warm-up `make` and generated-tree probes)
 # only require a zero exit status; they still report which substrings turned up
-# so the actual behavior is visible.
+# so the actual behavior is visible. No probe mutates source-tree content or
+# metadata.
 #
 # Command translation (matches the planner's environment helpers):
 #   make                        -> cmake --build "$BUILDDIR" --parallel 16
@@ -20,9 +21,9 @@
 #                                  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 #                                  -DCMAKE_C_COMPILER_LAUNCHER=ccache -DAVA_BUILD_TESTS=ON
 #
-# `touch` and `rm` probes run unchanged. Environment variables REPOROOT and
-# BUILDDIR must be set (the planner exposes them); the script fails early with a
-# clear message otherwise.
+# Generated-tree `touch` and `rm` probes run unchanged. Environment variables
+# REPOROOT and BUILDDIR must be set (the planner exposes them); the script fails
+# early with a clear message otherwise.
 
 import os
 import re
@@ -121,6 +122,12 @@ def main(argv):
         build_dir, "generated", "print_members", "ava", "config", "print_members.cpp"
     )
     source_files = os.path.join(build_dir, "generated", "print_members", "source_files")
+    completion_marker = os.path.join(
+        build_dir, "generated", "print_members", "generation-complete.sources.sha256"
+    )
+    tags_json = os.path.join(build_dir, "generated", "ctags", "tags.json")
+    tags_json_sources = tags_json + ".sources"
+    tags_json_sources_sha256 = tags_json_sources + ".sha256"
 
     # Each step is (label, argv, comment, expected). `expected` is either a
     # frozenset of PATTERNS keys that must be exactly the ones found, or None
@@ -205,6 +212,77 @@ def main(argv):
          "-- Generating .../generated/ctags/tags.json\n"
          "-- Generating print_members.cpp files in .../generated/print_members",
          frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "prints: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        ("rm", ["rm", tags_json_sources],
+         "delete the tags.json.sources input manifest",
+         None),
+        ("configure", configure(),
+         "prints: -- Need generation because tags.json.sources is missing, then regenerates",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "prints: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        ("rm", ["rm", tags_json_sources_sha256],
+         "delete the tags.json.sources.sha256 content-signature manifest",
+         None),
+        ("configure", configure(),
+         "prints: -- Need generation because tags.json.sources.sha256 is missing, then regenerates",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "prints: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        ("rm", ["rm", tags_json],
+         "delete tags.json while leaving printers and sources manifest",
+         None),
+        ("configure", configure(),
+         "prints: -- Need generation because tags.json is missing, then regenerates",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "prints: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        # Divergent recorded input list (addition/deletion path) must force refresh.
+        ("sh", ["sh", "-c",
+                "printf '%s\n' 'src/ava/__stale_manifest_probe.h' >>'{}'".format(tags_json_sources)],
+         "append a bogus path to tags.json.sources to force a source-list mismatch",
+         None),
+        ("configure", configure(),
+         "prints: -- Need (re)generation because the src/ava source list differs",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "prints: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        # Divergent content signature must force refresh without touching src/ava.
+        ("sh", ["sh", "-c",
+                "printf '%s\n' 'bogus-signature' >>'{}'".format(tags_json_sources_sha256)],
+         "append a bogus line to tags.json.sources.sha256",
+         None),
+        ("configure", configure(),
+         "prints: -- Need (re)generation because the source signature differs",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "stable after signature-driven refresh: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        ("rm", ["rm", completion_marker],
+         "delete the print-members completion marker",
+         None),
+        ("configure", configure(),
+         "prints: -- Need generation because the completion marker is missing, then regenerates",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "stable after missing-marker refresh: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
+        ("sh", ["sh", "-c",
+                "printf '%s\\n' 'bogus-completion-signature' >>'{}'".format(completion_marker)],
+         "append a bogus line to the completion marker",
+         None),
+        ("configure", configure(),
+         "prints: -- Need (re)generation because the completed printer signature differs",
+         frozenset({7, 8, 9})),
+        ("configure", configure(),
+         "stable after stale-marker refresh: -- Not regenerating print_members.cpp files",
+         frozenset({6})),
     ]
 
     # Run the sequence, capturing everything. Steps run to completion regardless

@@ -3,6 +3,7 @@
 #include "ava/app/command_session_support_internal.h"
 #include "ava/app/command_sessions.h"
 #include "ava/app/project_trust.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/stats.h"
 #include "ava/context/context_loader.h"
@@ -330,11 +331,11 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto const include_project_resources = project_resources_trusted(session.project_trust());
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
   auto const project_lsp_config = session.workspace_dir() / ".ava" / "lsp.json";
   auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
-      .global_config_file = session.paths().ava_config_dir / "lsp.json",
-      .project_config_file = include_project_resources ? project_lsp_config : std::filesystem::path{},
+      .global_config_file = resource_policy.global_lsp_config_file,
+      .project_config_file = resource_policy.project_lsp_config_file,
       .workspace_root = session.workspace_dir(),
       .anchor_set = session.anchor_set(),
       .mode = session.mode(),
@@ -343,7 +344,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   output += "  mode=" + ava::agent::to_string(session.mode()) + "\n";
   output += "  model=" + session.model().provider_id + "/" + session.model().model_id + "\n";
   output += "  project_trust=" + std::string(to_string(session.project_trust().decision)) +
-            " project_resources=" + (include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
+            " project_resources=" + (resource_policy.include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
   if (prompt_matches_query(session, trimmed_query))
   {
     output += "  base_prompt=";
@@ -428,7 +429,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
       output += "  lsp_builtin  id=" + builtin.id + " status=" + std::string(ava::lsp::to_string(builtin.status)) + " reason=" + builtin.reason + '\n';
     }
   }
-  if (!include_project_resources)
+  if (!resource_policy.include_project_resources)
   {
     ava::lsp::ConfiguredLspConfigDiagnostic skipped_project{
         .scope = "project",

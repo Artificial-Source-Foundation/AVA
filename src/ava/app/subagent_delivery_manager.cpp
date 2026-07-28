@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -26,17 +27,17 @@ namespace {
 
 constexpr std::string_view kDeliveryMarkerPrefix = "[AVA_SUBAGENT_DELIVERY_V1 delivery_id=";
 
-class BoundedDeliveryTransport final : public ava::provider::Transport
+class BoundedDeliveryTransport final : public ava::http::Transport
 {
  public:
-  BoundedDeliveryTransport(std::unique_ptr<ava::provider::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
+  BoundedDeliveryTransport(std::unique_ptr<ava::http::Transport> inner, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline)
       : inner_(std::move(inner)), stop_token_(stop_token), deadline_(deadline)
   {
   }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override { return send(request, nullptr); }
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override { return send(request, nullptr); }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request, CancelCallback cancel_requested) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request, CancelCallback cancel_requested) override
   {
     auto bounded = bounded_request(request);
     return inner_->send(bounded, [this, cancel_requested] { return canceled() || (cancel_requested && cancel_requested()); });
@@ -44,8 +45,8 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
 
   bool supports_streaming() const noexcept override { return inner_->supports_streaming(); }
 
-  ava::core::Result<ava::provider::HttpResponse> send_streaming(ava::provider::HttpRequest const& request, BodyChunkSink on_body_chunk,
-                                                                CancelCallback cancel_requested = nullptr) override
+  ava::core::Result<ava::http::HttpResponse> send_streaming(ava::http::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                            CancelCallback cancel_requested = nullptr) override
   {
     auto bounded = bounded_request(request);
     return inner_->send_streaming(bounded, std::move(on_body_chunk),
@@ -53,7 +54,7 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
   }
 
  private:
-  ava::provider::HttpRequest bounded_request(ava::provider::HttpRequest request) const
+  ava::http::HttpRequest bounded_request(ava::http::HttpRequest request) const
   {
     auto const now = std::chrono::steady_clock::now();
     auto const remaining = now < deadline_ ? std::chrono::duration_cast<std::chrono::milliseconds>(deadline_ - now).count() : 0;
@@ -64,7 +65,7 @@ class BoundedDeliveryTransport final : public ava::provider::Transport
 
   bool canceled() const noexcept { return stop_token_.stop_requested() || std::chrono::steady_clock::now() >= deadline_; }
 
-  std::unique_ptr<ava::provider::Transport> inner_;
+  std::unique_ptr<ava::http::Transport> inner_;
   std::stop_token stop_token_;
   std::chrono::steady_clock::time_point deadline_;
 };
@@ -107,7 +108,7 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
   result.stream = source.stream;
   result.enable_transport_retries = source.enable_transport_retries;
   result.exact_builtin_tool_names = std::vector<std::string>{};
-  result.isolate_project_resources = true;
+  result.isolate_ambient_extensions = true;
   result.disable_session_mcp = true;
   result.require_descriptor_secure_workspace = source.require_descriptor_secure_workspace;
   result.announce_execution_after_permission = source.announce_execution_after_permission;
@@ -124,15 +125,15 @@ runtime::Session detached_session(runtime::Session const& source, ava::session::
                                   std::shared_ptr<SubagentDeliveryManager> manager)
 {
   runtime::SessionResources session_resources{.lease = std::move(lease),
-                                                    .anchor_set = source.anchor_set(),
-                                                    .run_controller = source.run_controller(),
-                                                    .append_target = source.append_target(),
-                                                    .bound_read_authority = std::move(authority),
-                                                    .subagent_coordinator = source.subagent_coordinator(),
-                                                    .subagent_delivery_manager = std::move(manager),
-                                                    .session_title_coordinator = source.session_title_coordinator(),
-                                                    .diagnostics = source.diagnostics(),
-                                                    .mcp_config = source.mcp_config()};
+                                              .anchor_set = source.anchor_set(),
+                                              .run_controller = source.run_controller(),
+                                              .append_target = source.append_target(),
+                                              .bound_read_authority = std::move(authority),
+                                              .subagent_coordinator = source.subagent_coordinator(),
+                                              .subagent_delivery_manager = std::move(manager),
+                                              .session_title_coordinator = source.session_title_coordinator(),
+                                              .diagnostics = source.diagnostics(),
+                                              .mcp_config = source.mcp_config()};
   return runtime::Session(runtime::Session_aggregate_base{.invocation_inputs_ = source.invocation_inputs(),
                                                           .resolved_prompt_state_ = source.resolve_prompt_state(),
                                                           .model_selection_ = source.model_selection(),
@@ -248,10 +249,11 @@ ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> SubagentDeliveryMana
 {
   if (!options.coordinator)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent delivery manager requires a coordinator"));
-  if (options.max_queued_deliveries == 0 || options.max_retained_parents == 0 || options.max_delivery_attempts < 2 || options.delivery_deadline.count() <= 0 ||
+  if (options.max_queued_deliveries == 0 || options.max_retained_parents == 0 || options.max_delivery_attempts < 2 ||
+      options.max_delivery_attempts > ava::agent::kMaxSubagentDeliveryAttemptHistory || options.delivery_deadline.count() <= 0 ||
       options.admission_retry_interval.count() <= 0)
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent delivery manager limits must be positive with at least two attempts"));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                            "subagent delivery manager limits must be positive with between two and 64 delivery attempts"));
   auto manager = std::shared_ptr<SubagentDeliveryManager>(new SubagentDeliveryManager(std::move(options)));
   manager->start();
   return manager;
@@ -282,12 +284,6 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
 {
   if (!session.run_controller())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot retain a parent without a run controller"));
-  if (!session.sessionless())
-  {
-    auto activated = coordinator_->activate_parent(session.store.session_id());
-    if (!activated)
-      return std::unexpected(std::move(activated.error()));
-  }
   auto authority = session.read_authority();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
@@ -337,7 +333,7 @@ bool SubagentDeliveryManager::parent_needed(std::string_view session_id) const
   if (std::ranges::any_of(jobs, [](auto const& snapshot) { return execution_live(snapshot.job.execution); }))
     return true;
   auto pending = coordinator_->pending_deliveries(session_id);
-  return pending && std::ranges::any_of(*pending, [this](auto const& snapshot) { return snapshot.job.delivery_attempts < options_.max_delivery_attempts; });
+  return pending && !pending->empty();
 }
 
 ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runtime::Session const& session)
@@ -402,11 +398,7 @@ void SubagentDeliveryManager::release_parent_if_unused(std::string_view parent_s
     if (found == parents_.end() || found->second != candidate || found->second->generation != generation || capsule_active(found->second))
       return;
     parents_.erase(found);
-    // Hold the manager mutex through the coordinator release so an attach
-    // cannot clear the explicit detach boundary between this check and owner
-    // release. Coordinator publication never takes this mutex.
-    if (detached_parents_.contains(std::string(parent_session_id)) && coordinator_->release_parent_if_idle(parent_session_id))
-      detached_parents_.erase(std::string(parent_session_id));
+    detached_parents_.erase(std::string(parent_session_id));
   }
 }
 
@@ -429,15 +421,6 @@ void SubagentDeliveryManager::release_detached_parent(std::string_view parent_se
   }
   if (generation)
     release_parent_if_unused(parent_session_id, *generation);
-  else
-  {
-    // Serialize the no-capsule detach with attach_parent: once a new visible
-    // attachment wins this mutex it must not lose its journal owner to a stale
-    // detach racing immediately afterward.
-    std::lock_guard lock(mutex_);
-    if (!parents_.contains(std::string(parent_session_id)))
-      static_cast<void>(coordinator_->release_parent_if_idle(parent_session_id));
-  }
 }
 
 ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::retained_session(std::string_view session_id,
@@ -571,9 +554,7 @@ void SubagentDeliveryManager::worker_loop(std::stop_token stop_token)
       auto pending = coordinator_->pending_deliveries(parent);
       if (!pending)
         continue;
-      for (auto const& delivery : *pending)
-        if (delivery.job.delivery_attempts < options_.max_delivery_attempts)
-          enqueue(delivery);
+      for (auto const& delivery : *pending) enqueue(delivery);
     }
   }
 }
@@ -621,6 +602,9 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   }
   if (snapshot.job.delivery_attempts >= options_.max_delivery_attempts)
   {
+    if (!snapshot.job.delivery_attempt_history.empty())
+      static_cast<void>(coordinator_->exhaust_delivery(snapshot.job.identity.parent_session_id, snapshot.job.identity.job_id,
+                                                       snapshot.job.delivery_attempt_history.back().attempt_id));
     release_parent_if_unused(snapshot.job.identity.parent_session_id, selected_capsule->generation);
     return;
   }
@@ -633,9 +617,9 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
     return;
 
   // Do not consume an attempt or append the synthetic user message while an
-  // ordinary parent turn is active. Once idle is observed, durably record the
-  // attempt before admission; if a user races and wins, this same stable
-  // attempt waits and retries admission without another journal transition.
+  // ordinary parent turn is active. Once idle is observed, record the attempt
+  // before admission; if a user races and wins, this same stable attempt waits
+  // and retries admission without consuming another attempt.
   while (!stop_token.stop_requested() && std::chrono::steady_clock::now() < deadline)
   {
     auto admission = selected_controller->inspect_admission(RunRequest{.request_id = delivery_run_id});
@@ -736,10 +720,8 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   }();
   if (!bundle || !bundle->provider || !bundle->transport)
   {
-    if (attempted->job.delivery_attempts < options_.max_delivery_attempts && !stop_token.stop_requested())
+    if (!stop_token.stop_requested())
       enqueue(*attempted);
-    else
-      release_parent_if_unused(snapshot.job.identity.parent_session_id, selected_capsule->generation);
     return;
   }
   BoundedDeliveryTransport bounded_transport(std::move(bundle->transport), stop_token, deadline);
@@ -750,10 +732,8 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   }
   if (!result || !result->committed_turn_id)
   {
-    if (attempted->job.delivery_attempts < options_.max_delivery_attempts && !stop_token.stop_requested())
+    if (!stop_token.stop_requested())
       enqueue(*attempted);
-    else
-      release_parent_if_unused(snapshot.job.identity.parent_session_id, selected_capsule->generation);
     return;
   }
   auto acknowledged =

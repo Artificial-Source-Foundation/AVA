@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/event/events.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_input_internal.h"
@@ -51,7 +52,7 @@ bool RuntimePromptCoordinator::render()
   return renderer_.render();
 }
 
-void RuntimePromptCoordinator::set_audit_sink(ava::app::runtime::EventSink sink)
+void RuntimePromptCoordinator::set_audit_sink(ava::event::RuntimeEventSink sink)
 {
   std::lock_guard<std::mutex> lock(prompt_audit_mutex_);
   prompt_audit_sink_ = std::move(sink);
@@ -62,23 +63,24 @@ void RuntimePromptCoordinator::emit_prompt_audit(std::string status, std::string
 {
   auto& prompt_audit_mutex = prompt_audit_mutex_;
   auto& prompt_audit_sink = prompt_audit_sink_;
-  ava::app::runtime::EventSink sink;
+  ava::event::RuntimeEventSink sink;
   {
     std::lock_guard<std::mutex> lock(prompt_audit_mutex);
     sink = prompt_audit_sink;
   }
   if (!sink)
     return;
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ProviderEvent;
-  event.status = std::move(status);
-  event.text = std::move(text);
-  event.tool_name = std::move(tool_name);
-  event.reason = std::move(reason);
-  event.error_details = std::move(resolution_reason);
+  // Preserve the legacy empty timestamp/session metadata; do not invent IDs.
+  ava::event::RuntimeEventMetadata metadata;
+  ava::event::ProviderPayload payload;
+  payload.status = std::move(status);
+  payload.text = std::move(text);
+  payload.tool = std::move(tool_name);
+  payload.reason = std::move(reason);
+  payload.error_details = std::move(resolution_reason);
   if (!permission_request_id.empty())
-    event.permission_request_ids.push_back(std::move(permission_request_id));
-  static_cast<void>(sink(event));
+    payload.permission_request_ids.push_back(std::move(permission_request_id));
+  static_cast<void>(ava::event::emit_event(sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::ProviderEvent{.payload = std::move(payload)}}));
 }
 
 ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptCoordinator::resolve_permission_prompt(

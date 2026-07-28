@@ -1,6 +1,6 @@
 #pragma once
-
 #include "ava/debug/print_members_on.h"
+#include "ava/http/transport.h"
 #include "ava/provider/provider.h"
 
 #include <memory>
@@ -35,9 +35,9 @@ class GeminiProvider final : public Provider
   using Provider::build_request;
 
   explicit GeminiProvider(std::string base_url = "");
-  [[nodiscard]] ava::core::Result<HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
+  [[nodiscard]] ava::core::Result<ava::http::HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
-  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(HttpResponse const& response, bool stream) const override;
+  [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_response(ava::http::HttpResponse const& response, bool stream) const override;
 
  private:
   std::string base_url_;
@@ -45,8 +45,8 @@ class GeminiProvider final : public Provider
 };
 
 [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse(std::string_view sse);
-[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse_response(HttpResponse const& response);
-[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse const& response);
+[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse_response(ava::http::HttpResponse const& response);
+[[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(ava::http::HttpResponse const& response);
 [[nodiscard]] std::optional<TokenUsage> parse_gemini_usage(std::string_view body);
 
 }  // namespace ava::provider

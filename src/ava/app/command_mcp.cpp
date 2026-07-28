@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_mcp.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/mcp/config.h"
 #include "ava/mcp/stdio_client.h"
@@ -13,14 +14,6 @@
 
 namespace ava::app {
 namespace {
-
-ava::mcp::McpConfigLoadOptions mcp_config_options(runtime::Session const& session)
-{
-  auto options = ava::mcp::default_mcp_config_options(session.workspace_dir());
-  options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  options.project_config_file = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
-  return options;
-}
 
 std::string mcp_scope_text(ava::mcp::McpServerScope scope)
 {
@@ -150,7 +143,8 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::Session& session, Comm
   if (args.empty())
     return usage();
 
-  auto config = ava::mcp::load_mcp_config(mcp_config_options(session));
+  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
   {
     add_output(result, config.error().format());

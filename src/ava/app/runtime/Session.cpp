@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ExtensionResourcePolicy.h"
 #include "Session.h"
 #include "command_names.h"
 #include "markdown_files.h"
@@ -15,7 +16,7 @@
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
-#include "ava/app/runtime.h"
+#include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/string_utils.h"
@@ -147,21 +148,21 @@ void load_prompt_command_dir(RegistryBuilder& builder, std::filesystem::path con
                      CommandRegistryDiagnostic{.source = to_string(source), .path = file, .message = "command file name does not form a safe slash command"});
       continue;
     }
-    auto content = read_bounded_file(file);
+    auto content = ava::context::read_resource_file(file, {.max_bytes = kMaxCommandFileBytes, .resource_description = "command file"});
     if (!content)
     {
       add_diagnostic(builder,
                      CommandRegistryDiagnostic{.command = "/" + *name, .source = to_string(source), .path = file, .message = content.error().format()});
       continue;
     }
-    auto parsed = parse_markdown(*content);
-    auto description = markdown_field(parsed, "description");
-    auto hint = markdown_field(parsed, "argument-hint");
+    auto parsed = ava::context::parse_markdown(*content);
+    auto description = ava::context::markdown_field(parsed, "description");
+    auto hint = ava::context::markdown_field(parsed, "argument-hint");
     if (hint.empty())
-      hint = markdown_field(parsed, "argument_hint");
+      hint = ava::context::markdown_field(parsed, "argument_hint");
     if (hint.empty())
-      hint = markdown_field(parsed, "hint");
-    auto body = markdown_field(parsed, "template");
+      hint = ava::context::markdown_field(parsed, "hint");
+    auto body = ava::context::markdown_field(parsed, "template");
     if (body.empty())
       body = std::move(parsed.body);
     if (core::trim_view(body).empty())
@@ -183,27 +184,15 @@ void load_prompt_command_dir(RegistryBuilder& builder, std::filesystem::path con
   }
 }
 
-void load_prompt_commands(RegistryBuilder& builder, runtime::Session const& session)
+void load_prompt_commands(RegistryBuilder& builder, runtime::Session const& session, ExtensionResourcePolicy const& policy)
 {
-  if (project_resources_trusted(session.project_trust()))
+  if (policy.include_project_resources)
   {
     load_prompt_command_dir(builder, session.workspace_dir() / ".ava" / "commands", UnifiedCommandSource::PromptProject, "project");
     load_prompt_command_dir(builder, session.workspace_dir() / ".ava" / "command", UnifiedCommandSource::PromptProject, "project");
   }
   load_prompt_command_dir(builder, session.paths().ava_config_dir / "commands", UnifiedCommandSource::PromptGlobal, "global");
   load_prompt_command_dir(builder, session.paths().ava_config_dir / "command", UnifiedCommandSource::PromptGlobal, "global");
-}
-
-ava::plugin::PluginDiscoveryOptions plugin_discovery_options(runtime::Session const& session)
-{
-  return ava::plugin::PluginDiscoveryOptions{
-      .global_plugins_dir = session.paths().ava_config_dir / "plugins",
-      .project_plugins_dir = project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "plugins" : std::filesystem::path{}};
-}
-
-std::filesystem::path plugin_enablement_file(runtime::Session const& session)
-{
-  return session.paths().ava_state_dir / "plugin-enablement.json";
 }
 
 std::string namespaced_command(std::string_view prefix, std::string_view id, std::string_view name = {})
@@ -220,9 +209,9 @@ std::string namespaced_command(std::string_view prefix, std::string_view id, std
   return command;
 }
 
-void load_plugin_commands(RegistryBuilder& builder, runtime::Session const& session)
+void load_plugin_commands(RegistryBuilder& builder, runtime::Session const& session, ExtensionResourcePolicy const& policy)
 {
-  auto diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
+  auto diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
   for (auto const& failure : diagnostics.failures)
   {
     add_diagnostic(builder, CommandRegistryDiagnostic{.source = to_string(UnifiedCommandSource::PluginCommand),
@@ -286,13 +275,9 @@ ava::core::VoidResult ensure_mcp_prompt_server_permission(ava::tools::ToolContex
   return {};
 }
 
-void load_mcp_prompt_commands(RegistryBuilder& builder, runtime::Session& session, CommandRegistryOptions const& options)
+void load_mcp_prompt_commands(RegistryBuilder& builder, runtime::Session& session, CommandRegistryOptions const& options, ExtensionResourcePolicy const& policy)
 {
-  auto config_options = ava::mcp::default_mcp_config_options(session.workspace_dir());
-  config_options.global_config_file = session.paths().ava_config_dir / "mcp.json";
-  config_options.project_config_file =
-      project_resources_trusted(session.project_trust()) ? session.workspace_dir() / ".ava" / "mcp.json" : std::filesystem::path{};
-  auto config = ava::mcp::load_mcp_config(config_options);
+  auto config = ava::mcp::load_mcp_config(policy.mcp_config);
   if (!config)
   {
     add_diagnostic(builder, CommandRegistryDiagnostic{.source = to_string(UnifiedCommandSource::McpPrompt), .message = config.error().format()});
@@ -401,14 +386,15 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
   return files;
 }
 
-void load_skill_commands(RegistryBuilder& builder, runtime::Session const& session)
+void load_skill_commands(RegistryBuilder& builder, runtime::Session const& session, ExtensionResourcePolicy const& policy)
 {
-  auto plugin_diagnostics =
-      ava::plugin::collect_plugin_diagnostics(plugin_discovery_options(session), plugin_enablement_file(session), session.workspace_dir());
+  auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session.workspace_dir(),
+      .global_skill_dirs = policy.global_skill_dirs,
+      .project_skill_dirs = policy.project_skill_dirs,
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
-      .include_project_skills = project_resources_trusted(session.project_trust()),
+      .include_project_skills = policy.include_project_resources,
   });
   for (auto const& diagnostic : loaded.diagnostics)
   {
@@ -438,16 +424,17 @@ void load_skill_commands(RegistryBuilder& builder, runtime::Session const& sessi
 CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
 {
   RegistryBuilder builder;
+  auto const resource_policy = make_extension_resource_policy(*this);
   if (options.include_builtins)
     load_builtin_commands(builder);
   if (options.include_prompt_commands)
-    load_prompt_commands(builder, *this);
+    load_prompt_commands(builder, *this, resource_policy);
   if (options.include_plugin_commands)
-    load_plugin_commands(builder, *this);
+    load_plugin_commands(builder, *this, resource_policy);
   if (options.include_mcp_prompts)
-    load_mcp_prompt_commands(builder, *this, options);
+    load_mcp_prompt_commands(builder, *this, options, resource_policy);
   if (options.include_skills)
-    load_skill_commands(builder, *this);
+    load_skill_commands(builder, *this, resource_policy);
   return std::move(builder.registry);
 }
 
@@ -478,16 +465,10 @@ ava::core::VoidResult Session::replace_with(runtime::Session&& replacement)
   if (title_coordinator)
     resources().session_title_coordinator = std::move(title_coordinator);
 
-  // The delivery manager keeps a capsule and journal owner when work remains;
-  // otherwise its exact generation release allows another AVA process to
-  // activate this history.
-  if (leaves_detached_parent)
-  {
-    if (delivery_manager)
-      delivery_manager->release_detached_parent(detached_parent_id);
-    else if (coordinator)
-      static_cast<void>(coordinator->release_parent_if_idle(detached_parent_id));
-  }
+  // This is an explicit visible-session detach boundary. The delivery manager
+  // keeps the exact parent capsule while process-local work still needs it.
+  if (leaves_detached_parent && delivery_manager)
+    delivery_manager->release_detached_parent(detached_parent_id);
   return {};
 }
 
@@ -552,11 +533,13 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
 
 ava::core::VoidResult Session::apply_runtime_prompt_state(runtime::PromptState prompt_state)
 {
-  resolve_prompt_state() = ResolvedPromptState{.mode = prompt_state.mode,
-                                               .base_prompt = std::move(prompt_state.base_prompt),
-                                               .context_sources = std::move(prompt_state.context_sources),
-                                               .freshness_sources = std::move(prompt_state.freshness_sources),
-                                               .system_prompt = std::move(prompt_state.system_prompt)};
+  resolve_prompt_state() =
+      runtime::ResolvedPromptState{.mode = prompt_state.mode,
+                                   .base_prompt = std::move(prompt_state.base_prompt),
+                                   .context_sources = std::move(prompt_state.context_sources),
+                                   .freshness_sources = std::move(prompt_state.freshness_sources),
+                                   .system_prompt = std::move(prompt_state.system_prompt),
+                                   .ambient_extension_free_system_prompt = std::move(prompt_state.ambient_extension_free_system_prompt)};
   return refresh_parent_configuration();
 }
 
@@ -576,11 +559,13 @@ ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo mod
     return std::unexpected(std::move(appended.error()));
 
   model_selection().model = std::move(model);
-  resolve_prompt_state() = ResolvedPromptState{.mode = prompt_state->mode,
-                                               .base_prompt = std::move(prompt_state->base_prompt),
-                                               .context_sources = std::move(prompt_state->context_sources),
-                                               .freshness_sources = std::move(prompt_state->freshness_sources),
-                                               .system_prompt = std::move(prompt_state->system_prompt)};
+  resolve_prompt_state() =
+      runtime::ResolvedPromptState{.mode = prompt_state->mode,
+                                   .base_prompt = std::move(prompt_state->base_prompt),
+                                   .context_sources = std::move(prompt_state->context_sources),
+                                   .freshness_sources = std::move(prompt_state->freshness_sources),
+                                   .system_prompt = std::move(prompt_state->system_prompt),
+                                   .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   model_selection().reasoning = std::nullopt;
   if (auto refreshed = refresh_parent_configuration(); !refreshed)
     return std::unexpected(std::move(refreshed.error()));

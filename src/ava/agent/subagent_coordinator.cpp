@@ -3,14 +3,23 @@
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <exception>
-#include <unordered_set>
+#include <limits>
 #include <utility>
 
 namespace ava::agent {
 namespace {
+
+constexpr std::size_t kMaxIdBytes = 96;
+constexpr std::size_t kMaxSummaryBytes = 16U * 1024U;
+constexpr std::size_t kMaxErrorBytes = 4U * 1024U;
+constexpr std::size_t kMaxStopReasonBytes = 1024;
+constexpr std::size_t kMaxAccountingValue = 1024U * 1024U;
+constexpr std::size_t kMaxIdentityGenerationAttempts = 8;
+constexpr std::string_view kPublicationCommitStateContext = "subagent_publication_commit_state";
 
 ava::core::Error interaction_unavailable(std::string_view interaction, bool background)
 {
@@ -34,6 +43,97 @@ bool terminal(SubagentExecutionState state) noexcept
          state == SubagentExecutionState::Interrupted;
 }
 
+bool delivery_pending(SubagentDeliveryState state) noexcept
+{
+  return state == SubagentDeliveryState::Pending || state == SubagentDeliveryState::Attempting;
+}
+
+ava::core::Error& mark_unpublished(ava::core::Error& error)
+{
+  return error.with_context(std::string(kPublicationCommitStateContext), std::string(to_string(SubagentPublicationCommitState::ProvenUnpublished)));
+}
+
+ava::core::Error invalid_transition(std::string_view message, std::string_view job_id)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Tool, std::string(message));
+  error.with_context("job_id", std::string(job_id));
+  return error;
+}
+
+bool valid_identifier(std::string_view value) noexcept
+{
+  if (value.empty() || value.size() > kMaxIdBytes)
+    return false;
+  return std::ranges::all_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') || ch == '_' || ch == '-' || ch == '.' || ch == ':';
+  });
+}
+
+ava::core::VoidResult validate_identifier(std::string_view field, std::string_view value, std::string_view job_id)
+{
+  if (valid_identifier(value))
+    return {};
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent job identifier is empty, too long, or contains a forbidden character");
+  error.with_context("field", std::string(field)).with_context("max_bytes", std::to_string(kMaxIdBytes));
+  if (!job_id.empty())
+    error.with_context("job_id", std::string(job_id));
+  return std::unexpected(std::move(error));
+}
+
+ava::core::Result<std::string> generate_identity_candidate(SubagentCoordinatorOptions const& options, std::string_view prefix)
+{
+  try
+  {
+    auto candidate = options.id_generator ? options.id_generator(prefix) : ava::core::make_id(prefix);
+    auto const field = std::string(prefix) + "_id";
+    if (auto valid = validate_identifier(field, candidate, {}); !valid)
+      return std::unexpected(std::move(valid.error()));
+    return candidate;
+  }
+  catch (std::exception const& exception)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "subagent identity generation failed");
+    error.with_context("identity_kind", std::string(prefix)).with_context("cause", exception.what());
+    return std::unexpected(std::move(error));
+  }
+  catch (...)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "subagent identity generation failed");
+    error.with_context("identity_kind", std::string(prefix)).with_context("cause", "unknown exception");
+    return std::unexpected(std::move(error));
+  }
+}
+
+bool has_forbidden_text_control(std::string_view value) noexcept
+{
+  return std::ranges::any_of(value, [](char ch) {
+    auto const byte = static_cast<unsigned char>(ch);
+    return byte < 0x20U && ch != '\n' && ch != '\r' && ch != '\t';
+  });
+}
+
+bool truncate_utf8(std::string& value, std::size_t max_bytes)
+{
+  if (value.size() <= max_bytes)
+    return false;
+  std::size_t end = max_bytes;
+  while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0U) == 0x80U) --end;
+  value.resize(end);
+  return true;
+}
+
+bool normalize_text(std::string& value, std::size_t max_bytes, std::string_view fallback)
+{
+  bool changed = false;
+  if (!ava::core::json::is_valid_utf8(value) || has_forbidden_text_control(value))
+  {
+    value = fallback;
+    changed = true;
+  }
+  return truncate_utf8(value, max_bytes) || changed;
+}
+
 BackgroundJobCompletion exception_completion(std::string const& job_id, std::stop_token const& stop_token, std::string cause)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "background job worker threw an exception");
@@ -44,7 +144,7 @@ BackgroundJobCompletion exception_completion(std::string const& job_id, std::sto
           .error = std::move(error)};
 }
 
-BackgroundJobCompletion normalize(std::string const& job_id, BackgroundJobCompletion completion)
+BackgroundJobCompletion normalize_completion(std::string const& job_id, BackgroundJobCompletion completion)
 {
   if (completion.state == BackgroundJobState::Completed)
   {
@@ -77,60 +177,6 @@ BackgroundJobCompletion normalize(std::string const& job_id, BackgroundJobComple
     completion.error = std::move(error);
   }
   return completion;
-}
-
-JobJournalRecord terminal_record(SubagentJobIdentity const& identity, BackgroundJobCompletion const& completion, std::string at)
-{
-  JobJournalRecord record{.kind = JobJournalTransitionKind::Terminal,
-                          .identity = identity,
-                          .at = std::move(at),
-                          .provider_iterations = completion.provider_iterations,
-                          .tool_calls = completion.tool_calls,
-                          .tool_iterations = completion.tool_iterations};
-  if (completion.state == BackgroundJobState::Completed)
-  {
-    record.terminal_state = SubagentTerminalState::Completed;
-    record.summary = completion.final_text;
-    record.summary_truncated = false;
-    record.stop_reason = completion.stop_reason;
-    record.stop_reason_truncated = false;
-  }
-  else if (completion.state == BackgroundJobState::Canceled)
-  {
-    record.terminal_state = SubagentTerminalState::Canceled;
-    record.stop_reason = completion.stop_reason;
-    record.stop_reason_truncated = false;
-  }
-  else
-  {
-    record.terminal_state = SubagentTerminalState::Failed;
-    if (completion.error)
-    {
-      record.error_category = safe_subagent_error_category(*completion.error);
-      record.error = safe_subagent_error_message(*completion.error);
-    }
-    else
-    {
-      record.error_category = "unknown";
-      record.error = "subagent job failed";
-    }
-    record.error_truncated = false;
-  }
-  return record;
-}
-
-constexpr std::string_view kPublicationCommitStateContext = "subagent_publication_commit_state";
-
-ava::core::Error& with_publication_commit_state(ava::core::Error& error, SubagentPublicationCommitState state)
-{
-  return error.with_context(std::string(kPublicationCommitStateContext), std::string(to_string(state)));
-}
-
-ava::core::Error journal_publication_error(ava::core::Error const&, std::string const& job_id)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::Session, "subagent coordinator latched after a durable journal failure");
-  error.with_context("job_id", job_id);
-  return error;
 }
 
 }  // namespace
@@ -262,23 +308,17 @@ SubagentPublicationCommitState subagent_publication_commit_state(ava::core::Erro
   return SubagentPublicationCommitState::PublicationUncertain;
 }
 
-struct SubagentCoordinator::JournalState
-{
-  explicit JournalState(JobJournal journal_in) : journal(std::move(journal_in)) { }
-  JobJournal journal;
-  std::mutex mutex;
-};
-
 struct SubagentCoordinator::JobState
 {
   SubagentJobSnapshot snapshot;
-  std::shared_ptr<JournalState> journal;
   mutable std::mutex mutex;
   std::condition_variable changed;
   std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr;
-  bool live = false;
-  bool coordinator_latched = false;
-  std::optional<std::string> coordinator_error = std::nullopt;
+  bool published = false;
+  bool terminal_notification_pending = false;
+  bool terminal_notification_emitted = false;
+  bool delivery_exhausted = false;
+  std::size_t sequence = 0;
 };
 
 SubagentCoordinator::SubagentCoordinator(SubagentCoordinatorOptions options) : options_(std::move(options)), registry_(options_.registry_options)
@@ -287,19 +327,12 @@ SubagentCoordinator::SubagentCoordinator(SubagentCoordinatorOptions options) : o
 
 ava::core::Result<std::shared_ptr<SubagentCoordinator>> SubagentCoordinator::create(SubagentCoordinatorOptions options)
 {
-  if (options.ava_state_dir.empty() || !options.ava_state_dir.is_absolute() || options.ava_state_dir.lexically_normal() != options.ava_state_dir)
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent coordinator requires a normalized absolute AVA state directory"));
-  if (options.anchor_set)
+  if (options.registry_options.max_running_jobs == 0 || options.registry_options.max_retained_finished_jobs == 0 ||
+      options.registry_options.max_running_jobs > std::numeric_limits<std::size_t>::max() - options.registry_options.max_retained_finished_jobs)
   {
-    auto state_anchor = options.anchor_set->find_anchor(options.ava_state_dir);
-    if (!state_anchor || !state_anchor->relative().empty() || state_anchor->anchor().root != options.ava_state_dir)
-      return std::unexpected(
-          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent coordinator state directory must be an exact shared AnchorSet root"));
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent coordinator running and retained-job limits must be positive and bounded"));
   }
-  // Parent journals are activated only when their exact parent session is
-  // opened or addressed. Startup must not discover, recover, or retain owner
-  // leases for unrelated historical parents.
   return std::shared_ptr<SubagentCoordinator>(new SubagentCoordinator(std::move(options)));
 }
 
@@ -311,162 +344,63 @@ SubagentCoordinator::~SubagentCoordinator()
 SubagentCoordinator::StartAdmission::~StartAdmission()
 {
   std::lock_guard lock(coordinator_.mutex_);
-  auto found = coordinator_.active_starts_by_parent_.find(parent_session_id_);
-  if (found != coordinator_.active_starts_by_parent_.end() && --found->second == 0)
-    coordinator_.active_starts_by_parent_.erase(found);
+  --coordinator_.active_starts_;
   coordinator_.admission_changed_.notify_all();
 }
 
-ava::core::VoidResult SubagentCoordinator::activate_parent(std::string parent_session_id)
+std::shared_ptr<SubagentCoordinator::JobState> SubagentCoordinator::find_owned_locked(std::string_view parent_session_id, std::string_view job_id) const
 {
-  // Serializing activation under the coordinator mutex makes concurrent calls
-  // idempotent. No JournalState mutex is held while publishing the recovered
-  // projection, preserving the coordinator -> JobState lock order.
-  std::lock_guard lock(mutex_);
-  if (journals_.contains(parent_session_id))
-    return {};
-
-  auto opened = JobJournal::try_open_owned(options_.ava_state_dir, parent_session_id, options_.journal_limits, options_.anchor_set.get());
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
-  if (!*opened)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "subagent jobs for this parent are managed by another AVA process");
-    error.with_context("parent_session_id", parent_session_id).with_context("session_id", parent_session_id);
-    return std::unexpected(std::move(error));
-  }
-
-  // JobJournal takes its own journal lock while retaining the just-acquired
-  // owner lease. This is the sole recovery point for this activated parent.
-  auto projection = (*opened)->recover_interrupted_jobs();
-  if (!projection)
-    return std::unexpected(std::move(projection.error()));
-  auto journal = std::make_shared<JournalState>(std::move(**opened));
-  journals_.emplace(parent_session_id, journal);
-  for (auto const& snapshot : projection->jobs)
-  {
-    auto state = std::make_shared<JobState>();
-    state->snapshot = snapshot;
-    state->journal = journal;
-    jobs_.emplace(snapshot.identity.job_id, std::move(state));
-  }
-  return {};
+  auto found = jobs_.find(std::string(job_id));
+  if (found == jobs_.end())
+    return nullptr;
+  std::lock_guard state_lock(found->second->mutex);
+  if (!found->second->published || found->second->snapshot.identity.parent_session_id != parent_session_id)
+    return nullptr;
+  return found->second;
 }
 
-bool SubagentCoordinator::release_parent_if_idle(std::string_view parent_session_id)
+SubagentCoordinatorJobSnapshot SubagentCoordinator::public_snapshot_locked(JobState const& state, bool timed_out) const
 {
-  std::unordered_map<std::string, std::shared_ptr<JobState>> released_jobs;
-  std::shared_ptr<JournalState> released_journal;
+  return {.job = state.snapshot, .timed_out = timed_out, .coordinator_latched = false, .coordinator_error = std::nullopt};
+}
+
+bool SubagentCoordinator::erase_oldest_eligible_locked()
+{
+  auto oldest = jobs_.end();
+  std::size_t oldest_sequence = 0;
+  for (auto candidate = jobs_.begin(); candidate != jobs_.end(); ++candidate)
   {
-    std::lock_guard lock(mutex_);
-    // A start has not selected its journal until after admission. Retain this
-    // parent while one is in flight so release cannot win between admission,
-    // durable publication, and JobState publication; unrelated parents remain
-    // independently releasable.
-    if (active_starts_by_parent_.contains(std::string(parent_session_id)))
-      return false;
-    auto journal = journals_.find(std::string(parent_session_id));
-    if (journal == journals_.end())
-      return false;
-    for (auto const& [_, state] : jobs_)
+    std::lock_guard state_lock(candidate->second->mutex);
+    auto const& state = *candidate->second;
+    bool const eligible = state.published && terminal(state.snapshot.execution) &&
+                          (state.snapshot.delivery == SubagentDeliveryState::Direct || state.snapshot.delivery == SubagentDeliveryState::Acknowledged ||
+                           state.delivery_exhausted);
+    if (!eligible)
+      continue;
+    if (oldest == jobs_.end() || state.sequence < oldest_sequence)
     {
-      std::lock_guard state_lock(state->mutex);
-      if (state->snapshot.identity.parent_session_id != parent_session_id)
-        continue;
-      if (!terminal(state->snapshot.execution) || state->snapshot.delivery == SubagentDeliveryState::Pending ||
-          state->snapshot.delivery == SubagentDeliveryState::Attempting)
-        return false;
+      oldest = candidate;
+      oldest_sequence = state.sequence;
     }
-    for (auto job = jobs_.begin(); job != jobs_.end();)
-    {
-      std::lock_guard state_lock(job->second->mutex);
-      if (job->second->snapshot.identity.parent_session_id == parent_session_id)
-      {
-        released_jobs.emplace(job->first, std::move(job->second));
-        job = jobs_.erase(job);
-      }
-      else
-      {
-        ++job;
-      }
-    }
-    released_journal = std::move(journal->second);
-    journals_.erase(journal);
   }
-  // Destroy terminal state before the journal so no retained JobState keeps
-  // the per-parent owner descriptor alive after an accepted release.
-  released_jobs.clear();
-  released_journal.reset();
+  if (oldest == jobs_.end())
+    return false;
+  jobs_.erase(oldest);
   return true;
 }
 
-ava::core::Result<std::shared_ptr<SubagentCoordinator::JournalState>> SubagentCoordinator::journal_for_parent(std::string const& parent_session_id)
+void SubagentCoordinator::prune_eligible_locked()
 {
-  auto activated = activate_parent(parent_session_id);
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
-  std::lock_guard lock(mutex_);
-  return journals_.at(parent_session_id);
-}
-
-ava::core::Result<SubagentJobSnapshot> SubagentCoordinator::append_transition(std::shared_ptr<JobState> const& state, JobJournalRecord record)
-{
-  std::lock_guard journal_lock(state->journal->mutex);
-  if (options_.journal_append_preflight)
+  std::size_t eligible = 0;
+  for (auto const& [_, state] : jobs_)
   {
-    if (auto allowed = options_.journal_append_preflight(record); !allowed)
-    {
-      auto error = std::move(allowed.error());
-      error.with_context("subagent_journal_preflight_rejected", "true");
-      return std::unexpected(std::move(error));
-    }
+    std::lock_guard state_lock(state->mutex);
+    if (state->published && terminal(state->snapshot.execution) &&
+        (state->snapshot.delivery == SubagentDeliveryState::Direct || state->snapshot.delivery == SubagentDeliveryState::Acknowledged ||
+         state->delivery_exhausted))
+      ++eligible;
   }
-  auto projection = state->journal->journal.append(record);
-  if (!projection)
-    return std::unexpected(std::move(projection.error()));
-  auto projected = projection->find(record.identity.job_id);
-  if (projected == nullptr)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "durable journal projection omitted the transitioned job"));
-  std::lock_guard state_lock(state->mutex);
-  state->snapshot = *projected;
-  state->changed.notify_all();
-  return state->snapshot;
-}
-
-void SubagentCoordinator::latch(std::shared_ptr<JobState> const& state, ava::core::Error const& error)
-{
-  auto formatted = error.format();
-  if (formatted.size() > options_.journal_limits.max_error_bytes)
-    formatted.resize(options_.journal_limits.max_error_bytes);
-  // Keep the coordinator -> JobState order used by list, lookup, retention,
-  // and shutdown. Callers must release JournalState before entering here.
-  std::lock_guard coordinator_lock(mutex_);
-  coordinator_latched_ = true;
-  accepting_ = false;
-  std::lock_guard state_lock(state->mutex);
-  state->coordinator_latched = true;
-  state->coordinator_error = std::move(formatted);
-}
-
-void SubagentCoordinator::synchronize_registry_retention()
-{
-  auto snapshots = registry_.snapshot();
-  std::unordered_set<std::string> retained;
-  retained.reserve(snapshots.size());
-  for (auto const& snapshot : snapshots) retained.insert(snapshot.job_id);
-  std::lock_guard lock(mutex_);
-  for (auto job = jobs_.begin(); job != jobs_.end();)
-  {
-    bool live = false;
-    {
-      std::lock_guard state_lock(job->second->mutex);
-      live = job->second->live;
-    }
-    if (live && !retained.contains(job->first))
-      job = jobs_.erase(job);
-    else
-      ++job;
-  }
+  while (eligible > options_.registry_options.max_retained_finished_jobs && erase_oldest_eligible_locked()) --eligible;
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
@@ -474,45 +408,132 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
                                                                              std::shared_ptr<SubagentInteractionGate> interaction_gate)
 {
   if (!worker)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "background job worker is unavailable"));
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "background job worker is unavailable");
+    mark_unpublished(error);
+    return std::unexpected(std::move(error));
+  }
+  if (auto valid = validate_identifier("parent_session_id", parent_session_id, {}); !valid)
+  {
+    auto error = std::move(valid.error());
+    mark_unpublished(error);
+    return std::unexpected(std::move(error));
+  }
+  if (auto valid = validate_identifier("child_session_id", options.child_session_id, {}); !valid)
+  {
+    auto error = std::move(valid.error());
+    mark_unpublished(error);
+    return std::unexpected(std::move(error));
+  }
+
+  std::shared_ptr<JobState> state;
+  SubagentJobIdentity identity;
   {
     std::lock_guard lock(mutex_);
     if (!accepting_)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, coordinator_latched_ ? "subagent coordinator is latched after a journal failure"
-                                                                                                   : "subagent coordinator is shutting down"));
-    ++active_starts_by_parent_[parent_session_id];
-  }
-  StartAdmission admission(*this, parent_session_id);
-  auto journal = journal_for_parent(parent_session_id);
-  if (!journal)
-    return std::unexpected(std::move(journal.error()));
-  SubagentJobIdentity identity{.job_id = ava::core::make_id("job"),
-                               .task_id = options.child_session_id,
-                               .parent_session_id = std::move(parent_session_id),
-                               .child_session_id = options.child_session_id,
-                               .delivery_id = ava::core::make_id("delivery")};
-  auto state = std::make_shared<JobState>();
-  state->journal = *journal;
-  state->interaction_gate = std::move(interaction_gate);
-  auto started_at = ava::session::now_timestamp();
-  auto started = append_transition(state, JobJournalRecord{.kind = JobJournalTransitionKind::Started, .identity = identity, .at = started_at, .mode = mode});
-  if (!started)
-  {
-    auto error = std::move(started.error());
-    // The test preflight runs before JobJournal mutation; any actual append
-    // error is conservatively uncertain because an fsync/write failure may
-    // have reached durable storage.
-    if (std::ranges::any_of(error.context(), [](ava::core::ErrorContext const& context) {
-          return context.key == "subagent_journal_preflight_rejected" && context.value == "true";
-        }))
     {
-      with_publication_commit_state(error, SubagentPublicationCommitState::ProvenUnpublished);
+      auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "subagent coordinator is shutting down");
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
     }
+    ++active_starts_;
+  }
+  StartAdmission admission(*this);
+
+  auto require_capacity_locked = [&]() -> ava::core::VoidResult {
+    prune_eligible_locked();
+    auto const hard_cap = options_.registry_options.max_running_jobs + options_.registry_options.max_retained_finished_jobs;
+    while (jobs_.size() >= hard_cap && erase_oldest_eligible_locked())
+    {
+    }
+    if (jobs_.size() < hard_cap)
+      return {};
+    auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "subagent coordinator state limit reached by active or pending jobs");
+    error.with_context("max_running_jobs", std::to_string(options_.registry_options.max_running_jobs))
+        .with_context("max_retained_finished_jobs", std::to_string(options_.registry_options.max_retained_finished_jobs));
+    return std::unexpected(std::move(error));
+  };
+  {
+    std::lock_guard lock(mutex_);
+    if (auto capacity = require_capacity_locked(); !capacity)
+    {
+      auto error = std::move(capacity.error());
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
+  }
+
+  for (std::size_t attempt = 0; attempt < kMaxIdentityGenerationAttempts && !state; ++attempt)
+  {
+    auto job_id = generate_identity_candidate(options_, "job");
+    if (!job_id)
+    {
+      auto error = std::move(job_id.error());
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
+    auto delivery_id = generate_identity_candidate(options_, "delivery");
+    if (!delivery_id)
+    {
+      auto error = std::move(delivery_id.error());
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
+
+    auto candidate = std::make_shared<JobState>();
+    auto const now = ava::session::now_timestamp();
+    candidate->snapshot = {.schema_version = kSubagentJobContractVersion,
+                           .identity = {.job_id = std::move(*job_id),
+                                        .task_id = options.child_session_id,
+                                        .parent_session_id = parent_session_id,
+                                        .child_session_id = options.child_session_id,
+                                        .delivery_id = std::move(*delivery_id)},
+                           .mode = mode,
+                           .execution = SubagentExecutionState::Starting,
+                           .delivery = SubagentDeliveryState::Direct,
+                           .started_at = now,
+                           .updated_at = now};
+    candidate->interaction_gate = interaction_gate;
+
+    std::lock_guard lock(mutex_);
+    if (auto capacity = require_capacity_locked(); !capacity)
+    {
+      auto error = std::move(capacity.error());
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
+    if (jobs_.contains(candidate->snapshot.identity.job_id))
+      continue;
+    bool delivery_id_exists = false;
+    for (auto const& [_, current] : jobs_)
+    {
+      std::lock_guard state_lock(current->mutex);
+      if (current->snapshot.identity.delivery_id == candidate->snapshot.identity.delivery_id)
+      {
+        delivery_id_exists = true;
+        break;
+      }
+    }
+    if (delivery_id_exists)
+      continue;
+    candidate->sequence = next_job_sequence_;
+    auto [_, inserted] = jobs_.emplace(candidate->snapshot.identity.job_id, candidate);
+    if (!inserted)
+      continue;
+    ++next_job_sequence_;
+    identity = candidate->snapshot.identity;
+    state = std::move(candidate);
+  }
+  if (!state)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to allocate unique subagent job and delivery identities");
+    error.with_context("attempts", std::to_string(kMaxIdentityGenerationAttempts));
+    mark_unpublished(error);
     return std::unexpected(std::move(error));
   }
 
   options.job_id = identity.job_id;
-  auto published = registry_.start(std::move(options), [this, state, worker = std::move(worker)](BackgroundJobContext const& context) mutable {
+  auto started = registry_.start(std::move(options), [this, state, worker = std::move(worker)](BackgroundJobContext const& context) mutable {
     BackgroundJobCompletion completion;
     try
     {
@@ -526,52 +547,40 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
     {
       completion = exception_completion(context.job_id, context.stop_token, "unknown exception");
     }
-    return persist_terminal(state, std::move(completion));
+    return complete(state, std::move(completion));
   });
-  if (!published)
+  if (!started)
   {
-    auto publication_error = std::move(published.error());
-    ava::core::Result<SubagentJobProjection> rolled_back =
-        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "unpublished-start rollback was not attempted"));
     {
-      std::lock_guard journal_lock(state->journal->mutex);
-      if (options_.journal_rollback_preflight)
-      {
-        if (auto allowed = options_.journal_rollback_preflight(identity); !allowed)
-          rolled_back = std::unexpected(std::move(allowed.error()));
-        else
-          rolled_back = state->journal->journal.rollback_unpublished_started(identity);
-      }
-      else
-      {
-        rolled_back = state->journal->journal.rollback_unpublished_started(identity);
-      }
+      std::lock_guard lock(mutex_);
+      auto found = jobs_.find(identity.job_id);
+      if (found != jobs_.end() && found->second == state)
+        jobs_.erase(found);
     }
-    if (rolled_back)
-    {
-      with_publication_commit_state(publication_error, SubagentPublicationCommitState::ProvenUnpublished);
-    }
-    else
-    {
-      // Keep the durable Started record and child identity for startup
-      // recovery. AgentLoop sees PublicationUncertain and must not delete it.
-      latch(state, rolled_back.error());
-      publication_error.with_context("journal_rollback_failure", rolled_back.error().format());
-      with_publication_commit_state(publication_error, SubagentPublicationCommitState::PublicationUncertain);
-    }
-    return std::unexpected(std::move(publication_error));
+    auto error = std::move(started.error());
+    mark_unpublished(error);
+    return std::unexpected(std::move(error));
   }
+
+  SubagentCoordinatorJobSnapshot result;
   {
+    std::lock_guard lock(mutex_);
     std::lock_guard state_lock(state->mutex);
-    state->live = true;
+    if (state->snapshot.execution == SubagentExecutionState::Starting)
+    {
+      state->snapshot.execution = SubagentExecutionState::Running;
+      state->snapshot.updated_at = ava::session::now_timestamp();
+    }
+    state->published = true;
+    result = public_snapshot_locked(*state);
+    state->changed.notify_all();
   }
   {
     std::lock_guard lock(mutex_);
-    jobs_.emplace(identity.job_id, state);
+    prune_eligible_locked();
   }
-  synchronize_registry_retention();
-  std::lock_guard state_lock(state->mutex);
-  return public_snapshot_locked(*state);
+  publish_terminal_notification(state);
+  return result;
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_background(std::string parent_session_id, BackgroundJobStartOptions options,
@@ -580,194 +589,124 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_bac
   return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker));
 }
 
-BackgroundJobCompletion SubagentCoordinator::persist_terminal(std::shared_ptr<JobState> const& state, BackgroundJobCompletion completion)
+BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> const& state, BackgroundJobCompletion completion)
 {
   std::string job_id;
-  SubagentJobIdentity identity;
   {
-    std::lock_guard lock(state->mutex);
-    identity = state->snapshot.identity;
-    job_id = identity.job_id;
+    std::lock_guard state_lock(state->mutex);
+    job_id = state->snapshot.identity.job_id;
   }
-  completion = normalize(job_id, std::move(completion));
-  auto const at = ava::session::now_timestamp();
-  ava::core::Result<SubagentJobProjection> persisted =
-      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "terminal journal preflight failed"));
-  bool preflight_failed = false;
-  bool projection_missing = false;
+  completion = normalize_completion(job_id, std::move(completion));
+  auto const now = ava::session::now_timestamp();
   {
-    // Promotion and completion serialize on the durable journal lock. The
-    // mode observed here therefore decides atomically whether terminal output
-    // is direct or requires background delivery.
-    std::lock_guard journal_lock(state->journal->mutex);
-    SubagentJobMode mode = SubagentJobMode::Foreground;
+    std::lock_guard state_lock(state->mutex);
+    if (terminal(state->snapshot.execution))
+      return completion;
+    state->snapshot.terminal_at = now;
+    state->snapshot.updated_at = now;
+    state->snapshot.provider_iterations = std::min(completion.provider_iterations, kMaxAccountingValue);
+    state->snapshot.tool_calls = std::min(completion.tool_calls, kMaxAccountingValue);
+    state->snapshot.tool_iterations = std::min(completion.tool_iterations, kMaxAccountingValue);
+    if (completion.state == BackgroundJobState::Completed)
     {
-      std::lock_guard state_lock(state->mutex);
-      mode = state->snapshot.mode;
+      state->snapshot.execution = SubagentExecutionState::Completed;
+      state->snapshot.summary = std::move(completion.final_text);
+      state->snapshot.summary_truncated = normalize_text(*state->snapshot.summary, kMaxSummaryBytes, "subagent output unavailable");
+      state->snapshot.stop_reason = std::move(completion.stop_reason);
+      state->snapshot.stop_reason_truncated = normalize_text(*state->snapshot.stop_reason, kMaxStopReasonBytes, "completed");
     }
-    std::vector<JobJournalRecord> records{terminal_record(identity, completion, at)};
-    if (mode == SubagentJobMode::Background)
-      records.push_back(JobJournalRecord{.kind = JobJournalTransitionKind::DeliveryPending, .identity = identity, .at = at});
-    for (auto const& record : records)
+    else if (completion.state == BackgroundJobState::Canceled)
     {
-      if (options_.journal_append_preflight)
-      {
-        if (auto allowed = options_.journal_append_preflight(record); !allowed)
-        {
-          persisted = std::unexpected(std::move(allowed.error()));
-          preflight_failed = true;
-          break;
-        }
-      }
+      state->snapshot.execution = SubagentExecutionState::Canceled;
+      state->snapshot.stop_reason = std::move(completion.stop_reason);
+      state->snapshot.stop_reason_truncated = normalize_text(*state->snapshot.stop_reason, kMaxStopReasonBytes, "canceled");
     }
-    if (!preflight_failed)
-      persisted = records.size() == 1 ? state->journal->journal.append(records.front()) : state->journal->journal.append_batch(records);
-    if (persisted)
+    else
     {
-      auto projected = persisted->find(job_id);
-      if (projected == nullptr)
-      {
-        projection_missing = true;
-      }
-      else
-      {
-        std::lock_guard state_lock(state->mutex);
-        state->snapshot = *projected;
-        state->changed.notify_all();
-      }
+      state->snapshot.execution = SubagentExecutionState::Failed;
+      state->snapshot.error_category = completion.error ? safe_subagent_error_category(*completion.error) : "unknown";
+      state->snapshot.error = completion.error ? safe_subagent_error_message(*completion.error) : "subagent job failed";
+      state->snapshot.error_truncated = normalize_text(*state->snapshot.error, kMaxErrorBytes, "subagent job failed");
     }
+    if (state->snapshot.mode == SubagentJobMode::Background)
+    {
+      state->snapshot.delivery = SubagentDeliveryState::Pending;
+      state->snapshot.delivery_pending_at = now;
+      state->terminal_notification_pending = true;
+    }
+    state->changed.notify_all();
   }
-  if (!persisted)
+  publish_terminal_notification(state);
   {
-    latch(state, persisted.error());
-    auto error = journal_publication_error(persisted.error(), job_id);
-    return {.state = BackgroundJobState::Failed, .final_text = {}, .stop_reason = "journal_failure", .error = std::move(error)};
+    std::lock_guard lock(mutex_);
+    prune_eligible_locked();
   }
-  if (projection_missing)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "durable terminal projection omitted the subagent job");
-    latch(state, error);
-    return {.state = BackgroundJobState::Failed, .final_text = {}, .stop_reason = "journal_failure", .error = std::move(error)};
-  }
+  return completion;
+}
 
-  // Delivery notification is deliberately outside all coordinator, state, and
-  // journal locks. A sink is advisory: even allocation/copy failures while
-  // materializing the notification cannot rewrite durable child completion.
+void SubagentCoordinator::publish_terminal_notification(std::shared_ptr<JobState> const& state) noexcept
+{
   try
   {
     SubagentTerminalSink sink;
     SubagentCoordinatorJobSnapshot notification;
     {
-      std::lock_guard coordinator_lock(mutex_);
-      sink = terminal_sink_;
+      std::lock_guard lock(mutex_);
       std::lock_guard state_lock(state->mutex);
-      if (state->snapshot.delivery == SubagentDeliveryState::Pending || state->snapshot.delivery == SubagentDeliveryState::Attempting)
-        notification = public_snapshot_locked(*state);
-      else
-        sink = nullptr;
+      if (!state->published || !state->terminal_notification_pending || state->terminal_notification_emitted || state->delivery_exhausted || !terminal_sink_)
+        return;
+      sink = terminal_sink_;
+      notification = public_snapshot_locked(*state);
+      state->terminal_notification_emitted = true;
     }
-    if (sink)
-      sink(notification);
+    sink(notification);
   }
   catch (...)
   {
   }
-  return completion;
-}
-
-std::shared_ptr<SubagentCoordinator::JobState> SubagentCoordinator::find_owned_locked(std::string_view parent_session_id, std::string_view job_id) const
-{
-  auto found = jobs_.find(std::string(job_id));
-  if (found == jobs_.end())
-    return nullptr;
-  std::lock_guard state_lock(found->second->mutex);
-  if (found->second->snapshot.identity.parent_session_id != parent_session_id)
-    return nullptr;
-  return found->second;
-}
-
-ava::core::Result<std::shared_ptr<SubagentCoordinator::JobState>> SubagentCoordinator::restore_owned(std::string_view parent_session_id,
-                                                                                                     std::string_view job_id)
-{
-  auto journal = journal_for_parent(std::string(parent_session_id));
-  if (!journal)
-    return std::unexpected(std::move(journal.error()));
-  ava::core::Result<SubagentJobProjection> projection =
-      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "subagent journal projection was not loaded"));
-  {
-    std::lock_guard journal_lock((*journal)->mutex);
-    projection = (*journal)->journal.projection();
-  }
-  if (!projection)
-    return std::unexpected(std::move(projection.error()));
-  auto const* restored = projection->find(job_id);
-  if (!restored || restored->identity.parent_session_id != parent_session_id)
-    return std::unexpected(not_found(job_id));
-  auto candidate = std::make_shared<JobState>();
-  candidate->snapshot = *restored;
-  candidate->journal = *journal;
-  std::lock_guard lock(mutex_);
-  if (auto existing = find_owned_locked(parent_session_id, job_id))
-    return existing;
-  jobs_.emplace(restored->identity.job_id, candidate);
-  return candidate;
-}
-
-SubagentCoordinatorJobSnapshot SubagentCoordinator::public_snapshot_locked(JobState const& state, bool timed_out) const
-{
-  return {.job = state.snapshot, .timed_out = timed_out, .coordinator_latched = state.coordinator_latched, .coordinator_error = state.coordinator_error};
 }
 
 std::vector<SubagentCoordinatorJobSnapshot> SubagentCoordinator::list(std::string_view parent_session_id) const
 {
-  std::vector<SubagentCoordinatorJobSnapshot> result;
-  std::lock_guard lock(mutex_);
-  for (auto const& [_, state] : jobs_)
+  std::vector<std::pair<std::size_t, SubagentCoordinatorJobSnapshot>> ordered;
   {
-    std::lock_guard state_lock(state->mutex);
-    if (state->snapshot.identity.parent_session_id == parent_session_id)
-      result.push_back(public_snapshot_locked(*state));
+    std::lock_guard lock(mutex_);
+    for (auto const& [_, state] : jobs_)
+    {
+      std::lock_guard state_lock(state->mutex);
+      if (state->published && state->snapshot.identity.parent_session_id == parent_session_id)
+        ordered.emplace_back(state->sequence, public_snapshot_locked(*state));
+    }
   }
-  std::ranges::sort(result, [](auto const& left, auto const& right) {
-    if (left.job.started_at != right.job.started_at)
-      return left.job.started_at < right.job.started_at;
-    return left.job.identity.job_id < right.job.identity.job_id;
-  });
+  std::ranges::sort(ordered, [](auto const& left, auto const& right) { return left.first < right.first; });
+  std::vector<SubagentCoordinatorJobSnapshot> result;
+  result.reserve(ordered.size());
+  for (auto& [_, snapshot] : ordered) result.push_back(std::move(snapshot));
   return result;
 }
 
 ava::core::Result<std::vector<SubagentCoordinatorJobSnapshot>> SubagentCoordinator::pending_deliveries(std::string_view parent_session_id)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
-  std::shared_ptr<JournalState> journal;
+  std::vector<std::pair<std::size_t, SubagentCoordinatorJobSnapshot>> ordered;
   {
     std::lock_guard lock(mutex_);
-    journal = journals_.at(std::string(parent_session_id));
+    for (auto const& [_, state] : jobs_)
+    {
+      std::lock_guard state_lock(state->mutex);
+      if (state->published && state->snapshot.identity.parent_session_id == parent_session_id && delivery_pending(state->snapshot.delivery) &&
+          !state->delivery_exhausted)
+        ordered.emplace_back(state->sequence, public_snapshot_locked(*state));
+    }
   }
-  ava::core::Result<SubagentJobProjection> projection =
-      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "subagent journal projection was not loaded"));
-  {
-    std::lock_guard journal_lock(journal->mutex);
-    projection = journal->journal.projection();
-  }
-  if (!projection)
-    return std::unexpected(std::move(projection.error()));
-  std::vector<SubagentCoordinatorJobSnapshot> pending;
-  for (auto const& job : projection->jobs)
-  {
-    if (job.delivery == SubagentDeliveryState::Pending || job.delivery == SubagentDeliveryState::Attempting)
-      pending.push_back(SubagentCoordinatorJobSnapshot{.job = job});
-  }
-  return pending;
+  std::ranges::sort(ordered, [](auto const& left, auto const& right) { return left.first < right.first; });
+  std::vector<SubagentCoordinatorJobSnapshot> result;
+  result.reserve(ordered.size());
+  for (auto& [_, snapshot] : ordered) result.push_back(std::move(snapshot));
+  return result;
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::snapshot(std::string_view parent_session_id, std::string_view job_id)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
@@ -782,9 +721,6 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::snapshot(
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::wait(std::string_view parent_session_id, std::string_view job_id,
                                                                             std::chrono::milliseconds timeout, SubagentWaitMode mode)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
@@ -794,34 +730,25 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::wait(std:
     return std::unexpected(not_found(job_id));
 
   auto const deadline = std::chrono::steady_clock::now() + timeout;
-  auto const ready = [&] {
-    return !state->live || terminal(state->snapshot.execution) || (mode == SubagentWaitMode::TerminalOrPromotion && state->snapshot.was_promoted);
-  };
   std::unique_lock state_lock(state->mutex);
+  auto const ready = [&] { return terminal(state->snapshot.execution) || (mode == SubagentWaitMode::TerminalOrPromotion && state->snapshot.was_promoted); };
   if (!ready() && !state->changed.wait_for(state_lock, timeout, ready))
     return public_snapshot_locked(*state, true);
   bool const is_terminal = terminal(state->snapshot.execution);
-  bool const was_live = state->live;
-  bool const was_promoted = state->snapshot.was_promoted;
-  auto gate = state->interaction_gate;
   auto result = public_snapshot_locked(*state);
   state_lock.unlock();
-  if (was_promoted && gate)
-    gate->commit_promotion();
-  if (is_terminal && was_live)
+
+  if (is_terminal)
   {
     auto const now = std::chrono::steady_clock::now();
     auto const remaining = now < deadline ? std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now) : std::chrono::milliseconds(0);
     auto registry_snapshot = registry_.wait_snapshot(job_id, remaining);
-    if (!registry_snapshot)
-      return std::unexpected(std::move(registry_snapshot.error()));
-    if (registry_snapshot->timed_out)
+    if (registry_snapshot && registry_snapshot->timed_out)
       result.timed_out = true;
-    else
-    {
+    else if (registry_snapshot)
       static_cast<void>(registry_.join_finished());
-      synchronize_registry_retention();
-    }
+    // A low-level record may already have been joined and pruned. The
+    // coordinator's terminal state remains authoritative in that case.
   }
   return result;
 }
@@ -842,9 +769,6 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::result(st
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::cancel(std::string_view parent_session_id, std::string_view job_id)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
@@ -852,248 +776,268 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::cancel(st
   }
   if (!state)
     return std::unexpected(not_found(job_id));
-  SubagentJobSnapshot current;
+
+  bool request_registry_cancel = false;
   {
     std::lock_guard state_lock(state->mutex);
-    current = state->snapshot;
-  }
-  if (!terminal(current.execution) && !current.cancel_requested)
-  {
-    auto appended = append_transition(
-        state, JobJournalRecord{.kind = JobJournalTransitionKind::CancelRequested, .identity = current.identity, .at = ava::session::now_timestamp()});
-    if (!appended)
+    if (!terminal(state->snapshot.execution) && !state->snapshot.cancel_requested)
     {
-      // Completion may have won after the caller's snapshot but before the
-      // journal lock. In that case cancellation is already idempotently done.
-      auto latest = snapshot(parent_session_id, job_id);
-      if (latest && terminal(latest->job.execution))
-        return latest;
-      latch(state, appended.error());
-      static_cast<void>(registry_.cancel(job_id));
-      return std::unexpected(std::move(appended.error()));
+      state->snapshot.cancel_requested = true;
+      state->snapshot.cancel_requested_at = ava::session::now_timestamp();
+      state->snapshot.updated_at = *state->snapshot.cancel_requested_at;
+      state->changed.notify_all();
     }
+    request_registry_cancel = !terminal(state->snapshot.execution);
   }
-  if (!terminal(current.execution))
+  if (request_registry_cancel)
   {
     auto canceled = registry_.cancel(job_id);
     if (!canceled)
-      return std::unexpected(std::move(canceled.error()));
-  }
-  return snapshot(parent_session_id, job_id);
-}
-
-ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::promote(std::string_view parent_session_id, std::string_view job_id)
-{
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
-  std::shared_ptr<JobState> state;
-  {
-    std::lock_guard lock(mutex_);
-    state = find_owned_locked(parent_session_id, job_id);
-  }
-  if (!state)
-    return std::unexpected(not_found(job_id));
-
-  SubagentJobSnapshot current;
-  std::shared_ptr<SubagentInteractionGate> gate;
-  {
-    std::lock_guard state_lock(state->mutex);
-    current = state->snapshot;
-    gate = state->interaction_gate;
-    if (terminal(current.execution) || current.was_promoted)
-      return public_snapshot_locked(*state);
-  }
-  if (current.mode != SubagentJobMode::Foreground)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "only a running foreground subagent can be promoted");
-    error.with_context("job_id", std::string(job_id));
-    return std::unexpected(std::move(error));
-  }
-  if (current.cancel_requested)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "cannot promote a subagent after cancellation was requested");
-    error.with_context("job_id", std::string(job_id));
-    return std::unexpected(std::move(error));
-  }
-  if (gate)
-  {
-    if (auto prepared = gate->prepare_promotion(); !prepared)
-      return std::unexpected(std::move(prepared.error()));
-  }
-  auto promoted =
-      append_transition(state, JobJournalRecord{.kind = JobJournalTransitionKind::Promoted, .identity = current.identity, .at = ava::session::now_timestamp()});
-  if (!promoted)
-  {
-    auto latest = snapshot(parent_session_id, job_id);
-    if (latest && terminal(latest->job.execution))
     {
-      if (gate)
-        gate->abort_promotion();
-      return latest;
+      std::lock_guard state_lock(state->mutex);
+      if (!terminal(state->snapshot.execution))
+        return std::unexpected(std::move(canceled.error()));
     }
-    if (latest && latest->job.was_promoted)
-    {
-      if (gate)
-        gate->commit_promotion();
-      return latest;
-    }
-    if (latest && latest->job.cancel_requested)
-    {
-      if (gate)
-        gate->abort_promotion();
-      auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "cannot promote a subagent after cancellation was requested");
-      error.with_context("job_id", std::string(job_id));
-      return std::unexpected(std::move(error));
-    }
-    bool const proven_preflight_failure = std::ranges::any_of(promoted.error().context(), [](ava::core::ErrorContext const& context) {
-      return context.key == "subagent_journal_preflight_rejected" && context.value == "true";
-    });
-    if (gate)
-    {
-      if (proven_preflight_failure)
-        gate->abort_promotion();
-      else
-        // A write/fsync failure can leave the Promoted record durable. Fail
-        // closed by releasing frontend callbacks even though publication is
-        // uncertain and the coordinator is latched.
-        gate->commit_promotion();
-    }
-    latch(state, promoted.error());
-    return std::unexpected(std::move(promoted.error()));
   }
-  if (gate)
-    gate->commit_promotion();
   std::lock_guard state_lock(state->mutex);
   return public_snapshot_locked(*state);
 }
 
-void SubagentCoordinator::set_terminal_sink(SubagentTerminalSink sink)
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::promote(std::string_view parent_session_id, std::string_view job_id)
 {
-  std::vector<SubagentCoordinatorJobSnapshot> pending;
+  std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
-    terminal_sink_ = sink;
-    if (sink)
+    state = find_owned_locked(parent_session_id, job_id);
+  }
+  if (!state)
+    return std::unexpected(not_found(job_id));
+
+  std::shared_ptr<SubagentInteractionGate> gate;
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (terminal(state->snapshot.execution) || state->snapshot.was_promoted)
+      return public_snapshot_locked(*state);
+    if (state->snapshot.mode != SubagentJobMode::Foreground)
+      return std::unexpected(invalid_transition("only a running foreground subagent can be promoted", job_id));
+    if (state->snapshot.cancel_requested)
+      return std::unexpected(invalid_transition("cannot promote a subagent after cancellation was requested", job_id));
+    gate = state->interaction_gate;
+  }
+  if (gate)
+    if (auto prepared = gate->prepare_promotion(); !prepared)
+      return std::unexpected(std::move(prepared.error()));
+
+  bool commit_gate = false;
+  bool cancellation_won = false;
+  SubagentCoordinatorJobSnapshot result;
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (terminal(state->snapshot.execution))
+    {
+      result = public_snapshot_locked(*state);
+    }
+    else if (state->snapshot.cancel_requested)
+    {
+      cancellation_won = true;
+    }
+    else
+    {
+      if (!state->snapshot.was_promoted)
+      {
+        state->snapshot.mode = SubagentJobMode::Background;
+        state->snapshot.was_promoted = true;
+        state->snapshot.promoted_at = ava::session::now_timestamp();
+        state->snapshot.updated_at = *state->snapshot.promoted_at;
+        state->changed.notify_all();
+      }
+      commit_gate = true;
+      result = public_snapshot_locked(*state);
+    }
+  }
+  if (gate)
+  {
+    if (commit_gate)
+      gate->commit_promotion();
+    else
+      gate->abort_promotion();
+  }
+  if (cancellation_won)
+    return std::unexpected(invalid_transition("cannot promote a subagent after cancellation was requested", job_id));
+  return result;
+}
+
+void SubagentCoordinator::set_terminal_sink(SubagentTerminalSink sink)
+{
+  std::vector<std::shared_ptr<JobState>> pending;
+  {
+    std::lock_guard lock(mutex_);
+    terminal_sink_ = std::move(sink);
+    if (terminal_sink_)
     {
       for (auto const& [_, state] : jobs_)
       {
         std::lock_guard state_lock(state->mutex);
-        if (state->snapshot.delivery == SubagentDeliveryState::Pending || state->snapshot.delivery == SubagentDeliveryState::Attempting)
-          pending.push_back(public_snapshot_locked(*state));
+        if (state->published && state->terminal_notification_pending && !state->terminal_notification_emitted && !state->delivery_exhausted)
+          pending.push_back(state);
       }
     }
   }
-  for (auto const& notification : pending)
-  {
-    try
-    {
-      sink(notification);
-    }
-    catch (...)
-    {
-    }
-  }
+  for (auto const& state : pending) publish_terminal_notification(state);
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::record_delivery_attempt(std::string_view parent_session_id, std::string_view job_id,
                                                                                                std::string attempt_id, std::string prompt_fingerprint)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
+  if (auto valid = validate_identifier("attempt_id", attempt_id, job_id); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_identifier("prompt_fingerprint", prompt_fingerprint, job_id); !valid)
+    return std::unexpected(std::move(valid.error()));
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
     state = find_owned_locked(parent_session_id, job_id);
   }
   if (!state)
-  {
-    auto restored = restore_owned(parent_session_id, job_id);
-    if (!restored)
-      return std::unexpected(std::move(restored.error()));
-    state = std::move(*restored);
-  }
-  SubagentJobIdentity identity;
-  {
-    std::lock_guard state_lock(state->mutex);
-    identity = state->snapshot.identity;
-  }
-  auto appended = append_transition(state, JobJournalRecord{.kind = JobJournalTransitionKind::DeliveryAttempt,
-                                                            .identity = std::move(identity),
-                                                            .at = ava::session::now_timestamp(),
-                                                            .attempt_id = std::move(attempt_id),
-                                                            .prompt_fingerprint = std::move(prompt_fingerprint)});
-  if (!appended)
-    return std::unexpected(std::move(appended.error()));
+    return std::unexpected(not_found(job_id));
+
   std::lock_guard state_lock(state->mutex);
+  if (!terminal(state->snapshot.execution) || !delivery_pending(state->snapshot.delivery) || state->delivery_exhausted)
+    return std::unexpected(invalid_transition("subagent delivery is not pending", job_id));
+  if (!state->snapshot.delivery_attempt_history.empty() && state->snapshot.delivery_attempt_history.back().attempt_id == attempt_id)
+  {
+    if (state->snapshot.delivery_attempt_history.back().prompt_fingerprint != prompt_fingerprint)
+      return std::unexpected(invalid_transition("subagent delivery attempt identity was reused with different content", job_id));
+    return public_snapshot_locked(*state);
+  }
+  if (state->snapshot.delivery_attempt_history.size() >= kMaxSubagentDeliveryAttemptHistory)
+    return std::unexpected(invalid_transition("subagent delivery attempt history limit reached", job_id));
+  auto const now = ava::session::now_timestamp();
+  state->snapshot.delivery = SubagentDeliveryState::Attempting;
+  ++state->snapshot.delivery_attempts;
+  state->snapshot.delivery_attempt_history.push_back(
+      {.attempt_id = std::move(attempt_id), .prompt_fingerprint = std::move(prompt_fingerprint), .attempted_at = now});
+  state->snapshot.last_delivery_attempt_at = now;
+  state->snapshot.updated_at = now;
+  state->changed.notify_all();
   return public_snapshot_locked(*state);
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::acknowledge_delivery(std::string_view parent_session_id, std::string_view job_id,
                                                                                             std::string_view attempt_id, std::string committed_turn_id)
 {
-  auto activated = activate_parent(std::string(parent_session_id));
-  if (!activated)
-    return std::unexpected(std::move(activated.error()));
+  if (auto valid = validate_identifier("attempt_id", attempt_id, job_id); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (auto valid = validate_identifier("committed_turn_id", committed_turn_id, job_id); !valid)
+    return std::unexpected(std::move(valid.error()));
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
     state = find_owned_locked(parent_session_id, job_id);
   }
   if (!state)
-  {
-    auto restored = restore_owned(parent_session_id, job_id);
-    if (!restored)
-      return std::unexpected(std::move(restored.error()));
-    state = std::move(*restored);
-  }
-  SubagentJobIdentity identity;
+    return std::unexpected(not_found(job_id));
   {
     std::lock_guard state_lock(state->mutex);
-    identity = state->snapshot.identity;
+    if (state->snapshot.delivery == SubagentDeliveryState::Acknowledged)
+    {
+      if (state->snapshot.acknowledged_attempt_id == attempt_id && state->snapshot.committed_turn_id == committed_turn_id)
+        return public_snapshot_locked(*state);
+      return std::unexpected(invalid_transition("subagent delivery was already acknowledged by another attempt", job_id));
+    }
+    if (state->delivery_exhausted || state->snapshot.delivery != SubagentDeliveryState::Attempting || state->snapshot.delivery_attempt_history.empty() ||
+        state->snapshot.delivery_attempt_history.back().attempt_id != attempt_id)
+      return std::unexpected(invalid_transition("subagent delivery acknowledgement does not match the latest attempt", job_id));
+    auto const now = ava::session::now_timestamp();
+    state->snapshot.delivery = SubagentDeliveryState::Acknowledged;
+    state->snapshot.acknowledged_attempt_id = std::string(attempt_id);
+    state->snapshot.committed_turn_id = std::move(committed_turn_id);
+    state->snapshot.delivery_acknowledged_at = now;
+    state->snapshot.updated_at = now;
+    state->changed.notify_all();
   }
-  auto appended = append_transition(state, JobJournalRecord{.kind = JobJournalTransitionKind::DeliveryAck,
-                                                            .identity = std::move(identity),
-                                                            .at = ava::session::now_timestamp(),
-                                                            .attempt_id = std::string(attempt_id),
-                                                            .committed_turn_id = std::move(committed_turn_id)});
-  if (!appended)
-    return std::unexpected(std::move(appended.error()));
-  std::lock_guard state_lock(state->mutex);
-  return public_snapshot_locked(*state);
+  SubagentCoordinatorJobSnapshot result;
+  {
+    std::lock_guard state_lock(state->mutex);
+    result = public_snapshot_locked(*state);
+  }
+  {
+    std::lock_guard lock(mutex_);
+    prune_eligible_locked();
+  }
+  return result;
+}
+
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::exhaust_delivery(std::string_view parent_session_id, std::string_view job_id,
+                                                                                        std::string_view attempt_id)
+{
+  if (auto valid = validate_identifier("attempt_id", attempt_id, job_id); !valid)
+    return std::unexpected(std::move(valid.error()));
+  std::shared_ptr<JobState> state;
+  {
+    std::lock_guard lock(mutex_);
+    state = find_owned_locked(parent_session_id, job_id);
+  }
+  if (!state)
+    return std::unexpected(not_found(job_id));
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (state->delivery_exhausted)
+    {
+      if (!state->snapshot.delivery_attempt_history.empty() && state->snapshot.delivery_attempt_history.back().attempt_id == attempt_id)
+        return public_snapshot_locked(*state);
+      return std::unexpected(invalid_transition("subagent delivery exhaustion does not match the latest attempt", job_id));
+    }
+    if (state->snapshot.delivery != SubagentDeliveryState::Attempting || state->snapshot.delivery_attempt_history.empty() ||
+        state->snapshot.delivery_attempt_history.back().attempt_id != attempt_id)
+      return std::unexpected(invalid_transition("subagent delivery exhaustion does not match the latest attempt", job_id));
+    state->delivery_exhausted = true;
+    state->terminal_notification_pending = false;
+    state->changed.notify_all();
+  }
+  SubagentCoordinatorJobSnapshot result;
+  {
+    std::lock_guard state_lock(state->mutex);
+    result = public_snapshot_locked(*state);
+  }
+  {
+    std::lock_guard lock(mutex_);
+    prune_eligible_locked();
+  }
+  return result;
 }
 
 void SubagentCoordinator::shutdown()
 {
-  std::vector<std::pair<std::string, std::string>> jobs;
+  std::vector<std::string> jobs;
   {
     std::unique_lock lock(mutex_);
     if (shutdown_complete_)
       return;
     accepting_ = false;
     terminal_sink_ = nullptr;
-    admission_changed_.wait(lock, [this] { return active_starts_by_parent_.empty(); });
+    admission_changed_.wait(lock, [this] { return active_starts_ == 0; });
     for (auto const& [job_id, state] : jobs_)
     {
       std::lock_guard state_lock(state->mutex);
-      if (state->live && !terminal(state->snapshot.execution))
-        jobs.emplace_back(state->snapshot.identity.parent_session_id, job_id);
+      if (!terminal(state->snapshot.execution))
+      {
+        state->snapshot.cancel_requested = true;
+        if (!state->snapshot.cancel_requested_at)
+          state->snapshot.cancel_requested_at = ava::session::now_timestamp();
+        state->snapshot.updated_at = *state->snapshot.cancel_requested_at;
+        jobs.push_back(job_id);
+      }
     }
   }
-  for (auto const& [parent, job_id] : jobs) static_cast<void>(cancel(parent, job_id));
+  for (auto const& job_id : jobs) static_cast<void>(registry_.cancel(job_id));
   registry_.shutdown();
-  std::unordered_map<std::string, std::shared_ptr<JournalState>> released_journals;
-  std::unordered_map<std::string, std::shared_ptr<JobState>> released_jobs;
+  std::unordered_map<std::string, std::shared_ptr<JobState>> released;
   {
     std::lock_guard lock(mutex_);
     shutdown_complete_ = true;
-    released_journals.swap(journals_);
-    released_jobs.swap(jobs_);
+    released.swap(jobs_);
   }
-  // Releasing the last JobState/JournalState references closes each
-  // process-lifetime owner descriptor only after every worker and durable
-  // shutdown transition has completed.
 }
 
 }  // namespace ava::agent

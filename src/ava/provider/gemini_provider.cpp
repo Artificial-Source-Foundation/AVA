@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/http/transport.h"
 #include "ava/provider/gemini_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/ids.h"
@@ -528,12 +529,12 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, GeminiParseSta
   }
 }
 
-ava::core::Result<std::vector<StreamEvent>> gemini_http_error(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> gemini_http_error(ava::http::HttpResponse const& response)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "Gemini HTTP request failed with status " + std::to_string(response.status_code));
   error.with_context("status", std::to_string(response.status_code));
   error.with_context("provider_error_kind", to_string(classify_provider_error(response)));
-  if (auto const retry_after = retry_after_header(response))
+  if (auto const retry_after = ava::http::retry_after_header(response))
     error.with_context("retry_after", *retry_after);
   return std::unexpected(std::move(error));
 }
@@ -544,7 +545,7 @@ GeminiProvider::GeminiProvider(std::string base_url) : base_url_(normalize_gemin
 {
 }
 
-ava::core::Result<HttpRequest> GeminiProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
+ava::core::Result<ava::http::HttpRequest> GeminiProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
   auto model_path = gemini_model_path(request.model_id);
   if (!model_path)
@@ -564,16 +565,16 @@ ava::core::Result<HttpRequest> GeminiProvider::build_request(ProviderRequest con
     return std::unexpected(std::move(body.error()));
 
   std::string url = base_url_ + "/v1beta/" + *model_path + (request.stream ? ":streamGenerateContent?alt=sse" : ":generateContent");
-  return HttpRequest{.method = "POST",
-                     .url = std::move(url),
-                     .headers = {{"x-goog-api-key", std::string(access_token)},
-                                 {"Content-Type", "application/json"},
-                                 {"Accept", request.stream ? "text/event-stream" : "application/json"}},
-                     .body = std::move(*body),
-                     .timeout_ms = 60000,
-                     .follow_redirects = true,
-                     .include_response_headers = false,
-                     .resolve_hosts = {}};
+  return ava::http::HttpRequest{.method = "POST",
+                                .url = std::move(url),
+                                .headers = {{"x-goog-api-key", std::string(access_token)},
+                                            {"Content-Type", "application/json"},
+                                            {"Accept", request.stream ? "text/event-stream" : "application/json"}},
+                                .body = std::move(*body),
+                                .timeout_ms = 60000,
+                                .follow_redirects = true,
+                                .include_response_headers = false,
+                                .resolve_hosts = {}};
 }
 
 std::unique_ptr<StreamParser> GeminiProvider::create_stream_parser() const
@@ -581,7 +582,7 @@ std::unique_ptr<StreamParser> GeminiProvider::create_stream_parser() const
   return std::make_unique<GeminiStreamParser>();
 }
 
-ava::core::Result<std::vector<StreamEvent>> GeminiProvider::parse_response(HttpResponse const& response, bool stream) const
+ava::core::Result<std::vector<StreamEvent>> GeminiProvider::parse_response(ava::http::HttpResponse const& response, bool stream) const
 {
   return stream ? parse_gemini_sse_response(response) : parse_gemini_response(response);
 }
@@ -663,14 +664,14 @@ ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse(std::string_view ss
   return events;
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse_response(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> parse_gemini_sse_response(ava::http::HttpResponse const& response)
 {
   if (response.status_code < 200 || response.status_code >= 300)
     return gemini_http_error(response);
   return parse_gemini_sse(response.body);
 }
 
-ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(HttpResponse const& response)
+ava::core::Result<std::vector<StreamEvent>> parse_gemini_response(ava::http::HttpResponse const& response)
 {
   if (response.status_code < 200 || response.status_code >= 300)
     return gemini_http_error(response);

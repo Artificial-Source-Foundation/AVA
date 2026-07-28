@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
@@ -37,20 +38,20 @@ struct TitleTransportState
 {
   std::mutex mutex;
   std::size_t sends = 0;
-  std::vector<ava::provider::HttpRequest> requests;
+  std::vector<ava::http::HttpRequest> requests;
 };
 
-class TitleProviderTransport final : public ava::provider::Transport
+class TitleProviderTransport final : public ava::http::Transport
 {
  public:
   explicit TitleProviderTransport(std::shared_ptr<TitleTransportState> state) : state_(std::move(state)) { }
 
-  ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     std::lock_guard lock(state_->mutex);
     ++state_->sends;
     state_->requests.push_back(request);
-    return ava::provider::HttpResponse{
+    return ava::http::HttpResponse{
         .status_code = 200,
         .headers = {},
         .body =
@@ -653,8 +654,8 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   bool title_absent_at_done = false;
   ava::app::runtime::RunOptions options;
   options.access_token = "fake-token";
-  options.event_sink = [&](ava::app::runtime::Event const& event) -> ava::core::VoidResult {
-    if (event.type == ava::app::runtime::EventType::Done)
+  options.event_sink = [&](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
+    if (event.type() == ava::event::RuntimeEventType::Done)
     {
       auto authority = session->read_authority();
       auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));

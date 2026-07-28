@@ -2,14 +2,13 @@
 #include "tests/acp_test_declarations.h"
 #include "tests/support/acp_test_support.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/EventEnvelope.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/content.h"
 #include "ava/app/acp/envelope_intent.h"
 #include "ava/app/acp/permission.h"
 #include "ava/app/acp/session_update.h"
 #include "ava/app/acp/transport.h"
-#include "ava/app/runtime/Event.h"
 #include "ava/agent/mode.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
@@ -30,7 +29,6 @@
 using namespace std::chrono_literals;
 using ava::app::acp::JsonRpcId;
 using namespace acp_test;
-namespace runtime = ava::app::runtime;
 
 void test_acp_prompt_content_capabilities_and_strict_validation()
 {
@@ -71,39 +69,43 @@ void test_acp_prompt_content_capabilities_and_strict_validation()
 void test_acp_typed_session_update_mapper_ordering_and_limits()
 {
   using namespace ava::app::acp;
-  using ava::app::EventEnvelope;
-  using ava::app::runtime::Event;
-  using ava::app::runtime::EventType;
+  using namespace ava::event;
   auto root = std::filesystem::path("/workspace");
   RuntimeSessionUpdateMapper mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "message_1"});
-  runtime::Event text;
-  text.type = runtime::EventType::MessageUpdate;
-  text.text = "hello";
-  runtime::Event final;
-  final.type = runtime::EventType::AssistantMessage;
-  final.text = "hello";
-  runtime::Event thought;
-  thought.type = runtime::EventType::ReasoningDelta;
-  thought.text = "considering";
-  runtime::Event start;
-  start.type = runtime::EventType::ToolStart;
-  start.call_id = "call_1";
-  start.tool_name = "write_file";
-  start.tool_arguments_json = R"({"path":"src/a.cpp"})";
-  start.text = "src/a.cpp";
-  runtime::Event progress;
-  progress.type = runtime::EventType::ToolProgress;
-  progress.text = "writing";
-  progress.call_id = "call_1";
-  progress.tool_name = "write_file";
-  progress.status = "running";
-  runtime::Event result;
-  result.type = runtime::EventType::ToolResult;
-  result.call_id = "call_1";
-  result.tool_name = "write_file";
-  result.tool_result_json = R"({"ok":true})";
-  result.status = "success";
-  result.changed_paths = {"src/a.cpp"};
+  auto message_update = [](std::string value) {
+    MessagePayload payload;
+    payload.text = std::move(value);
+    return RuntimeEvent{{}, MessageUpdateEvent{.payload = std::move(payload)}};
+  };
+  auto reasoning_delta = [](std::string value) {
+    ReasoningPayload payload;
+    payload.text = std::move(value);
+    return RuntimeEvent{{}, ReasoningDeltaEvent{.payload = std::move(payload)}};
+  };
+  auto text = message_update("hello");
+  MessagePayload final_payload;
+  final_payload.text = "hello";
+  auto final = RuntimeEvent{{}, AssistantMessageEvent{.payload = std::move(final_payload)}};
+  auto thought = reasoning_delta("considering");
+  ToolPayload start_payload;
+  start_payload.text = "src/a.cpp";
+  start_payload.call_id = "call_1";
+  start_payload.tool = "write_file";
+  start_payload.args_json = R"({"path":"src/a.cpp"})";
+  auto start = RuntimeEvent{{}, ToolStartEvent{.payload = std::move(start_payload)}};
+  ToolPayload progress_payload;
+  progress_payload.text = "writing";
+  progress_payload.call_id = "call_1";
+  progress_payload.tool = "write_file";
+  progress_payload.status = "running";
+  auto progress = RuntimeEvent{{}, ToolProgressEvent{.payload = std::move(progress_payload)}};
+  ToolPayload result_payload;
+  result_payload.call_id = "call_1";
+  result_payload.tool = "write_file";
+  result_payload.result_json = R"({"ok":true})";
+  result_payload.status = "success";
+  result_payload.changed_paths = {"src/a.cpp"};
+  auto result = RuntimeEvent{{}, ToolResultEvent{.payload = std::move(result_payload)}};
   auto text_update = mapper.map_and_encode(text);
   auto duplicate = mapper.map_and_encode(final);
   auto thought_update = mapper.map_and_encode(thought);
@@ -118,30 +120,15 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
              *result_update && (*result_update)->find(R"("status":"completed")") != std::string::npos,
          "typed ACP mapper preserves text/thought/tool ordering, stable ids, content, status, kind, locations, and final de-duplication");
 
-  RuntimeSessionUpdateMapper envelope_mapper(RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "message_2"});
-  EventEnvelope envelope;
-  envelope.timestamp = "now";
-  envelope.session_id = "session";
-  envelope.name = "tool_progress";
-  envelope.payload_json = R"({"call_id":"call_2","tool":"bash","text":"running","status":"running"})";
-  envelope.payload_type = "tool";
-  auto envelope_update = envelope_mapper.map_and_encode(envelope);
-  expect(envelope_update && *envelope_update && (*envelope_update)->find(R"("kind":"execute")") != std::string::npos,
-         "typed ACP mapper accepts the protocol-neutral EventEnvelope seam without leaking unknown events");
-
   RuntimeSessionUpdateMapper bounded(
       RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "bounded", .max_updates = 2, .max_encoded_bytes = 4096});
-  runtime::Event bounded_one;
-  bounded_one.type = runtime::EventType::MessageUpdate;
-  bounded_one.text = "1";
-  runtime::Event bounded_two;
-  bounded_two.type = runtime::EventType::ReasoningDelta;
-  bounded_two.text = "2";
-  runtime::Event bounded_three;
-  bounded_three.type = runtime::EventType::ToolProgress;
-  bounded_three.text = "3";
-  bounded_three.call_id = "call";
-  bounded_three.tool_name = "bash";
+  auto bounded_one = message_update("1");
+  auto bounded_two = reasoning_delta("2");
+  ToolPayload bounded_three_payload;
+  bounded_three_payload.text = "3";
+  bounded_three_payload.call_id = "call";
+  bounded_three_payload.tool = "bash";
+  auto bounded_three = RuntimeEvent{{}, ToolProgressEvent{.payload = std::move(bounded_three_payload)}};
   auto one = bounded.map_and_encode(bounded_one);
   auto two = bounded.map_and_encode(bounded_two);
   auto saturated = bounded.map_and_encode(bounded_three);
@@ -154,17 +141,14 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
   bool coalesce_failed = false;
   for (std::size_t index = 0; index < 5'000; ++index)
   {
-    runtime::Event delta;
-    delta.type = runtime::EventType::MessageUpdate;
-    delta.text = "x";
+    auto delta = message_update("x");
     auto batch = coalesced.map_coalesced_and_encode(delta);
     if (!batch)
       coalesce_failed = true;
     else
       coalesced_updates.insert(coalesced_updates.end(), std::make_move_iterator(batch->begin()), std::make_move_iterator(batch->end()));
   }
-  runtime::Event done;
-  done.type = runtime::EventType::Done;
+  auto done = RuntimeEvent{{}, CompletionEvent{}};
   auto flushed = coalesced.map_coalesced_and_encode(done);
   if (flushed)
     coalesced_updates.insert(coalesced_updates.end(), std::make_move_iterator(flushed->begin()), std::make_move_iterator(flushed->end()));
@@ -180,9 +164,8 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
 
   RuntimeSessionUpdateMapper unicode_mapper(
       RuntimeSessionUpdateMapperOptions{.workspace_root = root, .message_id = "unicode", .max_updates = 4, .max_encoded_bytes = 16 * 1024});
-  runtime::Event unicode_delta;
-  unicode_delta.type = runtime::EventType::MessageUpdate;
-  unicode_delta.text = std::string(kMaxStreamContentChunkBytes - 1, 'a') + "€x";
+  auto unicode_text = std::string(kMaxStreamContentChunkBytes - 1, 'a') + "€x";
+  auto unicode_delta = message_update(unicode_text);
   auto unicode_batch = unicode_mapper.map_coalesced_and_encode(unicode_delta);
   auto unicode_flush = unicode_mapper.flush_coalesced();
   std::string reconstructed;
@@ -195,7 +178,7 @@ void test_acp_typed_session_update_mapper_ordering_and_limits()
       if (auto content = ava::core::json::object_field(update, "content"))
         reconstructed += ava::core::json::string_field(*content, "text").value_or("");
   }
-  expect(unicode_batch && unicode_flush && unicode_updates == 2 && reconstructed == unicode_delta.text,
+  expect(unicode_batch && unicode_flush && unicode_updates == 2 && reconstructed == unicode_text,
          "ACP stream coalescing preserves a multibyte UTF-8 code point that crosses the byte chunk boundary");
 }
 

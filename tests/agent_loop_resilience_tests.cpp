@@ -1,6 +1,8 @@
 #include "sys.h"
+#include "tests/support/agent_loop_test_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/http/transport.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/mode.h"
@@ -23,20 +25,20 @@
 
 namespace {
 
-ava::provider::HttpResponse sse_response(std::string const& body)
+ava::http::HttpResponse sse_response(std::string const& body)
 {
-  return ava::provider::HttpResponse{.status_code = 200, .headers = {}, .body = body};
+  return ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = body};
 }
 
-class CallbackTransport final : public ava::provider::Transport
+class CallbackTransport final : public ava::http::Transport
 {
  public:
-  CallbackTransport(std::vector<ava::provider::HttpResponse> responses, std::function<void()> after_send)
+  CallbackTransport(std::vector<ava::http::HttpResponse> responses, std::function<void()> after_send)
       : responses_(std::move(responses)), after_send_(std::move(after_send))
   {
   }
 
-  [[nodiscard]] ava::core::Result<ava::provider::HttpResponse> send(ava::provider::HttpRequest const& request) override
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
   {
     requests_.push_back(request);
     if (responses_.empty())
@@ -50,12 +52,12 @@ class CallbackTransport final : public ava::provider::Transport
     return response;
   }
 
-  [[nodiscard]] std::vector<ava::provider::HttpRequest> const& requests() const noexcept { return requests_; }
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept { return requests_; }
 
  private:
-  std::vector<ava::provider::HttpResponse> responses_;
+  std::vector<ava::http::HttpResponse> responses_;
   std::function<void()> after_send_;
-  std::vector<ava::provider::HttpRequest> requests_;
+  std::vector<ava::http::HttpRequest> requests_;
 };
 
 void test_agent_loop_cancellation_boundaries()
@@ -75,9 +77,7 @@ void test_agent_loop_cancellation_boundaries()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .cancel_requested = [] { return true; },
         .append_entry = append_route_for_test(store),
@@ -114,9 +114,7 @@ void test_agent_loop_cancellation_boundaries()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .cancel_requested =
             [&cancel_checks] {
@@ -159,9 +157,7 @@ void test_agent_loop_cancellation_boundaries()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .cancel_requested = [&cancel] { return cancel; },
         .append_entry = append_route_for_test(store),
@@ -211,9 +207,7 @@ void test_agent_loop_cancellation_boundaries()
         .workspace_dir = workspace,
         .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .on_tool_event =
             [&bash_started](auto const& entry) {
@@ -267,9 +261,7 @@ void test_agent_loop_cancellation_boundaries()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const&) { ++tool_events; },
         .cancel_requested = [&cancel] { return cancel; },
@@ -318,9 +310,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
@@ -341,9 +331,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
@@ -364,9 +352,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
@@ -388,9 +374,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .max_provider_events = 1,
         .append_entry = append_route_for_test(store),
@@ -413,9 +397,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .max_assistant_text_bytes = 3,
         .append_entry = append_route_for_test(store),
@@ -441,9 +423,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .max_tool_argument_bytes = 5,
         .append_entry = append_route_for_test(store),
@@ -467,9 +447,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
@@ -502,9 +480,7 @@ void test_agent_loop_error_paths_and_bounds()
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
-        .provider_id = "openai",
-        .model_id = "gpt-5.5",
-        .system_prompt = "system prompt",
+        .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
@@ -538,9 +514,7 @@ void test_agent_loop_max_iteration_guard()
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .provider_id = "openai",
-      .model_id = "gpt-5.5",
-      .system_prompt = "system prompt",
+      .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
       .max_tool_iterations = 2,
       .append_entry = append_route_for_test(store),

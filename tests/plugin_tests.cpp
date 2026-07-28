@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
 #include "ava/app/runtime/Session.h"
@@ -1576,13 +1577,13 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
         return {};
       });
 
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.call_id = "call_hook";
-  event.tool_name = "demo";
-  event.status = "success";
-  event.text = "ok";
-  auto observed = sink(ava::app::to_runtime_event(event));
+  ava::event::ToolPayload payload;
+  payload.text = "ok";
+  payload.call_id = "call_hook";
+  payload.tool = "demo";
+  payload.status = "success";
+  auto event = ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
+  auto observed = sink(event);
   expect(observed.has_value(), "plugin event observer sink forwards runtime event successfully");
   expect(forwarded && hook_observed_before_forward, "plugin event observer runs matching hooks before forwarding to the next typed sink");
   expect(prompts.size() == 2 && prompts[0].operation == ava::permissions::Operation::PluginExecute &&
@@ -1659,13 +1660,13 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
         return {};
       });
 
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.call_id = "call_diag";
-  event.tool_name = "demo";
-  event.status = "success";
-  event.text = "ok";
-  auto observed = sink(ava::app::to_runtime_event(event));
+  ava::event::ToolPayload payload;
+  payload.text = "ok";
+  payload.call_id = "call_diag";
+  payload.tool = "demo";
+  payload.status = "success";
+  auto event = ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
+  auto observed = sink(event);
   expect(observed.has_value(), "plugin event observer keeps hook failures best-effort");
   expect(forwarded, "plugin event observer forwards runtime events after hook failures");
   expect(failures.size() == 1, "plugin event observer reports hook protocol failures to opt-in sink");
@@ -1680,7 +1681,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
 
   fail_downstream = true;
   forwarded = false;
-  auto downstream_failure = sink(ava::app::to_runtime_event(event));
+  auto downstream_failure = sink(event);
   expect(!downstream_failure && forwarded && downstream_failure.error().category() == ava::core::ErrorCategory::Io &&
              downstream_failure.error().message() == "stable downstream event sink failure",
          "plugin event observer remains best-effort for hook failures but propagates the downstream sink failure exactly");

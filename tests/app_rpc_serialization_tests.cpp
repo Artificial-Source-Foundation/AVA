@@ -4,8 +4,7 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
-#include "ava/app/EventEnvelope.h"
-#include "ava/app/events.h"
+#include "ava/event/events.h"
 #include "ava/app/rpc/catalog.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/protocol.h"
@@ -14,7 +13,6 @@
 #include "ava/app/rpc/serialization_json.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/Event.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/question.h"
@@ -523,17 +521,16 @@ void test_app_rpc_production_catalog_and_golden_contract()
   std::string actual_envelopes;
   actual_envelopes += ava::app::serialize_rpc_success_jsonl("req-1", "{\"protocol_version\":1}");
   actual_envelopes += ava::app::serialize_rpc_error_jsonl("bad-1", ava::app::rpc::invalid_rpc("malformed RPC JSON object"));
-  ava::app::EventEnvelope event;
-  event.schema_version = 1;
-  event.event_id = "event-1";
-  event.timestamp = "2026-07-12T00:00:00Z";
-  event.session_id = "session-1";
-  event.request_id = "prompt-1";
-  event.correlation_id = "prompt-1";
-  event.name = "message_update";
-  event.payload_type = "message";
-  event.payload_json = "{\"text\":\"hello\",\"status\":\"streaming\"}";
-  actual_envelopes += ava::app::serialize_event_envelope_jsonl(event);
+  ava::event::MessagePayload event_payload;
+  event_payload.text = "hello";
+  event_payload.status = "streaming";
+  auto event = ava::event::RuntimeEvent{{.timestamp = "2026-07-12T00:00:00Z", .session_id = "session-1"},
+                                        ava::event::MessageUpdateEvent{.payload = std::move(event_payload)}};
+  ava::event::EventEnvelopeContext event_context;
+  event_context.event_id = "event-1";
+  event_context.request_id = "prompt-1";
+  event_context.correlation_id = "prompt-1";
+  actual_envelopes += ava::event::serialize_event_envelope_jsonl(ava::event::to_event_envelope(event, event_context));
   expect(actual_envelopes == app_read_binary_file(golden / "envelopes.jsonl"),
          "RPC response/event envelope golden is exact deterministic production serialization");
 
@@ -579,15 +576,18 @@ void test_app_rpc_contract_validation_regressions()
              std::ranges::all_of(invalid_response, [](char ch) { return static_cast<unsigned char>(ch) < 0x80U; }),
          "invalid UTF-8 produces an ASCII-safe recoverable error with stable code");
 
-  ava::app::runtime::Event invalid_event;
-  invalid_event.type = ava::app::runtime::EventType::ToolStart;
-  invalid_event.tool_arguments_json = "{\"path\":\"";
-  invalid_event.tool_arguments_json.push_back(static_cast<char>(0xFF));
-  invalid_event.tool_arguments_json += "\"}";
-  auto const serialized_invalid_event = ava::app::serialize_event_json(invalid_event);
-  expect(serialized_invalid_event.find("\"args\":{") == std::string::npos && serialized_invalid_event.find("\"args_json\":") != std::string::npos &&
-             ava::core::json::is_valid_utf8(serialized_invalid_event) && ava::core::json::is_valid_object(serialized_invalid_event),
-         "RPC event serialization rejects invalid UTF-8 argument JSON from object-form event payloads");
+  ava::event::ToolPayload invalid_tool_payload;
+  invalid_tool_payload.args_json = "{\"path\":\"";
+  invalid_tool_payload.args_json.push_back(static_cast<char>(0xFF));
+  invalid_tool_payload.args_json += "\"}";
+  auto invalid_event = ava::event::RuntimeEvent{{}, ava::event::ToolStartEvent{.payload = invalid_tool_payload}};
+  auto const invalid_payload_json = ava::event::serialize_payload_json(invalid_tool_payload);
+  auto const invalid_envelope = ava::event::to_event_envelope(invalid_event);
+  auto const serialized_invalid_event = ava::event::serialize_event_envelope_json(invalid_envelope);
+  expect(invalid_payload_json.find("\"args\":{") == std::string::npos && invalid_payload_json.find("\"args_json\":") != std::string::npos &&
+             invalid_envelope.payload_json == invalid_payload_json && ava::core::json::is_valid_utf8(serialized_invalid_event) &&
+             ava::core::json::is_valid_object(serialized_invalid_event),
+         "typed RPC event payload serialization rejects invalid UTF-8 argument JSON and preserves the envelope fallback path");
 
   auto active = ava::app::rpc::active_run_reject_error("prompt");
   auto canceled = ava::app::rpc::canceled_error();

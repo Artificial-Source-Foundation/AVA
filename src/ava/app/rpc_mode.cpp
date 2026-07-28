@@ -1,8 +1,8 @@
 #include "sys.h"
-#include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/commands.h"
+#include "ava/event/events.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/prompt_worker.h"
@@ -211,12 +211,12 @@ std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions option
 
     ava::event::EventBus event_bus;
     rpc::subscribe_event_envelope_writer(event_bus, options.output);
-    auto result = run_command(options.session,
-                              CommandRequest{.command = "/bash " + options.command,
-                                             .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
-                                             .permission_resolver = std::move(permission_resolver),
-                                             .cancel_requested = std::move(command_cancel_requested),
-                                             .session_mutex = &options.session_mutex});
+    auto result =
+        run_command(options.session, CommandRequest{.command = "/bash " + options.command,
+                                                    .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
+                                                    .permission_resolver = std::move(permission_resolver),
+                                                    .cancel_requested = std::move(command_cancel_requested),
+                                                    .session_mutex = &options.session_mutex});
     if (!result)
     {
       finish(std::unexpected(std::move(result.error())));
@@ -328,16 +328,15 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
     std::string slash_command = "/compact";
     if (options.instructions)
       slash_command += " " + *options.instructions;
-    auto command_result =
-        run_command(options.session, CommandRequest{
-                                         .command = std::move(slash_command),
-                                         .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
-                                         .permission_resolver = compact_runtime_options->permission_resolver,
-                                         .compaction_summary_generator = std::move(summary_generator),
-                                         .cancel_requested = std::move(compact_cancel_requested),
-                                         .session_mutex = &options.session_mutex,
-                                         .propagate_compaction_errors = true,
-                                     });
+    auto command_result = run_command(options.session, CommandRequest{
+                                                           .command = std::move(slash_command),
+                                                           .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
+                                                           .permission_resolver = compact_runtime_options->permission_resolver,
+                                                           .compaction_summary_generator = std::move(summary_generator),
+                                                           .cancel_requested = std::move(compact_cancel_requested),
+                                                           .session_mutex = &options.session_mutex,
+                                                           .propagate_compaction_errors = true,
+                                                       });
     if (!command_result)
     {
       finish(std::unexpected(std::move(command_result.error())));
@@ -359,13 +358,10 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 #ifdef CWDEBUG
   {
     runtime::session_ts::rat session_r(unlocked_session);
-    DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id() << ", provider_id=" << session_r->model().provider_id
-                                                               << ", model_id=" << session_r->model().model_id);
+    DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id()
+        << ", provider_id=" << session_r->model().provider_id << ", model_id=" << session_r->model().model_id);
   }
 #endif
-
-  runtime::session_ts::wat session_w(unlocked_session);
-  runtime::Session& session(*session_w);
 
   rpc::RpcRunState run_state;
   rpc::PendingResolverState pending_state;
@@ -378,14 +374,20 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   });
   std::mutex session_mutex;
   std::optional<std::jthread> prompt_worker;
-  runtime_options.offline = runtime_options.offline || session.is_offline() || open_options.offline;
-  if (!runtime_options.permission_resolver)
+
+  // At this point we are still single-threaded.
+  // Still need to create a rat object, to access information from the passed unlocked_session.
+  std::string injected_provider_id;
   {
-    runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
+    runtime::session_ts::rat session_r(unlocked_session);
+
+    runtime_options.offline = runtime_options.offline || session_r->is_offline() || open_options.offline;
+    if (!runtime_options.permission_resolver)
+      runtime_options.permission_resolver = build_headless_permission_resolver(HeadlessPermissionPolicyOptions{});
+    runtime_options.permission_resolver =
+        ava::permissions::build_persistent_permission_rule_resolver(session_r->permission_rule_store(), std::move(runtime_options.permission_resolver));
+    injected_provider_id = session_r->model().provider_id;
   }
-  runtime_options.permission_resolver =
-      ava::permissions::build_persistent_permission_rule_resolver(session.permission_rule_store(), std::move(runtime_options.permission_resolver));
-  std::string const injected_provider_id = session.model().provider_id;
 
   auto reap_finished_prompt = [&] {
     if (prompt_worker && rpc::async_worker_reap_ready(run_state))
@@ -463,7 +465,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     }
 
     auto session_command = rpc::handle_session_rpc_command(rpc::RpcSessionCommandContext{
-        .command = *command, .session = session, .open_options = open_options, .output = output, .run_state = run_state, .session_mutex = session_mutex});
+        .command = *command, .unlocked_session = unlocked_session,
+        .open_options = open_options, .output = output, .run_state = run_state});
     if (!session_command)
       return std::unexpected(std::move(session_command.error()));
     if (*session_command)
@@ -495,6 +498,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
           return written;
         continue;
       }
+      runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+      runtime::Session& session(*session_w);
       auto envelope =
           rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), *revoked);
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
@@ -507,6 +512,8 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     if (command->type == "permission_grants_clear")
     {
       auto const cleared = rpc::permission_session_grants_clear_result_json(pending_state);
+      runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+      runtime::Session& session(*session_w);
       auto envelope =
           rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), cleared);
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
@@ -526,15 +533,16 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         }
         continue;
       }
-      std::lock_guard lock(session_mutex);
-      auto registry =
-          session.load_command_registry(CommandRegistryOptions{.include_builtins = true,
-                                                               .include_prompt_commands = true,
-                                                               .include_skills = true,
-                                                               .include_plugin_commands = true,
-                                                               .include_mcp_prompts = true,
-                                                               .permission_resolver = runtime_options.permission_resolver,
-                                                               .cancel_requested = [&] { return run_state.cancel_requested.load(std::memory_order_relaxed); }});
+      std::lock_guard lock(session_mutex);      // FIXME: remove this once all session_mutex have been replaced by the mutex in unlocked_session.
+      runtime::session_ts::wat session_w(unlocked_session);
+      auto registry = session_w->load_command_registry(
+          CommandRegistryOptions{.include_builtins = true,
+                                          .include_prompt_commands = true,
+                                          .include_skills = true,
+                                          .include_plugin_commands = true,
+                                          .include_mcp_prompts = true,
+                                          .permission_resolver = runtime_options.permission_resolver,
+                                          .cancel_requested = [&] { return run_state.cancel_requested.load(std::memory_order_relaxed); }});
       if (auto written = rpc::write_success(output, command->id, rpc::command_registry_result_json(registry)); !written)
       {
         return written;
@@ -573,12 +581,13 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::config::XdgPaths paths;
       {
         std::lock_guard lock(session_mutex);
+        runtime::session_ts::wat session_w(unlocked_session); // FIXME: use session_r here instead and don't pass session_mutex...
+        runtime::Session& session(*session_w);
         paths = session.paths();
-        auto result =
-            run_command(session, CommandRequest{.command = std::move(slash_command),
-                                                .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
-                                                .permission_resolver = runtime_options.permission_resolver,
-                                                .session_mutex = &session_mutex});
+        auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
+                                                          .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
+                                                          .permission_resolver = runtime_options.permission_resolver,
+                                                          .session_mutex = &session_mutex});
         if (!result)
         {
           if (auto written = rpc::write_error(output, command->id, result.error()); !written)
@@ -607,6 +616,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         }
       }
 
+      runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+      runtime::Session& session(*session_w);
+
       reap_finished_prompt();
       rpc::set_active_run(run_state, rpc::RpcRunKind::Prompt, command->id);
       prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
@@ -626,6 +638,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       }));
       continue;
     }
+
+    runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+    runtime::Session& session(*session_w);
 
     if (is_direct_run_command_type(command->type))
     {
@@ -925,11 +940,10 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::event::EventBus event_bus;
       rpc::subscribe_event_envelope_writer(event_bus, output);
       std::lock_guard lock(session_mutex);
-      auto result =
-          run_command(session, CommandRequest{.command = std::move(slash_command),
-                                              .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
-                                              .permission_resolver = runtime_options.permission_resolver,
-                                              .session_mutex = &session_mutex});
+      auto result = run_command(session, CommandRequest{.command = std::move(slash_command),
+                                                        .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
+                                                        .permission_resolver = runtime_options.permission_resolver,
+                                                        .session_mutex = &session_mutex});
       if (!result)
       {
         if (auto written = rpc::write_error(output, command->id, result.error()); !written)
@@ -1050,6 +1064,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 
   if (prompt_worker)
   {
+    runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+    runtime::Session& session(*session_w);
+
     auto cleared = rpc::close_input_and_cancel(run_state);
     static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
     if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written)

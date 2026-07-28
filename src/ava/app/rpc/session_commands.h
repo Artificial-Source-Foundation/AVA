@@ -3,20 +3,18 @@
 #include "protocol.h"
 #include "run_state.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/core/result.h"
-
-#include <mutex>
 
 namespace ava::app::rpc {
 
 struct RpcSessionCommandContext
 {
   RpcCommand const& command;
-  runtime::Session& session;
+  runtime::session_ts& unlocked_session;
   runtime::OpenOptions const& open_options;
   output_ts& output;                            // Reference to threadsafe output stream.
   RpcRunState& run_state;
-  std::mutex& session_mutex;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

@@ -13,6 +13,14 @@ void add_output(CommandResult& result, std::string text)
   result.output.push_back(std::move(text));
 }
 
+CommandResult handled_text(std::string text)
+{
+  CommandResult result;
+  result.handled = true;
+  add_output(result, std::move(text));
+  return result;
+}
+
 std::string display_path(std::filesystem::path const& path, std::filesystem::path const& base)
 {
   std::error_code error;

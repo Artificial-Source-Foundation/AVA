@@ -3,6 +3,7 @@
 #include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
 #include "FreshnessSourceMetadata.h"
+#include "OpenOptions.h"
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
 #include "ava/debug/print_members_on.h"
@@ -325,6 +326,17 @@ class Session : protected Session_aggregate_base
   // session.
   [[nodiscard]] ava::core::VoidResult recover_source_session_for_mutation(std::string const& source_session_id,
                                                                           std::optional<ava::session::SessionLease>& temporary_source_lease);
+
+  // Build replacement OpenOptions for a mutation (fork/clone) rooted at this
+  // session, starting from `base_options`.
+  //
+  // Every session-derived field (workspace/current directory, mode, tool
+  // visibility, paths, prompt overrides, offline flag, and the application-
+  // scoped subagent/delivery/title coordinators) is overwritten from this
+  // session, while the request-specific selectors (requested/fork session id,
+  // initial session name, continue-last, sessionless, and initial reasoning
+  // level) are cleared so the replacement opens a fresh owned session.
+  [[nodiscard]] runtime::OpenOptions owned_replacement_options(runtime::OpenOptions const& base_options) const;
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);

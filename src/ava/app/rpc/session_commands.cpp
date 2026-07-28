@@ -85,28 +85,6 @@ ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session
   return matches.front();
 }
 
-runtime::OpenOptions owned_replacement_options(runtime::Session const& current, runtime::OpenOptions const& base_options)
-{
-  auto options = base_options;
-  options.workspace_dir = current.workspace_dir();
-  options.current_dir = current.current_dir();
-  options.requested_session_id = std::nullopt;
-  options.fork_session_id = std::nullopt;
-  options.initial_session_name = std::nullopt;
-  options.continue_last_session = false;
-  options.sessionless = false;
-  options.mode = current.mode();
-  options.tool_visibility = current.tool_visibility();
-  options.paths = current.paths();
-  options.prompt_overrides = current.prompt_overrides();
-  options.initial_reasoning_level = std::nullopt;
-  options.offline = current.is_offline();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  return options;
-}
-
 ava::core::Result<ava::permissions::PermissionRuleDraft> permission_rule_draft_from_command(RpcCommand const& command)
 {
   if (!command.action || command.action->empty())
@@ -538,8 +516,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!branched)
       return handled(write_error(context.output, command.id, branched.error()));
 
-    // FIXME: owned_replacement_options should become a member function of Session.
-    auto owned_options = owned_replacement_options(*session_w, context.open_options);
+    auto owned_options = session_w->owned_replacement_options(context.open_options);
     auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
     if (!opened)
     {

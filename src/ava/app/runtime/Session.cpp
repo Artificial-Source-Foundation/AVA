@@ -502,6 +502,28 @@ ava::core::VoidResult Session::recover_source_session_for_mutation(std::string c
   return {};
 }
 
+runtime::OpenOptions Session::owned_replacement_options(runtime::OpenOptions const& base_options) const
+{
+  auto options = base_options;
+  options.workspace_dir = workspace_dir();
+  options.current_dir = current_dir();
+  options.requested_session_id = std::nullopt;
+  options.fork_session_id = std::nullopt;
+  options.initial_session_name = std::nullopt;
+  options.continue_last_session = false;
+  options.sessionless = false;
+  options.mode = mode();
+  options.tool_visibility = tool_visibility();
+  options.paths = paths();
+  options.prompt_overrides = prompt_overrides();
+  options.initial_reasoning_level = std::nullopt;
+  options.offline = is_offline();
+  options.subagent_coordinator = subagent_coordinator();
+  options.subagent_delivery_manager = subagent_delivery_manager();
+  options.session_title_coordinator = session_title_coordinator();
+  return options;
+}
+
 ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)
 {
   auto read_authority = this->read_authority();

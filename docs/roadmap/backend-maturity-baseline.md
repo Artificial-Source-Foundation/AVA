@@ -60,18 +60,18 @@ AVA reaches backend maturity when these gates are true:
 
 AVA is past the toy-backend stage. The important existing seams are:
 
-- Runtime events and envelopes: `src/ava/app/events.*`.
+- Runtime events and envelopes: `src/ava/event/`. `RuntimeEvent` is a closed typed variant of concrete payload families in `ava_event`; v1 top-level compatibility aliases are serializer compatibility, not an internal event bag.
+- Neutral HTTP transport/curl/retry: `src/ava/http/`.
 - Runtime/RPC/print mode: `src/ava/app/runtime.*`, `src/ava/app/rpc/*`, `src/ava/app/print_mode.*`.
-- Provider-neutral request, stream, reasoning, usage, retry, and transport contracts: `src/ava/provider/provider.h`.
+- Provider-neutral request, stream, reasoning, usage, and retry-decision contracts: `src/ava/provider/provider.h`.
 - Provider-native content parts for text, reasoning, tool use, and tool result: `src/ava/provider/provider.h`.
-- Tool dispatcher and registry: `src/ava/agent/tool_dispatcher.*`, `src/ava/agent/tool_registry.*`, `src/ava/agent/tool_types.h`.
+- Tool dispatch: `src/ava/agent/tool_dispatcher.cpp` is per-call coordination; `tool_registration.*` owns schema/handler composition; `tool_dispatch_*` family files own adapters; `tool_registry.*` and `tool_types.h` retain generic registry mechanics and contracts.
 - Permission requests/prompts/resolvers: `src/ava/permissions/permission.*`.
 - Append-only session storage and typed entry categories: `src/ava/session/session_store.*`.
 - Focused tests already exist under `tests/` for providers, events, runtime, tools, sessions, permissions, plugin, MCP, LSP, and TUI composer behavior.
 
 The backend is not yet at the maturity target because several seams are still thinner than the target:
 
-- `RuntimeEvent` is semantic but still uses a broad flat payload with many optional string fields. That is workable for compatibility, but typed payload contracts should be strengthened around tools, permissions, questions, usage, and cancellation.
 - `ToolDispatchResult` now carries an initial structured result payload with status, content type, errors, diffs, changed paths, truncation, and spill metadata. Tool paths still need broader permission linkage, RPC golden coverage, and full migration away from text-only compatibility paths.
 - Cancellation now reaches provider retry sleeps, streaming and non-streaming transport boundaries, bash process cleanup, search/webfetch tool paths, read/write/edit file operations, plugin/MCP brokered tool calls, and subprocess LSP diagnostics. The baseline still requires broader RPC cancel golden coverage and stress-style coverage for larger multi-file mutation flows.
 - Provider abstractions are credible, but baseline maturity requires a tested provider matrix and cross-provider semantics, not only OpenAI plus partial Anthropic support.
@@ -82,7 +82,7 @@ The backend is not yet at the maturity target because several seams are still th
 
 | Area | Maturity expectation | AVA status | Closure work | Verification gate |
 | --- | --- | --- | --- | --- |
-| Runtime events | Stable event envelope plus typed semantic payloads for run/message/reasoning/tool/permission/question/retry/compaction/usage/cancel/error | Partial. Event envelope exists; payloads are still broad and flat in places | Define typed payload structs or narrow JSON schema helpers for the high-risk event families while keeping compatibility serialization | Event golden tests, replay tests, RPC round-trip tests |
+| Runtime events | Stable event envelope plus typed semantic payloads for run/message/reasoning/tool/permission/question/retry/compaction/usage/cancel/error | Strong / landed. Closed typed payload families live in `ava_event`; v1 top-level aliases remain serializer compatibility only | Preserve and extend golden/replay/RPC round-trip coverage as contracts evolve | Event golden tests, replay tests, RPC round-trip tests |
 | Cancellation | Prompt cancellation at provider stream, retry sleep, tool execution, shell timeout, process cleanup, and active run queue | Partial. Provider retry, streaming/non-streaming transport, bash, search, webfetch, read/write/edit file operations, plugin, MCP, and LSP diagnostics paths are covered | Keep the shared cancellation callback flowing through remaining long-running tools and add fuller RPC golden coverage | Fake transport abort tests, retry-sleep cancel test, bash/file/plugin/MCP/LSP process cleanup tests, RPC cancel test |
 | Providers | OpenAI plus at least one production-quality additional family, compatible-provider shims, reasoning/tool/usage/context/retry normalization | Partial. OpenAI strong; Anthropic native slice present but not complete; Kimi/Moonshot/OpenAI-compatible first slice exists, but live-provider and broader compatibility hardening remain | Finish Anthropic thinking/cache/stop/usage, harden Kimi/Moonshot/OpenAI-compatible profile drift, and add Anthropic-compatible route tests | Provider matrix tests for stream, abort, empty, context overflow, tokens, tool call/result, reasoning, cross-provider handoff |
 | Tools | Structured schema/input/result lifecycle, bounded output, diffs, changed paths, errors, truncation/spill, permission metadata, deterministic summaries | Partial. Structured tool result payloads exist for dispatcher/runtime/session paths, but permission linkage and RPC goldens remain incomplete | Complete permission linkage and compatibility migration for built-in, plugin, MCP, command, and RPC tool paths | Tool contract tests, golden result JSON tests, truncation/spill tests, permission audit tests |

@@ -11,19 +11,21 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 ## Source Map
 
 - `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
-- `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, descriptor anchors, and IDs.
+- `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, descriptor anchors, IDs, and shared Build/Plan mode.
 - `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
-- `src/ava/provider/`: provider contracts and transports for OpenAI, Anthropic, Gemini, and OpenAI-compatible services.
-- `src/ava/agent/`: agent loop, mode handling, tool dispatch, user-question plumbing, configurable task subagents, and background job registry.
+- `src/ava/http/`: neutral HTTP transport, curl, and retry contract.
+- `src/ava/event/`: typed RuntimeEvent payload, envelope, and emission ownership.
+- `src/ava/provider/`: provider protocol and request/response/stream adapters for OpenAI, Anthropic, Gemini, and OpenAI-compatible services.
+- `src/ava/agent/`: agent loop, thin tool dispatch/registration/family adapters, user-question plumbing, configurable task subagents, and process-local background job registry.
 - `src/ava/command/`: canonical command planning, classification, policy, environment, and execution metadata.
 - `src/ava/containment/`: Linux Landlock/seccomp command-containment planning and enforcement helpers.
-- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), command dispatch, project trust, headless policy, and event serialization.
+- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), command dispatch, project trust, headless policy, and event adapters.
 - `src/ava/permissions/`: backend permission policy, persistent rules, prompts, and decisions.
 - `src/ava/tools/`: built-in file, search, shell, web, LSP, and interaction tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
 - `src/ava/session/`: append-only JSONL session storage, leases/authority, compaction, validation, and session lifecycle helpers.
 - `src/ava/context/`: project/global instruction and skill loading for provider context.
 - `src/ava/mcp/`: stdio MCP config, protocol, client lifecycle, tool/resource/prompt broker, and containment helpers.
-- `src/ava/plugin/`: local out-of-process plugin manifest, discovery, enablement, runner, diagnostics, tool broker, and event hooks.
+- `src/ava/plugin/`: local out-of-process plugin manifest, discovery, enablement, inspected install/remove filesystem lifecycle, runner, diagnostics, tool broker, and event hooks.
 - `src/ava/lsp/`: LSP client/process lifecycle and configured provider integration for diagnostics, symbols, definitions, and references.
 - `src/ava/diagnostics/`: sanitized runtime diagnostics, records, and bounded diagnostic artifacts.
 - `src/ava/observability/`: run observers, trace accounting, and deterministic trace validation/scoring.
@@ -31,6 +33,14 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
 - `src/ava/desktop/`: optional Qt/QML desktop prototype.
 - `tests/`: focused `ava_tests` sources and support fakes, plus CMake/Python CLI, RPC, ACP, package/release, PTY, and TUI integration tests. The split tmux harness is `tests/tui_tmux_smoke.py` plus `tests/tui_tmux_scenarios/`.
+
+## Internal Ownership Boundaries
+
+- `AgentLoopOptions` uses focused model-invocation, tool-resource, and tool-execution bundles; credentials stay separate, and `ToolContext` remains execution/safety authority.
+- `runtime_prompt` applies `RunOptions` isolation flags when projecting `ExtensionResourcePolicy`: ambient plugin/LSP/subagent resources, global/project MCP discovery, and global/plugin-declared skills stay disabled; explicit session MCP can remain unless `disable_session_mcp` is set.
+- Runtime prompt ownership splits across `runtime_prompt_state`, `runtime_prompt_file_references`, `runtime_run_outcomes`, and `runtime_prompt` orchestration.
+- `/trust` and `/reload` orchestration owners are `command_trust` and `command_reload`; persistence remains `project_trust`.
+- The module dependency guard has zero backend exceptions; do not introduce a new module cycle.
 
 ## Local Workflow
 

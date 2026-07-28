@@ -605,15 +605,6 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager, options.session_title_coordinator);
 }
 
-ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode)
-{
-  return session.append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                         .parent_id = "",
-                                                         .type = ava::session::EntryType::ModeChange,
-                                                         .timestamp = ava::session::now_timestamp(),
-                                                         .data_json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\"}"});
-}
-
 std::string to_string(runtime::FreshnessSourceKind kind)
 {
   using enum runtime::FreshnessSourceKind;

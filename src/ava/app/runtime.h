@@ -53,9 +53,6 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
 
-// Append a mode change through the runtime owner's serialized route.
-[[nodiscard]] ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode);
-
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
 

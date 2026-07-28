@@ -10,6 +10,7 @@
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/context/skill_loader.h"
+#include "ava/core/ids.h"
 #include "ava/core/string_utils.h"
 
 namespace ava::app::runtime {
@@ -465,6 +466,15 @@ ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_ses
     return std::unexpected(std::move(appended.error()));
   entries->push_back(std::move(*entry));
   return ava::session::session_metadata_from_entries(store.session_id(), *entries);
+}
+
+ava::core::VoidResult Session::append_runtime_mode_change(ava::agent::Mode mode)
+{
+  return append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                 .parent_id = "",
+                                                 .type = ava::session::EntryType::ModeChange,
+                                                 .timestamp = ava::session::now_timestamp(),
+                                                 .data_json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\"}"});
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metadata() const

@@ -241,7 +241,7 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = append_runtime_mode_change(session, new_mode); !appended)
+  if (auto appended = session.append_runtime_mode_change(new_mode); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }

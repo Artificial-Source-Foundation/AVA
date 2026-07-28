@@ -326,6 +326,13 @@ class Session : protected Session_aggregate_base
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
 
+  // Append a mode change entry through the runtime owner's serialized route.
+  //
+  // Records an EntryType::ModeChange entry carrying the given `mode` so the
+  // transition survives session resume. Returns failure when the append route
+  // rejects the entry (for example, a latched controller).
+  [[nodiscard]] ava::core::VoidResult append_runtime_mode_change(ava::agent::Mode mode);
+
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata() const;
 
   [[nodiscard]] std::string state_result_json(bool cancel_requested) const;

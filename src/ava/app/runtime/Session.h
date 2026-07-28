@@ -312,6 +312,20 @@ class Session : protected Session_aggregate_base
   // process may activate it. Always succeeds.
   [[nodiscard]] ava::core::VoidResult replace_with(runtime::Session&& replacement);
 
+  // Recover torn-tail and incomplete-assistant-output suffix entries from the
+  // session identified by `source_session_id` so a follow-up mutation
+  // (fork/clone/branch summary) reads a clean source.
+  //
+  // When `source_session_id` names this session, recovery runs against the
+  // current store and lease. Otherwise a separate SessionStore is opened and the
+  // acquired lease is emplaced into `temporary_source_lease`, which the caller
+  // must keep alive for the duration of the mutation. Returns failure when the
+  // source store cannot be opened, the lease cannot be acquired, or a recovery
+  // stage rejects. Leaves `temporary_source_lease` untouched when recovering this
+  // session.
+  [[nodiscard]] ava::core::VoidResult recover_source_session_for_mutation(std::string const& source_session_id,
+                                                                          std::optional<ava::session::SessionLease>& temporary_source_lease);
+
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
 

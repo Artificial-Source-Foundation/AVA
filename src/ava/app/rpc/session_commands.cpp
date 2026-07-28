@@ -85,36 +85,6 @@ ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session
   return matches.front();
 }
 
-ava::core::VoidResult recover_source_session_for_mutation(runtime::Session& current, std::string const& source_session_id,
-                                                          std::optional<ava::session::SessionLease>& temporary_source_lease)
-{
-  if (source_session_id == current.store.session_id())
-  {
-    auto recovered = current.store.recover_torn_tail(current.lease(), current.session_read_limits());
-    if (!recovered)
-      return std::unexpected(std::move(recovered.error()));
-    auto staged_recovery = current.store.recover_incomplete_assistant_output_suffix(current.lease(), current.session_read_limits());
-    if (!staged_recovery)
-      return std::unexpected(std::move(staged_recovery.error()));
-    return {};
-  }
-
-  auto source = ava::session::SessionStore::open(current.workspace_dir(), source_session_id, current.paths().sessions_dir);
-  if (!source)
-    return std::unexpected(std::move(source.error()));
-  auto acquired = ava::session::SessionLease::acquire(source->session_path());
-  if (!acquired)
-    return std::unexpected(std::move(acquired.error()));
-  temporary_source_lease.emplace(std::move(*acquired));
-  auto recovered = source->recover_torn_tail(*temporary_source_lease, current.session_read_limits());
-  if (!recovered)
-    return std::unexpected(std::move(recovered.error()));
-  auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*temporary_source_lease, current.session_read_limits());
-  if (!staged_recovery)
-    return std::unexpected(std::move(staged_recovery.error()));
-  return {};
-}
-
 runtime::OpenOptions owned_replacement_options(runtime::Session const& current, runtime::OpenOptions const& base_options)
 {
   auto options = base_options;
@@ -550,8 +520,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, source_session_id.error()));
 
     std::optional<ava::session::SessionLease> temporary_source_lease;
-    // FIXME: recover_source_session_for_mutation should become a member function of Session.
-    if (auto recovered = recover_source_session_for_mutation(*session_w, *source_session_id, temporary_source_lease); !recovered)
+    if (auto recovered = session_w->recover_source_session_for_mutation(*source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
 
     auto const* source_lease = *source_session_id == session_w->store.session_id() ? &session_w->lease() : &*temporary_source_lease;
@@ -622,8 +591,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, source_session_id.error()));
     bool const current_source = *source_session_id == session_w->store.session_id();
     std::optional<ava::session::SessionLease> temporary_source_lease;
-    // FIXME: recover_source_session_for_mutation should become a member function of Session.
-    if (auto recovered = recover_source_session_for_mutation(*session_w, *source_session_id, temporary_source_lease); !recovered)
+    if (auto recovered = session_w->recover_source_session_for_mutation(*source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
     auto const* source_lease = current_source ? &session_w->lease() : &*temporary_source_lease;
     auto options = ava::session::BranchSummaryOptions{.workspace_dir = session_w->workspace_dir(),

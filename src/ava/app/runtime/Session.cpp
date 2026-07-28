@@ -472,6 +472,36 @@ ava::core::VoidResult Session::replace_with(runtime::Session&& replacement)
   return {};
 }
 
+ava::core::VoidResult Session::recover_source_session_for_mutation(std::string const& source_session_id,
+                                                                   std::optional<ava::session::SessionLease>& temporary_source_lease)
+{
+  if (source_session_id == store.session_id())
+  {
+    auto recovered = store.recover_torn_tail(lease(), session_read_limits());
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = store.recover_incomplete_assistant_output_suffix(lease(), session_read_limits());
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
+    return {};
+  }
+
+  auto source = ava::session::SessionStore::open(workspace_dir(), source_session_id, paths().sessions_dir);
+  if (!source)
+    return std::unexpected(std::move(source.error()));
+  auto acquired = ava::session::SessionLease::acquire(source->session_path());
+  if (!acquired)
+    return std::unexpected(std::move(acquired.error()));
+  temporary_source_lease.emplace(std::move(*acquired));
+  auto recovered = source->recover_torn_tail(*temporary_source_lease, session_read_limits());
+  if (!recovered)
+    return std::unexpected(std::move(recovered.error()));
+  auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*temporary_source_lease, session_read_limits());
+  if (!staged_recovery)
+    return std::unexpected(std::move(staged_recovery.error()));
+  return {};
+}
+
 ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)
 {
   auto read_authority = this->read_authority();

@@ -333,6 +333,15 @@ class Session : protected Session_aggregate_base
   // rejects the entry (for example, a latched controller).
   [[nodiscard]] ava::core::VoidResult append_runtime_mode_change(ava::agent::Mode mode);
 
+  // Apply a CLI-supplied initial reasoning level to a freshly opened session.
+  //
+  // Accepts the raw --thinking level token from OpenOptions; an empty or
+  // whitespace-only value is rejected. "off" clears the active selection;
+  // any other token must resolve to a level the active model supports.
+  // Returns failure when the level is empty, unsupported, or the underlying
+  // reasoning update rejects the resolved selection.
+  [[nodiscard]] ava::core::VoidResult apply_initial_reasoning_level(std::string_view requested_level);
+
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata() const;
 
   [[nodiscard]] std::string state_result_json(bool cancel_requested) const;

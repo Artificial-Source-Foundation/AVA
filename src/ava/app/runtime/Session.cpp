@@ -5,10 +5,12 @@
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/serialization_detail.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
+#include "ava/app/runtime.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/ids.h"
 #include "ava/core/string_utils.h"
@@ -39,6 +41,29 @@ bool valid_command_token(std::string_view command)
 void add_diagnostic(RegistryBuilder& builder, CommandRegistryDiagnostic diagnostic)
 {
   builder.registry.diagnostics.push_back(std::move(diagnostic));
+}
+
+// Comma-separated list of reasoning levels acceptable on the CLI for `model`,
+// always including "off" first; non-empty, non-"off" supported levels follow.
+std::string cli_supported_reasoning_levels(ava::config::ModelInfo const& model)
+{
+  std::string levels = "off";
+  for (auto const& level : ava::config::supported_reasoning_levels(model))
+  {
+    if (level.empty() || level == "off")
+      continue;
+    levels += ", ";
+    levels += level;
+  }
+  return levels;
+}
+
+// Attach the --thinking option name and the model's supported levels to `error`
+// so CLI failures point the user at the levels they may pass.
+void add_cli_reasoning_context(ava::core::Error& error, ava::config::ModelInfo const& model)
+{
+  error.with_context("option", "--thinking");
+  error.with_context("supported_levels", cli_supported_reasoning_levels(model));
 }
 
 bool add_entry(RegistryBuilder& builder, CommandRegistryEntry entry)
@@ -475,6 +500,39 @@ ava::core::VoidResult Session::append_runtime_mode_change(ava::agent::Mode mode)
                                                  .type = ava::session::EntryType::ModeChange,
                                                  .timestamp = ava::session::now_timestamp(),
                                                  .data_json = "{\"mode\":\"" + ava::agent::to_string(mode) + "\"}"});
+}
+
+ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view requested_level)
+{
+  auto level = core::trim(requested_level);
+  if (level.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required");
+    add_cli_reasoning_context(error, model());
+    return std::unexpected(std::move(error));
+  }
+
+  std::optional<ReasoningSelection> selection = std::nullopt;
+  if (level != "off")
+  {
+    auto selected = reasoning_selection_for_level(model(), std::move(level));
+    if (!selected)
+    {
+      auto error = std::move(selected.error());
+      add_cli_reasoning_context(error, model());
+      return std::unexpected(std::move(error));
+    }
+    selection = std::move(*selected);
+  }
+
+  auto changed = set_runtime_reasoning(*this, std::move(selection));
+  if (!changed)
+  {
+    auto error = std::move(changed.error());
+    add_cli_reasoning_context(error, model());
+    return std::unexpected(std::move(error));
+  }
+  return {};
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metadata() const

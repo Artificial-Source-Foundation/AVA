@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_json.h"
@@ -16,7 +15,6 @@
 #include "ava/session/session_metadata.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/ids.h"
-#include "ava/core/string_utils.h"
 #include "ava/core/trusted_home.h"
 
 #include <filesystem>
@@ -63,58 +61,6 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
     return std::unexpected(std::move(error));
   }
   return matches.front();
-}
-
-std::string cli_supported_reasoning_levels(ava::config::ModelInfo const& model)
-{
-  std::string levels = "off";
-  for (auto const& level : ava::config::supported_reasoning_levels(model))
-  {
-    if (level.empty() || level == "off")
-      continue;
-    levels += ", ";
-    levels += level;
-  }
-  return levels;
-}
-
-void add_cli_reasoning_context(ava::core::Error& error, ava::config::ModelInfo const& model)
-{
-  error.with_context("option", "--thinking");
-  error.with_context("supported_levels", cli_supported_reasoning_levels(model));
-}
-
-ava::core::VoidResult apply_initial_reasoning_level(runtime::Session& session, std::string_view requested_level)
-{
-  auto level = core::trim(requested_level);
-  if (level.empty())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reasoning level is required");
-    add_cli_reasoning_context(error, session.model());
-    return std::unexpected(std::move(error));
-  }
-
-  std::optional<runtime::ReasoningSelection> selection = std::nullopt;
-  if (level != "off")
-  {
-    auto selected = reasoning_selection_for_level(session.model(), std::move(level));
-    if (!selected)
-    {
-      auto error = std::move(selected.error());
-      add_cli_reasoning_context(error, session.model());
-      return std::unexpected(std::move(error));
-    }
-    selection = std::move(*selected);
-  }
-
-  auto changed = set_runtime_reasoning(session, std::move(selection));
-  if (!changed)
-  {
-    auto error = std::move(changed.error());
-    add_cli_reasoning_context(error, session.model());
-    return std::unexpected(std::move(error));
-  }
-  return {};
 }
 
 ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resolve_runtime_directories(runtime::OpenOptions const& options)
@@ -411,7 +357,7 @@ ava::core::Result<runtime::Session> construct_runtime_session(runtime::OpenOptio
 
   if (options.initial_reasoning_level)
   {
-    if (auto applied = apply_initial_reasoning_level(session, *options.initial_reasoning_level); !applied)
+    if (auto applied = session.apply_initial_reasoning_level(*options.initial_reasoning_level); !applied)
     {
       auto error = std::move(applied.error());
       store = std::move(session.store);

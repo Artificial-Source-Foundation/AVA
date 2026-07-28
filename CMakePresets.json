@@ -150,7 +150,7 @@
       "configurePreset": "tsan",
       "filter": {
         "include": {
-          "name": "^ava_tests\\.(session_run_controller|subagent_coordinator|subagent_delivery_manager|acp)$"
+          "name": "^ava_tests\\.(session_run_controller|subagent_coordinator|subagent_delivery_manager|acp|app_rpc)$"
         }
       },
       "output": {

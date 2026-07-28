@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/event/events.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
@@ -49,65 +50,68 @@ std::string read_line_summary(ava::tools::TextOutput const& output)
   return "lines " + std::to_string(output.start_line) + "-" + std::to_string(output.end_line) + "/" + std::to_string(output.total_lines);
 }
 
-runtime::Event command_event(runtime::Session const& session, runtime::EventType type)
+ava::event::ToolPayload tool_payload_from_timeline_entry(ava::agent::ToolTimelineEntry const& entry)
 {
-  runtime::Event event;
-  event.type = type;
-  event.timestamp = ava::session::now_timestamp();
-  event.session_id = session.store.session_id();
-  event.mode = session.mode();
-  event.provider_id = session.model().provider_id;
-  event.model_id = session.model().model_id;
-  return event;
+  ava::event::ToolPayload payload{
+      .text = entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary,
+      .call_id = entry.call_id,
+      .tool = entry.name,
+      .args_json = entry.arguments_json,
+      .result_json = entry.result_json,
+      .structured_result_json = entry.structured_result_json,
+      .status = ava::agent::to_string(entry.status),
+      .error_category = entry.error_category,
+      .error_code = entry.error_code,
+      .error_message = entry.error_message,
+      .error_details = entry.error_details,
+      .content_type = entry.content_type,
+      .diff = entry.diff,
+      .changed_paths = entry.changed_paths,
+      .permission_request_ids = entry.permission_request_ids,
+      .spill_path = entry.spill_path,
+      .diff_truncated = entry.diff_truncated,
+      .truncated = entry.truncated,
+      .byte_limited = entry.byte_limited,
+      .line_limited = entry.line_limited,
+      .spill_truncated = entry.spill_truncated,
+  };
+  if (entry.output_bytes)
+    payload.output_bytes = *entry.output_bytes;
+  if (entry.total_bytes)
+    payload.total_bytes = *entry.total_bytes;
+  if (entry.output_lines)
+    payload.output_lines = *entry.output_lines;
+  if (entry.total_lines)
+    payload.total_lines = *entry.total_lines;
+  if (entry.start_line)
+    payload.start_line = *entry.start_line;
+  if (entry.end_line)
+    payload.end_line = *entry.end_line;
+  if (entry.next_offset_line)
+    payload.next_offset_line = *entry.next_offset_line;
+  if (entry.omitted_bytes)
+    payload.omitted_bytes = *entry.omitted_bytes;
+  if (entry.omitted_lines)
+    payload.omitted_lines = *entry.omitted_lines;
+  if (entry.visible_matches)
+    payload.visible_matches = *entry.visible_matches;
+  if (entry.total_matches)
+    payload.total_matches = *entry.total_matches;
+  return payload;
 }
 
 ava::core::VoidResult emit_tool_event(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, ava::agent::ToolTimelineEntry const& entry)
 {
-  auto event = command_event(session, entry.status == ava::agent::ToolTimelineStatus::Running ? runtime::EventType::ToolStart : runtime::EventType::ToolResult);
-  event.call_id = entry.call_id;
-  event.tool_name = entry.name;
-  event.status = ava::agent::to_string(entry.status);
-  event.text = entry.status == ava::agent::ToolTimelineStatus::Running ? entry.argument_summary : entry.result_summary;
-  event.tool_arguments_json = entry.arguments_json;
-  event.tool_result_json = entry.result_json;
-  event.tool_structured_result_json = entry.structured_result_json;
-  event.content_type = entry.content_type;
-  event.error_category = entry.error_category;
-  event.error_code = entry.error_code;
-  event.error_message = entry.error_message;
-  event.error_details = entry.error_details;
-  event.diff = entry.diff;
-  event.diff_truncated = entry.diff_truncated;
-  event.changed_paths = entry.changed_paths;
-  event.permission_request_ids = entry.permission_request_ids;
-  event.truncated = entry.truncated;
-  event.byte_limited = entry.byte_limited;
-  event.line_limited = entry.line_limited;
-  event.spill_path = entry.spill_path;
-  event.spill_truncated = entry.spill_truncated;
-  if (entry.output_bytes)
-    event.output_bytes = *entry.output_bytes;
-  if (entry.total_bytes)
-    event.total_bytes = *entry.total_bytes;
-  if (entry.output_lines)
-    event.output_lines = *entry.output_lines;
-  if (entry.total_lines)
-    event.total_lines = *entry.total_lines;
-  if (entry.start_line)
-    event.start_line = *entry.start_line;
-  if (entry.end_line)
-    event.end_line = *entry.end_line;
-  if (entry.next_offset_line)
-    event.next_offset_line = *entry.next_offset_line;
-  if (entry.omitted_bytes)
-    event.omitted_bytes = *entry.omitted_bytes;
-  if (entry.omitted_lines)
-    event.omitted_lines = *entry.omitted_lines;
-  if (entry.visible_matches)
-    event.visible_matches = *entry.visible_matches;
-  if (entry.total_matches)
-    event.total_matches = *entry.total_matches;
-  return emit_event(sink, event);
+  ava::event::RuntimeEventMetadata metadata{
+      .timestamp = ava::session::now_timestamp(),
+      .session_id = session.store.session_id(),
+  };
+  auto payload = tool_payload_from_timeline_entry(entry);
+  if (entry.status == ava::agent::ToolTimelineStatus::Running)
+  {
+    return ava::event::emit_event(sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::ToolStartEvent{.payload = std::move(payload)}});
+  }
+  return ava::event::emit_event(sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::ToolResultEvent{.payload = std::move(payload)}});
 }
 
 ava::agent::ToolTimelineEntry command_result_entry(std::string const& call_id, std::string name, ava::agent::ToolTimelineStatus status,
@@ -530,8 +534,8 @@ ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, Com
     {
       return std::unexpected(std::move(recorded.error()));
     }
-    auto const bash = ava::tools::run_bash(
-        context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
+    auto const bash =
+        ava::tools::run_bash(context, command, ava::tools::BashOptions{.invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
     if (!bash)
     {
       auto const text = bash.error().format();

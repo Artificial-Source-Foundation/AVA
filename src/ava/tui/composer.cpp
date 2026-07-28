@@ -54,7 +54,6 @@ constexpr short kPairQuestionWarning = 24;
 constexpr short kPairQuestionError = 25;
 constexpr short kPairQuestionAccent = 26;
 
-constexpr short kColorScreenBg = 16;
 constexpr short kColorComposerBg = 17;
 constexpr short kColorMuted = 18;
 constexpr short kColorAccent = 19;
@@ -211,18 +210,17 @@ void initialize_color_pairs()
   }
   else if (theme.kind == TuiThemeKind::Light)
   {
-    screen_bg = COLOR_WHITE;
+    // Built-in screen canvas inherits the terminal default background (-1).
+    screen_bg = -1;
     composer_bg = COLOR_WHITE;
     text_fg = COLOR_BLACK;
     muted_fg = COLOR_BLACK;
     accent_fg = COLOR_BLUE;
     if (can_change_color() && COLORS > kColorAccent)
     {
-      static_cast<void>(init_color(kColorScreenBg, 965, 971, 984));
       static_cast<void>(init_color(kColorComposerBg, 914, 933, 961));
       static_cast<void>(init_color(kColorMuted, 430, 430, 430));
       static_cast<void>(init_color(kColorAccent, 120, 360, 780));
-      screen_bg = kColorScreenBg;
       composer_bg = kColorComposerBg;
       muted_fg = kColorMuted;
       accent_fg = kColorAccent;
@@ -242,11 +240,11 @@ void initialize_color_pairs()
   }
   else
   {
+    // Built-in screen canvas inherits the terminal default background (-1).
+    screen_bg = -1;
     if (can_change_color() && COLORS > kColorComposerBg)
     {
-      static_cast<void>(init_color(kColorScreenBg, 43, 55, 78));
       static_cast<void>(init_color(kColorComposerBg, 102, 122, 180));
-      screen_bg = kColorScreenBg;
       composer_bg = kColorComposerBg;
     }
     tool_bg = composer_bg;
@@ -502,6 +500,10 @@ void apply_sgr_codes(std::vector<int> const& codes, CursesStyle& style)
             style.background = (red > 15 || green > 20 || blue > 30) ? BackgroundRole::Composer : BackgroundRole::Screen;
           index += 4;
         }
+        break;
+      case 49:
+        // SGR 49 restores the terminal default background (screen canvas).
+        style.background = BackgroundRole::Screen;
         break;
       default:
         break;

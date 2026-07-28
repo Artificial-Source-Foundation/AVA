@@ -63,6 +63,22 @@ void run_tui_composer_rendering_tests_part_1()
            "only a directly drawn footer");
   }
   {
+    constexpr std::string_view kLegacyScreenRgb = "\x1b[48;2;11;14;20m";
+    auto const reset = std::string(ava::tui::detail::kSgrReset);
+    auto const bold = std::string(ava::tui::detail::kSgrBold);
+    auto const screen_line = ava::tui::detail::screen_surface_line(bold + "hi" + reset + "there", 20);
+    auto const composer_line = ava::tui::detail::composer_surface_line("draft", 20);
+    auto const first_default_bg = screen_line.find(std::string(ava::tui::detail::kSgrScreenBg));
+    auto const reset_at = screen_line.find(reset);
+    auto const reapplied_default_bg =
+        reset_at == std::string::npos ? std::string::npos : screen_line.find(std::string(ava::tui::detail::kSgrScreenBg), reset_at + reset.size());
+    expect(ava::tui::detail::kSgrScreenBg == "\x1b[49m" && first_default_bg == 0 && reset_at != std::string::npos &&
+               reapplied_default_bg != std::string::npos && screen_line.find(kLegacyScreenRgb) == std::string::npos &&
+               composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos,
+           "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB while composer "
+           "contrast surfaces remain explicitly styled");
+  }
+  {
     using Clock = ava::tui::WheelBurstGovernor::Clock;
     auto const started_at = Clock::time_point{};
     ava::tui::WheelBurstGovernor governor;

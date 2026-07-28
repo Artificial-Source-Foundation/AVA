@@ -34,7 +34,7 @@ Session::Session() : default_rendition_(ColorPair{0})
     int const status = ::use_default_colors();
     ASSERT(status == OK);
     Color foreground_color{0xffffff};
-    Color background_color{0x2a2222};
+    Color background_color{};
     default_rendition_ = Rendition{create_color_pair(foreground_color, background_color)};
   }
 

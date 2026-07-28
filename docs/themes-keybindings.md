@@ -20,8 +20,8 @@ AVA has three built-in display modes:
 
 | Theme | Meaning |
 | --- | --- |
-| `dark` | Built-in dark ncurses palette. This is the final fallback. |
-| `light` | Built-in light ncurses palette. |
+| `dark` | Built-in dark ncurses palette. The ordinary screen canvas inherits the terminal background; contrast surfaces stay styled. This is the final fallback. |
+| `light` | Built-in light ncurses palette. The ordinary screen canvas inherits the terminal background; contrast surfaces stay styled. |
 | `plain` | No ANSI styling/color. Layout, modal text, and width behavior remain available. |
 
 Persist the TUI theme with `/theme`:
@@ -129,7 +129,7 @@ compatibility with existing custom themes.
 | `warning` | Warning status. |
 | `error` | Error or denial status. |
 | `accent` | Focus, selection, and brand accents. |
-| `screenBg` | Main screen background. |
+| `screenBg` | Main screen background. Built-in dark/light inherit the terminal default; custom themes may set an explicit color. |
 | `composerBg` | Composer/input background. |
 | `toolBg` | Optional low-contrast tool-card background. |
 | `questionBg` | Optional distinct question dock/modal background. |

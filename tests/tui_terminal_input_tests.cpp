@@ -858,6 +858,8 @@ struct VirtualTerminalResult
   bool processing_footer_output_is_quiet = false;
   bool processing_footer_output_is_plain = false;
   bool cursor_forced_visible_for_teardown = false;
+  bool checked_builtin_dark_default_screen_bg = false;
+  bool builtin_dark_stdscr_background_is_default = false;
 };
 
 std::optional<std::string> ncurses_screen_row(std::size_t row)
@@ -906,6 +908,12 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
   if (screen)
   {
     static_cast<void>(set_term(screen));
+    // Match production color setup before drawing so default-background pairs resolve.
+    if (has_colors())
+    {
+      static_cast<void>(start_color());
+      static_cast<void>(use_default_colors());
+    }
     int rows = 0;
     int columns = 0;
     getmaxyx(stdscr, rows, columns);
@@ -927,6 +935,16 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
     auto const canvas = ava::tui::composer_canvas_layout(snapshot);
     auto const expected_column = canvas.left + ava::tui::detail::input_cursor_column(snapshot, canvas.content_width);
     result.base_drawn = ava::tui::draw_screen(snapshot);
+    // initialize_color_pairs caches statically across SCREENs; assert default screen bg once on the dark baseline.
+    if (!profile.no_color && profile.name == "xterm baseline" && has_colors())
+    {
+      result.checked_builtin_dark_default_screen_bg = true;
+      short foreground = 0;
+      short background = 0;
+      auto const bkgd_cell = getbkgd(stdscr);
+      auto const pair = static_cast<short>(PAIR_NUMBER(bkgd_cell));
+      result.builtin_dark_stdscr_background_is_default = pair_content(pair, &foreground, &background) == OK && background == -1;
+    }
 
     auto modal_snapshot = snapshot;
     modal_snapshot.select_list = ava::tui::SelectListView{.title = "Terminal profile",
@@ -1184,6 +1202,7 @@ void test_ncurses_newterm_smoke_without_real_tty()
        .wezterm_exec = "/usr/bin/wezterm"}};
 
   std::size_t exercised = 0;
+  bool checked_default_screen_bg = false;
   for (auto const& profile : profiles)
   {
     auto const result = exercise_virtual_terminal_profile(profile);
@@ -1192,12 +1211,17 @@ void test_ncurses_newterm_smoke_without_real_tty()
     expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
     expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.cached_row_draw_preserves_unchanged_lower_row &&
                result.graphic_overlay_cache_stable && result.processing_footer_updates_stable && result.processing_footer_output_is_quiet &&
-               result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown,
+               result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown &&
+               (!result.checked_builtin_dark_default_screen_bg || result.builtin_dark_stdscr_background_is_default),
            "ncurses smoke test draws base/modal frames, preserves unchanged rows, suppresses identical graphic payloads while retransmitting changes and "
            "invalidations and deleting removed Kitty images, updates processing footers without terminal clears, cursor toggles, graphics, or NO_COLOR bold "
-           "styling, and forces the cursor visible for teardown for " +
+           "styling, forces the cursor visible for teardown, and keeps the built-in dark stdscr background pair at terminal default (-1) for " +
                profile.name);
+    if (result.checked_builtin_dark_default_screen_bg)
+      checked_default_screen_bg = true;
   }
+  expect(checked_default_screen_bg,
+         "ncurses smoke test verifies built-in dark stdscr background uses terminal default color on one supported baseline profile");
   expect(exercised == profiles.size(),
          "ncurses smoke test covers xterm and screen terminfo plus tmux, kitty, wezterm, and ssh-like environment "
          "variables");

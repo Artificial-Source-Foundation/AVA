@@ -6,7 +6,6 @@
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/commands.h"
-#include "ava/app/events.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/assistant_output.h"

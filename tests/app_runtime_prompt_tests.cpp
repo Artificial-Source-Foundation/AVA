@@ -9,7 +9,6 @@
 #include "ava/app/onboarding.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/Event.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"

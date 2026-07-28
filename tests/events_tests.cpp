@@ -243,7 +243,7 @@ void test_tool_payload_serializes_semantic_frontend_fields()
                             .status = "success",
                             .content_type = "application/json",
                             .diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new",
-                            .changed_paths = {"src/main.cpp", "include/ava/app/events.h"},
+                            .changed_paths = {"src/main.cpp", "src/ava/event/events.h"},
                             .permission_request_ids = {"permreq_edit"},
                             .spill_path = "/tmp/ava-spill/tool.txt",
                             .diff_truncated = true,
@@ -266,7 +266,7 @@ void test_tool_payload_serializes_semantic_frontend_fields()
              json.find("\"result\":{\"ok\":true,\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
              json.find("\"content_type\":\"application/json\"") != std::string::npos &&
-             json.find("\"changed_paths\":[\"src/main.cpp\",\"include/ava/app/events.h\"]") != std::string::npos &&
+             json.find("\"changed_paths\":[\"src/main.cpp\",\"src/ava/event/events.h\"]") != std::string::npos &&
              json.find("\"permission_request_ids\":[\"permreq_edit\"]") != std::string::npos && json.find("\"diff_truncated\":true") != std::string::npos &&
              json.find("\"byte_limited\":true") != std::string::npos && json.find("\"line_limited\":true") != std::string::npos &&
              json.find("\"output_lines\":4") != std::string::npos && json.find("\"next_offset_line\":6") != std::string::npos &&
@@ -282,7 +282,7 @@ void test_tool_payload_serializes_semantic_frontend_fields()
   auto const permission_ids = ava::core::json::strings_in_array_field(envelope.payload_json, "permission_request_ids");
   expect(envelope.name == "tool_result" && args && *args == "{\"path\":\"src/main.cpp\"}" && result && *result == "{\"ok\":true,\"path\":\"src/main.cpp\"}" &&
              structured_result && envelope.payload_type == "tool" && structured_result->find("\"status\":\"success\"") != std::string::npos &&
-             paths.size() == 2 && paths[1] == "include/ava/app/events.h" && permission_ids.size() == 1 && permission_ids[0] == "permreq_edit" &&
+             paths.size() == 2 && paths[1] == "src/ava/event/events.h" && permission_ids.size() == 1 && permission_ids[0] == "permreq_edit" &&
              envelope.payload_json.find("\"output_lines\":4") != std::string::npos && envelope.payload_json.find("\"total_lines\":11") != std::string::npos &&
              envelope.payload_json.find("\"next_offset_line\":6") != std::string::npos &&
              envelope.payload_json.find("\"spill_path\":\"/tmp/ava-spill/tool.txt\"") != std::string::npos,

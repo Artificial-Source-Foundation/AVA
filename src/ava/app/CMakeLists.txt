@@ -40,7 +40,6 @@ target_sources(ava_app
     "connect_openai.cpp"
     "display_settings.cpp"
     "doctor_support.cpp"
-    "events.cpp"
     "external_editor.cpp"
     "headless_policy.cpp"
     "interactive_run_queue.cpp"

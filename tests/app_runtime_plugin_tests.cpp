@@ -10,7 +10,6 @@
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/Event.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"

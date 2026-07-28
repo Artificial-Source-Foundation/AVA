@@ -3,7 +3,6 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/Application.h"
 #include "ava/app/commands.h"
-#include "ava/app/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"

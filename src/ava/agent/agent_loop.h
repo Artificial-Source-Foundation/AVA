@@ -155,7 +155,7 @@ struct AgentLoopOptions
   std::function<ava::core::VoidResult(RunPhase)> on_phase = nullptr;
   bool parallel_read_search_tools = false;
   std::size_t parallel_read_search_max_workers = 4;
-  // Disabled by default. This is independent from runtime::Event/RPC output.
+  // Disabled by default. This is independent from typed runtime-event/RPC output.
   std::shared_ptr<ava::observability::RunObservation> observation = nullptr;
   // Runtime may pre-establish this so retries, compaction, and the agent share
   // one run/turn identity.

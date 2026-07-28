@@ -2,7 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
-#include "ava/app/EventEnvelope.h"
+#include "ava/event/events.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/rpc/output.h"
 #include "ava/app/rpc/resolvers.h"
@@ -106,7 +106,7 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
                                                            ava::app::rpc::resolver_permission_payload(permission_payload_json));
   expect(permission.payload_type == "permission" && permission.payload_json == permission_payload_json,
          "typed permission resolver payload builder preserves the existing JSON fields");
-  auto const permission_json = ava::app::serialize_event_envelope_json(permission);
+  auto const permission_json = ava::event::serialize_event_envelope_json(permission);
   expect(permission_json.find("\"payload_type\":\"permission\"") != std::string::npos &&
              permission_json.find("\"payload\":" + permission_payload_json) != std::string::npos &&
              permission_json.find("\"reason\":\"needs read\"") != std::string::npos,
@@ -124,7 +124,7 @@ void test_app_rpc_resolver_payload_builders_preserve_wire_shapes()
   auto queue = ava::app::rpc::resolver_event_envelope("follow_up_skipped", "request_3", "correlation_3", "session_1",
                                                       ava::app::rpc::resolver_queue_payload(queue_payload_json));
   expect(queue.payload_type == "queue" && queue.payload_json == queue_payload_json, "typed queue resolver payload builder preserves the existing JSON fields");
-  auto const queue_json = ava::app::serialize_event_envelope_json(queue);
+  auto const queue_json = ava::event::serialize_event_envelope_json(queue);
   expect(queue_json.find("\"payload_type\":\"queue\"") != std::string::npos && queue_json.find("\"message\":\"follow next\"") != std::string::npos &&
              queue_json.find("\"reason\":\"canceled\"") != std::string::npos,
          "typed queue resolver envelope keeps payload family and top-level aliases");

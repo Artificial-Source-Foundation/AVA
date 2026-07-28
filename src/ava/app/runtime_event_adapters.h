@@ -6,8 +6,8 @@
 
 namespace ava::app {
 
-// Private app adapters that map agent/provider source records onto immutable
-// RuntimeEvent alternatives without the migration-only runtime::Event bag.
+// Private app adapters that map agent/provider source records directly onto
+// neutral immutable RuntimeEvent alternatives.
 
 [[nodiscard]] ava::event::RuntimeEvent runtime_event_from_tool_timeline_entry(ava::event::RuntimeEventMetadata metadata,
                                                                               ava::agent::ToolTimelineEntry const& entry);

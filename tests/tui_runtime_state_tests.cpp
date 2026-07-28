@@ -1,8 +1,9 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
-#include "ava/app/EventEnvelope.h"
-#include "ava/app/events.h"
+#include "ava/event/EventEnvelope.h"
+#include "ava/event/EventEnvelopeContext.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime.h"
@@ -32,6 +33,96 @@ void apply_session_start(ava::tui::TuiEventState& state, ava::core::Mode mode, s
       ava::event::RuntimeEvent{{}, ava::event::SessionStartEvent{.payload = {.mode = mode, .provider = std::move(provider), .model = std::move(model)}}});
 }
 
+[[nodiscard]] ava::event::RuntimeEvent user_message_event(ava::event::MessagePayload payload)
+{
+  return {{}, ava::event::UserMessageEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent assistant_message_event(ava::event::MessagePayload payload)
+{
+  return {{}, ava::event::AssistantMessageEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent message_update_event(ava::event::MessagePayload payload)
+{
+  return {{}, ava::event::MessageUpdateEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent message_end_event(ava::event::MessagePayload payload = {})
+{
+  return {{}, ava::event::MessageEndEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent reasoning_start_event(ava::event::ReasoningPayload payload)
+{
+  return {{}, ava::event::ReasoningStartEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent reasoning_delta_event(ava::event::ReasoningPayload payload)
+{
+  return {{}, ava::event::ReasoningDeltaEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent reasoning_end_event(ava::event::ReasoningPayload payload = {})
+{
+  return {{}, ava::event::ReasoningEndEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent provider_event(ava::event::ProviderPayload payload)
+{
+  return {{}, ava::event::ProviderEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent tool_start_event(ava::event::ToolPayload payload)
+{
+  return {{}, ava::event::ToolStartEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent tool_progress_event(ava::event::ToolPayload payload)
+{
+  return {{}, ava::event::ToolProgressEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent tool_result_event(ava::event::ToolPayload payload)
+{
+  return {{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent compaction_start_event(ava::event::CompactionPayload payload)
+{
+  return {{}, ava::event::CompactionStartEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent compaction_end_event(ava::event::CompactionPayload payload)
+{
+  return {{}, ava::event::CompactionEndEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent retry_event(ava::event::RetryPayload payload, ava::event::RetryDiagnostics diagnostics = {})
+{
+  return {{}, ava::event::RetryEvent{.payload = std::move(payload), .diagnostics = std::move(diagnostics)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent retry_tick_event(ava::event::RetryPayload payload, ava::event::RetryDiagnostics diagnostics = {})
+{
+  return {{}, ava::event::RetryTickEvent{.payload = std::move(payload), .diagnostics = std::move(diagnostics)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent cancellation_event(ava::event::CancellationPayload payload)
+{
+  return {{}, ava::event::CancellationEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent error_event(ava::event::ErrorPayload payload)
+{
+  return {{}, ava::event::ErrorEvent{.payload = std::move(payload)}};
+}
+
+[[nodiscard]] ava::event::RuntimeEvent completion_event(ava::event::CompletionPayload payload)
+{
+  return {{}, ava::event::CompletionEvent{.payload = std::move(payload)}};
+}
+
 void test_tui_event_state_reduces_runtime_events()
 {
   auto active_context_status = std::optional<std::string>{"1.1%"};
@@ -54,21 +145,18 @@ void test_tui_event_state_reduces_runtime_events()
   ava::tui::TuiEventState state;
   apply_session_start(state, ava::core::Mode::Build, "openai", "gpt-5.5");
 
-  ava::app::runtime::Event user;
-  user.type = ava::app::runtime::EventType::UserMessage;
-  user.text = "hello";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(user));
+  auto user_payload = ava::event::MessagePayload{};
+  user_payload.text = "hello";
+  ava::tui::apply_runtime_event(state, user_message_event(user_payload));
   expect(state.run_status == ava::tui::TuiEventRunStatus::Running && state.transcript.size() == 1 && state.transcript[0].label == "you" &&
              state.transcript[0].text == "hello" && ava::tui::to_plain_text(state.transcript[0].text_model) == "hello",
          "tui event state records user messages as completed transcript items");
 
-  ava::app::runtime::Event delta;
-  delta.type = ava::app::runtime::EventType::MessageUpdate;
-  delta.model_id = "gpt-5.5";
-  delta.text = "hel";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(delta));
-  delta.text = "lo";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(delta));
+  auto delta_payload = ava::event::MessagePayload{};
+  delta_payload.text = "hel";
+  ava::tui::apply_runtime_event(state, message_update_event(delta_payload));
+  delta_payload.text = "lo";
+  ava::tui::apply_runtime_event(state, message_update_event(delta_payload));
   auto streaming_snapshot = ava::tui::event_state_transcript_snapshot(state);
   auto active_streaming_snapshot = ava::tui::event_state_transcript_snapshot(state, ava::tui::PendingTextProjection::Unparsed);
   expect(
@@ -78,9 +166,7 @@ void test_tui_event_state_reduces_runtime_events()
           ava::tui::text_empty(active_streaming_snapshot[1].text_model) && active_streaming_snapshot[1].text == "hello",
       "default event snapshots fully model pending text while active streaming projection leaves cumulative text unparsed for the incremental tail renderer");
 
-  ava::app::runtime::Event end;
-  end.type = ava::app::runtime::EventType::MessageEnd;
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(end));
+  ava::tui::apply_runtime_event(state, message_end_event());
   expect(state.run_status == ava::tui::TuiEventRunStatus::Completed && state.pending_assistant_text.empty() && state.transcript.size() == 2 &&
              state.transcript[1].label == "ava" && state.transcript[1].text == "hello" && state.transcript[1].meta == "Build · GPT-5.5" &&
              ava::tui::to_plain_text(state.transcript[1].text_model) == "hello",
@@ -91,12 +177,9 @@ void test_tui_event_state_reduces_runtime_events()
 
   ava::tui::TuiEventState non_gpt_state;
   apply_session_start(non_gpt_state, ava::core::Mode::Build, "anthropic", "claude-sonnet-4-5");
-  ava::app::runtime::Event non_gpt_delta;
-  non_gpt_delta.type = ava::app::runtime::EventType::MessageUpdate;
-  non_gpt_delta.provider_id = "anthropic";
-  non_gpt_delta.model_id = "claude-sonnet-4-5";
-  non_gpt_delta.text = "hi";
-  ava::tui::apply_runtime_event(non_gpt_state, ava::app::to_runtime_event(non_gpt_delta));
+  auto non_gpt_delta_payload = ava::event::MessagePayload{};
+  non_gpt_delta_payload.text = "hi";
+  ava::tui::apply_runtime_event(non_gpt_state, message_update_event(non_gpt_delta_payload));
   auto const non_gpt_snapshot = ava::tui::event_state_transcript_snapshot(non_gpt_state);
   expect(non_gpt_snapshot.size() == 1 && non_gpt_snapshot[0].meta == "Build · Claude Sonnet 4.5",
          "tui event state uses centralized model profile display labels for non-GPT assistant metadata");
@@ -135,50 +218,40 @@ void test_tui_event_state_reduces_runtime_events()
              trailing_empty_fallback.transcript[1].meta.empty(),
          "no-event fallback normalization does not move the footer from the final visible output to an empty trailing item");
 
-  ava::app::runtime::Event assistant_final;
-  assistant_final.type = ava::app::runtime::EventType::AssistantMessage;
-  assistant_final.text = "hello";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(assistant_final));
+  auto assistant_final_payload = ava::event::MessagePayload{};
+  assistant_final_payload.text = "hello";
+  ava::tui::apply_runtime_event(state, assistant_message_event(assistant_final_payload));
   expect(state.transcript.size() == 2 && state.transcript[1].text == "hello", "tui event state avoids duplicating matching streamed assistant final events");
 
-  assistant_final.text = "hello\n";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(assistant_final));
+  assistant_final_payload.text = "hello\n";
+  ava::tui::apply_runtime_event(state, assistant_message_event(assistant_final_payload));
   expect(state.transcript.size() == 2 && state.transcript[1].text == "hello",
          "tui event state treats trailing whitespace-only final changes as duplicate streamed assistant events");
 
   ava::tui::TuiEventState reasoning_state;
   apply_session_start(reasoning_state, ava::core::Mode::Build, "openai", "gpt-5.5");
-  ava::app::runtime::Event reasoning_start;
-  reasoning_start.type = ava::app::runtime::EventType::ReasoningStart;
-  reasoning_start.reasoning_format = "summary";
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_start));
-  ava::app::runtime::Event reasoning_delta;
-  reasoning_delta.type = ava::app::runtime::EventType::ReasoningDelta;
-  reasoning_delta.text = "checking";
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_delta));
-  reasoning_delta.text = " options";
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_delta));
+  auto reasoning_start_payload = ava::event::ReasoningPayload{};
+  reasoning_start_payload.reasoning_format = "summary";
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_start_event(reasoning_start_payload));
+  auto reasoning_delta_payload = ava::event::ReasoningPayload{};
+  reasoning_delta_payload.text = "checking";
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_delta_event(reasoning_delta_payload));
+  reasoning_delta_payload.text = " options";
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_delta_event(reasoning_delta_payload));
   auto reasoning_snapshot = ava::tui::event_state_transcript_snapshot(reasoning_state);
   expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_snapshot.size() == 1 && reasoning_snapshot[0].label == "ava" &&
              reasoning_snapshot[0].thinking == "checking options" && reasoning_snapshot[0].text.empty() &&
              ava::tui::to_plain_text(reasoning_snapshot[0].thinking_model) == "checking options",
          "tui event state exposes pending reasoning as part of the assistant turn");
-  ava::app::runtime::Event reasoning_end;
-  reasoning_end.type = ava::app::runtime::EventType::ReasoningEnd;
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_end));
+  ava::tui::apply_runtime_event(reasoning_state, reasoning_end_event());
   expect(reasoning_state.pending_reasoning_text == "checking options" && reasoning_state.transcript.empty() && reasoning_state.activity.size() == 1 &&
              reasoning_state.activity[0].label == "reasoning" && reasoning_state.activity[0].status == ava::tui::ToolTimelineStatus::Success,
          "tui event state keeps completed reasoning attached to the pending assistant turn");
 
-  ava::app::runtime::Event reasoning_answer;
-  reasoning_answer.type = ava::app::runtime::EventType::MessageUpdate;
-  reasoning_answer.model_id = "gpt-5.5";
-  reasoning_answer.text = "answer";
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_answer));
-  ava::app::runtime::Event reasoning_answer_end;
-  reasoning_answer_end.type = ava::app::runtime::EventType::MessageEnd;
-  reasoning_answer_end.model_id = "gpt-5.5";
-  ava::tui::apply_runtime_event(reasoning_state, ava::app::to_runtime_event(reasoning_answer_end));
+  auto reasoning_answer_payload = ava::event::MessagePayload{};
+  reasoning_answer_payload.text = "answer";
+  ava::tui::apply_runtime_event(reasoning_state, message_update_event(reasoning_answer_payload));
+  ava::tui::apply_runtime_event(reasoning_state, message_end_event());
   expect(reasoning_state.pending_reasoning_text.empty() && reasoning_state.transcript.size() == 1 && reasoning_state.transcript[0].label == "ava" &&
              reasoning_state.transcript[0].text == "answer" && reasoning_state.transcript[0].thinking == "checking options" &&
              ava::tui::to_plain_text(reasoning_state.transcript[0].text_model) == "answer" &&
@@ -227,11 +300,10 @@ void test_tui_event_state_reduces_runtime_events()
          "tui thinking visibility hides inline thinking blocks without hiding assistant text");
 
   ava::tui::TuiEventState redacted_reasoning_state;
-  ava::app::runtime::Event redacted_reasoning;
-  redacted_reasoning.type = ava::app::runtime::EventType::ReasoningDelta;
-  redacted_reasoning.reasoning_redacted = true;
-  redacted_reasoning.text = "provider-private-secret";
-  ava::tui::apply_runtime_event(redacted_reasoning_state, ava::app::to_runtime_event(redacted_reasoning));
+  auto redacted_reasoning_payload = ava::event::ReasoningPayload{};
+  redacted_reasoning_payload.text = "provider-private-secret";
+  redacted_reasoning_payload.reasoning_redacted = true;
+  ava::tui::apply_runtime_event(redacted_reasoning_state, reasoning_delta_event(redacted_reasoning_payload));
   auto redacted_snapshot = ava::tui::event_state_transcript_snapshot(redacted_reasoning_state);
   auto const redacted_render = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
@@ -248,57 +320,52 @@ void test_tui_event_state_reduces_runtime_events()
       "tui event state never renders text from redacted reasoning deltas");
 
   ava::tui::TuiEventState audit_state;
-  ava::app::runtime::Event permission_audit;
-  permission_audit.type = ava::app::runtime::EventType::ProviderEvent;
-  permission_audit.status = "tui:permission_request";
-  permission_audit.text = "permission requested: bash pwd";
-  ava::tui::apply_runtime_event(audit_state, ava::app::to_runtime_event(permission_audit));
-  ava::app::runtime::Event question_audit;
-  question_audit.type = ava::app::runtime::EventType::ProviderEvent;
-  question_audit.status = "tui:question_answer";
-  question_audit.text = "question answered: yes";
-  ava::tui::apply_runtime_event(audit_state, ava::app::to_runtime_event(question_audit));
+  auto permission_audit_payload = ava::event::ProviderPayload{};
+  permission_audit_payload.text = "permission requested: bash pwd";
+  permission_audit_payload.status = "tui:permission_request";
+  ava::tui::apply_runtime_event(audit_state, provider_event(permission_audit_payload));
+  auto question_audit_payload = ava::event::ProviderPayload{};
+  question_audit_payload.text = "question answered: yes";
+  question_audit_payload.status = "tui:question_answer";
+  ava::tui::apply_runtime_event(audit_state, provider_event(question_audit_payload));
   expect(audit_state.transcript.empty() && audit_state.activity.size() == 2 && audit_state.activity[0].label == "permission" &&
              audit_state.activity[1].label == "question",
          "tui keeps routine permission and question receipts in internal activity rather than the ordinary transcript");
 
   ava::tui::TuiEventState live_permission_state;
-  ava::app::runtime::Event live_permission_tool_start;
-  live_permission_tool_start.type = ava::app::runtime::EventType::ToolStart;
-  live_permission_tool_start.call_id = "call_live_permission";
-  live_permission_tool_start.tool_name = "bash";
-  live_permission_tool_start.text = "git push origin main";
-  ava::tui::apply_runtime_event(live_permission_state, ava::app::to_runtime_event(live_permission_tool_start));
-  ava::app::runtime::Event live_permission_request;
-  live_permission_request.type = ava::app::runtime::EventType::ProviderEvent;
-  live_permission_request.status = "tui:permission_request";
-  live_permission_request.tool_name = "bash";
-  live_permission_request.permission_request_ids = {"perm_live_permission"};
-  live_permission_request.text = "git push origin main";
-  live_permission_request.reason = "changes remote state";
-  ava::tui::apply_runtime_event(live_permission_state, ava::app::to_runtime_event(live_permission_request));
+  auto live_permission_tool_start_payload = ava::event::ToolPayload{};
+  live_permission_tool_start_payload.text = "git push origin main";
+  live_permission_tool_start_payload.call_id = "call_live_permission";
+  live_permission_tool_start_payload.tool = "bash";
+  ava::tui::apply_runtime_event(live_permission_state, tool_start_event(live_permission_tool_start_payload));
+  auto live_permission_request_payload = ava::event::ProviderPayload{};
+  live_permission_request_payload.text = "git push origin main";
+  live_permission_request_payload.tool = "bash";
+  live_permission_request_payload.status = "tui:permission_request";
+  live_permission_request_payload.reason = "changes remote state";
+  live_permission_request_payload.permission_request_ids = {"perm_live_permission"};
+  ava::tui::apply_runtime_event(live_permission_state, provider_event(live_permission_request_payload));
   expect(live_permission_state.pending_tools.size() == 1 && live_permission_state.pending_tools[0].item.permissions.size() == 1 &&
              live_permission_state.pending_tools[0].item.permissions[0].permission_request_id == "perm_live_permission" &&
              live_permission_state.pending_tools[0].item.permissions[0].decision.empty() &&
              strip_sgr(ava::tui::detail::render_tool_card(live_permission_state.pending_tools[0].item, 100, false).front()).find("permission") ==
                  std::string::npos,
          "tui event state attaches the permission request internally without painting it on the running tool");
-  auto live_permission_allow = live_permission_request;
-  live_permission_allow.status = "tui:permission_allow";
-  live_permission_allow.tool_name.clear();
-  live_permission_allow.text = "permission allowed";
-  ava::tui::apply_runtime_event(live_permission_state, ava::app::to_runtime_event(live_permission_allow));
+  auto live_permission_allow_payload = live_permission_request_payload;
+  live_permission_allow_payload.status = "tui:permission_allow";
+  live_permission_allow_payload.tool.clear();
+  live_permission_allow_payload.text = "permission allowed";
+  ava::tui::apply_runtime_event(live_permission_state, provider_event(live_permission_allow_payload));
   expect(live_permission_state.pending_tools[0].item.permissions.size() == 1 &&
              live_permission_state.pending_tools[0].item.permissions[0].decision == "allow" &&
              strip_sgr(ava::tui::detail::render_tool_card(live_permission_state.pending_tools[0].item, 100, false).front()).find("permission allow") ==
                  std::string::npos,
          "tui merges a permission resolution internally without painting a routine allow receipt");
-  ava::app::runtime::Event live_permission_result;
-  live_permission_result.type = ava::app::runtime::EventType::ToolResult;
-  live_permission_result.call_id = live_permission_tool_start.call_id;
-  live_permission_result.tool_name = live_permission_tool_start.tool_name;
-  live_permission_result.text = "pushed";
-  ava::tui::apply_runtime_event(live_permission_state, ava::app::to_runtime_event(live_permission_result));
+  auto live_permission_result_payload = ava::event::ToolPayload{};
+  live_permission_result_payload.text = "pushed";
+  live_permission_result_payload.call_id = live_permission_tool_start_payload.call_id;
+  live_permission_result_payload.tool = live_permission_tool_start_payload.tool;
+  ava::tui::apply_runtime_event(live_permission_state, tool_result_event(live_permission_result_payload));
   expect(live_permission_state.pending_tools.empty() && !live_permission_state.transcript.empty() && live_permission_state.transcript.back().tool &&
              live_permission_state.transcript.back().tool->permissions.size() == 1 &&
              live_permission_state.transcript.back().tool->permissions[0].decision == "allow",
@@ -306,20 +373,20 @@ void test_tui_event_state_reduces_runtime_events()
 
   auto verify_settled_provider_permission = [&](std::string resolution_detail, std::string expected_decision, std::string expected_label) {
     ava::tui::TuiEventState provider_permission_state;
-    auto tool_start = live_permission_tool_start;
-    tool_start.call_id = "call_provider_permission_" + expected_decision + resolution_detail;
-    ava::tui::apply_runtime_event(provider_permission_state, ava::app::to_runtime_event(tool_start));
-    auto request = live_permission_request;
-    request.permission_request_ids = {"perm_provider_permission"};
-    ava::tui::apply_runtime_event(provider_permission_state, ava::app::to_runtime_event(request));
-    auto resolution = request;
-    resolution.status = "tui:permission_allow";
-    resolution.text = "permission allowed";
-    resolution.error_details = std::move(resolution_detail);
-    ava::tui::apply_runtime_event(provider_permission_state, ava::app::to_runtime_event(resolution));
-    auto result = live_permission_result;
-    result.call_id = tool_start.call_id;
-    ava::tui::apply_runtime_event(provider_permission_state, ava::app::to_runtime_event(result));
+    auto tool_start_payload = live_permission_tool_start_payload;
+    tool_start_payload.call_id = "call_provider_permission_" + expected_decision + resolution_detail;
+    ava::tui::apply_runtime_event(provider_permission_state, tool_start_event(tool_start_payload));
+    auto request_payload = live_permission_request_payload;
+    request_payload.permission_request_ids = {"perm_provider_permission"};
+    ava::tui::apply_runtime_event(provider_permission_state, provider_event(request_payload));
+    auto resolution_payload = request_payload;
+    resolution_payload.status = "tui:permission_allow";
+    resolution_payload.text = "permission allowed";
+    resolution_payload.error_details = std::move(resolution_detail);
+    ava::tui::apply_runtime_event(provider_permission_state, provider_event(resolution_payload));
+    auto result_payload = live_permission_result_payload;
+    result_payload.call_id = tool_start_payload.call_id;
+    ava::tui::apply_runtime_event(provider_permission_state, tool_result_event(result_payload));
     auto const* item = provider_permission_state.transcript.empty() || !provider_permission_state.transcript.back().tool
                            ? nullptr
                            : &*provider_permission_state.transcript.back().tool;
@@ -336,96 +403,94 @@ void test_tui_event_state_reduces_runtime_events()
   verify_settled_provider_permission("selected allow and remember", "allow_remember", "allow always");
 
   ava::tui::TuiEventState ambiguous_permission_state;
-  auto ambiguous_start = live_permission_tool_start;
-  ambiguous_start.tool_name = "read_file";
-  ambiguous_start.call_id = "call_ambiguous_one";
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_start));
-  ambiguous_start.call_id = "call_ambiguous_two";
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_start));
-  auto ambiguous_request = live_permission_request;
-  ambiguous_request.tool_name = "read_file";
-  ambiguous_request.permission_request_ids = {"perm_ambiguous"};
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_request));
+  auto ambiguous_start_payload = live_permission_tool_start_payload;
+  ambiguous_start_payload.tool = "read_file";
+  ambiguous_start_payload.call_id = "call_ambiguous_one";
+  ava::tui::apply_runtime_event(ambiguous_permission_state, tool_start_event(ambiguous_start_payload));
+  ambiguous_start_payload.call_id = "call_ambiguous_two";
+  ava::tui::apply_runtime_event(ambiguous_permission_state, tool_start_event(ambiguous_start_payload));
+  auto ambiguous_request_payload = live_permission_request_payload;
+  ambiguous_request_payload.tool = "read_file";
+  ambiguous_request_payload.permission_request_ids = {"perm_ambiguous"};
+  ava::tui::apply_runtime_event(ambiguous_permission_state, provider_event(ambiguous_request_payload));
   expect(ambiguous_permission_state.permission_audits.size() == 1 &&
              std::ranges::all_of(ambiguous_permission_state.pending_tools,
                                  [](ava::tui::PendingToolItem const& pending) { return pending.item.permissions.empty(); }),
          "tui event state does not guess between multiple running tools with the same permission tool name");
-  auto ambiguous_first_result = live_permission_result;
-  ambiguous_first_result.call_id = "call_ambiguous_one";
-  ambiguous_first_result.tool_name = "read_file";
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_first_result));
-  auto ambiguous_reply = ambiguous_request;
-  ambiguous_reply.status = "tui:permission_allow";
-  ambiguous_reply.text = "permission allowed";
-  ambiguous_reply.error_details = "selected allow";
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_reply));
+  auto ambiguous_first_result_payload = live_permission_result_payload;
+  ambiguous_first_result_payload.call_id = "call_ambiguous_one";
+  ambiguous_first_result_payload.tool = "read_file";
+  ava::tui::apply_runtime_event(ambiguous_permission_state, tool_result_event(ambiguous_first_result_payload));
+  auto ambiguous_reply_payload = ambiguous_request_payload;
+  ambiguous_reply_payload.status = "tui:permission_allow";
+  ambiguous_reply_payload.text = "permission allowed";
+  ambiguous_reply_payload.error_details = "selected allow";
+  ava::tui::apply_runtime_event(ambiguous_permission_state, provider_event(ambiguous_reply_payload));
   expect(ambiguous_permission_state.pending_tools.size() == 1 && ambiguous_permission_state.pending_tools[0].call_id == "call_ambiguous_two" &&
              ambiguous_permission_state.pending_tools[0].item.permissions.empty(),
          "tui permission audit merge never reuses unique-name fallback after an initially ambiguous request");
-  auto ambiguous_second_result = ambiguous_first_result;
-  ambiguous_second_result.call_id = "call_ambiguous_two";
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(ambiguous_second_result));
+  auto ambiguous_second_result_payload = ambiguous_first_result_payload;
+  ambiguous_second_result_payload.call_id = "call_ambiguous_two";
+  ava::tui::apply_runtime_event(ambiguous_permission_state, tool_result_event(ambiguous_second_result_payload));
   expect(!ambiguous_permission_state.transcript.empty() && ambiguous_permission_state.transcript.back().tool &&
              ambiguous_permission_state.transcript.back().tool->permissions.empty(),
          "tui initially ambiguous permission audit remains unattached when the surviving same-name tool settles");
 
   ava::tui::TuiEventState exact_permission_state;
-  auto exact_first = ambiguous_start;
-  exact_first.call_id = "call_exact_one";
-  exact_first.permission_request_ids.clear();
-  ava::tui::apply_runtime_event(exact_permission_state, ava::app::to_runtime_event(exact_first));
-  auto exact_second = exact_first;
-  exact_second.call_id = "call_exact_two";
-  exact_second.permission_request_ids = {"perm_exact"};
-  ava::tui::apply_runtime_event(exact_permission_state, ava::app::to_runtime_event(exact_second));
-  auto exact_request = ambiguous_request;
-  exact_request.permission_request_ids = {"perm_exact"};
-  ava::tui::apply_runtime_event(exact_permission_state, ava::app::to_runtime_event(exact_request));
+  auto exact_first_payload = ambiguous_start_payload;
+  exact_first_payload.call_id = "call_exact_one";
+  exact_first_payload.permission_request_ids.clear();
+  ava::tui::apply_runtime_event(exact_permission_state, tool_start_event(exact_first_payload));
+  auto exact_second_payload = exact_first_payload;
+  exact_second_payload.call_id = "call_exact_two";
+  exact_second_payload.permission_request_ids = {"perm_exact"};
+  ava::tui::apply_runtime_event(exact_permission_state, tool_start_event(exact_second_payload));
+  auto exact_request_payload = ambiguous_request_payload;
+  exact_request_payload.permission_request_ids = {"perm_exact"};
+  ava::tui::apply_runtime_event(exact_permission_state, provider_event(exact_request_payload));
   expect(exact_permission_state.pending_tools[0].item.permissions.empty() && exact_permission_state.pending_tools[1].item.permissions.size() == 1,
          "tui event state prefers an exact permission-id match when same-name pending tools are ambiguous");
-  auto question_with_permission_shape = ambiguous_request;
-  question_with_permission_shape.status = "tui:question_request";
-  question_with_permission_shape.permission_request_ids = {"perm_must_not_attach"};
+  auto question_with_permission_shape_payload = ambiguous_request_payload;
+  question_with_permission_shape_payload.status = "tui:question_request";
+  question_with_permission_shape_payload.permission_request_ids = {"perm_must_not_attach"};
   auto const permission_audit_count = ambiguous_permission_state.permission_audits.size();
-  ava::tui::apply_runtime_event(ambiguous_permission_state, ava::app::to_runtime_event(question_with_permission_shape));
+  ava::tui::apply_runtime_event(ambiguous_permission_state, provider_event(question_with_permission_shape_payload));
   expect(ambiguous_permission_state.permission_audits.size() == permission_audit_count &&
              std::ranges::all_of(ambiguous_permission_state.pending_tools,
                                  [](ava::tui::PendingToolItem const& pending) { return pending.item.permissions.empty(); }),
          "tui question audit events never create or attach permission state");
 
   ava::tui::TuiEventState reused_state;
-  ava::tui::apply_runtime_event(reused_state, ava::app::to_runtime_event(user));
-  delta.text = "streamed";
-  ava::tui::apply_runtime_event(reused_state, ava::app::to_runtime_event(delta));
-  ava::tui::apply_runtime_event(reused_state, ava::app::to_runtime_event(end));
-  ava::app::runtime::Event next_user;
-  next_user.type = ava::app::runtime::EventType::UserMessage;
-  next_user.text = "next";
-  ava::tui::apply_runtime_event(reused_state, ava::app::to_runtime_event(next_user));
-  assistant_final.text = "fresh final";
-  ava::tui::apply_runtime_event(reused_state, ava::app::to_runtime_event(assistant_final));
+  ava::tui::apply_runtime_event(reused_state, user_message_event(user_payload));
+  delta_payload.text = "streamed";
+  ava::tui::apply_runtime_event(reused_state, message_update_event(delta_payload));
+  ava::tui::apply_runtime_event(reused_state, message_end_event());
+  auto next_user_payload = ava::event::MessagePayload{};
+  next_user_payload.text = "next";
+  ava::tui::apply_runtime_event(reused_state, user_message_event(next_user_payload));
+  assistant_final_payload.text = "fresh final";
+  ava::tui::apply_runtime_event(reused_state, assistant_message_event(assistant_final_payload));
   expect(reused_state.transcript.size() == 4 && reused_state.transcript[1].text == "streamed" && reused_state.transcript.back().text == "fresh final",
          "tui event state clears streaming index before a reused-state next turn");
 
   ava::tui::TuiEventState final_state;
-  assistant_final.text = "direct final";
-  ava::tui::apply_runtime_event(final_state, ava::app::to_runtime_event(assistant_final));
+  assistant_final_payload.text = "direct final";
+  ava::tui::apply_runtime_event(final_state, assistant_message_event(assistant_final_payload));
   expect(final_state.run_status == ava::tui::TuiEventRunStatus::Completed && final_state.transcript.size() == 1 && final_state.transcript[0].label == "ava" &&
              final_state.transcript[0].text == "direct final",
          "tui event state records assistant final events without streaming deltas");
-  assistant_final.text = "Use `ava` and **bold**";
-  ava::tui::apply_runtime_event(final_state, ava::app::to_runtime_event(assistant_final));
+  assistant_final_payload.text = "Use `ava` and **bold**";
+  ava::tui::apply_runtime_event(final_state, assistant_message_event(assistant_final_payload));
   expect(final_state.transcript.size() == 2 && ava::tui::to_plain_text(final_state.transcript.back().text_model) == "Use ava and bold",
          "tui event state stores assistant Markdown as frontend-owned semantic Text");
 
   ava::tui::TuiEventState provider_state;
-  ava::app::runtime::Event provider_start;
-  provider_start.type = ava::app::runtime::EventType::ProviderEvent;
-  provider_start.status = "tool_call_start";
-  provider_start.call_id = "provider_call_1";
-  provider_start.tool_name = "read_file";
-  provider_start.text = R"({"path": "README.md"})";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_start));
+  auto provider_start_payload = ava::event::ProviderPayload{};
+  provider_start_payload.text = R"({"path": "README.md"})";
+  provider_start_payload.call_id = "provider_call_1";
+  provider_start_payload.tool = "read_file";
+  provider_start_payload.status = "tool_call_start";
+  ava::tui::apply_runtime_event(provider_state, provider_event(provider_start_payload));
   auto provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
   auto const provider_activity_id = provider_state.activity.empty() ? std::string{} : provider_state.activity[0].id;
   expect(provider_state.activity.size() == 1 && !provider_activity_id.empty() && provider_state.activity[0].label == "read_file" &&
@@ -435,11 +500,11 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool->lifecycle == ava::tui::ToolLifecycleState::ProviderAnnounced,
          "tui event state shows provider tool-call starts as pending announced tool cards");
 
-  ava::app::runtime::Event provider_delta = provider_start;
-  provider_delta.status = "tool_call_delta";
-  provider_delta.tool_name.clear();
-  provider_delta.text = R"({"path": "README.md", "partial": true})";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_delta));
+  auto provider_delta_payload = provider_start_payload;
+  provider_delta_payload.status = "tool_call_delta";
+  provider_delta_payload.tool.clear();
+  provider_delta_payload.text = R"({"path": "README.md", "partial": true})";
+  ava::tui::apply_runtime_event(provider_state, provider_event(provider_delta_payload));
   provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
   expect(provider_state.activity.size() == 1 && provider_state.activity[0].id == provider_activity_id && provider_state.activity[0].label == "read_file" &&
              provider_state.activity[0].detail == "streaming tool arguments" && provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Running &&
@@ -449,10 +514,10 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool,
          "tui event state keeps provider tool-call deltas on the pending tool card and preserves labels by call id");
 
-  ava::app::runtime::Event provider_end = provider_delta;
-  provider_end.status = "tool_call_end";
-  provider_end.text = R"({"path": "README.md", "complete": true})";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_end));
+  auto provider_end_payload = provider_delta_payload;
+  provider_end_payload.status = "tool_call_end";
+  provider_end_payload.text = R"({"path": "README.md", "complete": true})";
+  ava::tui::apply_runtime_event(provider_state, provider_event(provider_end_payload));
   provider_snapshot = ava::tui::event_state_transcript_snapshot(provider_state);
   expect(provider_state.activity.size() == 1 && provider_state.activity[0].id == provider_activity_id && provider_state.activity[0].label == "read_file" &&
              provider_state.activity[0].detail == "tool call ready" && provider_state.activity[0].status == ava::tui::ToolTimelineStatus::Success &&
@@ -461,49 +526,45 @@ void test_tui_event_state_reduces_runtime_events()
              provider_snapshot.back().tool,
          "tui event state marks provider tool-call arguments complete without settling completed transcript history");
 
-  ava::app::runtime::Event provider_execution_start;
-  provider_execution_start.type = ava::app::runtime::EventType::ToolStart;
-  provider_execution_start.call_id = "provider_call_1";
-  provider_execution_start.tool_name = "read_file";
-  provider_execution_start.text = "path=README.md";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_execution_start));
+  auto provider_execution_start_payload = ava::event::ToolPayload{};
+  provider_execution_start_payload.text = "path=README.md";
+  provider_execution_start_payload.call_id = "provider_call_1";
+  provider_execution_start_payload.tool = "read_file";
+  ava::tui::apply_runtime_event(provider_state, tool_start_event(provider_execution_start_payload));
   expect(provider_state.pending_tools.size() == 1 && provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ExecutionStarted &&
              provider_state.pending_tools[0].item.argument_summary == "path=README.md",
          "tui event state advances an announced provider tool card into execution by call id");
 
-  ava::app::runtime::Event provider_execution_progress;
-  provider_execution_progress.type = ava::app::runtime::EventType::ToolProgress;
-  provider_execution_progress.call_id = "provider_call_1";
-  provider_execution_progress.tool_name = "read_file";
-  provider_execution_progress.text = "reading file";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_execution_progress));
+  auto provider_execution_progress_payload = ava::event::ToolPayload{};
+  provider_execution_progress_payload.text = "reading file";
+  provider_execution_progress_payload.call_id = "provider_call_1";
+  provider_execution_progress_payload.tool = "read_file";
+  ava::tui::apply_runtime_event(provider_state, tool_progress_event(provider_execution_progress_payload));
   expect(provider_state.pending_tools.size() == 1 && provider_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::Progress &&
              provider_state.pending_tools[0].item.result_summary == "reading file",
          "tui event state records partial tool progress on the pending card");
 
-  ava::app::runtime::Event provider_execution_result;
-  provider_execution_result.type = ava::app::runtime::EventType::ToolResult;
-  provider_execution_result.call_id = "provider_call_1";
-  provider_execution_result.tool_name = "read_file";
-  provider_execution_result.status = "success";
-  provider_execution_result.text = "read lines 1-10/10";
-  ava::tui::apply_runtime_event(provider_state, ava::app::to_runtime_event(provider_execution_result));
+  auto provider_execution_result_payload = ava::event::ToolPayload{};
+  provider_execution_result_payload.text = "read lines 1-10/10";
+  provider_execution_result_payload.call_id = "provider_call_1";
+  provider_execution_result_payload.tool = "read_file";
+  provider_execution_result_payload.status = "success";
+  ava::tui::apply_runtime_event(provider_state, tool_result_event(provider_execution_result_payload));
   expect(provider_state.pending_tools.empty() && !provider_state.transcript.empty() && provider_state.transcript.back().tool &&
              provider_state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Complete &&
              provider_state.transcript.back().tool->argument_summary == "path=README.md",
          "tui event state settles completed tools into immutable transcript history");
 
   ava::tui::TuiEventState provider_without_id_state;
-  ava::app::runtime::Event provider_without_id;
-  provider_without_id.type = ava::app::runtime::EventType::ProviderEvent;
-  provider_without_id.status = "tool_call_start";
-  provider_without_id.tool_name = "grep";
-  ava::tui::apply_runtime_event(provider_without_id_state, ava::app::to_runtime_event(provider_without_id));
+  auto provider_without_id_payload = ava::event::ProviderPayload{};
+  provider_without_id_payload.tool = "grep";
+  provider_without_id_payload.status = "tool_call_start";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_event(provider_without_id_payload));
   auto const provider_without_id_activity_id = provider_without_id_state.activity.empty() ? std::string{} : provider_without_id_state.activity[0].id;
-  provider_without_id.status = "tool_call_delta";
-  ava::tui::apply_runtime_event(provider_without_id_state, ava::app::to_runtime_event(provider_without_id));
-  provider_without_id.status = "tool_call_end";
-  ava::tui::apply_runtime_event(provider_without_id_state, ava::app::to_runtime_event(provider_without_id));
+  provider_without_id_payload.status = "tool_call_delta";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_event(provider_without_id_payload));
+  provider_without_id_payload.status = "tool_call_end";
+  ava::tui::apply_runtime_event(provider_without_id_state, provider_event(provider_without_id_payload));
   expect(provider_without_id_state.activity.size() == 1 && !provider_without_id_activity_id.empty() &&
              provider_without_id_state.activity[0].id == provider_without_id_activity_id && provider_without_id_state.activity[0].label == "grep" &&
              provider_without_id_state.activity[0].detail == "tool call ready" &&
@@ -511,99 +572,90 @@ void test_tui_event_state_reduces_runtime_events()
              provider_without_id_state.pending_tools[0].item.lifecycle == ava::tui::ToolLifecycleState::ArgumentsComplete,
          "tui event state coalesces provider tool-call activity and pending cards when provider events omit call ids");
 
-  ava::app::runtime::Event tool_start;
-  tool_start.type = ava::app::runtime::EventType::ToolStart;
-  tool_start.call_id = "call_1";
-  tool_start.tool_name = "bash";
-  tool_start.text = "pwd";
-  tool_start.tool_arguments_json = "{\"command\":\"pwd\"}";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_start));
+  auto tool_start_payload = ava::event::ToolPayload{};
+  tool_start_payload.text = "pwd";
+  tool_start_payload.call_id = "call_1";
+  tool_start_payload.tool = "bash";
+  tool_start_payload.args_json = "{\"command\":\"pwd\"}";
+  ava::tui::apply_runtime_event(state, tool_start_event(tool_start_payload));
   expect(state.pending_tools.size() == 1 && state.pending_tools[0].call_id == "call_1" &&
              state.pending_tools[0].item.status == ava::tui::ToolTimelineStatus::Running && state.pending_tools[0].item.name == "bash" &&
              state.pending_tools[0].item.argument_summary == "pwd" && state.pending_tools[0].item.arguments_json == "{\"command\":\"pwd\"}",
          "tui event state tracks started tools by call id");
 
-  ava::app::runtime::Event tool_progress;
-  tool_progress.type = ava::app::runtime::EventType::ToolProgress;
-  tool_progress.call_id = "call_1";
-  tool_progress.tool_name = "bash";
-  tool_progress.text = "running pwd";
-  tool_progress.tool_result_json = "{\"partial\":true}";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_progress));
+  auto tool_progress_payload = ava::event::ToolPayload{};
+  tool_progress_payload.text = "running pwd";
+  tool_progress_payload.call_id = "call_1";
+  tool_progress_payload.tool = "bash";
+  tool_progress_payload.result_json = "{\"partial\":true}";
+  ava::tui::apply_runtime_event(state, tool_progress_event(tool_progress_payload));
   auto tool_snapshot = ava::tui::event_state_transcript_snapshot(state);
   expect(state.pending_tools.size() == 1 && state.pending_tools[0].item.result_summary == "running pwd" &&
              state.pending_tools[0].item.result_json == "{\"partial\":true}" && !tool_snapshot.empty() && tool_snapshot.back().tool &&
              tool_snapshot.back().tool->status == ava::tui::ToolTimelineStatus::Running,
          "tui event state updates pending tool progress and includes it in snapshots");
 
-  ava::app::runtime::Event tool_result;
-  tool_result.type = ava::app::runtime::EventType::ToolResult;
-  tool_result.call_id = "call_1";
-  tool_result.tool_name = "bash";
-  tool_result.status = "success";
-  tool_result.text = "ok";
-  tool_result.tool_result_json = "{\"ok\":true}";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_result));
+  auto tool_result_payload = ava::event::ToolPayload{};
+  tool_result_payload.text = "ok";
+  tool_result_payload.call_id = "call_1";
+  tool_result_payload.tool = "bash";
+  tool_result_payload.result_json = "{\"ok\":true}";
+  tool_result_payload.status = "success";
+  ava::tui::apply_runtime_event(state, tool_result_event(tool_result_payload));
   expect(state.pending_tools.empty() && !state.transcript.empty() && state.transcript.back().tool &&
              state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Success && state.transcript.back().tool->argument_summary == "pwd" &&
              state.transcript.back().tool->result_summary == "ok" && state.transcript.back().tool->arguments_json == "{\"command\":\"pwd\"}" &&
              state.transcript.back().tool->result_json == "{\"ok\":true}",
          "tui event state moves successful tool results into completed transcript items");
 
-  ava::app::runtime::Event write_start;
-  write_start.type = ava::app::runtime::EventType::ToolStart;
-  write_start.call_id = "call_write";
-  write_start.tool_name = "write_file";
-  write_start.text = "path=src/main.cpp, content=12 bytes";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(write_start));
-  ava::app::runtime::Event write_result;
-  write_result.type = ava::app::runtime::EventType::ToolResult;
-  write_result.call_id = "call_write";
-  write_result.tool_name = "write_file";
-  write_result.status = "success";
-  write_result.text = "wrote 12 bytes";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(write_result));
+  auto write_start_payload = ava::event::ToolPayload{};
+  write_start_payload.text = "path=src/main.cpp, content=12 bytes";
+  write_start_payload.call_id = "call_write";
+  write_start_payload.tool = "write_file";
+  ava::tui::apply_runtime_event(state, tool_start_event(write_start_payload));
+  auto write_result_payload = ava::event::ToolPayload{};
+  write_result_payload.text = "wrote 12 bytes";
+  write_result_payload.call_id = "call_write";
+  write_result_payload.tool = "write_file";
+  write_result_payload.status = "success";
+  ava::tui::apply_runtime_event(state, tool_result_event(write_result_payload));
   expect(!state.activity.empty() && state.activity.back().label == "write_file" && state.activity.back().status == ava::tui::ToolTimelineStatus::Success &&
              state.modified_files.size() == 1 && state.modified_files[0].path == "src/main.cpp",
          "tui event state feeds sidebar activity and modified-file summaries from successful mutating tools");
 
-  ava::app::runtime::Event semantic_write;
-  semantic_write.type = ava::app::runtime::EventType::ToolResult;
-  semantic_write.call_id = "call_semantic_write";
-  semantic_write.tool_name = "edit_file";
-  semantic_write.status = "success";
-  semantic_write.text = "edited file";
-  semantic_write.changed_paths = {"src/semantic.cpp"};
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(semantic_write));
+  auto semantic_write_payload = ava::event::ToolPayload{};
+  semantic_write_payload.text = "edited file";
+  semantic_write_payload.call_id = "call_semantic_write";
+  semantic_write_payload.tool = "edit_file";
+  semantic_write_payload.status = "success";
+  semantic_write_payload.changed_paths = {"src/semantic.cpp"};
+  ava::tui::apply_runtime_event(state, tool_result_event(semantic_write_payload));
   expect(std::ranges::any_of(state.modified_files, [](ava::tui::SidebarModifiedFile const& file) { return file.path == "src/semantic.cpp"; }),
          "tui event state prefers semantic changed paths over parsing mutating tool summaries");
 
-  ava::app::runtime::Event tool_error;
-  tool_error.type = ava::app::runtime::EventType::ToolResult;
-  tool_error.call_id = "call_2";
-  tool_error.tool_name = "read";
-  tool_error.status = "error";
-  tool_error.text = "denied";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_error));
+  auto tool_error_payload = ava::event::ToolPayload{};
+  tool_error_payload.text = "denied";
+  tool_error_payload.call_id = "call_2";
+  tool_error_payload.tool = "read";
+  tool_error_payload.status = "error";
+  ava::tui::apply_runtime_event(state, tool_result_event(tool_error_payload));
   expect(state.transcript.back().tool && state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Error &&
              state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Error && state.transcript.back().tool->result_summary == "denied",
          "tui event state records errored tool results as error tool cards");
 
-  ava::app::runtime::Event tool_canceled_start;
-  tool_canceled_start.type = ava::app::runtime::EventType::ToolStart;
-  tool_canceled_start.call_id = "call_canceled";
-  tool_canceled_start.tool_name = "bash";
-  tool_canceled_start.text = "sleep 30";
-  tool_canceled_start.tool_arguments_json = "{\"command\":\"sleep 30\"}";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_canceled_start));
-  ava::app::runtime::Event tool_canceled;
-  tool_canceled.type = ava::app::runtime::EventType::ToolResult;
-  tool_canceled.call_id = "call_canceled";
-  tool_canceled.tool_name = "bash";
-  tool_canceled.status = "canceled";
-  tool_canceled.text = "stopped by user";
-  tool_canceled.tool_result_json = "{\"tool\":\"bash\",\"canceled\":true}";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(tool_canceled));
+  auto tool_canceled_start_payload = ava::event::ToolPayload{};
+  tool_canceled_start_payload.text = "sleep 30";
+  tool_canceled_start_payload.call_id = "call_canceled";
+  tool_canceled_start_payload.tool = "bash";
+  tool_canceled_start_payload.args_json = "{\"command\":\"sleep 30\"}";
+  ava::tui::apply_runtime_event(state, tool_start_event(tool_canceled_start_payload));
+  auto tool_canceled_payload = ava::event::ToolPayload{};
+  tool_canceled_payload.text = "stopped by user";
+  tool_canceled_payload.call_id = "call_canceled";
+  tool_canceled_payload.tool = "bash";
+  tool_canceled_payload.result_json = "{\"tool\":\"bash\",\"canceled\":true}";
+  tool_canceled_payload.status = "canceled";
+  ava::tui::apply_runtime_event(state, tool_result_event(tool_canceled_payload));
   expect(state.transcript.back().tool && state.transcript.back().tool->status == ava::tui::ToolTimelineStatus::Canceled &&
              state.transcript.back().tool->lifecycle == ava::tui::ToolLifecycleState::Canceled &&
              state.transcript.back().tool->argument_summary == "sleep 30" && state.transcript.back().tool->result_summary == "stopped by user" &&
@@ -611,37 +663,37 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state records canceled tool results as canceled tool cards");
 
   ava::tui::TuiEventState permission_tool_state;
-  ava::app::EventEnvelope permission_tool_requested{.schema_version = 1,
-                                                    .event_id = "event_permission_tool_request",
-                                                    .timestamp = "2026-04-30T00:00:00Z",
+  ava::event::EventEnvelope permission_tool_requested{.schema_version = 1,
+                                                      .event_id = "event_permission_tool_request",
+                                                      .timestamp = "2026-04-30T00:00:00Z",
+                                                      .session_id = "session_test",
+                                                      .run_id = "run_permission_tool",
+                                                      .turn_id = "turn_permission_tool",
+                                                      .message_id = std::nullopt,
+                                                      .request_id = "permission_1",
+                                                      .correlation_id = "permission_1",
+                                                      .name = "permission_requested",
+                                                      .payload_json =
+                                                          "{\"resolver_request_id\":\"permission_1\","
+                                                          "\"permission_request_id\":\"permreq_push\","
+                                                          "\"operation\":\"bash\",\"mode\":\"build\","
+                                                          "\"target_path\":\"\",\"command\":\"git push origin main\","
+                                                          "\"tool_name\":\"bash\",\"risk\":\"high\","
+                                                          "\"reason\":\"command can change external state\"}"};
+  ava::tui::apply_control_event_envelope(permission_tool_state, permission_tool_requested);
+  ava::event::EventEnvelope permission_tool_replied{.schema_version = 1,
+                                                    .event_id = "event_permission_tool_reply",
+                                                    .timestamp = "2026-04-30T00:00:01Z",
                                                     .session_id = "session_test",
                                                     .run_id = "run_permission_tool",
                                                     .turn_id = "turn_permission_tool",
                                                     .message_id = std::nullopt,
                                                     .request_id = "permission_1",
                                                     .correlation_id = "permission_1",
-                                                    .name = "permission_requested",
+                                                    .name = "permission_replied",
                                                     .payload_json =
                                                         "{\"resolver_request_id\":\"permission_1\","
-                                                        "\"permission_request_id\":\"permreq_push\","
-                                                        "\"operation\":\"bash\",\"mode\":\"build\","
-                                                        "\"target_path\":\"\",\"command\":\"git push origin main\","
-                                                        "\"tool_name\":\"bash\",\"risk\":\"high\","
-                                                        "\"reason\":\"command can change external state\"}"};
-  ava::tui::apply_control_event_envelope(permission_tool_state, permission_tool_requested);
-  ava::app::EventEnvelope permission_tool_replied{.schema_version = 1,
-                                                  .event_id = "event_permission_tool_reply",
-                                                  .timestamp = "2026-04-30T00:00:01Z",
-                                                  .session_id = "session_test",
-                                                  .run_id = "run_permission_tool",
-                                                  .turn_id = "turn_permission_tool",
-                                                  .message_id = std::nullopt,
-                                                  .request_id = "permission_1",
-                                                  .correlation_id = "permission_1",
-                                                  .name = "permission_replied",
-                                                  .payload_json =
-                                                      "{\"resolver_request_id\":\"permission_1\","
-                                                      "\"decision\":\"deny\",\"reason\":\"selected deny\"}"};
+                                                        "\"decision\":\"deny\",\"reason\":\"selected deny\"}"};
   ava::tui::apply_control_event_envelope(permission_tool_state, permission_tool_replied);
   auto permission_tool_payload = ava::event::ToolPayload{};
   permission_tool_payload.text = "permission denied";
@@ -653,7 +705,7 @@ void test_tui_event_state_reduces_runtime_events()
   permission_tool_payload.permission_request_ids = {"permreq_push"};
   auto permission_tool_result = ava::event::RuntimeEvent{{.timestamp = "2026-04-30T00:00:02Z", .session_id = "session_test"},
                                                          ava::event::ToolResultEvent{.payload = std::move(permission_tool_payload)}};
-  auto permission_tool_context = ava::app::EventEnvelopeContext{};
+  auto permission_tool_context = ava::event::EventEnvelopeContext{};
   permission_tool_context.run_id = "run_permission_tool";
   permission_tool_context.turn_id = "turn_permission_tool";
   permission_tool_context.message_id = "message_permission_tool";
@@ -704,7 +756,7 @@ void test_tui_event_state_reduces_runtime_events()
   canonical_permission_payload.permission_request_ids = {"permreq_canonical_session"};
   auto canonical_permission_result = ava::event::RuntimeEvent{{.timestamp = "2026-04-30T00:00:02Z", .session_id = "session_test"},
                                                               ava::event::ToolResultEvent{.payload = std::move(canonical_permission_payload)}};
-  auto canonical_permission_context = ava::app::EventEnvelopeContext{};
+  auto canonical_permission_context = ava::event::EventEnvelopeContext{};
   canonical_permission_context.request_id = "request_canonical_session_tool";
   canonical_permission_context.correlation_id = "call_canonical_session_tool";
   ava::tui::apply_runtime_event(canonical_session_permission_state, canonical_permission_result, canonical_permission_context);
@@ -728,7 +780,7 @@ void test_tui_event_state_reduces_runtime_events()
   correlated_provider_payload.status = "tool_call_delta";
   auto correlated_provider_delta = ava::event::RuntimeEvent{{.timestamp = "2026-04-30T00:00:00Z", .session_id = "session_test"},
                                                             ava::event::ProviderEvent{.payload = std::move(correlated_provider_payload)}};
-  auto correlated_context = ava::app::EventEnvelopeContext{};
+  auto correlated_context = ava::event::EventEnvelopeContext{};
   correlated_context.run_id = "run_tool";
   correlated_context.turn_id = "turn_tool";
   correlated_context.message_id = "message_tool";
@@ -799,7 +851,7 @@ void test_tui_event_state_reduces_runtime_events()
   second_provider_payload.status = "tool_call_start";
   auto second_provider = ava::event::RuntimeEvent{{.timestamp = "2026-04-30T00:00:03Z", .session_id = "session_test"},
                                                   ava::event::ProviderEvent{.payload = std::move(second_provider_payload)}};
-  auto second_context = ava::app::EventEnvelopeContext{};
+  auto second_context = ava::event::EventEnvelopeContext{};
   second_context.run_id = "run_tool_2";
   second_context.turn_id = "turn_tool_2";
   second_context.message_id = "message_tool_2";
@@ -824,7 +876,7 @@ void test_tui_event_state_reduces_runtime_events()
          "tui typed reducer keeps independent empty-id tool cards separated by correlation context");
 
   ava::tui::TuiEventState shared_context_distinct_ids_state;
-  auto shared_context = ava::app::EventEnvelopeContext{};
+  auto shared_context = ava::event::EventEnvelopeContext{};
   shared_context.run_id = "run_shared";
   shared_context.turn_id = "turn_shared";
   shared_context.message_id = "message_shared";
@@ -928,28 +980,23 @@ void test_tui_event_state_reduces_runtime_events()
              session_start_identity_state.current_model_id == "gpt-5.5",
          "tui session start updates mode while preserving nonempty provider and model identity");
 
-  ava::app::runtime::Event error;
-  error.type = ava::app::runtime::EventType::Error;
-  error.error_message = "provider failed";
-  error.error_details = "Provider: provider failed";
-  ava::tui::apply_runtime_event(state, ava::app::to_runtime_event(error));
+  auto error_payload = ava::event::ErrorPayload{};
+  error_payload.error_message = "provider failed";
+  error_payload.error_details = "Provider: provider failed";
+  ava::tui::apply_runtime_event(state, error_event(error_payload));
   expect(state.run_status == ava::tui::TuiEventRunStatus::Error && state.error_text == "provider failed" &&
              state.error_details == "Provider: provider failed" && state.transcript.back().label == "error" &&
              state.transcript.back().text == "provider failed",
          "tui event state records runtime errors and exposes error transcript text");
 
   ava::tui::TuiEventState streaming_error_state;
-  ava::app::runtime::Event streaming_delta;
-  streaming_delta.type = ava::app::runtime::EventType::MessageUpdate;
-  streaming_delta.model_id = "gpt-5.5";
-  streaming_delta.text = "partial answer";
-  ava::tui::apply_runtime_event(streaming_error_state, ava::app::to_runtime_event(streaming_delta));
-  ava::app::runtime::Event streaming_error;
-  streaming_error.type = ava::app::runtime::EventType::Error;
-  streaming_error.model_id = "gpt-5.5";
-  streaming_error.error_message = "provider: curl transport failed";
-  streaming_error.error_details = "provider: curl transport failed\noutput: event: response.created\ndata: {...}";
-  ava::tui::apply_runtime_event(streaming_error_state, ava::app::to_runtime_event(streaming_error));
+  auto streaming_delta_payload = ava::event::MessagePayload{};
+  streaming_delta_payload.text = "partial answer";
+  ava::tui::apply_runtime_event(streaming_error_state, message_update_event(streaming_delta_payload));
+  auto streaming_error_payload = ava::event::ErrorPayload{};
+  streaming_error_payload.error_message = "provider: curl transport failed";
+  streaming_error_payload.error_details = "provider: curl transport failed\noutput: event: response.created\ndata: {...}";
+  ava::tui::apply_runtime_event(streaming_error_state, error_event(streaming_error_payload));
   expect(streaming_error_state.transcript.size() == 2 && streaming_error_state.transcript[0].label == "ava" &&
              streaming_error_state.transcript[0].text == "partial answer" && streaming_error_state.transcript[1].label == "error" &&
              streaming_error_state.transcript[1].text == "provider: curl transport failed" &&
@@ -989,11 +1036,10 @@ void test_tui_event_state_reduces_runtime_events()
          "tui renders concise collapsed errors while preserving partial assistant text and details-on-demand");
 
   ava::tui::TuiEventState canceled_state;
-  ava::app::runtime::Event canceled;
-  canceled.type = ava::app::runtime::EventType::Error;
-  canceled.error_message = "agent loop canceled";
-  canceled.error_details = "Unknown: agent loop canceled";
-  ava::tui::apply_runtime_event(canceled_state, ava::app::to_runtime_event(canceled));
+  auto canceled_payload = ava::event::ErrorPayload{};
+  canceled_payload.error_message = "agent loop canceled";
+  canceled_payload.error_details = "Unknown: agent loop canceled";
+  ava::tui::apply_runtime_event(canceled_state, error_event(canceled_payload));
   expect(canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled && canceled_state.error_text == "stopped by user" &&
              canceled_state.transcript.size() == 1 && canceled_state.transcript[0].label == "ava" &&
              canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." && !canceled_state.activity.empty() &&
@@ -1002,11 +1048,10 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state presents cooperative cancellation with continuation guidance");
 
   ava::tui::TuiEventState explicit_canceled_state;
-  ava::app::runtime::Event explicit_canceled;
-  explicit_canceled.type = ava::app::runtime::EventType::Canceled;
-  explicit_canceled.text = "stopped by user";
-  explicit_canceled.reason = "cancel_requested";
-  ava::tui::apply_runtime_event(explicit_canceled_state, ava::app::to_runtime_event(explicit_canceled));
+  auto explicit_canceled_payload = ava::event::CancellationPayload{};
+  explicit_canceled_payload.text = "stopped by user";
+  explicit_canceled_payload.reason = "cancel_requested";
+  ava::tui::apply_runtime_event(explicit_canceled_state, cancellation_event(explicit_canceled_payload));
   expect(explicit_canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled && explicit_canceled_state.transcript.size() == 1 &&
              explicit_canceled_state.transcript[0].text == "stopped by user. Submit a new prompt to continue." &&
              explicit_canceled_state.activity.back().status == ava::tui::ToolTimelineStatus::Canceled &&
@@ -1015,47 +1060,44 @@ void test_tui_event_state_reduces_runtime_events()
          "tui event state accepts explicit backend canceled lifecycle events");
 
   ava::tui::TuiEventState lifecycle_state;
-  ava::app::runtime::Event compaction_start;
-  compaction_start.type = ava::app::runtime::EventType::CompactionStart;
-  compaction_start.trigger = "auto";
-  compaction_start.estimated_tokens = 9000;
-  compaction_start.threshold_tokens = 8000;
-  ava::tui::apply_runtime_event(lifecycle_state, ava::app::to_runtime_event(compaction_start));
+  auto compaction_start_payload = ava::event::CompactionPayload{};
+  compaction_start_payload.trigger = "auto";
+  compaction_start_payload.estimated_tokens = 9000;
+  compaction_start_payload.threshold_tokens = 8000;
+  ava::tui::apply_runtime_event(lifecycle_state, compaction_start_event(compaction_start_payload));
   expect(lifecycle_state.transcript.empty() && lifecycle_state.activity.size() == 1 && lifecycle_state.activity[0].label == "compaction" &&
              lifecycle_state.activity[0].detail.find("tokens~9000/8000") != std::string::npos,
          "tui event state keeps compaction starts in status activity without inventing transcript content");
-  ava::app::runtime::Event retry;
-  retry.type = ava::app::runtime::EventType::Retry;
-  retry.reason = "context_overflow";
-  retry.trigger = "context_overflow";
-  retry.attempt = 1;
-  retry.max_attempts = 1;
-  retry.delay_ms = 250;
-  retry.estimated_tokens = 9000;
-  retry.threshold_tokens = 8000;
-  retry.snapshot_entries = 3;
-  retry.current_entries = 4;
-  retry.summary_bytes = 321;
-  ava::tui::apply_runtime_event(lifecycle_state, ava::app::to_runtime_event(retry));
-  ava::app::runtime::Event retry_tick;
-  retry_tick.type = ava::app::runtime::EventType::RetryTick;
-  retry_tick.reason = "context_overflow";
-  retry_tick.trigger = "context_overflow";
-  retry_tick.attempt = 1;
-  retry_tick.max_attempts = 1;
-  retry_tick.delay_ms = 250;
-  retry_tick.remaining_ms = 125;
-  ava::tui::apply_runtime_event(lifecycle_state, ava::app::to_runtime_event(retry_tick));
-  ava::app::runtime::Event retry_tick_update = retry_tick;
-  retry_tick_update.remaining_ms = 25;
-  ava::tui::apply_runtime_event(lifecycle_state, ava::app::to_runtime_event(retry_tick_update));
-  ava::app::runtime::Event compaction_end;
-  compaction_end.type = ava::app::runtime::EventType::CompactionEnd;
-  compaction_end.trigger = "context_overflow";
-  compaction_end.attempt = 1;
-  compaction_end.max_attempts = 2;
-  compaction_end.summary_bytes = 1234;
-  ava::tui::apply_runtime_event(lifecycle_state, ava::app::to_runtime_event(compaction_end));
+  auto retry_payload = ava::event::RetryPayload{};
+  retry_payload.trigger = "context_overflow";
+  retry_payload.reason = "context_overflow";
+  retry_payload.attempt = 1;
+  retry_payload.max_attempts = 1;
+  retry_payload.delay_ms = 250;
+  auto retry_diagnostics = ava::event::RetryDiagnostics{};
+  retry_diagnostics.estimated_tokens = 9000;
+  retry_diagnostics.threshold_tokens = 8000;
+  retry_diagnostics.snapshot_entries = 3;
+  retry_diagnostics.current_entries = 4;
+  retry_diagnostics.summary_bytes = 321;
+  ava::tui::apply_runtime_event(lifecycle_state, retry_event(retry_payload, retry_diagnostics));
+  auto retry_tick_payload = ava::event::RetryPayload{};
+  retry_tick_payload.trigger = "context_overflow";
+  retry_tick_payload.reason = "context_overflow";
+  retry_tick_payload.attempt = 1;
+  retry_tick_payload.max_attempts = 1;
+  retry_tick_payload.delay_ms = 250;
+  retry_tick_payload.remaining_ms = 125;
+  ava::tui::apply_runtime_event(lifecycle_state, retry_tick_event(retry_tick_payload));
+  auto retry_tick_update_payload = retry_tick_payload;
+  retry_tick_update_payload.remaining_ms = 25;
+  ava::tui::apply_runtime_event(lifecycle_state, retry_tick_event(retry_tick_update_payload));
+  auto compaction_end_payload = ava::event::CompactionPayload{};
+  compaction_end_payload.trigger = "context_overflow";
+  compaction_end_payload.attempt = 1;
+  compaction_end_payload.max_attempts = 2;
+  compaction_end_payload.summary_bytes = 1234;
+  ava::tui::apply_runtime_event(lifecycle_state, compaction_end_event(compaction_end_payload));
   expect(lifecycle_state.transcript.size() == 3 && lifecycle_state.transcript[0].label == "audit" &&
              lifecycle_state.transcript[0].text.find("retrying after context_overflow") != std::string::npos &&
              lifecycle_state.transcript[0].text.find("attempt 1/1") != std::string::npos &&
@@ -1092,107 +1134,115 @@ void test_tui_event_state_reduces_runtime_events()
          "tui renders compaction lifecycle entries as dedicated long-session status cards");
 
   ava::tui::TuiEventState done_state;
-  delta.text = "done text";
-  ava::tui::apply_runtime_event(done_state, ava::app::to_runtime_event(delta));
-  ava::app::runtime::Event done;
-  done.type = ava::app::runtime::EventType::Done;
-  done.stop_reason = "stop";
-  done.provider_iterations = 2;
-  done.tool_calls = 1;
-  ava::tui::apply_runtime_event(done_state, ava::app::to_runtime_event(done));
+  delta_payload.text = "done text";
+  ava::tui::apply_runtime_event(done_state, message_update_event(delta_payload));
+  auto done_payload = ava::event::CompletionPayload{};
+  done_payload.stop_reason = "stop";
+  done_payload.provider_iterations = 2;
+  done_payload.tool_calls = 1;
+  ava::tui::apply_runtime_event(done_state, completion_event(done_payload));
   expect(done_state.run_status == ava::tui::TuiEventRunStatus::Done && done_state.stop_reason == "stop" && done_state.provider_iterations == 2 &&
              done_state.tool_calls == 1 && done_state.pending_assistant_text.empty() && done_state.transcript.size() == 1 &&
              done_state.transcript[0].text == "done text",
          "tui event state records done metadata and commits pending assistant text");
 
-  std::vector<ava::app::runtime::Event> live_events;
-  ava::app::runtime::Event parity_session;
-  parity_session.type = ava::app::runtime::EventType::SessionStart;
-  parity_session.mode = ava::core::Mode::Plan;
-  parity_session.provider_id = "openai";
-  parity_session.model_id = "gpt-5.5";
-  live_events.push_back(parity_session);
-  ava::app::runtime::Event parity_user;
-  parity_user.type = ava::app::runtime::EventType::UserMessage;
-  parity_user.text = "inspect";
-  live_events.push_back(parity_user);
-  ava::app::runtime::Event parity_retry;
-  parity_retry.type = ava::app::runtime::EventType::Retry;
-  parity_retry.reason = "context_overflow";
-  parity_retry.trigger = "context_overflow";
-  parity_retry.attempt = 1;
-  parity_retry.max_attempts = 1;
-  live_events.push_back(parity_retry);
-  ava::app::runtime::Event parity_retry_tick;
-  parity_retry_tick.type = ava::app::runtime::EventType::RetryTick;
-  parity_retry_tick.reason = "context_overflow";
-  parity_retry_tick.trigger = "context_overflow";
-  parity_retry_tick.attempt = 1;
-  parity_retry_tick.max_attempts = 1;
-  parity_retry_tick.delay_ms = 250;
-  parity_retry_tick.remaining_ms = 0;
-  live_events.push_back(parity_retry_tick);
-  ava::app::runtime::Event parity_compaction_start;
-  parity_compaction_start.type = ava::app::runtime::EventType::CompactionStart;
-  parity_compaction_start.trigger = "context_overflow";
-  parity_compaction_start.attempt = 1;
-  parity_compaction_start.max_attempts = 2;
-  live_events.push_back(parity_compaction_start);
-  ava::app::runtime::Event parity_compaction_end;
-  parity_compaction_end.type = ava::app::runtime::EventType::CompactionEnd;
-  parity_compaction_end.trigger = "context_overflow";
-  parity_compaction_end.attempt = 1;
-  parity_compaction_end.max_attempts = 2;
-  parity_compaction_end.summary_bytes = 512;
-  live_events.push_back(parity_compaction_end);
-  ava::app::runtime::Event parity_reasoning;
-  parity_reasoning.type = ava::app::runtime::EventType::ReasoningDelta;
-  parity_reasoning.text = "checking";
-  live_events.push_back(parity_reasoning);
-  ava::app::runtime::Event parity_delta;
-  parity_delta.type = ava::app::runtime::EventType::MessageUpdate;
-  parity_delta.model_id = "gpt-5.5";
-  parity_delta.text = "answer";
-  live_events.push_back(parity_delta);
-  ava::app::runtime::Event parity_end;
-  parity_end.type = ava::app::runtime::EventType::MessageEnd;
-  parity_end.model_id = "gpt-5.5";
-  live_events.push_back(parity_end);
-  ava::app::runtime::Event parity_tool_start;
-  parity_tool_start.type = ava::app::runtime::EventType::ToolStart;
-  parity_tool_start.call_id = "call_parity";
-  parity_tool_start.tool_name = "read_file";
-  parity_tool_start.text = "path=README.md";
-  live_events.push_back(parity_tool_start);
-  ava::app::runtime::Event parity_tool_progress;
-  parity_tool_progress.type = ava::app::runtime::EventType::ToolProgress;
-  parity_tool_progress.call_id = "call_parity";
-  parity_tool_progress.tool_name = "read_file";
-  parity_tool_progress.text = "reading";
-  parity_tool_progress.status = "running";
-  live_events.push_back(parity_tool_progress);
-  ava::app::runtime::Event parity_tool_result;
-  parity_tool_result.type = ava::app::runtime::EventType::ToolResult;
-  parity_tool_result.call_id = "call_parity";
-  parity_tool_result.tool_name = "read_file";
-  parity_tool_result.text = "12 bytes";
-  parity_tool_result.status = "success";
-  live_events.push_back(parity_tool_result);
-  ava::app::runtime::Event parity_audit;
-  parity_audit.type = ava::app::runtime::EventType::ProviderEvent;
-  parity_audit.status = "tui:question_answer";
-  parity_audit.text = "question answered: yes";
-  live_events.push_back(parity_audit);
-  ava::app::runtime::Event parity_done;
-  parity_done.type = ava::app::runtime::EventType::Done;
-  parity_done.stop_reason = "stop";
-  parity_done.provider_iterations = 1;
-  parity_done.tool_calls = 1;
-  live_events.push_back(parity_done);
+  std::vector<ava::event::RuntimeEvent> live_events;
+  {
+    auto parity_session_payload = ava::event::SessionPayload{};
+    parity_session_payload.mode = ava::core::Mode::Plan;
+    parity_session_payload.provider = "openai";
+    parity_session_payload.model = "gpt-5.5";
+    live_events.emplace_back(ava::event::RuntimeEventMetadata{}, ava::event::SessionStartEvent{.payload = std::move(parity_session_payload)});
+  }
+  {
+    auto payload = ava::event::MessagePayload{};
+    payload.text = "inspect";
+    live_events.emplace_back(user_message_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::RetryPayload{};
+    payload.trigger = "context_overflow";
+    payload.reason = "context_overflow";
+    payload.attempt = 1;
+    payload.max_attempts = 1;
+    live_events.emplace_back(retry_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::RetryPayload{};
+    payload.trigger = "context_overflow";
+    payload.reason = "context_overflow";
+    payload.attempt = 1;
+    payload.max_attempts = 1;
+    payload.delay_ms = 250;
+    payload.remaining_ms = 0;
+    live_events.emplace_back(retry_tick_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::CompactionPayload{};
+    payload.trigger = "context_overflow";
+    payload.attempt = 1;
+    payload.max_attempts = 2;
+    live_events.emplace_back(compaction_start_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::CompactionPayload{};
+    payload.trigger = "context_overflow";
+    payload.attempt = 1;
+    payload.max_attempts = 2;
+    payload.summary_bytes = 512;
+    live_events.emplace_back(compaction_end_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::ReasoningPayload{};
+    payload.text = "checking";
+    live_events.emplace_back(reasoning_delta_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::MessagePayload{};
+    payload.text = "answer";
+    live_events.emplace_back(message_update_event(std::move(payload)));
+  }
+  live_events.emplace_back(message_end_event());
+  {
+    auto payload = ava::event::ToolPayload{};
+    payload.text = "path=README.md";
+    payload.call_id = "call_parity";
+    payload.tool = "read_file";
+    live_events.emplace_back(tool_start_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::ToolPayload{};
+    payload.text = "reading";
+    payload.call_id = "call_parity";
+    payload.tool = "read_file";
+    payload.status = "running";
+    live_events.emplace_back(tool_progress_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::ToolPayload{};
+    payload.text = "12 bytes";
+    payload.call_id = "call_parity";
+    payload.tool = "read_file";
+    payload.status = "success";
+    live_events.emplace_back(tool_result_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::ProviderPayload{};
+    payload.text = "question answered: yes";
+    payload.status = "tui:question_answer";
+    live_events.emplace_back(provider_event(std::move(payload)));
+  }
+  {
+    auto payload = ava::event::CompletionPayload{};
+    payload.stop_reason = "stop";
+    payload.provider_iterations = 1;
+    payload.tool_calls = 1;
+    live_events.emplace_back(completion_event(std::move(payload)));
+  }
 
   ava::tui::TuiEventState live_state;
   ava::tui::TuiEventState context_state;
-  ava::app::EventEnvelopeContext parity_context;
+  ava::event::EventEnvelopeContext parity_context;
   parity_context.run_id = "run_1";
   parity_context.turn_id = "turn_1";
   parity_context.message_id = "message_1";
@@ -1200,9 +1250,8 @@ void test_tui_event_state_reduces_runtime_events()
   parity_context.correlation_id = "correlation_1";
   for (auto const& event : live_events)
   {
-    auto typed_event = ava::app::to_runtime_event(event);
-    ava::tui::apply_runtime_event(live_state, typed_event);
-    ava::tui::apply_runtime_event(context_state, typed_event, parity_context);
+    ava::tui::apply_runtime_event(live_state, event);
+    ava::tui::apply_runtime_event(context_state, event, parity_context);
   }
   auto const live_render =
       tui_test_support::plain_lines(ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -1232,8 +1281,28 @@ void test_tui_event_state_reduces_runtime_events()
          "tui typed direct and context reduction render the same story, track active ids, and inherit session mode/provider/model");
 
   ava::tui::TuiEventState resolver_state;
-  ava::app::EventEnvelope permission_requested{.schema_version = 1,
-                                               .event_id = "event_permission",
+  ava::event::EventEnvelope permission_requested{.schema_version = 1,
+                                                 .event_id = "event_permission",
+                                                 .timestamp = "2026-04-30T00:00:00Z",
+                                                 .session_id = "session_test",
+                                                 .run_id = "run_prompt",
+                                                 .turn_id = "turn_prompt",
+                                                 .message_id = std::nullopt,
+                                                 .request_id = "request_prompt",
+                                                 .correlation_id = "request_prompt",
+                                                 .name = "permission_requested",
+                                                 .payload_json =
+                                                     "{\"resolver_request_id\":\"permission_1\","
+                                                     "\"operation\":\"shell.run\",\"mode\":\"build\","
+                                                     "\"target_path\":\"\",\"command\":\"pwd\","
+                                                     "\"tool_name\":\"bash\",\"reason\":\"needs approval\"}"};
+  ava::tui::apply_control_event_envelope(resolver_state, permission_requested);
+  expect(resolver_state.transcript.empty() && !resolver_state.activity.empty() && resolver_state.activity[0].label == "permission" &&
+             resolver_state.activity[0].detail.find("permission requested: bash pwd") != std::string::npos && resolver_state.active_run_id == "run_prompt",
+         "tui EventEnvelope reducer keeps shared permission requests in internal activity without transcript receipts");
+
+  ava::event::EventEnvelope permission_replied{.schema_version = 1,
+                                               .event_id = "event_permission_reply",
                                                .timestamp = "2026-04-30T00:00:00Z",
                                                .session_id = "session_test",
                                                .run_id = "run_prompt",
@@ -1241,47 +1310,27 @@ void test_tui_event_state_reduces_runtime_events()
                                                .message_id = std::nullopt,
                                                .request_id = "request_prompt",
                                                .correlation_id = "request_prompt",
-                                               .name = "permission_requested",
+                                               .name = "permission_replied",
                                                .payload_json =
                                                    "{\"resolver_request_id\":\"permission_1\","
-                                                   "\"operation\":\"shell.run\",\"mode\":\"build\","
-                                                   "\"target_path\":\"\",\"command\":\"pwd\","
-                                                   "\"tool_name\":\"bash\",\"reason\":\"needs approval\"}"};
-  ava::tui::apply_control_event_envelope(resolver_state, permission_requested);
-  expect(resolver_state.transcript.empty() && !resolver_state.activity.empty() && resolver_state.activity[0].label == "permission" &&
-             resolver_state.activity[0].detail.find("permission requested: bash pwd") != std::string::npos && resolver_state.active_run_id == "run_prompt",
-         "tui EventEnvelope reducer keeps shared permission requests in internal activity without transcript receipts");
-
-  ava::app::EventEnvelope permission_replied{.schema_version = 1,
-                                             .event_id = "event_permission_reply",
-                                             .timestamp = "2026-04-30T00:00:00Z",
-                                             .session_id = "session_test",
-                                             .run_id = "run_prompt",
-                                             .turn_id = "turn_prompt",
-                                             .message_id = std::nullopt,
-                                             .request_id = "request_prompt",
-                                             .correlation_id = "request_prompt",
-                                             .name = "permission_replied",
-                                             .payload_json =
-                                                 "{\"resolver_request_id\":\"permission_1\","
-                                                 "\"decision\":\"deny\"}"};
+                                                   "\"decision\":\"deny\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, permission_replied);
   expect(resolver_state.transcript.empty() &&
              std::ranges::any_of(resolver_state.activity,
                                  [](ava::tui::SidebarActivityItem const& item) { return item.label == "permission" && item.detail == "permission replied"; }),
          "tui EventEnvelope reducer keeps shared permission replies in internal activity without transcript receipts");
 
-  ava::app::EventEnvelope question_requested{.schema_version = 1,
-                                             .event_id = "event_question",
-                                             .timestamp = "2026-04-30T00:00:01Z",
-                                             .session_id = "session_test",
-                                             .run_id = "run_prompt",
-                                             .turn_id = "turn_prompt",
-                                             .message_id = std::nullopt,
-                                             .request_id = "request_question",
-                                             .correlation_id = "request_question",
-                                             .name = "question_requested",
-                                             .payload_json = "{\"question\":\"Pick an option\"}"};
+  ava::event::EventEnvelope question_requested{.schema_version = 1,
+                                               .event_id = "event_question",
+                                               .timestamp = "2026-04-30T00:00:01Z",
+                                               .session_id = "session_test",
+                                               .run_id = "run_prompt",
+                                               .turn_id = "turn_prompt",
+                                               .message_id = std::nullopt,
+                                               .request_id = "request_question",
+                                               .correlation_id = "request_question",
+                                               .name = "question_requested",
+                                               .payload_json = "{\"question\":\"Pick an option\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, question_requested);
   expect(resolver_state.transcript.empty() && std::ranges::any_of(resolver_state.activity,
                                                                   [](ava::tui::SidebarActivityItem const& item) {
@@ -1289,36 +1338,36 @@ void test_tui_event_state_reduces_runtime_events()
                                                                   }),
          "tui EventEnvelope reducer keeps shared question requests in internal activity without transcript receipts");
 
-  ava::app::EventEnvelope question_replied{.schema_version = 1,
-                                           .event_id = "event_question_reply",
-                                           .timestamp = "2026-04-30T00:00:01Z",
-                                           .session_id = "session_test",
-                                           .run_id = "run_prompt",
-                                           .turn_id = "turn_prompt",
-                                           .message_id = std::nullopt,
-                                           .request_id = "request_question",
-                                           .correlation_id = "request_question",
-                                           .name = "question_replied",
-                                           .payload_json =
-                                               "{\"resolver_request_id\":\"question_1\","
-                                               "\"answer\":\"custom ok\"}"};
+  ava::event::EventEnvelope question_replied{.schema_version = 1,
+                                             .event_id = "event_question_reply",
+                                             .timestamp = "2026-04-30T00:00:01Z",
+                                             .session_id = "session_test",
+                                             .run_id = "run_prompt",
+                                             .turn_id = "turn_prompt",
+                                             .message_id = std::nullopt,
+                                             .request_id = "request_question",
+                                             .correlation_id = "request_question",
+                                             .name = "question_replied",
+                                             .payload_json =
+                                                 "{\"resolver_request_id\":\"question_1\","
+                                                 "\"answer\":\"custom ok\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, question_replied);
   expect(resolver_state.transcript.empty() &&
              std::ranges::any_of(resolver_state.activity,
                                  [](ava::tui::SidebarActivityItem const& item) { return item.label == "question" && item.detail == "question replied"; }),
          "tui EventEnvelope reducer keeps shared question replies in internal activity without transcript receipts");
 
-  ava::app::EventEnvelope steer_queued{.schema_version = 1,
-                                       .event_id = "event_steer",
-                                       .timestamp = "2026-04-30T00:00:02Z",
-                                       .session_id = "session_test",
-                                       .run_id = "run_prompt",
-                                       .turn_id = "turn_prompt",
-                                       .message_id = std::nullopt,
-                                       .request_id = "request_steer",
-                                       .correlation_id = "request_steer",
-                                       .name = "steer_queued",
-                                       .payload_json = "{\"message\":\"Use smaller patch groups\"}"};
+  ava::event::EventEnvelope steer_queued{.schema_version = 1,
+                                         .event_id = "event_steer",
+                                         .timestamp = "2026-04-30T00:00:02Z",
+                                         .session_id = "session_test",
+                                         .run_id = "run_prompt",
+                                         .turn_id = "turn_prompt",
+                                         .message_id = std::nullopt,
+                                         .request_id = "request_steer",
+                                         .correlation_id = "request_steer",
+                                         .name = "steer_queued",
+                                         .payload_json = "{\"message\":\"Use smaller patch groups\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, steer_queued);
   expect(resolver_state.transcript.size() == 1 && resolver_state.transcript.back().label == "audit" &&
              resolver_state.transcript.back().text.find("steer queued") != std::string::npos &&
@@ -1331,17 +1380,17 @@ void test_tui_event_state_reduces_runtime_events()
                                  }),
          "tui EventEnvelope reducer surfaces backend queued steer events in transcript and sidebar activity");
 
-  ava::app::EventEnvelope follow_up_queued{.schema_version = 1,
-                                           .event_id = "event_follow_queue",
-                                           .timestamp = "2026-04-30T00:00:02Z",
-                                           .session_id = "session_test",
-                                           .run_id = "run_prompt",
-                                           .turn_id = "turn_prompt",
-                                           .message_id = std::nullopt,
-                                           .request_id = "request_follow",
-                                           .correlation_id = "request_steer",
-                                           .name = "follow_up_queued",
-                                           .payload_json = "{\"message\":\"Continue after tests\"}"};
+  ava::event::EventEnvelope follow_up_queued{.schema_version = 1,
+                                             .event_id = "event_follow_queue",
+                                             .timestamp = "2026-04-30T00:00:02Z",
+                                             .session_id = "session_test",
+                                             .run_id = "run_prompt",
+                                             .turn_id = "turn_prompt",
+                                             .message_id = std::nullopt,
+                                             .request_id = "request_follow",
+                                             .correlation_id = "request_steer",
+                                             .name = "follow_up_queued",
+                                             .payload_json = "{\"message\":\"Continue after tests\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, follow_up_queued);
   expect(resolver_state.transcript.size() == 2 && resolver_state.transcript.back().text.find("follow-up queued") != std::string::npos &&
              resolver_state.queued_messages.size() == 2 && resolver_state.queued_messages.back().kind == "follow-up" &&
@@ -1352,17 +1401,17 @@ void test_tui_event_state_reduces_runtime_events()
                                  }),
          "tui EventEnvelope reducer records backend queued follow-up events");
 
-  ava::app::EventEnvelope follow_up_started{.schema_version = 1,
-                                            .event_id = "event_follow_start",
-                                            .timestamp = "2026-04-30T00:00:02Z",
-                                            .session_id = "session_test",
-                                            .run_id = "run_prompt",
-                                            .turn_id = "turn_prompt",
-                                            .message_id = std::nullopt,
-                                            .request_id = "request_follow",
-                                            .correlation_id = "request_follow",
-                                            .name = "follow_up_started",
-                                            .payload_json = "{\"message\":\"Continue after tests\"}"};
+  ava::event::EventEnvelope follow_up_started{.schema_version = 1,
+                                              .event_id = "event_follow_start",
+                                              .timestamp = "2026-04-30T00:00:02Z",
+                                              .session_id = "session_test",
+                                              .run_id = "run_prompt",
+                                              .turn_id = "turn_prompt",
+                                              .message_id = std::nullopt,
+                                              .request_id = "request_follow",
+                                              .correlation_id = "request_follow",
+                                              .name = "follow_up_started",
+                                              .payload_json = "{\"message\":\"Continue after tests\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, follow_up_started);
   expect(resolver_state.transcript.size() == 3 && resolver_state.transcript.back().text.find("follow-up started") != std::string::npos &&
              resolver_state.queued_messages.size() == 1 &&
@@ -1373,21 +1422,21 @@ void test_tui_event_state_reduces_runtime_events()
                                  }),
          "tui EventEnvelope reducer records backend follow-up start events");
 
-  ava::app::EventEnvelope follow_up_skipped{.schema_version = 1,
-                                            .event_id = "event_follow_skip",
-                                            .timestamp = "2026-04-30T00:00:02Z",
-                                            .session_id = "session_test",
-                                            .run_id = "run_prompt",
-                                            .turn_id = "turn_prompt",
-                                            .message_id = std::nullopt,
-                                            .request_id = "request_follow",
-                                            .correlation_id = "request_follow",
-                                            .name = "follow_up_skipped",
-                                            .payload_json =
-                                                "{\"message\":\"Continue after tests\","
-                                                "\"reason\":\"canceled\","
-                                                "\"message_truncated\":true,"
-                                                "\"message_bytes\":4096}"};
+  ava::event::EventEnvelope follow_up_skipped{.schema_version = 1,
+                                              .event_id = "event_follow_skip",
+                                              .timestamp = "2026-04-30T00:00:02Z",
+                                              .session_id = "session_test",
+                                              .run_id = "run_prompt",
+                                              .turn_id = "turn_prompt",
+                                              .message_id = std::nullopt,
+                                              .request_id = "request_follow",
+                                              .correlation_id = "request_follow",
+                                              .name = "follow_up_skipped",
+                                              .payload_json =
+                                                  "{\"message\":\"Continue after tests\","
+                                                  "\"reason\":\"canceled\","
+                                                  "\"message_truncated\":true,"
+                                                  "\"message_bytes\":4096}"};
   ava::tui::apply_control_event_envelope(resolver_state, follow_up_skipped);
   expect(resolver_state.transcript.size() == 4 &&
              resolver_state.transcript.back().text.find("follow-up skipped: run stopped before delivery; submit it again to continue") != std::string::npos &&
@@ -1400,38 +1449,38 @@ void test_tui_event_state_reduces_runtime_events()
          "tui EventEnvelope reducer records skipped follow-up events with continuation guidance and truncation metadata");
 
   ava::tui::TuiEventState steering_skip_state;
-  ava::app::EventEnvelope steer_skipped{.schema_version = 1,
-                                        .event_id = "event_steer_skip",
-                                        .timestamp = "2026-04-30T00:00:02Z",
-                                        .session_id = "session_test",
-                                        .run_id = "run_prompt",
-                                        .turn_id = "turn_prompt",
-                                        .message_id = std::nullopt,
-                                        .request_id = "request_steer",
-                                        .correlation_id = "request_steer",
-                                        .name = "steer_skipped",
-                                        .payload_json =
-                                            "{\"message\":\"Use smaller patch groups\","
-                                            "\"reason\":\"run_completed_before_safe_point\"}"};
+  ava::event::EventEnvelope steer_skipped{.schema_version = 1,
+                                          .event_id = "event_steer_skip",
+                                          .timestamp = "2026-04-30T00:00:02Z",
+                                          .session_id = "session_test",
+                                          .run_id = "run_prompt",
+                                          .turn_id = "turn_prompt",
+                                          .message_id = std::nullopt,
+                                          .request_id = "request_steer",
+                                          .correlation_id = "request_steer",
+                                          .name = "steer_skipped",
+                                          .payload_json =
+                                              "{\"message\":\"Use smaller patch groups\","
+                                              "\"reason\":\"run_completed_before_safe_point\"}"};
   ava::tui::apply_control_event_envelope(steering_skip_state, steer_skipped);
   expect(steering_skip_state.transcript.size() == 1 &&
              steering_skip_state.transcript.back().text.find("steer skipped: run finished before the next safe steering point") != std::string::npos &&
              steering_skip_state.transcript.back().text.find("Use smaller patch groups") != std::string::npos,
          "tui EventEnvelope reducer explains skipped steering when the turn finishes before a safe point");
 
-  ava::app::EventEnvelope cancel_requested{.schema_version = 1,
-                                           .event_id = "event_cancel",
-                                           .timestamp = "2026-04-30T00:00:03Z",
-                                           .session_id = "session_test",
-                                           .run_id = "run_prompt",
-                                           .turn_id = "turn_prompt",
-                                           .message_id = std::nullopt,
-                                           .request_id = "cancel_request",
-                                           .correlation_id = "request_prompt",
-                                           .name = "cancel_requested",
-                                           .payload_json =
-                                               "{\"active_run\":true,\"cleared_steer\":1,"
-                                               "\"cleared_follow_up\":2,\"active_request_id\":\"request_prompt\"}"};
+  ava::event::EventEnvelope cancel_requested{.schema_version = 1,
+                                             .event_id = "event_cancel",
+                                             .timestamp = "2026-04-30T00:00:03Z",
+                                             .session_id = "session_test",
+                                             .run_id = "run_prompt",
+                                             .turn_id = "turn_prompt",
+                                             .message_id = std::nullopt,
+                                             .request_id = "cancel_request",
+                                             .correlation_id = "request_prompt",
+                                             .name = "cancel_requested",
+                                             .payload_json =
+                                                 "{\"active_run\":true,\"cleared_steer\":1,"
+                                                 "\"cleared_follow_up\":2,\"active_request_id\":\"request_prompt\"}"};
   ava::tui::apply_control_event_envelope(resolver_state, cancel_requested);
   expect(resolver_state.transcript.back().label == "audit" &&
              resolver_state.transcript.back().text.find("cancel requested for active run") != std::string::npos &&
@@ -1615,13 +1664,13 @@ void test_tui_mixed_runtime_event_queue_preserves_order_and_context()
   second_payload_value.tool = "bash";
   auto second =
       ava::event::RuntimeEvent{{.timestamp = "second", .session_id = "session"}, ava::event::ToolProgressEvent{.payload = std::move(second_payload_value)}};
-  auto first_context = ava::app::EventEnvelopeContext{};
+  auto first_context = ava::event::EventEnvelopeContext{};
   first_context.run_id = "run_1";
   first_context.turn_id = "turn_1";
   first_context.message_id = "message_1";
   first_context.request_id = "request_1";
   first_context.correlation_id = "correlation_1";
-  auto second_context = ava::app::EventEnvelopeContext{};
+  auto second_context = ava::event::EventEnvelopeContext{};
   second_context.run_id = "run_2";
   second_context.turn_id = "turn_2";
   second_context.message_id = "message_2";
@@ -1629,7 +1678,7 @@ void test_tui_mixed_runtime_event_queue_preserves_order_and_context()
   second_context.correlation_id = "correlation_2";
   expect(queue.enqueue(first, first_context).has_value(), "mixed TUI event queue accepts a typed runtime event");
   auto control_sink = queue.envelope_sink();
-  auto control_event = ava::app::EventEnvelope{};
+  auto control_event = ava::event::EventEnvelope{};
   control_event.schema_version = 1;
   control_event.event_id = "control";
   control_event.timestamp = "between";
@@ -1643,7 +1692,7 @@ void test_tui_mixed_runtime_event_queue_preserves_order_and_context()
 
   auto drained = queue.drain();
   auto const* first_queued = drained.size() == 3 ? std::get_if<ava::tui::QueuedRuntimeEvent>(&drained[0]) : nullptr;
-  auto const* control = drained.size() == 3 ? std::get_if<ava::app::EventEnvelope>(&drained[1]) : nullptr;
+  auto const* control = drained.size() == 3 ? std::get_if<ava::event::EventEnvelope>(&drained[1]) : nullptr;
   auto const* second_queued = drained.size() == 3 ? std::get_if<ava::tui::QueuedRuntimeEvent>(&drained[2]) : nullptr;
   auto const* first_payload = first_queued ? std::get_if<ava::event::MessageUpdateEvent>(&first_queued->event.payload()) : nullptr;
   auto const* second_payload = second_queued ? std::get_if<ava::event::ToolProgressEvent>(&second_queued->event.payload()) : nullptr;
@@ -1659,7 +1708,7 @@ void test_tui_mixed_runtime_event_queue_preserves_order_and_context()
 void test_tui_typed_runtime_inherits_session_identity_fields()
 {
   ava::tui::TuiEventState state;
-  auto context = ava::app::EventEnvelopeContext{};
+  auto context = ava::event::EventEnvelopeContext{};
   context.run_id = "run_typed";
   context.turn_id = "turn_typed";
   context.message_id = "message_typed";

@@ -126,7 +126,7 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
   {
     auto tui_timeline = ava::app::tool_timeline_for_tui(write->tool_timeline);
     ava::tui::TuiEventState event_state;
-    for (auto const& event : write_tool_events) ava::tui::apply_event_envelope(event_state, ava::event::to_event_envelope(event));
+    for (auto const& event : write_tool_events) ava::tui::apply_runtime_event(event_state, event);
     auto event_transcript = ava::tui::event_state_transcript_snapshot(event_state);
     std::vector<ava::tui::TranscriptItem> timeline_transcript;
     if (!tui_timeline.empty())

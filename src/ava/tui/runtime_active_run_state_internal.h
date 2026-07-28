@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ava/app/events.h"
+#include "ava/event/events.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -28,14 +28,13 @@ struct RuntimeActiveRunState final
   std::vector<TranscriptItem> submitted_transcript;
   std::size_t turn_snapshot_leading_evictions = 0;
   std::vector<ava::session::ImageAttachmentRef> submit_image_attachments;
-  ava::app::EventBus event_bus;
-  EventEnvelopeQueue event_queue;
+  RuntimeEventQueue event_queue;
   TuiEventState event_state;
   std::atomic_bool run_cancel_requested{false};
   bool close_after_submit = false;
   std::optional<TuiActiveRunQueues> active_queues;
   std::mutex event_context_mutex;
-  std::string current_request_id;
+  ava::event::EventEnvelopeContext current_event_context;
   ava::event::RuntimeEventSink event_sink;
   std::chrono::steady_clock::time_point turn_started_at;
 

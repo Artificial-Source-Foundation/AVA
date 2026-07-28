@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ava/app/EventEnvelope.h"
-#include "ava/app/events.h"
+#include "ava/event/EventEnvelope.h"
+#include "ava/event/events.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/session_grants.h"
 #include "ava/session/attachments.h"
@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 #include "debug.h"
 
@@ -18,15 +19,28 @@ namespace ava::tui {
 struct TuiRuntimeOptions;
 struct TuiRuntimeStateSnapshot;
 
-struct EventEnvelopeQueue
+struct QueuedRuntimeEvent
 {
-  [[nodiscard]] ava::app::EventEnvelopeSink sink();
-  [[nodiscard]] std::vector<ava::app::EventEnvelope> drain();
+  QueuedRuntimeEvent(ava::event::RuntimeEvent event_in, ava::event::EventEnvelopeContext context_in);
+
+  ava::event::RuntimeEvent event;
+  ava::event::EventEnvelopeContext context;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+using QueuedTuiEvent = std::variant<QueuedRuntimeEvent, ava::event::EventEnvelope>;
+
+struct RuntimeEventQueue
+{
+  [[nodiscard]] ava::event::EventEnvelopeSink envelope_sink();
+  [[nodiscard]] ava::core::VoidResult enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context = {});
+  [[nodiscard]] std::vector<QueuedTuiEvent> drain();
   [[nodiscard]] bool received_any();
 
  private:
   std::mutex mutex;
-  std::vector<ava::app::EventEnvelope> events;
+  std::vector<QueuedTuiEvent> events;
   bool received = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

@@ -136,6 +136,7 @@ struct RetryDiagnostics
   std::size_t threshold_tokens = 0;
   std::size_t snapshot_entries = 0;
   std::size_t current_entries = 0;
+  std::size_t summary_bytes = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

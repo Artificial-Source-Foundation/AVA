@@ -254,13 +254,15 @@ ava::event::RuntimeEvent to_runtime_event(runtime::Event const& event)
                                                           .diagnostics = {.estimated_tokens = event.estimated_tokens,
                                                                           .threshold_tokens = event.threshold_tokens,
                                                                           .snapshot_entries = event.snapshot_entries,
-                                                                          .current_entries = event.current_entries}}};
+                                                                          .current_entries = event.current_entries,
+                                                                          .summary_bytes = event.summary_bytes}}};
     case EventType::RetryTick:
       return {std::move(metadata), ava::event::RetryTickEvent{.payload = retry_payload_from_event(event),
                                                               .diagnostics = {.estimated_tokens = event.estimated_tokens,
                                                                               .threshold_tokens = event.threshold_tokens,
                                                                               .snapshot_entries = event.snapshot_entries,
-                                                                              .current_entries = event.current_entries}}};
+                                                                              .current_entries = event.current_entries,
+                                                                              .summary_bytes = event.summary_bytes}}};
     case EventType::Canceled:
       return {std::move(metadata), ava::event::CancellationEvent{.payload = cancellation_payload_from_event(event)}};
     case EventType::Error:

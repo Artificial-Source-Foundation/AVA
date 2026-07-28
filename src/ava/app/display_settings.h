@@ -44,6 +44,7 @@ struct TuiDisplaySettingsWatchState
 [[nodiscard]] std::optional<std::string> normalize_tui_theme_setting(std::string_view value);
 [[nodiscard]] bool is_tui_theme_reset_value(std::string_view value);
 [[nodiscard]] std::string tui_theme_setting_usage();
+[[nodiscard]] std::string active_tui_theme_summary();
 [[nodiscard]] ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::filesystem::path const& path);
 [[nodiscard]] ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::XdgPaths const& paths,
                                                                                 std::string_view name);

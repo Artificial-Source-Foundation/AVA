@@ -36,6 +36,7 @@ target_sources(ava_app
     "command_sessions.cpp"
     "command_tools.cpp"
     "command_trust.cpp"
+    "command_reload.cpp"
     "commands.cpp"
     "connect_oauth_callback.cpp"
     "connect_openai.cpp"

@@ -445,13 +445,14 @@ void test_app_runtime_plugin_install_remove_commands()
   if (!session)
     return;
 
-  auto install = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + source_plugin.generic_string()});
+  auto install = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install ../local-plugin-source/plugin.json"});
   expect(install && install->handled && !install->output.empty() &&
              install->output[0].find("Installed global plugin com.example.installed") != std::string::npos &&
              install->output[0].find("status: disabled") != std::string::npos &&
              install->output[0].find("no plugin process was started") != std::string::npos && std::filesystem::exists(installed_plugin_dir / "plugin.json") &&
              !std::filesystem::exists(marker),
-         "plugin install ignores stale staging directories and copies a local directory without starting its entrypoint");
+         "plugin install resolves a relative plugin.json path against Session.current_dir, ignores stale staging directories, and copies without starting its "
+         "entrypoint");
   auto const installed_prompt_permissions = std::filesystem::status(installed_plugin_dir / "prompts" / "review.md").permissions();
   expect((installed_prompt_permissions & (std::filesystem::perms::group_write | std::filesystem::perms::others_write | std::filesystem::perms::group_exec |
                                           std::filesystem::perms::others_exec)) == std::filesystem::perms::none &&
@@ -495,6 +496,21 @@ void test_app_runtime_plugin_install_remove_commands()
              plugins_after_remove->output[0].find("com.example.installed") == std::string::npos && std::filesystem::exists(stale_staging_dir),
          "removed plugin no longer appears in plugin discovery and stale install staging dirs remain ignored");
 
+  auto const has_install_staging_residue = [&](std::string_view plugin_id) {
+    auto const plugins_root = paths.ava_config_dir / "plugins";
+    std::error_code iterate_error;
+    std::filesystem::directory_iterator iterator(plugins_root, iterate_error);
+    if (iterate_error)
+      return true;
+    auto const prefix = std::string(plugin_id) + ".installing-";
+    for (auto const& entry : iterator)
+    {
+      if (entry.path().filename().generic_string().starts_with(prefix))
+        return true;
+    }
+    return false;
+  };
+
   auto const symlink_source = root / "symlink-plugin-source";
   auto const symlink_marker = root / "symlink-plugin-entrypoint-executed";
   write_app_test_file(symlink_source / "plugin.json", app_plugin_install_manifest_json("com.example.symlinkinstall", "Symlink Install Plugin", symlink_marker));
@@ -509,8 +525,45 @@ void test_app_runtime_plugin_install_remove_commands()
     auto symlink_install = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + symlink_source.generic_string()});
     expect(symlink_install && symlink_install->handled && !symlink_install->output.empty() &&
                symlink_install->output[0].find("plugin install source must not contain symlinks") != std::string::npos &&
-               !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.symlinkinstall") && !std::filesystem::exists(symlink_marker),
+               !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.symlinkinstall") &&
+               !has_install_staging_residue("com.example.symlinkinstall") && !std::filesystem::exists(symlink_marker),
            "plugin install rejects symlinked package contents and cleans the staging directory");
+  }
+
+  auto const top_level_symlink_source = root / "top-level-symlink-plugin-source";
+  auto const top_level_symlink_marker = root / "top-level-symlink-plugin-entrypoint-executed";
+  auto const top_level_real_source = root / "top-level-real-plugin-source";
+  write_app_test_file(top_level_real_source / "plugin.json",
+                      app_plugin_install_manifest_json("com.example.toplevelsymlink", "Top-Level Symlink Plugin", top_level_symlink_marker));
+  std::filesystem::create_directory_symlink(top_level_real_source, top_level_symlink_source, symlink_error);
+  expect(!symlink_error, "plugin install/remove command test creates a top-level source directory symlink fixture");
+  if (!symlink_error)
+  {
+    auto top_level_symlink_install =
+        ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + top_level_symlink_source.generic_string()});
+    expect(top_level_symlink_install && top_level_symlink_install->handled && !top_level_symlink_install->output.empty() &&
+               top_level_symlink_install->output[0].find("invalid_argument: plugin install source must not be a symlink") != std::string::npos &&
+               !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.toplevelsymlink") &&
+               !has_install_staging_residue("com.example.toplevelsymlink") && !std::filesystem::exists(top_level_symlink_marker),
+           "plugin install rejects a top-level source directory symlink without creating destination or staging residue");
+  }
+
+  auto const symlink_parent_real = root / "symlink-parent-real-plugin-source";
+  auto const symlink_parent = root / "symlink-parent-plugin-source";
+  auto const symlink_parent_marker = root / "symlink-parent-plugin-entrypoint-executed";
+  write_app_test_file(symlink_parent_real / "plugin.json",
+                      app_plugin_install_manifest_json("com.example.symlinkparent", "Symlink Parent Plugin", symlink_parent_marker));
+  std::filesystem::create_directory_symlink(symlink_parent_real, symlink_parent, symlink_error);
+  expect(!symlink_error, "plugin install/remove command test creates a plugin.json parent directory symlink fixture");
+  if (!symlink_error)
+  {
+    auto parent_symlink_install =
+        ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins install " + (symlink_parent / "plugin.json").generic_string()});
+    expect(parent_symlink_install && parent_symlink_install->handled && !parent_symlink_install->output.empty() &&
+               parent_symlink_install->output[0].find("invalid_argument: plugin install manifest parent must be a real directory") != std::string::npos &&
+               !std::filesystem::exists(paths.ava_config_dir / "plugins" / "com.example.symlinkparent") &&
+               !has_install_staging_residue("com.example.symlinkparent") && !std::filesystem::exists(symlink_parent_marker),
+           "plugin install rejects a plugin.json path whose parent is a symlink without creating destination or staging residue");
   }
 }
 

@@ -2,6 +2,7 @@ add_library(ava_plugin
   "diagnostics.cpp"
   "discovery.cpp"
   "enablement.cpp"
+  "install.cpp"
   "manifest.cpp"
   "runner.cpp"
   "runner_protocol.cpp"

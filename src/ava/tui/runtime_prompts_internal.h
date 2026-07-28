@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ava/app/events.h"
+#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/question.h"
 #include "ava/tui/terminal.h"
 #include "ava/permissions/permission.h"

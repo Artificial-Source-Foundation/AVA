@@ -1,6 +1,6 @@
 #include "sys.h"
+#include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
-#include "ava/app/EventEnvelope.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
@@ -123,19 +123,17 @@ runtime::RunOptions print_runtime_options(runtime::RunOptions options)
   return options;
 }
 
-runtime::Event runtime_error_event(runtime::Session const& session, ava::core::Error const& error)
+ava::event::RuntimeEvent runtime_error_event(runtime::Session const& session, ava::core::Error const& error)
 {
-  runtime::Event event;
-  event.type = runtime::EventType::Error;
-  event.timestamp = ava::session::now_timestamp();
-  event.session_id = session.store.session_id();
-  event.mode = session.mode();
-  event.provider_id = session.model().provider_id;
-  event.model_id = session.model().model_id;
-  event.error_category = ava::core::to_string(error.category());
-  event.error_message = error.message();
-  event.error_details = error.format();
-  return event;
+  ava::event::ErrorPayload payload;
+  payload.error_category = ava::core::to_string(error.category());
+  payload.error_message = error.message();
+  payload.error_details = error.format();
+  return ava::event::RuntimeEvent{ava::event::RuntimeEventMetadata{
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .session_id = session.store.session_id(),
+                                  },
+                                  ava::event::ErrorEvent{.payload = std::move(payload)}};
 }
 
 }  // namespace
@@ -159,22 +157,22 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
 {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
-  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session),
-                                                                                                    std::move(runtime_options.permission_resolver));
-  EventBus event_bus;
+  runtime_options.permission_resolver =
+      ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store_for_session(session), std::move(runtime_options.permission_resolver));
+  ava::event::EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json)
   {
-    event_bus.subscribe([&out, &emitted_error](EventEnvelope const& envelope) {
+    event_bus.subscribe([&out, &emitted_error](ava::event::EventEnvelope const& envelope) {
       if (envelope.name == ava::event::to_string(ava::event::RuntimeEventType::Error))
         emitted_error = true;
-      out << serialize_event_envelope_jsonl(envelope);
+      out << ava::event::serialize_event_envelope_jsonl(envelope);
       if (!out)
       {
         return ava::core::VoidResult{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write print JSON event"))};
       }
       return ava::core::VoidResult{};
     });
-    runtime_options.event_sink = make_runtime_event_bus_adapter(event_bus);
+    runtime_options.event_sink = ava::event::make_runtime_event_bus_adapter(event_bus);
   }
   else
   {
@@ -198,7 +196,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
       if (options.output_format == PrintOutputFormat::Json)
       {
         // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
-        static_cast<void>(event_bus.publish(to_event_envelope(runtime_error_event(session, result.error()))));
+        static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(session, result.error()))));
       }
       else
       {

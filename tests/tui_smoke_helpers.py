@@ -39,13 +39,16 @@ def _compatibility_environment(*, home: pathlib.Path, tmpdir: pathlib.Path) -> d
     """Return the only parent-derived values allowed into test processes.
 
     The tmux server and fake provider receive this environment, rather than a
-    copy of the developer's environment.  Individual pane HOME/XDG values and
-    the two fake-provider settings are added explicitly by ``SmokeContext``.
+    copy of the developer's environment.  PATH is intentionally the portable
+    system default (``os.defpath``), never the mutable host PATH: sealed command
+    plans capture PATH metadata, so developer tool directories would make the
+    fixture non-deterministic.  Individual pane HOME/XDG values and the two
+    fake-provider settings are added explicitly by ``SmokeContext``.
     """
 
     environment = {
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", os.defpath),
+        "PATH": os.defpath,
         "SHELL": "/bin/sh",
         "TERM": "xterm-256color",
         "TMPDIR": str(tmpdir),
@@ -486,16 +489,18 @@ class SmokeContext:
         self.root = root
 
     def _prepare_fixture(self) -> None:
+        # Workspaces, XDG config/data, and review artifacts stay under the
+        # guarded build evidence root.  AVA pane trusted HOMEs join XDG state
+        # under the lifecycle-owned TemporaryDirectory so concurrent sibling
+        # scenario mkdir/rmtree cannot perturb shared build-root ancestors that
+        # trusted-home freshness captures (HOME is outside the session AnchorSet).
         self.workspace = self.root / "workspace"
-        self.home = self.root / "home"
         self.config = self.root / "config"
         self.data = self.root / "data"
         self.active_workspace = self.root / "active-workspace"
-        self.active_home = self.root / "active-home"
         self.active_config = self.root / "active-config"
         self.active_data = self.root / "active-data"
         self.restore_workspace = self.root / "restore-workspace"
-        self.restore_home = self.root / "restore-home"
         self.restore_config = self.root / "restore-config"
         self.restore_data = self.root / "restore-data"
 
@@ -512,6 +517,9 @@ class SmokeContext:
                 "refusing tmux smoke state root overlapping trusted paths: "
                 f"state root={state_root}, real home={real_home}, workspace={workspace}"
             )
+        self.home = state_root / "home"
+        self.active_home = state_root / "active-home"
+        self.restore_home = state_root / "restore-home"
         self.state = state_root / "state"
         self.active_state = state_root / "active-state"
         self.restore_state = state_root / "restore-state"

@@ -12,6 +12,7 @@
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/permissions/permission.h"
 
@@ -107,14 +108,16 @@ RuntimeActiveRunState::RuntimeActiveRunState(std::string submitted_in, bool is_c
 
 RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                        RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator,
-                                                       RuntimeNavigationController& navigation, RuntimeActionController& action_controller)
+                                                       RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
+                                                       TranscriptSearchController& transcript_search)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
       renderer_(renderer),
       prompt_coordinator_(prompt_coordinator),
       navigation_(navigation),
-      action_controller_(action_controller)
+      action_controller_(action_controller),
+      transcript_search_(transcript_search)
 {
 }
 
@@ -230,6 +233,7 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     carry_tool_detail_visibility(tool_detail_overrides, snapshot.transcript);
     turn_snapshot_leading_evictions = capped_update.leading_evictions;
     ++snapshot.transcript_generation;
+    transcript_search_.refresh(capped_update.item_index_shift);
     snapshot.queued_messages = event_state.queued_messages;
     sidebar.activity = event_state.activity;
     if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running)
@@ -412,7 +416,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         request_close_after_submit();
         break;
       }
-      if (prompt_coordinator.service_pending_request(cancel_requested, request_stop))
+      if (prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() { transcript_search_.close_before_prompt(); }))
       {
         auto const drain_result = drain_events(state);
         if (drain_result == RuntimeEventDrainResult::RenderFailed)
@@ -547,27 +551,29 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   {
     auto const turn_elapsed = std::chrono::steady_clock::now() - turn_started_at;
     auto const assistant_meta = assistant_meta_for_snapshot(snapshot, turn_elapsed);
+    std::ptrdiff_t item_index_shift = 0;
     if (!is_command_submission)
     {
-      push_transcript(snapshot, TranscriptItem{.label = "you", .text = submitted});
+      item_index_shift += push_transcript(snapshot, TranscriptItem{.label = "you", .text = submitted});
     }
     if (run_cancel_requested.load())
     {
-      push_fallback_assistant_outputs(snapshot, {"stopped by user"}, assistant_meta);
+      item_index_shift += push_fallback_assistant_outputs(snapshot, {"stopped by user"}, assistant_meta);
     }
     else
     {
       for (auto const& tool : result.tool_timeline)
       {
-        push_transcript(snapshot, TranscriptItem{.tool = tool});
+        item_index_shift += push_transcript(snapshot, TranscriptItem{.tool = tool});
       }
       auto const bounded_bash_output_is_in_card =
           std::ranges::any_of(result.tool_timeline, [](auto const& tool) { return tool.name == "bash" && tool.truncated && !tool.spill_path.empty(); });
       if (!should_show_slash_command_output_as_status(submitted) && !bounded_bash_output_is_in_card)
-        push_fallback_assistant_outputs(snapshot, result.output, assistant_meta);
+        item_index_shift += push_fallback_assistant_outputs(snapshot, result.output, assistant_meta);
     }
+    transcript_search_.refresh(item_index_shift);
   }
-  if (!events_received)
+  if (!events_received && !transcript_search_.is_open())
     transcript_scroll_offset = 0;
   auto const show_command_status =
       !events_received && !run_cancel_requested.load() && should_show_slash_command_output_as_status(submitted) && !result.output.empty();

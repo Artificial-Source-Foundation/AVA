@@ -117,7 +117,7 @@ git --no-pager diff --check
 
 ## TUI And Terminal Testing
 
-- The opt-in tmux suite is 15 isolated `ava_tui.tmux_smoke_*` scenarios dispatched by `tests/tui_tmux_smoke.py` into `tests/tui_tmux_scenarios/`. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 15 -R '^ava_tui\.tmux_smoke_'`.
+- The opt-in tmux suite is 16 isolated `ava_tui.tmux_smoke_*` scenarios dispatched by `tests/tui_tmux_smoke.py` into `tests/tui_tmux_scenarios/`. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 16 -R '^ava_tui\.tmux_smoke_'`.
 - Start TUI verification at the smallest deterministic layer: text wrapping, width calculation, editor state, keybinding dispatch, palette/filter state, event reducers, permission/tool-card formatting, and transcript rendering should be covered by CTest unit tests where possible.
 - For full terminal behavior, use a pseudo-terminal harness rather than plain pipes. A PTY smoke can set `TERM`, rows, columns, and environment variables, start `ava`, send keystrokes or escape sequences, resize the terminal, and assert on captured screen state and process exit.
 - For ncurses-backed behavior, keep `newterm`/RAII lifecycle tests and add real terminal smokes only for behavior that requires a controlling terminal: alternate-screen cleanup, bracketed paste, resize redraw, mouse events, Escape latency, cursor visibility, Unicode cell placement, and terminal-state restoration after cancellation or crash.

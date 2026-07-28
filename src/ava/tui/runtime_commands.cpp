@@ -122,6 +122,20 @@ std::optional<std::string> diff_command_argument(std::string_view submitted)
   return std::nullopt;
 }
 
+std::optional<std::string> search_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kSearch = "/search";
+  if (submitted == kSearch)
+    return std::string{};
+  if (submitted.starts_with(kSearch) && submitted.size() > kSearch.size() && std::isspace(static_cast<unsigned char>(submitted[kSearch.size()])) != 0)
+  {
+    return trim_view_to_string(submitted.substr(kSearch.size() + 1));
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> attach_command_argument(std::string_view submitted)
 {
   auto const normalized = trim_view_to_string(submitted);

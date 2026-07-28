@@ -63,7 +63,8 @@ class RuntimePromptCoordinator final
   [[nodiscard]] ava::permissions::PermissionResolver permission_resolver();
   [[nodiscard]] ava::agent::QuestionResolver question_resolver();
   void fail_pending_requests();
-  [[nodiscard]] bool service_pending_request(std::function<bool()> const& stop_requested = {}, std::function<bool()> const& request_stop = {});
+  [[nodiscard]] bool service_pending_request(std::function<bool()> const& stop_requested = {}, std::function<bool()> const& request_stop = {},
+                                             std::function<void()> const& before_prompt = {});
   void set_audit_sink(ava::event::RuntimeEventSink sink);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

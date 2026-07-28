@@ -156,6 +156,7 @@ set(AVA_TESTS_SOURCES
   "tui_terminal_input_tests.cpp"
   "tui_tool_card_tests.cpp"
   "tui_transcript_tests.cpp"
+  "tui_transcript_search_tests.cpp"
   "run_observer_tests.cpp"
   "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
@@ -712,6 +713,7 @@ if(Python3_Interpreter_FOUND)
     active_run
     restore_followup
     streaming_scroll
+    transcript_search
     main_startup_trust_keybinds
     main_models_selectors
     main_editor_input

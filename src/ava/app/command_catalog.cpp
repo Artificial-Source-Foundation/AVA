@@ -34,6 +34,8 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/settings", .description = "Open TUI settings", .category = "General"},
       CommandCatalogEntry{.command = "/sidebar", .description = "Open the current session overview", .category = "General"},
       CommandCatalogEntry{
+          .command = "/search", .description = "Find literal text in currently rendered TUI transcript items", .hint = "[query]", .category = "General"},
+      CommandCatalogEntry{
           .command = "/theme", .description = "Persist the TUI display theme", .hint = "[dark|light|plain|custom-name|reset]", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details",

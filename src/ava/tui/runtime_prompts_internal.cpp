@@ -623,7 +623,8 @@ void RuntimePromptCoordinator::fail_pending_requests()
   }
 }
 
-bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop)
+bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop,
+                                                       std::function<void()> const& before_prompt)
 {
   auto& prompt_request_mutex = prompt_request_mutex_;
   auto& pending_permission_requests = pending_permission_requests_;
@@ -645,11 +646,15 @@ bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> con
   }
   if (permission_request)
   {
+    if (before_prompt)
+      before_prompt();
     complete_permission_request(permission_request, resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
     return true;
   }
   if (question_request)
   {
+    if (before_prompt)
+      before_prompt();
     complete_question_request(question_request, resolve_question_prompt(question_request->prompt, stop_requested, request_stop));
     return true;
   }

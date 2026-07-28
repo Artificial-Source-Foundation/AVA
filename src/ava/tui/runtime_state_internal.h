@@ -61,7 +61,8 @@ enum class ActiveSelectList
   Settings,
   Model,
   ScopedModels,
-  Session
+  Session,
+  TranscriptSearch
 };
 
 enum class ComposerJumpMode

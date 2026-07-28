@@ -11,6 +11,7 @@
 #include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/tool_cards.h"
 
@@ -29,6 +30,7 @@ using runtime_commands::parse_copy_target;
 using runtime_commands::reload_command_argument;
 using runtime_commands::reload_target_from_argument;
 using runtime_commands::ReloadTarget;
+using runtime_commands::search_command_argument;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_to_terminal_clipboard;
@@ -43,7 +45,8 @@ using runtime_views::compact_path_leaf;
 
 RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                  RuntimeRenderer& renderer, RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                                                 RuntimeActiveRunController& active_run_controller, ActiveSelectList& active_select_list)
+                                                 RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
+                                                 ActiveSelectList& active_select_list)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -51,6 +54,7 @@ RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, Run
       navigation_(navigation),
       action_controller_(action_controller),
       active_run_controller_(active_run_controller),
+      transcript_search_(transcript_search),
       active_select_list_(active_select_list)
 {
 }
@@ -212,6 +216,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       if (!action_controller_.open_session_selector())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
+    if (auto search_query = search_command_argument(submitted))
+    {
+      push_history(input_history, submitted);
+      static_cast<void>(transcript_search_.open(std::move(*search_query)));
+      if (!renderer_.request_render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }

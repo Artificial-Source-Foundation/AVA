@@ -14,6 +14,7 @@
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
@@ -124,6 +125,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& completion_cache = renderer.completion_cache;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
   [[maybe_unused]] auto permission_resolver = prompt_coordinator.permission_resolver();
@@ -131,7 +133,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto render = [&]() -> bool { return renderer.render(); };
 
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
-  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller);
+  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
+                                                   transcript_search);
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
@@ -164,7 +167,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
   RuntimeSubmitController submit_controller(options, presentation_state, draft_state, renderer, navigation, action_controller, active_run_controller,
-                                            active_select_list);
+                                            transcript_search, active_select_list);
   auto handle_submit = [&](std::optional<std::string> forced_submission = std::nullopt) {
     auto const outcome = submit_controller.submit(std::move(forced_submission));
     terminal_write_failed = outcome.terminal_write_failed;
@@ -218,6 +221,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (input.resize)
     {
       renderer.wheel_governor.reset();
+      transcript_search.refresh();
       if (!render())
       {
         terminal_write_failed = true;
@@ -228,6 +232,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (!runtime_wheel_input_accepted(renderer.wheel_governor, input.event.key))
       continue;
     clear_reasoning_feedback_for_user_input(snapshot);
+    if (auto handled = transcript_search.handle_input(input.event))
+    {
+      if (!*handled)
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
     if (snapshot.select_list)
     {
       auto input_result = [&]() {

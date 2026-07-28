@@ -252,6 +252,40 @@ void RuntimeNavigationController::jump_to_bottom(std::string status)
   snapshot_.status = std::move(status);
 }
 
+void RuntimeNavigationController::jump_to_transcript_item(std::size_t item_index, std::string status)
+{
+  draft_state_.pending_escape_clear = false;
+  auto const [width, height] = terminal_size();
+  snapshot_.width = width;
+  snapshot_.height = height;
+  renderer_.synchronize_detached_transcript_layout();
+  auto const max_scroll =
+      detail::composer_max_transcript_scroll_offset_cached(snapshot_, width, height, renderer_.completion_cache, snapshot_.file_references_generation,
+                                                           renderer_.transcript_layout_cache, snapshot_.transcript_generation);
+  auto const& layout = renderer_.transcript_layout_cache.layout;
+  auto const message = std::ranges::find(layout.message_item_indices, item_index);
+  if (message == layout.message_item_indices.end())
+  {
+    snapshot_.status = "transcript item is no longer visible";
+    return;
+  }
+  auto const position = static_cast<std::size_t>(message - layout.message_item_indices.begin());
+  auto const target_start = std::min(layout.message_starts[position], max_scroll);
+  renderer_.transcript_scroll_offset = max_scroll - target_start;
+  renderer_.discard_deferred_detached_transcript_update();
+  if (renderer_.transcript_scroll_offset > 0)
+  {
+    if (!renderer_.detached_sidebar_snapshot)
+      renderer_.detached_sidebar_snapshot = sidebar_;
+  }
+  else
+  {
+    renderer_.detached_new_output_count = 0;
+    renderer_.detached_sidebar_snapshot.reset();
+  }
+  snapshot_.status = std::move(status);
+}
+
 void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
 {
   draft_state_.pending_escape_clear = false;

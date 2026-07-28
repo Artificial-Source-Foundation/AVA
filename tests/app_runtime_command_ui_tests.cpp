@@ -321,6 +321,10 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
              sidebar->output[0].find("session overview") != std::string::npos && sidebar->output[0].find("session_id") == std::string::npos &&
              sidebar->output[0].find("workspace") == std::string::npos,
          "command dispatcher describes /sidebar as a TUI-only view without inventing sidebar data");
+  auto search = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/search Unicode literal"});
+  expect(search && search->handled && !search->output.empty() && search->output[0].find("only inside the interactive TUI") != std::string::npos &&
+             search->output[0].find("currently rendered transcript items") != std::string::npos,
+         "headless command dispatcher truthfully identifies transcript search as a TUI-only rendered view");
   auto tool = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/tools write"});
   expect(tool && tool->handled && !tool->output.empty() && tool->output[0].find("/tool [query] to toggle the latest or matching card") != std::string::npos &&
              tool->output[0].find("inherited non-expanded view and Expanded") != std::string::npos &&
@@ -377,9 +381,10 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
              help->output[0].find("/keybindings") != std::string::npos && help->output[0].find("/sidebar") != std::string::npos &&
-             help->output[0].find("/connect") != std::string::npos && help->output[0].find("/plugins") != std::string::npos &&
-             help->output[0].find("!<command>") != std::string::npos && help->output[0].find("!!<command>") != std::string::npos &&
-             help->output[0].find("Unavailable commands") != std::string::npos && help->output[0].find("Ctrl+M") != std::string::npos,
+             help->output[0].find("/search") != std::string::npos && help->output[0].find("/connect") != std::string::npos &&
+             help->output[0].find("/plugins") != std::string::npos && help->output[0].find("!<command>") != std::string::npos &&
+             help->output[0].find("!!<command>") != std::string::npos && help->output[0].find("Unavailable commands") != std::string::npos &&
+             help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
 
   int shell_prompts = 0;

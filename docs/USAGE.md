@@ -155,6 +155,7 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 - `/reload [all|theme|models|prompts|trust|compaction|keybindings|auth|permissions|lsp|mcp|plugins]`: reload safe config domains and report restart-required domains
 - `/theme [dark|light|plain|custom-name|reset]`: show or persist the TUI display theme in `display.json`
 - `/mode`: toggle build/plan mode
+- `/search [query]`: open the TUI transcript finder over currently rendered message and tool-card items; matching is literal, ASCII case-insensitive, and exact for non-ASCII UTF-8. Enter jumps to the selected item and Esc restores the prior viewport.
 - `/details [compact|rich|expanded]` or Ctrl+O: select tool-card presentation; Rich is the default, and bare `/details` or Ctrl+O toggles Rich and Expanded
 - `/tool [query]`: show the latest or matching expanded tool card in the TUI transcript; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI transcript

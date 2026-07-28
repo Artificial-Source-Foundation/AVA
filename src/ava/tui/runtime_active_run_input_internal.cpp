@@ -12,6 +12,7 @@
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/tool_cards.h"
 
@@ -22,6 +23,7 @@
 #include <curses.h>
 
 namespace ava::tui {
+using runtime_commands::search_command_argument;
 using runtime_commands::shell_helper_submission;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
@@ -141,6 +143,13 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (auto search_query = search_command_argument(submitted_command))
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    static_cast<void>(transcript_search_.open(std::move(*search_query)));
+    return renderer_.request_render();
+  }
   if (submitted_command == "/details" || submitted_command == "/details compact" || submitted_command == "/details rich" ||
       submitted_command == "/details expanded")
   {
@@ -331,12 +340,18 @@ bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runt
   if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
     renderer_.wheel_governor.reset();
   if (active_input.resize)
+  {
+    transcript_search_.refresh();
     return renderer_.render();
+  }
   if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
       !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
   {
     return true;
   }
+
+  if (auto handled = transcript_search_.handle_input(active_input.event))
+    return *handled;
 
   auto result = handle_preemptive_input(state, active_input);
   if (result != InputHandling::Unhandled)

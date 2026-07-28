@@ -29,7 +29,7 @@ namespace runtime_transcript {
 [[nodiscard]] std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot,
                                                       std::optional<std::chrono::steady_clock::duration> elapsed = std::nullopt);
 void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible = true);
-void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
+std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
 [[nodiscard]] std::string base64_encode(std::string_view text);
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
@@ -41,7 +41,7 @@ void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> cons
 [[nodiscard]] std::string diff_transcript_text(std::string_view title, std::string_view diff);
 [[nodiscard]] std::optional<std::string> latest_permission_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answer);
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item);
+std::ptrdiff_t push_transcript(ComposerSnapshot& snapshot, TranscriptItem item);
 void push_history(std::vector<std::string>& history, std::string input);
 
 }  // namespace runtime_transcript

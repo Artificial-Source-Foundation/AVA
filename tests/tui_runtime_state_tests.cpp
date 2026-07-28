@@ -218,6 +218,19 @@ void test_tui_event_state_reduces_runtime_events()
              trailing_empty_fallback.transcript[1].meta.empty(),
          "no-event fallback normalization does not move the footer from the final visible output to an empty trailing item");
 
+  ava::tui::ComposerSnapshot capped_fallback;
+  capped_fallback.transcript.resize(ava::tui::kMaxTranscriptItems, ava::tui::TranscriptItem{.label = "old", .text = "old item"});
+  auto const fallback_shift = ava::tui::runtime_transcript::push_fallback_assistant_outputs(capped_fallback, {"one", "two", "three"}, "Build · GPT-5.5");
+  expect(fallback_shift == -3 && capped_fallback.transcript.size() == ava::tui::kMaxTranscriptItems &&
+             capped_fallback.transcript[capped_fallback.transcript.size() - 3].text == "one" && capped_fallback.transcript.back().text == "three",
+         "multi-output no-event fallback reports the exact accumulated leading item-index shift at the production cap");
+
+  ava::tui::ComposerSnapshot over_cap_push;
+  over_cap_push.transcript.resize(ava::tui::kMaxTranscriptItems + 4, ava::tui::TranscriptItem{.label = "old", .text = "old item"});
+  auto const over_cap_shift = ava::tui::runtime_transcript::push_transcript(over_cap_push, ava::tui::TranscriptItem{.label = "ava", .text = "new item"});
+  expect(over_cap_shift == -5 && over_cap_push.transcript.size() == ava::tui::kMaxTranscriptItems && over_cap_push.transcript.back().text == "new item",
+         "direct transcript pushes return the exact negative truncation shift even when the input snapshot starts above the cap");
+
   auto assistant_final_payload = ava::event::MessagePayload{};
   assistant_final_payload.text = "hello";
   ava::tui::apply_runtime_event(state, assistant_message_event(assistant_final_payload));

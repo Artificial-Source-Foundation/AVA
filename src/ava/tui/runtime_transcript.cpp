@@ -144,13 +144,15 @@ void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::str
     final_visible_assistant->meta = meta;
 }
 
-void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta)
+std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta)
 {
   std::vector<TranscriptItem> items;
   items.reserve(outputs.size());
   for (auto const& output : outputs) items.push_back(TranscriptItem{.label = "ava", .text = output});
   apply_assistant_turn_meta(items, meta, snapshot.thinking_visible);
-  for (auto& item : items) push_transcript(snapshot, std::move(item));
+  std::ptrdiff_t item_index_shift = 0;
+  for (auto& item : items) item_index_shift += push_transcript(snapshot, std::move(item));
+  return item_index_shift;
 }
 
 std::string base64_encode(std::string_view text)
@@ -301,11 +303,12 @@ std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answe
   return detail;
 }
 
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
+std::ptrdiff_t push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
 {
   snapshot.transcript.push_back(std::move(item));
-  truncate_transcript(snapshot.transcript);
+  auto const removed = truncate_transcript(snapshot.transcript);
   ++snapshot.transcript_generation;
+  return -static_cast<std::ptrdiff_t>(removed);
 }
 
 void push_history(std::vector<std::string>& history, std::string input)

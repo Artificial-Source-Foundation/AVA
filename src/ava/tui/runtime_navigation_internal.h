@@ -50,6 +50,7 @@ class RuntimeNavigationController final
   [[nodiscard]] std::optional<bool> handle_sidebar_drawer_input(InputEvent const& event);
 
   void jump_to_bottom(std::string status);
+  void jump_to_transcript_item(std::size_t item_index, std::string status);
   void scroll_to_message_boundary(bool previous);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

@@ -1093,6 +1093,11 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     return handled_text("The current session overview is an interactive TUI view. Use /sidebar inside the TUI to open it.");
   }
+  if (starts_with_command(request.command, "/search"))
+  {
+    return handled_text(
+        "Transcript search is available only inside the interactive TUI. Use /search [query] there to find currently rendered transcript items.");
+  }
   if (starts_with_command(request.command, "/tool"))
   {
     return handled_text(

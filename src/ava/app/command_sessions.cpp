@@ -81,7 +81,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
     return std::unexpected(std::move(error));
   }
   opened->created = true;
-  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
 
   result.session_tree_changed = true;
@@ -133,7 +133,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
       return std::unexpected(std::move(metadata.error()));
   }
 
-  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
 
   result.session_tree_changed = true;
@@ -160,7 +160,7 @@ ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, s
   if (!opened)
     return std::unexpected(std::move(opened.error()));
 
-  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
   add_output(result, "resumed session " + session.store.session_id());
   return result;

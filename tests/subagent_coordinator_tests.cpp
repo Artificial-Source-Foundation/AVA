@@ -1087,7 +1087,7 @@ void test_runtime_navigation_releases_idle_parent_owner()
   expect(replacement.has_value(), "idle-navigation fixture opens an unrelated replacement");
   if (!replacement)
     return;
-  expect(ava::app::replace_runtime_session(*visible, std::move(*replacement)).has_value() && other_process_activates(paths.ava_state_dir, parent_a),
+  expect(visible->replace_with(std::move(*replacement)).has_value() && other_process_activates(paths.ava_state_dir, parent_a),
          "process B activates idle parent A after process A navigates away while its coordinator remains alive");
 }
 
@@ -1168,7 +1168,7 @@ void test_runtime_navigation_preserves_coordinator_and_child_authority()
   if (!replacement)
     return;
   auto const unrelated_parent_id = replacement->store.session_id();
-  expect(ava::app::replace_runtime_session(*visible, std::move(*replacement)).has_value(), "visible runtime session is replaced");
+  expect(visible->replace_with(std::move(*replacement)).has_value(), "visible runtime session is replaced");
   expect(visible->subagent_coordinator() == coordinator && !other_process_activates(paths.ava_state_dir, original_parent_id),
          "process B cannot activate a parent after navigation while its child remains live");
   expect(visible->subagent_coordinator() == coordinator, "runtime replacement preserves the exact application coordinator");

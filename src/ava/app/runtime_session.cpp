@@ -605,40 +605,6 @@ ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOpti
   return construct_runtime_session(options, store, lease, created, true, false, false, options.subagent_delivery_manager, options.session_title_coordinator);
 }
 
-ava::core::VoidResult replace_runtime_session(runtime::Session& destination, runtime::Session&& replacement)
-{
-  // Background ownership is application-scoped. Retire only the visible
-  // session controller and preserve the exact coordinator across navigation.
-  auto coordinator = destination.resources().subagent_coordinator;
-  auto delivery_manager = destination.resources().subagent_delivery_manager;
-  auto title_coordinator = destination.resources().session_title_coordinator;
-  auto const detached_parent_id = destination.sessionless() ? std::string{} : destination.store.session_id();
-  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
-  destination.resources().run_controller.reset();
-  destination = std::move(replacement);
-  if (delivery_manager)
-  {
-    destination.resources().subagent_delivery_manager = delivery_manager;
-    destination.resources().subagent_coordinator = destination.resources().subagent_delivery_manager->coordinator();
-  }
-  else if (coordinator)
-    destination.resources().subagent_coordinator = coordinator;
-  if (title_coordinator)
-    destination.resources().session_title_coordinator = std::move(title_coordinator);
-
-  // This is an explicit visible-session detach boundary. The delivery manager
-  // keeps a capsule and journal owner when work remains; otherwise its exact
-  // generation release allows another AVA process to activate this history.
-  if (leaves_detached_parent)
-  {
-    if (delivery_manager)
-      delivery_manager->release_detached_parent(detached_parent_id);
-    else if (coordinator)
-      static_cast<void>(coordinator->release_parent_if_idle(detached_parent_id));
-  }
-  return {};
-}
-
 ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode)
 {
   return session.append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),

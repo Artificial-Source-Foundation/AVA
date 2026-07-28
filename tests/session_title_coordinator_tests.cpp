@@ -410,7 +410,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
   auto replacement = ava::app::create_runtime_session_like(*session, ava::app::runtime::OpenOptions{});
   expect(replacement.has_value(), replacement ? "replacement session opens" : replacement.error().format());
   if (replacement)
-    expect(ava::app::replace_runtime_session(*session, std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");
+    expect(session->replace_with(std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "navigation title coordinator becomes idle");
   auto summaries = ava::session::SessionStore::list_sessions(session->workspace_dir(), session->paths().sessions_dir);

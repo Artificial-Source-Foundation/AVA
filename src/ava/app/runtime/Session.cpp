@@ -416,6 +416,40 @@ ava::core::VoidResult Session::refresh_parent_configuration() const
   return manager ? manager->refresh_parent_configuration(*this) : ava::core::VoidResult{};
 }
 
+ava::core::VoidResult Session::replace_with(runtime::Session&& replacement)
+{
+  // Background ownership is application-scoped. Retire only the visible
+  // session controller and preserve the exact coordinator across navigation.
+  auto coordinator = resources().subagent_coordinator;
+  auto delivery_manager = resources().subagent_delivery_manager;
+  auto title_coordinator = resources().session_title_coordinator;
+  auto const detached_parent_id = sessionless() ? std::string{} : store.session_id();
+  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
+  resources().run_controller.reset();
+  *this = std::move(replacement);
+  if (delivery_manager)
+  {
+    resources().subagent_delivery_manager = delivery_manager;
+    resources().subagent_coordinator = resources().subagent_delivery_manager->coordinator();
+  }
+  else if (coordinator)
+    resources().subagent_coordinator = coordinator;
+  if (title_coordinator)
+    resources().session_title_coordinator = std::move(title_coordinator);
+
+  // The delivery manager keeps a capsule and journal owner when work remains;
+  // otherwise its exact generation release allows another AVA process to
+  // activate this history.
+  if (leaves_detached_parent)
+  {
+    if (delivery_manager)
+      delivery_manager->release_detached_parent(detached_parent_id);
+    else if (coordinator)
+      static_cast<void>(coordinator->release_parent_if_idle(detached_parent_id));
+  }
+  return {};
+}
+
 ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)
 {
   auto read_authority = this->read_authority();

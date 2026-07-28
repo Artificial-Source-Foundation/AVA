@@ -444,7 +444,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   if (!replacement)
     return;
   auto replacement_id = replacement->store.session_id();
-  expect(ava::app::replace_runtime_session(*fixture.session, std::move(*replacement)).has_value(), "navigation replaces the visible session");
+  expect(fixture.session->replace_with(std::move(*replacement)).has_value(), "navigation replaces the visible session");
 
   ava::app::runtime::OpenOptions reopen = base;
   reopen.workspace_dir = fixture.session->workspace_dir();

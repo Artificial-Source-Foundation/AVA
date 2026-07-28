@@ -118,7 +118,7 @@ struct TrustState
 // the bound read authority for detached capsules, and the shared
 // application-scoped services (subagent coordinator/delivery, title
 // coordinator, diagnostics, MCP config). These cannot round-trip through
-// disk; the three app-scoped services are rebound by replace_runtime_session
+// disk; the three app-scoped services are rebound by Session::replace_with
 // and mcp_config is set once at ACP session setup.
 struct SessionResources
 {
@@ -188,7 +188,7 @@ class Session : protected Session_aggregate_base
   Session(Session&& session) = default;
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
-  // Called from replace_runtime_session.
+  // Called from replace_with.
   Session& operator=(Session&& session) = default;
 
   // Accessors.
@@ -313,6 +313,15 @@ class Session : protected Session_aggregate_base
   // Returns failure when the parent delivery manager rejects the configuration update;
   // returns success when no delivery manager is attached or the update was applied.
   [[nodiscard]] ava::core::VoidResult refresh_parent_configuration() const;
+
+  // Stop background work and replace this session's contents with `replacement`,
+  // rebinding the application-scoped subagent coordinator/delivery and title
+  // coordinator shared services that cannot round-trip through disk.
+  //
+  // This is the visible-session detach boundary: when `replacement` targets a
+  // different session the previously visible parent is released so another AVA
+  // process may activate it. Always succeeds.
+  [[nodiscard]] ava::core::VoidResult replace_with(runtime::Session&& replacement);
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);

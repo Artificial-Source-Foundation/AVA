@@ -522,7 +522,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
     add_output(result, error.format());
     return result;
   }
-  if (auto replaced = replace_runtime_session(session, std::move(*opened)); !replaced)
+  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
     return std::unexpected(std::move(replaced.error()));
   result.session_tree_changed = true;
   add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +

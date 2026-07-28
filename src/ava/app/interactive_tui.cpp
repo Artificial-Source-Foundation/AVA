@@ -152,7 +152,7 @@ int run_tui(ShellState state)
     auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), target_session_id);
     if (!opened)
       return std::unexpected(std::move(opened.error()));
-    if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+    if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
       return std::unexpected(std::move(replaced.error()));
     application_catalog.retarget_session(state.session.store.session_id());
     application_catalog.refresh_values(state.session, hotkeys);
@@ -564,7 +564,7 @@ int run_tui(ShellState state)
         auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
         if (!opened)
           return std::unexpected(std::move(opened.error()));
-        if (auto replaced = ava::app::replace_runtime_session(state.session, std::move(*opened)); !replaced)
+        if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
           return std::unexpected(std::move(replaced.error()));
         application_catalog.retarget_session(state.session.store.session_id());
         application_catalog.refresh_values(state.session, hotkeys);

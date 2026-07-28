@@ -579,8 +579,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, error));
     }
     opened->created = true;
-    // FIXME: replace_runtime_session should become a member function of Session.
-    if (auto replaced = replace_runtime_session(*session_w, std::move(*opened)); !replaced)
+    if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)
       return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
@@ -674,8 +673,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto created = create_new_session(*session_w, context.open_options);
     if (!created)
       return handled(write_error(context.output, command.id, created.error()));
-    // FIXME: replace_runtime_session should become a member function of Session.
-    if (auto replaced = replace_runtime_session(*session_w, std::move(*created)); !replaced)
+    if (auto replaced = session_w->replace_with(std::move(*created)); !replaced)
       return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
@@ -696,8 +694,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto opened = open_requested_session(*session_w, context.open_options, *command.session_id);
     if (!opened)
       return handled(write_error(context.output, command.id, opened.error()));
-    // FIXME: replace_runtime_session should become a member function of Session.
-    if (auto replaced = replace_runtime_session(*session_w, std::move(*opened)); !replaced)
+    if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)
       return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));

@@ -136,7 +136,7 @@ ava::core::Result<bool> set_runtime_reasoning(runtime::Session& session, std::op
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   session.model_selection().reasoning = std::move(selection);
-  if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
+  if (auto refreshed = session.refresh_parent_configuration(); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return true;
 }

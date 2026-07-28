@@ -6,6 +6,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_tools.h"
 #include "ava/app/rpc/serialization_detail.h"
+#include "ava/app/subagent_delivery_manager.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
 #include "ava/context/skill_loader.h"
@@ -407,6 +408,12 @@ CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
   if (options.include_skills)
     load_skill_commands(builder, *this);
   return std::move(builder.registry);
+}
+
+ava::core::VoidResult Session::refresh_parent_configuration() const
+{
+  auto const& manager = subagent_delivery_manager();
+  return manager ? manager->refresh_parent_configuration(*this) : ava::core::VoidResult{};
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)

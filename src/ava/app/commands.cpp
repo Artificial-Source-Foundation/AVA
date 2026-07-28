@@ -904,7 +904,7 @@ ReloadReportRow reload_model_settings(runtime::Session& session)
   if (!registry)
     return reload_error_row("models", registry.error());
   session.model_selection().scoped_model_cycle = registry->scoped_model_cycle;
-  if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
+  if (auto refreshed = session.refresh_parent_configuration(); !refreshed)
     return reload_error_row("models", refreshed.error());
   ReloadReportRow row{.name = "models", .status = "loaded", .details = {}};
   append_reload_detail(row, "config", session.paths().models_file.string());

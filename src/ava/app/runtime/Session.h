@@ -307,6 +307,13 @@ class Session : protected Session_aggregate_base
             .anchor_set = anchor_set()};
   }
 
+  // Publish callback-free mutable runtime configuration into an existing retained parent capsule
+  // without changing its safe policy snapshot.
+  //
+  // Returns failure when the parent delivery manager rejects the configuration update;
+  // returns success when no delivery manager is attached or the update was applied.
+  [[nodiscard]] ava::core::VoidResult refresh_parent_configuration() const;
+
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
 

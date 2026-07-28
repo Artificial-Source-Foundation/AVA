@@ -811,11 +811,6 @@ ava::core::Error offline_provider_error(std::string_view action)
   return error;
 }
 
-ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session)
-{
-  return session.subagent_delivery_manager() ? session.subagent_delivery_manager()->refresh_parent_configuration(session) : ava::core::VoidResult{};
-}
-
 ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state)
 {
   session.resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state.mode,
@@ -823,7 +818,7 @@ ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runt
                                                                 .context_sources = std::move(prompt_state.context_sources),
                                                                 .freshness_sources = std::move(prompt_state.freshness_sources),
                                                                 .system_prompt = std::move(prompt_state.system_prompt)};
-  return refresh_runtime_parent_configuration(session);
+  return session.refresh_parent_configuration();
 }
 
 ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message, ava::provider::Provider const& provider,

@@ -162,7 +162,7 @@ ava::core::Result<bool> switch_runtime_model(runtime::Session& session, ava::con
                                                                 .freshness_sources = std::move(prompt_state->freshness_sources),
                                                                 .system_prompt = std::move(prompt_state->system_prompt)};
   session.model_selection().reasoning = std::nullopt;
-  if (auto refreshed = refresh_runtime_parent_configuration(session); !refreshed)
+  if (auto refreshed = session.refresh_parent_configuration(); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return true;
 }

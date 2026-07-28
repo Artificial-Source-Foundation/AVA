@@ -53,10 +53,6 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::Session& session, runtime::PromptState prompt_state);
 
-// Publishes callback-free mutable runtime configuration into an existing
-// retained parent capsule without changing its safe policy snapshot.
-[[nodiscard]] ava::core::VoidResult refresh_runtime_parent_configuration(runtime::Session const& session);
-
 // Append a mode change through the runtime owner's serialized route.
 [[nodiscard]] ava::core::VoidResult append_runtime_mode_change(runtime::Session& session, ava::agent::Mode mode);
 

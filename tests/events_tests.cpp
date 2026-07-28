@@ -1,38 +1,36 @@
 #include "sys.h"
-#include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
-#include "ava/event/CancellationPayload.h"
-#include "ava/event/CompletionPayload.h"
-#include "ava/event/ErrorPayload.h"
-#include "ava/event/RetryPayload.h"
-#include "ava/event/ToolPayload.h"
-#include "ava/app/EventEnvelope.h"
-#include "ava/app/events.h"
+#include "ava/event/events.h"
 #include "ava/app/interactive_run_queue.h"
-#include "ava/agent/mode.h"
 #include "ava/core/json.h"
 
-#include <iostream>
 #include <string>
+#include <variant>
 #include <vector>
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+// Typed fixture payloads intentionally retain declared defaults for fields omitted by each concrete v1 event.
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
 
 namespace {
 
 void test_event_envelope_serialization_is_deterministic()
 {
-  ava::app::EventEnvelope const envelope{.schema_version = 1,
-                                         .event_id = "event_1",
-                                         .timestamp = "2026-04-30T00:00:00Z",
-                                         .session_id = "session_1",
-                                         .run_id = "run_1",
-                                         .turn_id = "turn_1",
-                                         .message_id = "message_1",
-                                         .request_id = "request_1",
-                                         .correlation_id = "correlation_1",
-                                         .name = "user_message",
-                                         .payload_json = "{\"text\":\"hello\\n\\\"ava\\\"\"}"};
+  ava::event::EventEnvelope const envelope{.schema_version = 1,
+                                           .event_id = "event_1",
+                                           .timestamp = "2026-04-30T00:00:00Z",
+                                           .session_id = "session_1",
+                                           .run_id = "run_1",
+                                           .turn_id = "turn_1",
+                                           .message_id = "message_1",
+                                           .request_id = "request_1",
+                                           .correlation_id = "correlation_1",
+                                           .name = "user_message",
+                                           .payload_json = "{\"text\":\"hello\\n\\\"ava\\\"\"}"};
 
-  auto const json = ava::app::serialize_event_envelope_json(envelope);
+  auto const json = ava::event::serialize_event_envelope_json(envelope);
   expect(json ==
              "{\"schema_version\":1,\"event_id\":\"event_1\","
              "\"timestamp\":\"2026-04-30T00:00:00Z\",\"session_id\":\"session_1\","
@@ -42,89 +40,78 @@ void test_event_envelope_serialization_is_deterministic()
              "\"payload\":{\"text\":\"hello\\n\\\"ava\\\"\"},\"text\":\"hello\\n\\\"ava\\\"\"}",
          "event envelope JSON serialization uses deterministic field ordering");
 
-  auto const jsonl = ava::app::serialize_event_envelope_jsonl(envelope);
+  auto const jsonl = ava::event::serialize_event_envelope_jsonl(envelope);
   expect(jsonl == json + '\n', "event envelope JSONL appends one newline");
 }
 
-void test_runtime_event_conversion_preserves_legacy_payload_shape()
+void test_typed_runtime_event_preserves_metadata_and_payload_shape()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.timestamp = "2026-04-30T00:00:01Z";
-  event.session_id = "session_1";
-  event.text = "read ok";
-  event.call_id = "call_1";
-  event.tool_name = "read";
-  event.status = "completed";
+  using namespace ava::event;
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:01Z", .session_id = "session_1"},
+                           ToolResultEvent{ToolPayload{.text = "read ok", .call_id = "call_1", .tool = "read", .status = "completed"}});
 
-  ava::app::EventEnvelopeContext context;
+  EventEnvelopeContext context;
   context.event_id = "event_2";
   context.run_id = "run_1";
   context.turn_id = "turn_2";
-  auto const envelope = ava::app::to_event_envelope(event, context);
+  auto const envelope = to_event_envelope(event, context);
   expect(envelope.schema_version == 1, "runtime event conversion sets schema version");
   expect(envelope.event_id == "event_2", "runtime event conversion uses supplied event id");
   expect(envelope.timestamp == "2026-04-30T00:00:01Z", "runtime event conversion carries timestamp");
   expect(envelope.session_id == "session_1", "runtime event conversion carries session id");
   expect(envelope.run_id == "run_1" && envelope.turn_id == "turn_2", "runtime event conversion carries optional ids");
-  expect(envelope.name == "tool_result", "runtime event conversion maps event name");
+  expect(envelope.name == "tool_result", "runtime event conversion maps the concrete alternative name");
   expect(envelope.payload_type == "tool", "runtime event conversion classifies tool payloads");
   expect(envelope.payload_json == "{\"text\":\"read ok\",\"call_id\":\"call_1\",\"tool\":\"read\",\"status\":\"completed\"}",
-         "runtime event conversion maps legacy event fields into payload object");
-  auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
+         "runtime event conversion serializes the authoritative typed payload");
+  auto const envelope_json = serialize_event_envelope_json(envelope);
   expect(envelope_json.find("\"payload_type\":\"tool\"") != std::string::npos,
          "runtime event envelopes advertise payload family without changing payload shape");
 }
 
-void test_app_emit_event_projects_once_and_neutral_emit_is_null_safe()
+void test_neutral_emit_invokes_once_and_is_null_safe()
 {
-  ava::app::runtime::Event legacy_event;
-  legacy_event.type = ava::app::runtime::EventType::ProviderEvent;
-  legacy_event.timestamp = "2026-04-30T00:00:01Z";
-  legacy_event.session_id = "session_projection";
-  legacy_event.text = "provider payload";
-  legacy_event.call_id = "call_projection";
-  legacy_event.tool_name = "read_file";
-  legacy_event.status = "running";
+  using namespace ava::event;
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:01Z", .session_id = "session_projection"},
+                           ProviderEvent{ProviderPayload{.text = "provider payload", .call_id = "call_projection", .tool = "read_file", .status = "running"}});
 
   std::size_t calls = 0;
-  auto emitted = ava::app::emit_event(
-      [&calls](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
+  auto emitted = emit_event(
+      [&calls](RuntimeEvent const& emitted_event) -> ava::core::VoidResult {
         ++calls;
-        auto const* provider = ava::tests::runtime_event_as<ava::event::ProviderEvent>(event);
-        expect(provider && event.metadata().timestamp == "2026-04-30T00:00:01Z" && event.metadata().session_id == "session_projection" &&
+        auto const* provider = std::get_if<ProviderEvent>(&emitted_event.payload());
+        expect(provider && emitted_event.metadata().timestamp == "2026-04-30T00:00:01Z" && emitted_event.metadata().session_id == "session_projection" &&
                    provider->payload.text == "provider payload" && provider->payload.call_id == "call_projection" && provider->payload.tool == "read_file" &&
                    provider->payload.status == "running",
-               "app event bridge projects the legacy producer bag to the exact typed alternative and payload");
+               "neutral event emit retains the exact typed alternative, metadata, and payload");
         return {};
       },
-      legacy_event);
-  expect(emitted.has_value() && calls == 1, "app event bridge projects once and invokes the typed sink once");
+      event);
+  expect(emitted.has_value() && calls == 1, "neutral event emit invokes the typed sink once");
 
-  auto typed_event = ava::app::to_runtime_event(legacy_event);
-  ava::event::RuntimeEventSink null_sink;
-  expect(ava::event::emit_event(null_sink, typed_event).has_value(), "neutral typed emit treats a null sink as a successful no-op");
+  RuntimeEventSink null_sink;
+  expect(emit_event(null_sink, event).has_value(), "neutral typed emit treats a null sink as a successful no-op");
 }
 
 void test_event_bus_preserves_order_and_stops_on_first_failure()
 {
-  ava::app::EventBus bus;
+  ava::event::EventBus bus;
   std::vector<std::string> calls;
   auto expected_error = ava::core::Error(ava::core::ErrorCategory::Io, "stable second sink failure").with_context("sink", "second");
-  bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+  bus.subscribe([&calls](ava::event::EventEnvelope const&) {
     calls.push_back("first");
     return ava::core::VoidResult{};
   });
-  bus.subscribe([&calls](ava::app::EventEnvelope const&) -> ava::core::VoidResult {
+  bus.subscribe([&calls](ava::event::EventEnvelope const&) -> ava::core::VoidResult {
     calls.push_back("second");
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable second sink failure").with_context("sink", "second"));
   });
-  bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+  bus.subscribe([&calls](ava::event::EventEnvelope const&) {
     calls.push_back("third");
     return ava::core::VoidResult{};
   });
 
-  ava::app::EventEnvelope envelope;
+  ava::event::EventEnvelope envelope;
   envelope.event_id = "event_order";
   envelope.name = "done";
   auto const published = bus.publish(envelope);
@@ -137,166 +124,144 @@ void test_event_bus_preserves_order_and_stops_on_first_failure()
 
 void test_runtime_event_bus_adapter_publishes_and_forwards()
 {
-  ava::app::EventBus bus;
+  using namespace ava::event;
+  EventBus bus;
   std::vector<std::string> call_order;
-  std::vector<ava::app::EventEnvelope> published;
-  std::vector<ava::event::RuntimeEvent> forwarded;
-  bus.subscribe([&call_order, &published](ava::app::EventEnvelope const& envelope) {
+  std::vector<EventEnvelope> published;
+  std::vector<RuntimeEvent> forwarded;
+  bus.subscribe([&call_order, &published](EventEnvelope const& envelope) {
     call_order.push_back("publish");
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
 
-  ava::app::EventEnvelopeContext context;
+  EventEnvelopeContext context;
   context.event_id = "event_3";
   context.correlation_id = "correlation_1";
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context, [&call_order, &forwarded](ava::event::RuntimeEvent const& event) {
+  auto sink = make_runtime_event_bus_adapter(bus, context, [&call_order, &forwarded](RuntimeEvent const& event) {
     call_order.push_back("next");
     forwarded.push_back(event);
     return ava::core::VoidResult{};
   });
 
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::AssistantMessage;
-  event.timestamp = "2026-04-30T00:00:02Z";
-  event.session_id = "session_1";
-  event.text = "done";
-
-  auto const emitted = sink(ava::app::to_runtime_event(event));
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:02Z", .session_id = "session_1"},
+                           AssistantMessageEvent{MessagePayload{.text = "done"}});
+  auto const emitted = sink(event);
   expect(emitted.has_value(), "runtime event bus adapter succeeds when bus and next sink succeed");
   expect(published.size() == 1 && published.front().name == "assistant_message" && published.front().correlation_id == "correlation_1",
          "runtime event bus adapter publishes converted envelopes");
-  auto const* forwarded_message = forwarded.size() == 1 ? ava::tests::runtime_event_as<ava::event::AssistantMessageEvent>(forwarded.front()) : nullptr;
+  auto const* forwarded_message = forwarded.size() == 1 ? std::get_if<AssistantMessageEvent>(&forwarded.front().payload()) : nullptr;
   expect(forwarded_message && forwarded_message->payload.text == "done" && call_order == std::vector<std::string>({"publish", "next"}),
          "runtime event bus adapter publishes before forwarding typed runtime events to the next sink");
 }
 
 void test_runtime_event_bus_adapter_failure_order()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::Done;
-  event.timestamp = "2026-04-30T00:00:03Z";
-  event.session_id = "session_1";
+  using namespace ava::event;
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:03Z", .session_id = "session_1"}, CompletionEvent{});
 
-  ava::app::EventBus failing_bus;
+  EventBus failing_bus;
   bool next_called = false;
   auto expected_publish_error = ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure");
-  failing_bus.subscribe([](ava::app::EventEnvelope const&) -> ava::core::VoidResult {
+  failing_bus.subscribe([](EventEnvelope const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "stable envelope publish failure"));
   });
-  auto publish_failure_sink = ava::app::make_runtime_event_bus_adapter(failing_bus, {}, [&next_called](ava::event::RuntimeEvent const&) {
+  auto publish_failure_sink = make_runtime_event_bus_adapter(failing_bus, {}, [&next_called](RuntimeEvent const&) {
     next_called = true;
     return ava::core::VoidResult{};
   });
-  auto const publish_failure = publish_failure_sink(ava::app::to_runtime_event(event));
+  auto const publish_failure = publish_failure_sink(event);
   expect(!publish_failure && !next_called && publish_failure.error().format() == expected_publish_error.format(),
          "runtime event bus adapter propagates envelope publish failure without calling the next sink");
 
-  ava::app::EventBus successful_bus;
+  EventBus successful_bus;
   std::vector<std::string> calls;
-  successful_bus.subscribe([&calls](ava::app::EventEnvelope const&) {
+  successful_bus.subscribe([&calls](EventEnvelope const&) {
     calls.push_back("publish");
     return ava::core::VoidResult{};
   });
   auto expected_next_error = ava::core::Error(ava::core::ErrorCategory::Tool, "stable next sink failure").with_context("sink", "next");
-  auto next_failure_sink = ava::app::make_runtime_event_bus_adapter(successful_bus, {}, [&calls](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
+  auto next_failure_sink = make_runtime_event_bus_adapter(successful_bus, {}, [&calls](RuntimeEvent const&) -> ava::core::VoidResult {
     calls.push_back("next");
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "stable next sink failure").with_context("sink", "next"));
   });
-  auto const next_failure = next_failure_sink(ava::app::to_runtime_event(event));
+  auto const next_failure = next_failure_sink(event);
   expect(!next_failure && calls == std::vector<std::string>({"publish", "next"}) && next_failure.error().format() == expected_next_error.format(),
          "runtime event bus adapter publishes first and propagates the next sink failure exactly");
 }
 
 void test_runtime_event_bus_adapter_allows_default_next_sink()
 {
-  ava::app::EventBus bus;
-  std::vector<ava::app::EventEnvelope> published;
-  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
+  using namespace ava::event;
+  EventBus bus;
+  std::vector<EventEnvelope> published;
+  bus.subscribe([&published](EventEnvelope const& envelope) {
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
 
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus);
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::Done;
-  event.timestamp = "2026-04-30T00:00:03Z";
-  event.session_id = "session_1";
-
-  auto const emitted = sink(ava::app::to_runtime_event(event));
+  auto sink = make_runtime_event_bus_adapter(bus);
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:03Z", .session_id = "session_1"}, CompletionEvent{});
+  auto const emitted = sink(event);
   expect(emitted.has_value() && published.size() == 1 && published.front().name == "done", "runtime event bus adapter supports a null next sink");
 }
 
-void test_tool_progress_runtime_event_serialization_and_bus_adapter()
+void test_tool_progress_payload_serialization_and_bus_adapter()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolProgress;
-  event.timestamp = "2026-04-30T00:00:04Z";
-  event.session_id = "session_1";
-  event.text = "reading";
-  event.call_id = "call_2";
-  event.tool_name = "read_file";
-  event.status = "running";
+  using namespace ava::event;
+  ToolPayload const payload{.text = "reading", .call_id = "call_2", .tool = "read_file", .status = "running"};
+  expect(serialize_payload_json(payload) == "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
+         "tool progress uses the authoritative typed payload serializer");
 
-  auto const json = ava::app::serialize_event_json(event);
-  expect(json ==
-             "{\"type\":\"tool_progress\",\"timestamp\":\"2026-04-30T00:00:04Z\","
-             "\"session_id\":\"session_1\",\"text\":\"reading\",\"call_id\":\"call_2\","
-             "\"tool\":\"read_file\",\"status\":\"running\"}",
-         "tool progress serializes with existing runtime event payload fields");
-
-  ava::app::EventBus bus;
-  std::vector<ava::app::EventEnvelope> published;
-  bus.subscribe([&published](ava::app::EventEnvelope const& envelope) {
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:04Z", .session_id = "session_1"}, ToolProgressEvent{payload});
+  EventBus bus;
+  std::vector<EventEnvelope> published;
+  bus.subscribe([&published](EventEnvelope const& envelope) {
     published.push_back(envelope);
     return ava::core::VoidResult{};
   });
-  ava::app::EventEnvelopeContext context;
+  EventEnvelopeContext context;
   context.event_id = "event_progress";
-  auto sink = ava::app::make_runtime_event_bus_adapter(bus, context);
-  auto const emitted = sink(ava::app::to_runtime_event(event));
+  auto sink = make_runtime_event_bus_adapter(bus, context);
+  auto const emitted = sink(event);
   expect(emitted.has_value() && published.size() == 1 && published.front().name == "tool_progress", "event bus adapter publishes tool progress envelopes");
-  expect(published.front().payload_json == "{\"text\":\"reading\",\"call_id\":\"call_2\",\"tool\":\"read_file\",\"status\":\"running\"}",
-         "tool progress envelope payload keeps existing tool event fields");
+  expect(published.front().payload_json == serialize_payload_json(payload), "tool progress envelope keeps the typed tool payload fields");
 }
 
-void test_tool_runtime_event_serializes_semantic_frontend_payloads()
+void test_tool_payload_serializes_semantic_frontend_fields()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ToolResult;
-  event.timestamp = "2026-04-30T00:00:04Z";
-  event.session_id = "session_1";
-  event.text = "edited src/main.cpp";
-  event.call_id = "call_edit";
-  event.tool_name = "edit_file";
-  event.tool_arguments_json = "{\"path\":\"src/main.cpp\"}";
-  event.tool_result_json = "{\"ok\":true,\"path\":\"src/main.cpp\"}";
-  event.tool_structured_result_json =
-      "{\"schema_version\":1,\"call_id\":\"call_edit\",\"tool\":\"edit_file\",\"status\":\"success\","
-      "\"ok\":true,\"content_type\":\"application/json\",\"content\":{\"ok\":true,\"path\":\"src/main.cpp\"},"
-      "\"changed_paths\":[\"src/main.cpp\"]}";
-  event.status = "success";
-  event.content_type = "application/json";
-  event.diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new";
-  event.changed_paths = {"src/main.cpp", "include/ava/app/events.h"};
-  event.permission_request_ids = {"permreq_edit"};
-  event.diff_truncated = true;
-  event.truncated = true;
-  event.byte_limited = true;
-  event.line_limited = true;
-  event.spill_path = "/tmp/ava-spill/tool.txt";
-  event.spill_truncated = true;
-  event.output_bytes = 128;
-  event.total_bytes = 512;
-  event.output_lines = 4;
-  event.total_lines = 11;
-  event.start_line = 2;
-  event.end_line = 5;
-  event.next_offset_line = 6;
-  event.omitted_bytes = 384;
-  event.omitted_lines = 7;
+  using namespace ava::event;
+  ToolPayload const payload{.text = "edited src/main.cpp",
+                            .call_id = "call_edit",
+                            .tool = "edit_file",
+                            .args_json = "{\"path\":\"src/main.cpp\"}",
+                            .result_json = "{\"ok\":true,\"path\":\"src/main.cpp\"}",
+                            .structured_result_json =
+                                "{\"schema_version\":1,\"call_id\":\"call_edit\",\"tool\":\"edit_file\",\"status\":\"success\","
+                                "\"ok\":true,\"content_type\":\"application/json\",\"content\":{\"ok\":true,\"path\":\"src/main.cpp\"},"
+                                "\"changed_paths\":[\"src/main.cpp\"]}",
+                            .status = "success",
+                            .content_type = "application/json",
+                            .diff = "--- src/main.cpp\n+++ src/main.cpp\n-old\n+new",
+                            .changed_paths = {"src/main.cpp", "include/ava/app/events.h"},
+                            .permission_request_ids = {"permreq_edit"},
+                            .spill_path = "/tmp/ava-spill/tool.txt",
+                            .diff_truncated = true,
+                            .truncated = true,
+                            .byte_limited = true,
+                            .line_limited = true,
+                            .spill_truncated = true,
+                            .output_bytes = 128,
+                            .total_bytes = 512,
+                            .output_lines = 4,
+                            .total_lines = 11,
+                            .start_line = 2,
+                            .end_line = 5,
+                            .next_offset_line = 6,
+                            .omitted_bytes = 384,
+                            .omitted_lines = 7};
 
-  auto const json = ava::app::serialize_event_json(event);
+  auto const json = serialize_payload_json(payload);
   expect(json.find("\"args\":{\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"result\":{\"ok\":true,\"path\":\"src/main.cpp\"}") != std::string::npos &&
              json.find("\"structured_result\":{\"schema_version\":1") != std::string::npos &&
@@ -306,11 +271,10 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
              json.find("\"byte_limited\":true") != std::string::npos && json.find("\"line_limited\":true") != std::string::npos &&
              json.find("\"output_lines\":4") != std::string::npos && json.find("\"next_offset_line\":6") != std::string::npos &&
              json.find("\"omitted_lines\":7") != std::string::npos,
-         "tool runtime events serialize semantic args, result, permission ids, diffs, and truncation metadata");
+         "typed tool payloads serialize semantic args, result, permission ids, diffs, and truncation metadata");
 
-  ava::app::EventEnvelopeContext context;
-  context.event_id = "event_semantic_tool";
-  auto const envelope = ava::app::to_event_envelope(event, context);
+  RuntimeEvent const event(RuntimeEventMetadata{}, ToolResultEvent{payload});
+  auto const envelope = to_event_envelope(event, EventEnvelopeContext{.event_id = "event_semantic_tool"});
   auto const args = ava::core::json::object_field(envelope.payload_json, "args");
   auto const result = ava::core::json::object_field(envelope.payload_json, "result");
   auto const structured_result = ava::core::json::object_field(envelope.payload_json, "structured_result");
@@ -325,128 +289,117 @@ void test_tool_runtime_event_serializes_semantic_frontend_payloads()
          "tool event envelopes preserve semantic payloads for frontend replay");
 }
 
-void test_high_risk_runtime_payload_builders_preserve_wire_shapes()
+void test_high_risk_typed_payloads_preserve_wire_shapes()
 {
-  ava::app::runtime::Event tool_event;
-  tool_event.type = ava::app::runtime::EventType::ToolResult;
-  tool_event.text = "read ok";
-  tool_event.call_id = "call_read";
-  tool_event.tool_name = "read_file";
-  tool_event.tool_arguments_json = "{\"path\":\"README.md\"}";
-  tool_event.tool_result_json = "{\"ok\":true}";
-  tool_event.tool_structured_result_json = "{\"schema_version\":1,\"ok\":true}";
-  tool_event.status = "success";
-  tool_event.content_type = "application/json";
-  tool_event.changed_paths = {"README.md"};
-  tool_event.permission_request_ids = {"permreq_read"};
-  tool_event.output_lines = 2;
-  tool_event.total_lines = 3;
-  auto const tool_payload = ava::app::serialize_payload_json(ava::app::tool_payload_from_event(tool_event));
-  expect(tool_payload ==
+  using namespace ava::event;
+  ToolPayload const tool_payload{.text = "read ok",
+                                 .call_id = "call_read",
+                                 .tool = "read_file",
+                                 .args_json = "{\"path\":\"README.md\"}",
+                                 .result_json = "{\"ok\":true}",
+                                 .structured_result_json = "{\"schema_version\":1,\"ok\":true}",
+                                 .status = "success",
+                                 .content_type = "application/json",
+                                 .changed_paths = {"README.md"},
+                                 .permission_request_ids = {"permreq_read"},
+                                 .output_lines = 2,
+                                 .total_lines = 3};
+  auto const tool_json = serialize_payload_json(tool_payload);
+  expect(tool_json ==
              "{\"text\":\"read ok\",\"call_id\":\"call_read\",\"tool\":\"read_file\","
              "\"args\":{\"path\":\"README.md\"},\"result\":{\"ok\":true},"
              "\"structured_result\":{\"schema_version\":1,\"ok\":true},\"status\":\"success\","
              "\"content_type\":\"application/json\",\"changed_paths\":[\"README.md\"],"
              "\"permission_request_ids\":[\"permreq_read\"],\"output_lines\":2,\"total_lines\":3}",
-         "typed tool payload builder preserves the existing JSON field contract");
-  expect(ava::app::to_event_envelope(tool_event).payload_json == tool_payload, "tool event envelopes are serialized through the typed payload contract");
+         "typed tool payload preserves the existing JSON field contract");
+  expect(to_event_envelope(RuntimeEvent(RuntimeEventMetadata{}, ToolResultEvent{tool_payload})).payload_json == tool_json,
+         "tool event envelopes use the typed payload serializer");
 
-  ava::app::runtime::Event retry_event;
-  retry_event.type = ava::app::runtime::EventType::RetryTick;
-  retry_event.text = "HTTP status 429";
-  retry_event.status = "request";
-  retry_event.trigger = "provider_transport";
-  retry_event.reason = "rate_limited";
-  retry_event.attempt = 2;
-  retry_event.max_attempts = 3;
-  retry_event.delay_ms = 1000;
-  retry_event.remaining_ms = 250;
-  auto const retry_payload = ava::app::serialize_payload_json(ava::app::retry_payload_from_event(retry_event));
-  expect(retry_payload ==
+  RetryPayload const retry_payload{.text = "HTTP status 429",
+                                   .status = "request",
+                                   .trigger = "provider_transport",
+                                   .reason = "rate_limited",
+                                   .attempt = 2,
+                                   .max_attempts = 3,
+                                   .delay_ms = 1000,
+                                   .remaining_ms = 250};
+  auto const retry_json = serialize_payload_json(retry_payload);
+  expect(retry_json ==
              "{\"text\":\"HTTP status 429\",\"status\":\"request\",\"trigger\":\"provider_transport\","
              "\"reason\":\"rate_limited\",\"attempt\":2,\"max_attempts\":3,\"delay_ms\":1000,"
              "\"remaining_ms\":250}",
-         "typed retry payload builder preserves retry timing fields");
-  expect(ava::app::to_event_envelope(retry_event).payload_json == retry_payload, "retry event envelopes are serialized through the typed payload contract");
+         "typed retry payload preserves retry timing fields");
+  expect(to_event_envelope(RuntimeEvent(RuntimeEventMetadata{}, RetryTickEvent{retry_payload})).payload_json == retry_json,
+         "retry event envelopes use the typed payload serializer");
 
-  ava::app::runtime::Event canceled_event;
-  canceled_event.type = ava::app::runtime::EventType::Canceled;
-  canceled_event.text = "stopped by user";
-  canceled_event.error_category = "canceled";
-  canceled_event.error_message = "agent loop canceled";
-  canceled_event.error_details = "canceled: agent loop canceled";
-  canceled_event.reason = "agent loop canceled";
-  auto const cancellation_payload = ava::app::serialize_payload_json(ava::app::cancellation_payload_from_event(canceled_event));
-  expect(cancellation_payload ==
+  CancellationPayload const cancellation_payload{.text = "stopped by user",
+                                                 .error_category = "canceled",
+                                                 .error_message = "agent loop canceled",
+                                                 .error_details = "canceled: agent loop canceled",
+                                                 .reason = "agent loop canceled"};
+  auto const cancellation_json = serialize_payload_json(cancellation_payload);
+  expect(cancellation_json ==
              "{\"text\":\"stopped by user\",\"category\":\"canceled\",\"message\":\"agent loop canceled\","
              "\"details\":\"canceled: agent loop canceled\",\"reason\":\"agent loop canceled\"}",
-         "typed cancellation payload builder preserves cancellation reason fields");
-  expect(ava::app::to_event_envelope(canceled_event).payload_json == cancellation_payload,
-         "cancellation event envelopes are serialized through the typed payload contract");
+         "typed cancellation payload preserves cancellation reason fields");
+  expect(to_event_envelope(RuntimeEvent(RuntimeEventMetadata{}, CancellationEvent{cancellation_payload})).payload_json == cancellation_json,
+         "cancellation event envelopes use the typed payload serializer");
 
-  ava::app::runtime::Event error_event;
-  error_event.type = ava::app::runtime::EventType::Error;
-  error_event.error_category = "io";
-  error_event.error_code = "write_failed";
-  error_event.error_message = "failed to write RPC JSONL record";
-  error_event.error_details = "io: failed to write RPC JSONL record";
-  auto const error_payload = ava::app::serialize_payload_json(ava::app::error_payload_from_event(error_event));
-  expect(error_payload ==
+  ErrorPayload const error_payload{.error_category = "io",
+                                   .error_code = "write_failed",
+                                   .error_message = "failed to write RPC JSONL record",
+                                   .error_details = "io: failed to write RPC JSONL record"};
+  auto const error_json = serialize_payload_json(error_payload);
+  expect(error_json ==
              "{\"category\":\"io\",\"error_code\":\"write_failed\","
              "\"message\":\"failed to write RPC JSONL record\","
              "\"details\":\"io: failed to write RPC JSONL record\"}",
-         "typed error payload builder preserves error diagnostic fields");
-  expect(ava::app::to_event_envelope(error_event).payload_json == error_payload, "error event envelopes are serialized through the typed payload contract");
+         "typed error payload preserves error diagnostic fields");
+  expect(to_event_envelope(RuntimeEvent(RuntimeEventMetadata{}, ErrorEvent{error_payload})).payload_json == error_json,
+         "error event envelopes use the typed payload serializer");
 
-  ava::app::runtime::Event done_event;
-  done_event.type = ava::app::runtime::EventType::Done;
-  done_event.stop_reason = "completed";
-  done_event.provider_iterations = 2;
-  done_event.tool_calls = 1;
-  auto const completion_payload = ava::app::serialize_payload_json(ava::app::completion_payload_from_event(done_event));
-  expect(completion_payload == "{\"stop_reason\":\"completed\",\"provider_iterations\":2,\"tool_calls\":1}",
-         "typed completion payload builder preserves usage summary counters");
-  expect(ava::app::to_event_envelope(done_event).payload_json == completion_payload,
-         "completion event envelopes are serialized through the typed payload contract");
+  CompletionPayload const completion_payload{.stop_reason = "completed", .provider_iterations = 2, .tool_calls = 1};
+  auto const completion_json = serialize_payload_json(completion_payload);
+  expect(completion_json == "{\"stop_reason\":\"completed\",\"provider_iterations\":2,\"tool_calls\":1}",
+         "typed completion payload preserves usage summary counters");
+  expect(to_event_envelope(RuntimeEvent(RuntimeEventMetadata{}, CompletionEvent{completion_payload})).payload_json == completion_json,
+         "completion event envelopes use the typed payload serializer");
 }
 
 void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
 {
-  ava::app::runtime::Event success_event;
-  success_event.type = ava::app::runtime::EventType::ToolResult;
-  success_event.timestamp = "2026-05-07T00:00:00Z";
-  success_event.session_id = "session_golden";
-  success_event.text = "wrote note";
-  success_event.call_id = "call_write";
-  success_event.tool_name = "write_file";
-  success_event.tool_arguments_json = "{\"path\":\"note.txt\"}";
-  success_event.tool_result_json = "{\"ok\":true,\"path\":\"note.txt\"}";
-  success_event.tool_structured_result_json = "{\"schema_version\":1,\"call_id\":\"call_write\",\"tool\":\"write_file\",\"status\":\"success\",";
-  success_event.tool_structured_result_json += "\"ok\":true,\"content_type\":\"application/json\",\"content\":{\"ok\":true,\"path\":\"note.txt\"},";
-  success_event.tool_structured_result_json += "\"changed_paths\":[\"note.txt\"],\"permission_request_ids\":[\"permreq_write\"]}";
-  success_event.status = "success";
-  success_event.content_type = "application/json";
-  success_event.diff = "--- note.txt\n+++ note.txt\n-old\n+new";
-  success_event.changed_paths = {"note.txt"};
-  success_event.permission_request_ids = {"permreq_write"};
-  success_event.spill_path = "spill/tool.txt";
-  success_event.diff_truncated = true;
-  success_event.truncated = true;
-  success_event.byte_limited = true;
-  success_event.line_limited = true;
-  success_event.spill_truncated = true;
-  success_event.output_bytes = 128;
-  success_event.total_bytes = 512;
-  success_event.output_lines = 2;
-  success_event.total_lines = 5;
-  success_event.start_line = 1;
-  success_event.end_line = 2;
-  success_event.next_offset_line = 3;
-  success_event.omitted_bytes = 384;
-  success_event.omitted_lines = 3;
-
-  ava::app::EventEnvelopeContext success_context;
-  success_context.event_id = "event_tool_success";
+  using namespace ava::event;
+  ToolPayload const success_payload_value{.text = "wrote note",
+                                          .call_id = "call_write",
+                                          .tool = "write_file",
+                                          .args_json = "{\"path\":\"note.txt\"}",
+                                          .result_json = "{\"ok\":true,\"path\":\"note.txt\"}",
+                                          .structured_result_json =
+                                              "{\"schema_version\":1,\"call_id\":\"call_write\",\"tool\":\"write_file\",\"status\":\"success\","
+                                              "\"ok\":true,\"content_type\":\"application/json\",\"content\":{\"ok\":true,\"path\":\"note.txt\"},"
+                                              "\"changed_paths\":[\"note.txt\"],\"permission_request_ids\":[\"permreq_write\"]}",
+                                          .status = "success",
+                                          .content_type = "application/json",
+                                          .diff = "--- note.txt\n+++ note.txt\n-old\n+new",
+                                          .changed_paths = {"note.txt"},
+                                          .permission_request_ids = {"permreq_write"},
+                                          .spill_path = "spill/tool.txt",
+                                          .diff_truncated = true,
+                                          .truncated = true,
+                                          .byte_limited = true,
+                                          .line_limited = true,
+                                          .spill_truncated = true,
+                                          .output_bytes = 128,
+                                          .total_bytes = 512,
+                                          .output_lines = 2,
+                                          .total_lines = 5,
+                                          .start_line = 1,
+                                          .end_line = 2,
+                                          .next_offset_line = 3,
+                                          .omitted_bytes = 384,
+                                          .omitted_lines = 3};
+  RuntimeEvent const success_event(RuntimeEventMetadata{.timestamp = "2026-05-07T00:00:00Z", .session_id = "session_golden"},
+                                   ToolResultEvent{success_payload_value});
   auto const success_payload = std::string{"{\"text\":\"wrote note\",\"call_id\":\"call_write\",\"tool\":\"write_file\","} +
                                "\"args\":{\"path\":\"note.txt\"},\"result\":{\"ok\":true,\"path\":\"note.txt\"}," +
                                "\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_write\",\"tool\":\"write_file\"," +
@@ -459,8 +412,8 @@ void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
                                "\"byte_limited\":true,\"line_limited\":true,\"spill_truncated\":true,\"output_bytes\":128," +
                                "\"total_bytes\":512,\"output_lines\":2,\"total_lines\":5,\"start_line\":1,\"end_line\":2," +
                                "\"next_offset_line\":3,\"omitted_bytes\":384,\"omitted_lines\":3}";
-  auto const success_envelope = ava::app::to_event_envelope(success_event, success_context);
-  auto const success_json = ava::app::serialize_event_envelope_json(success_envelope);
+  auto const success_envelope = to_event_envelope(success_event, EventEnvelopeContext{.event_id = "event_tool_success"});
+  auto const success_json = serialize_event_envelope_json(success_envelope);
   auto const expected_success_json = std::string{"{\"schema_version\":1,\"event_id\":\"event_tool_success\","} +
                                      "\"timestamp\":\"2026-05-07T00:00:00Z\",\"session_id\":\"session_golden\"," +
                                      "\"name\":\"tool_result\",\"type\":\"tool_result\",\"payload_type\":\"tool\",\"payload\":" + success_payload +
@@ -471,27 +424,22 @@ void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
   expect(success_envelope.payload_type == "tool" && success_envelope.payload_json == success_payload && success_json == expected_success_json,
          "successful tool event envelope locks structured result, permission ids, diffs, truncation, and spill metadata");
 
-  ava::app::runtime::Event denied_event;
-  denied_event.type = ava::app::runtime::EventType::ToolResult;
-  denied_event.timestamp = "2026-05-07T00:00:01Z";
-  denied_event.session_id = "session_golden";
-  denied_event.text = "permission denied";
-  denied_event.call_id = "call_denied";
-  denied_event.tool_name = "write_file";
-  denied_event.tool_structured_result_json =
-      "{\"schema_version\":1,\"call_id\":\"call_denied\",\"tool\":\"write_file\",\"status\":\"error\","
-      "\"ok\":false,\"summary\":\"permission denied\",\"content_type\":\"text/plain\","
-      "\"content\":\"permission denied\",\"error\":{\"category\":\"permission\",\"code\":\"permission_denied\","
-      "\"message\":\"permission denied\",\"details\":\"resolution: deny\"}}";
-  denied_event.status = "error";
-  denied_event.error_category = "permission";
-  denied_event.error_code = "permission_denied";
-  denied_event.error_message = "permission denied";
-  denied_event.error_details = "resolution: deny";
-  denied_event.content_type = "text/plain";
-
-  ava::app::EventEnvelopeContext denied_context;
-  denied_context.event_id = "event_tool_denied";
+  ToolPayload const denied_payload_value{.text = "permission denied",
+                                         .call_id = "call_denied",
+                                         .tool = "write_file",
+                                         .structured_result_json =
+                                             "{\"schema_version\":1,\"call_id\":\"call_denied\",\"tool\":\"write_file\",\"status\":\"error\","
+                                             "\"ok\":false,\"summary\":\"permission denied\",\"content_type\":\"text/plain\","
+                                             "\"content\":\"permission denied\",\"error\":{\"category\":\"permission\",\"code\":\"permission_denied\","
+                                             "\"message\":\"permission denied\",\"details\":\"resolution: deny\"}}",
+                                         .status = "error",
+                                         .error_category = "permission",
+                                         .error_code = "permission_denied",
+                                         .error_message = "permission denied",
+                                         .error_details = "resolution: deny",
+                                         .content_type = "text/plain"};
+  RuntimeEvent const denied_event(RuntimeEventMetadata{.timestamp = "2026-05-07T00:00:01Z", .session_id = "session_golden"},
+                                  ToolResultEvent{denied_payload_value});
   auto const denied_payload = std::string{"{\"text\":\"permission denied\",\"call_id\":\"call_denied\",\"tool\":\"write_file\","} +
                               "\"structured_result\":{\"schema_version\":1,\"call_id\":\"call_denied\",\"tool\":\"write_file\"," +
                               "\"status\":\"error\",\"ok\":false,\"summary\":\"permission denied\",\"content_type\":\"text/plain\"," +
@@ -499,8 +447,8 @@ void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
                               "\"message\":\"permission denied\",\"details\":\"resolution: deny\"}},\"status\":\"error\"," +
                               "\"category\":\"permission\",\"error_code\":\"permission_denied\",\"message\":\"permission denied\"," +
                               "\"details\":\"resolution: deny\",\"content_type\":\"text/plain\"}";
-  auto const denied_envelope = ava::app::to_event_envelope(denied_event, denied_context);
-  auto const denied_json = ava::app::serialize_event_envelope_json(denied_envelope);
+  auto const denied_envelope = to_event_envelope(denied_event, EventEnvelopeContext{.event_id = "event_tool_denied"});
+  auto const denied_json = serialize_event_envelope_json(denied_envelope);
   auto const expected_denied_json = std::string{"{\"schema_version\":1,\"event_id\":\"event_tool_denied\","} +
                                     "\"timestamp\":\"2026-05-07T00:00:01Z\",\"session_id\":\"session_golden\"," +
                                     "\"name\":\"tool_result\",\"type\":\"tool_result\",\"payload_type\":\"tool\",\"payload\":" + denied_payload +
@@ -512,27 +460,22 @@ void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
              denied_structured->find("\"status\":\"error\"") != std::string::npos && denied_structured->find("\"ok\":false") != std::string::npos,
          "denied tool event envelope locks structured error fields with status/ok consistency");
 
-  ava::app::runtime::Event canceled_event;
-  canceled_event.type = ava::app::runtime::EventType::Canceled;
-  canceled_event.timestamp = "2026-05-07T00:00:02Z";
-  canceled_event.session_id = "session_golden";
-  canceled_event.text = "stopped by user";
-  canceled_event.status = "canceled";
-  canceled_event.error_category = "canceled";
-  canceled_event.error_code = "user_canceled";
-  canceled_event.error_message = "agent loop canceled";
-  canceled_event.error_details = "canceled at permission wait";
-  canceled_event.trigger = "rpc_cancel";
-  canceled_event.reason = "user_requested";
-
-  ava::app::EventEnvelopeContext canceled_context;
-  canceled_context.event_id = "event_canceled";
+  CancellationPayload const canceled_payload_value{.text = "stopped by user",
+                                                   .status = "canceled",
+                                                   .error_category = "canceled",
+                                                   .error_code = "user_canceled",
+                                                   .error_message = "agent loop canceled",
+                                                   .error_details = "canceled at permission wait",
+                                                   .trigger = "rpc_cancel",
+                                                   .reason = "user_requested"};
+  RuntimeEvent const canceled_event(RuntimeEventMetadata{.timestamp = "2026-05-07T00:00:02Z", .session_id = "session_golden"},
+                                    CancellationEvent{canceled_payload_value});
   auto const canceled_payload =
       "{\"text\":\"stopped by user\",\"status\":\"canceled\",\"category\":\"canceled\","
       "\"error_code\":\"user_canceled\",\"message\":\"agent loop canceled\","
       "\"details\":\"canceled at permission wait\",\"trigger\":\"rpc_cancel\",\"reason\":\"user_requested\"}";
-  auto const canceled_envelope = ava::app::to_event_envelope(canceled_event, canceled_context);
-  auto const canceled_json = ava::app::serialize_event_envelope_json(canceled_envelope);
+  auto const canceled_envelope = to_event_envelope(canceled_event, EventEnvelopeContext{.event_id = "event_canceled"});
+  auto const canceled_json = serialize_event_envelope_json(canceled_envelope);
   auto const expected_canceled_json = std::string{"{\"schema_version\":1,\"event_id\":\"event_canceled\","} +
                                       "\"timestamp\":\"2026-05-07T00:00:02Z\",\"session_id\":\"session_golden\"," +
                                       "\"name\":\"canceled\",\"type\":\"canceled\",\"payload_type\":\"cancellation\",\"payload\":" + canceled_payload +
@@ -543,112 +486,74 @@ void test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes()
          "canceled event envelope locks payload_type, status, trigger, and reason fields");
 }
 
-void test_reasoning_runtime_event_serialization_hides_provider_private_state()
+void test_reasoning_event_serialization_hides_provider_private_state()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::ReasoningDelta;
-  event.timestamp = "2026-04-30T00:00:05Z";
-  event.session_id = "session_1";
-  event.text = "visible reasoning summary";
-  event.reasoning_format = "anthropic_thinking";
-  event.reasoning_redacted = true;
-  event.reasoning_signature_present = true;
-
-  auto const json = ava::app::serialize_event_json(event);
-  expect(json ==
-             "{\"type\":\"reasoning_delta\",\"timestamp\":\"2026-04-30T00:00:05Z\","
-             "\"session_id\":\"session_1\",\"text\":\"visible reasoning summary\","
-             "\"reasoning_format\":\"anthropic_thinking\",\"reasoning_redacted\":true,"
+  using namespace ava::event;
+  ReasoningPayload const payload{
+      .text = "visible reasoning summary", .reasoning_format = "anthropic_thinking", .reasoning_redacted = true, .reasoning_signature_present = true};
+  auto const payload_json = serialize_payload_json(payload);
+  expect(payload_json ==
+             "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\",\"reasoning_redacted\":true,"
              "\"reasoning_signature_present\":true}",
-         "reasoning runtime event serializes visible text and format only");
+         "reasoning payload serializes visible text, format, and bounded boolean metadata only");
 
-  ava::app::EventEnvelopeContext context;
-  context.event_id = "event_reasoning";
-  auto const envelope = ava::app::to_event_envelope(event, context);
-  expect(envelope.name == "reasoning_delta" && envelope.payload_type == "reasoning" &&
-             envelope.payload_json ==
-                 "{\"text\":\"visible reasoning summary\",\"reasoning_format\":\"anthropic_thinking\","
-                 "\"reasoning_redacted\":true,\"reasoning_signature_present\":true}",
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:05Z", .session_id = "session_1"}, ReasoningDeltaEvent{payload});
+  auto const envelope = to_event_envelope(event, EventEnvelopeContext{.event_id = "event_reasoning"});
+  expect(envelope.name == "reasoning_delta" && envelope.payload_type == "reasoning" && envelope.payload_json == payload_json,
          "reasoning envelope carries frontend-visible reasoning payload");
-  auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
+  auto const envelope_json = serialize_event_envelope_json(envelope);
   expect(envelope_json.find("super-secret-signature") == std::string::npos && envelope_json.find("reasoning_signature\":") == std::string::npos &&
              envelope_json.find("\"signature\":") == std::string::npos,
          "reasoning frontend event envelope never exposes provider-private signatures");
 }
 
-void test_lifecycle_runtime_event_serialization_and_aliases()
+void test_lifecycle_event_serialization_and_payload_mapping()
 {
-  ava::app::runtime::Event event;
-  event.type = ava::app::runtime::EventType::CompactionEnd;
-  event.timestamp = "2026-04-30T00:00:06Z";
-  event.session_id = "session_1";
-  event.status = "completed";
-  event.trigger = "context_overflow";
-  event.attempt = 1;
-  event.max_attempts = 2;
-  event.estimated_tokens = 9000;
-  event.threshold_tokens = 8000;
-  event.summary_bytes = 512;
+  using namespace ava::event;
+  CompactionPayload const payload{.status = "completed",
+                                  .trigger = "context_overflow",
+                                  .attempt = 1,
+                                  .max_attempts = 2,
+                                  .estimated_tokens = 9000,
+                                  .threshold_tokens = 8000,
+                                  .summary_bytes = 512};
+  auto const payload_json = serialize_payload_json(payload);
+  expect(payload_json ==
+             "{\"status\":\"completed\",\"trigger\":\"context_overflow\",\"attempt\":1,\"max_attempts\":2,"
+             "\"estimated_tokens\":9000,\"threshold_tokens\":8000,\"summary_bytes\":512}",
+         "compaction payload serializes backend-owned compaction metadata");
 
-  auto const json = ava::app::serialize_event_json(event);
-  expect(json ==
-             "{\"type\":\"compaction_end\",\"timestamp\":\"2026-04-30T00:00:06Z\","
-             "\"session_id\":\"session_1\",\"status\":\"completed\",\"trigger\":\"context_overflow\","
-             "\"attempt\":1,\"max_attempts\":2,\"estimated_tokens\":9000,\"threshold_tokens\":8000,"
-             "\"summary_bytes\":512}",
-         "compaction lifecycle runtime events serialize backend-owned compaction metadata");
-
-  ava::app::EventEnvelopeContext context;
-  context.event_id = "event_compaction";
-  auto const envelope = ava::app::to_event_envelope(event, context);
-  auto const envelope_json = ava::app::serialize_event_envelope_json(envelope);
+  RuntimeEvent const event(RuntimeEventMetadata{.timestamp = "2026-04-30T00:00:06Z", .session_id = "session_1"}, CompactionEndEvent{payload});
+  auto const envelope = to_event_envelope(event, EventEnvelopeContext{.event_id = "event_compaction"});
+  auto const envelope_json = serialize_event_envelope_json(envelope);
   expect(envelope.name == "compaction_end" && envelope.payload_type == "compaction" &&
              envelope.payload_json.find("\"trigger\":\"context_overflow\"") != std::string::npos &&
              envelope.payload_json.find("\"max_attempts\":2") != std::string::npos && envelope_json.find("\"summary_bytes\":512") != std::string::npos,
          "compaction lifecycle envelope preserves payload and top-level aliases for stream clients");
 
-  event.type = ava::app::runtime::EventType::Canceled;
-  event.status.clear();
-  event.trigger.clear();
-  event.reason = "cancel_requested";
-  event.attempt = 0;
-  event.max_attempts = 0;
-  event.estimated_tokens = 0;
-  event.threshold_tokens = 0;
-  event.summary_bytes = 0;
-  expect(ava::app::serialize_event_json(event).find("\"type\":\"canceled\"") != std::string::npos,
-         "explicit canceled runtime events have a stable shared stream name");
+  RuntimeEvent const canceled(RuntimeEventMetadata{}, CancellationEvent{CancellationPayload{.reason = "cancel_requested"}});
+  expect(to_event_envelope(canceled).name == "canceled", "explicit cancellation events have a stable shared stream name");
 
-  event.type = ava::app::runtime::EventType::RetryTick;
-  event.reason = "rate_limited";
-  event.trigger = "provider_transport";
-  event.attempt = 2;
-  event.max_attempts = 3;
-  event.delay_ms = 1000;
-  event.remaining_ms = 500;
-  event.estimated_tokens = 0;
-  event.threshold_tokens = 0;
-  event.summary_bytes = 0;
-  event.snapshot_entries = 0;
-  event.current_entries = 0;
-  auto const retry_tick_json = ava::app::serialize_event_json(event);
+  RuntimeEvent const retry_tick(
+      RuntimeEventMetadata{},
+      RetryTickEvent{
+          RetryPayload{.trigger = "provider_transport", .reason = "rate_limited", .attempt = 2, .max_attempts = 3, .delay_ms = 1000, .remaining_ms = 500}});
+  auto const retry_tick_json = serialize_event_envelope_json(to_event_envelope(retry_tick));
   expect(retry_tick_json.find("\"type\":\"retry_tick\"") != std::string::npos && retry_tick_json.find("\"remaining_ms\":500") != std::string::npos,
-         "retry countdown tick runtime events serialize explicit backend timing data");
-  expect(ava::app::to_string(ava::app::payload_type_for_event(ava::app::runtime::EventType::SessionStart)) == "session" &&
-             ava::app::to_string(ava::app::payload_type_for_event(ava::app::runtime::EventType::AssistantMessage)) == "message" &&
-             ava::app::to_string(ava::app::payload_type_for_event(ava::app::runtime::EventType::RetryTick)) == "retry" &&
-             ava::app::to_string(ava::app::payload_type_for_event(ava::app::runtime::EventType::Canceled)) == "cancellation" &&
-             ava::app::to_string(ava::app::runtime::PayloadType::Permission) == "permission" &&
-             ava::app::to_string(ava::app::runtime::PayloadType::Question) == "question" &&
-             ava::app::to_string(ava::app::runtime::PayloadType::Queue) == "queue" &&
-             ava::app::to_string(ava::app::payload_type_for_event(ava::app::runtime::EventType::Done)) == "completion",
+         "retry countdown tick events serialize explicit backend timing data");
+  expect(to_string(payload_type_for_event(RuntimeEventType::SessionStart)) == "session" &&
+             to_string(payload_type_for_event(RuntimeEventType::AssistantMessage)) == "message" &&
+             to_string(payload_type_for_event(RuntimeEventType::RetryTick)) == "retry" &&
+             to_string(payload_type_for_event(RuntimeEventType::Canceled)) == "cancellation" && to_string(PayloadType::Permission) == "permission" &&
+             to_string(PayloadType::Question) == "question" && to_string(PayloadType::Queue) == "queue" &&
+             to_string(payload_type_for_event(RuntimeEventType::Done)) == "completion",
          "runtime event types map to stable payload families");
 }
 
 void test_interactive_run_queue_emits_steer_queued_and_applied_events()
 {
-  std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
     events.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -668,8 +573,8 @@ void test_interactive_run_queue_emits_steer_queued_and_applied_events()
 
 void test_interactive_run_queue_runs_follow_up_lifecycle()
 {
-  std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
     events.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -688,8 +593,8 @@ void test_interactive_run_queue_runs_follow_up_lifecycle()
 
 void test_interactive_run_queue_skips_pending_messages_on_finish()
 {
-  std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
     events.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -708,8 +613,8 @@ void test_interactive_run_queue_skips_pending_messages_on_finish()
 
 void test_interactive_run_queue_restores_latest_pending_message()
 {
-  std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
     events.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -731,8 +636,8 @@ void test_interactive_run_queue_restores_latest_pending_message()
 
 void test_interactive_run_queue_bounds_and_truncates_event_payloads()
 {
-  std::vector<ava::app::EventEnvelope> events;
-  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::app::EventEnvelope const& envelope) {
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_queue", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
     events.push_back(envelope);
     return ava::core::VoidResult{};
   });
@@ -754,21 +659,25 @@ void test_interactive_run_queue_bounds_and_truncates_event_payloads()
 
 }  // namespace
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 void run_app_event_bus_tests()
 {
   test_event_envelope_serialization_is_deterministic();
-  test_runtime_event_conversion_preserves_legacy_payload_shape();
-  test_app_emit_event_projects_once_and_neutral_emit_is_null_safe();
+  test_typed_runtime_event_preserves_metadata_and_payload_shape();
+  test_neutral_emit_invokes_once_and_is_null_safe();
   test_event_bus_preserves_order_and_stops_on_first_failure();
   test_runtime_event_bus_adapter_publishes_and_forwards();
   test_runtime_event_bus_adapter_failure_order();
   test_runtime_event_bus_adapter_allows_default_next_sink();
-  test_tool_progress_runtime_event_serialization_and_bus_adapter();
-  test_tool_runtime_event_serializes_semantic_frontend_payloads();
-  test_high_risk_runtime_payload_builders_preserve_wire_shapes();
+  test_tool_progress_payload_serialization_and_bus_adapter();
+  test_tool_payload_serializes_semantic_frontend_fields();
+  test_high_risk_typed_payloads_preserve_wire_shapes();
   test_tool_and_cancellation_event_envelopes_have_golden_wire_shapes();
-  test_reasoning_runtime_event_serialization_hides_provider_private_state();
-  test_lifecycle_runtime_event_serialization_and_aliases();
+  test_reasoning_event_serialization_hides_provider_private_state();
+  test_lifecycle_event_serialization_and_payload_mapping();
   test_interactive_run_queue_emits_steer_queued_and_applied_events();
   test_interactive_run_queue_runs_follow_up_lifecycle();
   test_interactive_run_queue_skips_pending_messages_on_finish();

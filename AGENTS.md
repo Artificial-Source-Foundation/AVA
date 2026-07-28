@@ -10,7 +10,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ## Source Map
 
-- `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
+- `src/main.cpp`: thin process entry point that initializes the application and delegates to `ava::app::run`; CLI and frontend orchestration live under `src/ava/app/`.
 - `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, descriptor anchors, IDs, and shared Build/Plan mode.
 - `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
 - `src/ava/http/`: neutral HTTP transport, curl, and retry contract.
@@ -19,9 +19,9 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/agent/`: agent loop, thin tool dispatch/registration/family adapters, user-question plumbing, configurable task subagents, and process-local background job registry.
 - `src/ava/command/`: canonical command planning, classification, policy, environment, and execution metadata.
 - `src/ava/containment/`: Linux Landlock/seccomp command-containment planning and enforcement helpers.
-- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), command dispatch, project trust, headless policy, and event adapters.
+- `src/ava/app/`: application entry after `main`, runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), OpenAI connect flow, non-TTY line shell, command dispatch, project trust, headless policy, and event adapters.
 - `src/ava/permissions/`: backend permission policy, persistent rules, prompts, and decisions.
-- `src/ava/tools/`: built-in file, search, shell, web, LSP, and interaction tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
+- `src/ava/tools/`: built-in file, search, shell, web, and LSP tools. Keep filesystem and process safety checks here or in clearly permissioned call paths. User-interaction tools such as `question` are registered and dispatched under `src/ava/agent/`.
 - `src/ava/session/`: append-only JSONL session storage, leases/authority, compaction, validation, and session lifecycle helpers.
 - `src/ava/context/`: project/global instruction and skill loading for provider context.
 - `src/ava/mcp/`: stdio MCP config, protocol, client lifecycle, tool/resource/prompt broker, and containment helpers.
@@ -37,7 +37,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 ## Internal Ownership Boundaries
 
 - `AgentLoopOptions` uses focused model-invocation, tool-resource, and tool-execution bundles; credentials stay separate, and `ToolContext` remains execution/safety authority.
-- `runtime_prompt` applies `RunOptions` isolation flags when projecting `ExtensionResourcePolicy`: ambient plugin/LSP/subagent resources, global/project MCP discovery, and global/plugin-declared skills stay disabled; explicit session MCP can remain unless `disable_session_mcp` is set.
+- `runtime_prompt` builds `ExtensionResourcePolicy` from the session, then applies `RunOptions` isolation flags while composing the run: ambient plugin/LSP/subagent resources, global/project MCP discovery, and global/plugin-declared skills stay disabled; explicit session MCP can remain unless `disable_session_mcp` is set.
 - Runtime prompt ownership splits across `runtime_prompt_state`, `runtime_prompt_file_references`, `runtime_run_outcomes`, and `runtime_prompt` orchestration.
 - `/trust` and `/reload` orchestration owners are `command_trust` and `command_reload`; persistence remains `project_trust`.
 - The module dependency guard has zero backend exceptions; do not introduce a new module cycle.

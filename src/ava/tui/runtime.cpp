@@ -221,7 +221,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (input.resize)
     {
       renderer.wheel_governor.reset();
-      transcript_search.refresh();
+      transcript_search.refresh_after_resize();
       if (!render())
       {
         terminal_write_failed = true;

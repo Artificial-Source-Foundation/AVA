@@ -3,6 +3,7 @@
 #include "ava/tui/runtime_state_internal.h"
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include "debug.h"
@@ -61,6 +62,23 @@ enum class ActiveRunInputReadDecision
 };
 
 [[nodiscard]] ActiveRunInputReadDecision active_run_input_read_decision(bool input_buffered, bool frame_due);
+
+enum class PendingPromptServiceResult
+{
+  None,
+  Serviced,
+  Failed,
+};
+
+enum class RetainedInputDispatchResult
+{
+  PromptServiced,
+  InputHandled,
+  Failed,
+};
+
+[[nodiscard]] RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(
+    std::function<PendingPromptServiceResult()> const& service_pending_prompt, std::function<bool()> const& dispatch_input);
 
 }  // namespace detail
 

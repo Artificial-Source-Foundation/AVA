@@ -86,6 +86,17 @@ ActiveRunInputReadDecision active_run_input_read_decision(bool input_buffered, b
   return input_buffered ? ActiveRunInputReadDecision::DrainBufferedInput : ActiveRunInputReadDecision::WaitForNextFrame;
 }
 
+RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(std::function<PendingPromptServiceResult()> const& service_pending_prompt,
+                                                                           std::function<bool()> const& dispatch_input)
+{
+  auto const prompt_result = service_pending_prompt();
+  if (prompt_result == PendingPromptServiceResult::Failed)
+    return RetainedInputDispatchResult::Failed;
+  if (prompt_result == PendingPromptServiceResult::Serviced)
+    return RetainedInputDispatchResult::PromptServiced;
+  return dispatch_input() ? RetainedInputDispatchResult::InputHandled : RetainedInputDispatchResult::Failed;
+}
+
 }  // namespace detail
 
 using runtime_commands::is_compact_command;
@@ -233,7 +244,9 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     carry_tool_detail_visibility(tool_detail_overrides, snapshot.transcript);
     turn_snapshot_leading_evictions = capped_update.leading_evictions;
     ++snapshot.transcript_generation;
-    transcript_search_.refresh(capped_update.item_index_shift);
+    auto const changed_from_item_index =
+        submitted_transcript.size() > capped_update.leading_evictions ? submitted_transcript.size() - capped_update.leading_evictions : std::size_t{0};
+    transcript_search_.refresh_after_transcript_mutation(capped_update.item_index_shift, changed_from_item_index);
     snapshot.queued_messages = event_state.queued_messages;
     sidebar.activity = event_state.activity;
     if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running)
@@ -394,6 +407,27 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                                            .image_attachments = submit_image_attachments});
     });
     bool render_failed = false;
+    auto fail_active_run = [&]() {
+      terminal_write_failed = true;
+      render_failed = true;
+      prompt_coordinator.fail_pending_requests();
+    };
+    auto service_pending_prompt = [&]() {
+      if (!prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() { transcript_search_.close_before_prompt(); }))
+        return detail::PendingPromptServiceResult::None;
+      if (drain_events(state) == RuntimeEventDrainResult::RenderFailed)
+        return detail::PendingPromptServiceResult::Failed;
+      return detail::PendingPromptServiceResult::Serviced;
+    };
+    auto dispatch_retained_input = [&](runtime_input::RuntimeInput const& input) {
+      auto const result = detail::dispatch_retained_input_with_prompt_precedence(service_pending_prompt, [&]() { return handle_input(state, input); });
+      if (result == detail::RetainedInputDispatchResult::Failed)
+      {
+        fail_active_run();
+        return false;
+      }
+      return true;
+    };
     detail::ActiveRunCadence cadence(std::chrono::steady_clock::now());
     while (submit_future.wait_for(std::chrono::milliseconds::zero()) != std::future_status::ready)
     {
@@ -416,31 +450,22 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         request_close_after_submit();
         break;
       }
-      if (prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() { transcript_search_.close_before_prompt(); }))
+      auto const prompt_result = service_pending_prompt();
+      if (prompt_result == detail::PendingPromptServiceResult::Failed)
       {
-        auto const drain_result = drain_events(state);
-        if (drain_result == RuntimeEventDrainResult::RenderFailed)
-        {
-          terminal_write_failed = true;
-          render_failed = true;
-          prompt_coordinator.fail_pending_requests();
-          break;
-        }
-        continue;
+        fail_active_run();
+        break;
       }
+      if (prompt_result == detail::PendingPromptServiceResult::Serviced)
+        continue;
       auto active_input = poll_curses_input();
       auto const input_checked_at = std::chrono::steady_clock::now();
       auto const pending_frame_due = renderer.has_pending_render() && renderer.time_until_pending_render() <= std::chrono::steady_clock::duration::zero();
       auto const input_decision = detail::active_run_input_read_decision(active_input.has_value(), cadence.frame_due(input_checked_at) || pending_frame_due);
       if (input_decision == detail::ActiveRunInputReadDecision::DrainBufferedInput)
       {
-        if (!handle_input(state, *active_input))
-        {
-          terminal_write_failed = true;
-          render_failed = true;
-          prompt_coordinator.fail_pending_requests();
+        if (!dispatch_retained_input(*active_input))
           break;
-        }
         if (close_after_submit)
           break;
         continue;
@@ -489,13 +514,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       }
       if (active_input)
       {
-        if (!handle_input(state, *active_input))
-        {
-          terminal_write_failed = true;
-          render_failed = true;
-          prompt_coordinator.fail_pending_requests();
+        if (!dispatch_retained_input(*active_input))
           break;
-        }
         if (close_after_submit)
           break;
       }
@@ -551,6 +571,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   {
     auto const turn_elapsed = std::chrono::steady_clock::now() - turn_started_at;
     auto const assistant_meta = assistant_meta_for_snapshot(snapshot, turn_elapsed);
+    auto const transcript_size_before_fallback = snapshot.transcript.size();
     std::ptrdiff_t item_index_shift = 0;
     if (!is_command_submission)
     {
@@ -571,7 +592,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       if (!should_show_slash_command_output_as_status(submitted) && !bounded_bash_output_is_in_card)
         item_index_shift += push_fallback_assistant_outputs(snapshot, result.output, assistant_meta);
     }
-    transcript_search_.refresh(item_index_shift);
+    auto const shifted_first_new_item = static_cast<std::ptrdiff_t>(transcript_size_before_fallback) + item_index_shift;
+    auto const changed_from_item_index = shifted_first_new_item > 0 ? static_cast<std::size_t>(shifted_first_new_item) : std::size_t{0};
+    transcript_search_.refresh_after_transcript_mutation(item_index_shift, std::min(changed_from_item_index, snapshot.transcript.size()));
   }
   if (!events_received && !transcript_search_.is_open())
     transcript_scroll_offset = 0;

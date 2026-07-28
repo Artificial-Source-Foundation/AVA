@@ -33,6 +33,13 @@ bool detail::prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::s
   return (key == Key::MouseWheelUp || key == Key::MouseWheelDown) && deadline && now < *deadline;
 }
 
+void detail::run_claimed_prompt_with_precedence(std::function<void()> const& before_prompt, std::function<void()> const& service_prompt)
+{
+  if (before_prompt)
+    before_prompt();
+  service_prompt();
+}
+
 PendingPermissionRequest::PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in) : prompt(std::move(prompt_in))
 {
 }
@@ -646,16 +653,15 @@ bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> con
   }
   if (permission_request)
   {
-    if (before_prompt)
-      before_prompt();
-    complete_permission_request(permission_request, resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
+    detail::run_claimed_prompt_with_precedence(before_prompt, [&]() {
+      complete_permission_request(permission_request, resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
+    });
     return true;
   }
   if (question_request)
   {
-    if (before_prompt)
-      before_prompt();
-    complete_question_request(question_request, resolve_question_prompt(question_request->prompt, stop_requested, request_stop));
+    detail::run_claimed_prompt_with_precedence(
+        before_prompt, [&]() { complete_question_request(question_request, resolve_question_prompt(question_request->prompt, stop_requested, request_stop)); });
     return true;
   }
   return false;

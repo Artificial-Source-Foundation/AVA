@@ -11,14 +11,18 @@
 #include "ava/tui/terminal_image.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -46,6 +50,56 @@ void run_tui_composer_rendering_tests_part_1()
                no_input_before_frame == ava::tui::detail::ActiveRunInputReadDecision::WaitForNextFrame,
            "active-run cadence drains buffered input before 16ms, but a buffered input at the frame deadline services provider updates before input drainage "
            "while the spinner advances at 120ms boundaries");
+  }
+  {
+    std::atomic_bool pending_prompt = false;
+    std::mutex synchronization_mutex;
+    std::condition_variable synchronization;
+    bool initial_prompt_check_complete = false;
+    bool prompt_arrived = false;
+    std::atomic_bool producer_timed_out = false;
+    std::vector<std::string> order;
+    auto service_prompt = [&]() {
+      if (!pending_prompt.exchange(false))
+      {
+        order.push_back("initial-none");
+        {
+          std::lock_guard lock(synchronization_mutex);
+          initial_prompt_check_complete = true;
+        }
+        synchronization.notify_all();
+        return ava::tui::detail::PendingPromptServiceResult::None;
+      }
+      order.push_back("claimed");
+      ava::tui::detail::run_claimed_prompt_with_precedence([&]() { order.push_back("before-prompt"); }, [&]() { order.push_back("nested-prompt"); });
+      return ava::tui::detail::PendingPromptServiceResult::Serviced;
+    };
+    std::jthread producer([&]() {
+      std::unique_lock lock(synchronization_mutex);
+      if (!synchronization.wait_for(lock, std::chrono::seconds(1), [&]() { return initial_prompt_check_complete; }))
+      {
+        producer_timed_out = true;
+        return;
+      }
+      pending_prompt.store(true);
+      prompt_arrived = true;
+      lock.unlock();
+      synchronization.notify_all();
+    });
+    auto const initial = service_prompt();
+    bool prompt_arrived_before_deadline = false;
+    {
+      std::unique_lock lock(synchronization_mutex);
+      prompt_arrived_before_deadline = synchronization.wait_for(lock, std::chrono::seconds(1), [&]() { return prompt_arrived || producer_timed_out.load(); });
+    }
+    auto const retained = ava::tui::detail::dispatch_retained_input_with_prompt_precedence(service_prompt, [&]() {
+      order.push_back("stale-input");
+      return true;
+    });
+    expect(initial == ava::tui::detail::PendingPromptServiceResult::None && prompt_arrived_before_deadline && !producer_timed_out.load() &&
+               retained == ava::tui::detail::RetainedInputDispatchResult::PromptServiced &&
+               order == std::vector<std::string>({"initial-none", "claimed", "before-prompt", "nested-prompt"}),
+           "a prompt arriving after the initial poll check is claimed permission-first, closes search before nested prompt work, and discards retained input");
   }
   {
     auto const unchanged =

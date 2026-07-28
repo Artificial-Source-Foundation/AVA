@@ -341,7 +341,7 @@ bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runt
     renderer_.wheel_governor.reset();
   if (active_input.resize)
   {
-    transcript_search_.refresh();
+    transcript_search_.refresh_after_resize();
     return renderer_.render();
   }
   if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&

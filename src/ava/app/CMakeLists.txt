@@ -75,6 +75,7 @@ target_sources(ava_app
     "runtime_prompt.cpp"
     "runtime_prompt_file_references.cpp"
     "runtime_prompt_state.cpp"
+    "runtime_run_outcomes.cpp"
     "runtime_event_adapters.cpp"
     "runtime_reasoning.cpp"
     "runtime_retry.cpp"

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_compaction.h"
@@ -13,6 +14,7 @@
 #include "ava/core/string_utils.h"
 
 #include <algorithm>
+#include <mutex>
 #include <optional>
 #include <utility>
 
@@ -21,45 +23,18 @@ namespace {
 
 constexpr std::size_t kMaxCompactionPromptEntryBytes = 8192;
 
-runtime::Event base_compaction_event_locked(runtime::Session const& session, runtime::RunOptions const& options, runtime::EventType type)
+ava::event::RuntimeEventMetadata runtime_event_metadata(runtime::Session const& session, runtime::RunOptions const& options)
 {
   auto build = [&] {
-    runtime::Event event;
-    event.type = type;
-    event.timestamp = ava::session::now_timestamp();
-    event.session_id = session.store.session_id();
-    event.mode = session.mode();
-    event.provider_id = session.model().provider_id;
-    event.model_id = session.model().model_id;
-    return event;
+    return ava::event::RuntimeEventMetadata{
+        .timestamp = ava::session::now_timestamp(),
+        .session_id = session.store.session_id(),
+    };
   };
   if (!options.session_mutex)
     return build();
   std::lock_guard lock(*options.session_mutex);
   return build();
-}
-
-ava::core::VoidResult emit_compaction_event(runtime::Session const& session, runtime::RunOptions const& options, runtime::Event event)
-{
-  if (!options.event_sink)
-    return {};
-  if (event.timestamp.empty())
-  {
-    event.timestamp = ava::session::now_timestamp();
-  }
-  if (event.session_id.empty())
-  {
-    if (options.session_mutex)
-    {
-      std::lock_guard lock(*options.session_mutex);
-      event.session_id = session.store.session_id();
-    }
-    else
-    {
-      event.session_id = session.store.session_id();
-    }
-  }
-  return emit_event(options.event_sink, event);
 }
 
 ava::core::Error agent_loop_canceled_error()
@@ -688,33 +663,41 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
 
     if (trigger == "context_overflow" && !context_retry_event_emitted)
     {
-      auto retry_event = base_compaction_event_locked(session, options, EventType::Retry);
-      retry_event.trigger = trigger_text;
-      retry_event.reason = "context_overflow";
-      retry_event.status = "started";
-      retry_event.attempt = 1;
-      retry_event.max_attempts = 1;
-      retry_event.estimated_tokens = estimated_tokens;
-      retry_event.threshold_tokens = threshold_tokens;
-      if (auto emitted = emit_compaction_event(session, options, std::move(retry_event)); !emitted)
+      ava::event::RetryPayload retry_payload;
+      retry_payload.status = "started";
+      retry_payload.trigger = trigger_text;
+      retry_payload.reason = "context_overflow";
+      retry_payload.attempt = 1;
+      retry_payload.max_attempts = 1;
+      ava::event::RetryDiagnostics retry_diagnostics;
+      retry_diagnostics.estimated_tokens = estimated_tokens;
+      retry_diagnostics.threshold_tokens = threshold_tokens;
+      if (auto emitted = ava::event::emit_event(
+              options.event_sink,
+              ava::event::RuntimeEvent{runtime_event_metadata(session, options),
+                                       ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
+          !emitted)
       {
         return std::unexpected(std::move(emitted.error()));
       }
       context_retry_event_emitted = true;
     }
 
-    auto start_event = base_compaction_event_locked(session, options, EventType::CompactionStart);
-    start_event.provider_id = config->provider_id;
-    start_event.model_id = config->model_id;
-    start_event.trigger = trigger_text;
-    start_event.reason = trigger == "auto" ? "automatic" : trigger == "context_overflow" ? "overflow" : "manual";
-    start_event.status = "started";
-    start_event.attempt = attempt + 1;
-    start_event.max_attempts = max_compaction_attempts;
-    start_event.estimated_tokens = estimated_tokens;
-    start_event.threshold_tokens = threshold_tokens;
-    start_event.retained_tokens = prepared->retained_tokens;
-    if (auto emitted = emit_compaction_event(session, options, std::move(start_event)); !emitted)
+    ava::event::CompactionPayload start_payload;
+    start_payload.provider = config->provider_id;
+    start_payload.model = config->model_id;
+    start_payload.status = "started";
+    start_payload.trigger = trigger_text;
+    start_payload.reason = trigger == "auto" ? "automatic" : trigger == "context_overflow" ? "overflow" : "manual";
+    start_payload.attempt = attempt + 1;
+    start_payload.max_attempts = max_compaction_attempts;
+    start_payload.estimated_tokens = estimated_tokens;
+    start_payload.threshold_tokens = threshold_tokens;
+    start_payload.retained_tokens = prepared->retained_tokens;
+    if (auto emitted = ava::event::emit_event(
+            options.event_sink,
+            ava::event::RuntimeEvent{runtime_event_metadata(session, options), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
+        !emitted)
     {
       return std::unexpected(std::move(emitted.error()));
     }
@@ -774,20 +757,23 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       return std::unexpected(std::move(appended.error()));
     if (*appended)
     {
-      auto end_event = base_compaction_event_locked(session, options, EventType::CompactionEnd);
-      end_event.provider_id = config->provider_id;
-      end_event.model_id = config->model_id;
-      end_event.trigger = trigger_text;
-      end_event.reason = trigger == "auto" ? "automatic" : trigger == "context_overflow" ? "overflow" : "manual";
-      end_event.status = "completed";
-      end_event.attempt = attempt + 1;
-      end_event.max_attempts = max_compaction_attempts;
-      end_event.estimated_tokens = estimated_tokens;
-      end_event.threshold_tokens = threshold_tokens;
-      end_event.retained_tokens = prepared->retained_tokens;
-      end_event.post_compaction_tokens = ava::session::estimate_tokens(*summary) + prepared->retained_tokens;
-      end_event.summary_bytes = summary->size();
-      if (auto emitted = emit_compaction_event(session, options, std::move(end_event)); !emitted)
+      ava::event::CompactionPayload end_payload;
+      end_payload.provider = config->provider_id;
+      end_payload.model = config->model_id;
+      end_payload.status = "completed";
+      end_payload.trigger = trigger_text;
+      end_payload.reason = trigger == "auto" ? "automatic" : trigger == "context_overflow" ? "overflow" : "manual";
+      end_payload.attempt = attempt + 1;
+      end_payload.max_attempts = max_compaction_attempts;
+      end_payload.estimated_tokens = estimated_tokens;
+      end_payload.threshold_tokens = threshold_tokens;
+      end_payload.retained_tokens = prepared->retained_tokens;
+      end_payload.post_compaction_tokens = ava::session::estimate_tokens(*summary) + prepared->retained_tokens;
+      end_payload.summary_bytes = summary->size();
+      if (auto emitted = ava::event::emit_event(
+              options.event_sink,
+              ava::event::RuntimeEvent{runtime_event_metadata(session, options), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
+          !emitted)
       {
         return std::unexpected(std::move(emitted.error()));
       }
@@ -795,15 +781,20 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     }
     if (snapshot_stale && attempt + 1 < max_compaction_attempts)
     {
-      auto retry_event = base_compaction_event_locked(session, options, EventType::Retry);
-      retry_event.trigger = trigger_text;
-      retry_event.reason = "stale_compaction_snapshot";
-      retry_event.status = "started";
-      retry_event.attempt = attempt + 2;
-      retry_event.max_attempts = max_compaction_attempts;
-      retry_event.snapshot_entries = last_snapshot_entries;
-      retry_event.current_entries = last_current_entries;
-      if (auto emitted = emit_compaction_event(session, options, std::move(retry_event)); !emitted)
+      ava::event::RetryPayload retry_payload;
+      retry_payload.status = "started";
+      retry_payload.trigger = trigger_text;
+      retry_payload.reason = "stale_compaction_snapshot";
+      retry_payload.attempt = attempt + 2;
+      retry_payload.max_attempts = max_compaction_attempts;
+      ava::event::RetryDiagnostics retry_diagnostics;
+      retry_diagnostics.snapshot_entries = last_snapshot_entries;
+      retry_diagnostics.current_entries = last_current_entries;
+      if (auto emitted = ava::event::emit_event(
+              options.event_sink,
+              ava::event::RuntimeEvent{runtime_event_metadata(session, options),
+                                       ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
+          !emitted)
       {
         return std::unexpected(std::move(emitted.error()));
       }

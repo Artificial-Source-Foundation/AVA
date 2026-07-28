@@ -1000,6 +1000,11 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
                                       sse_response(final_text_sse("retry after stale"))});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
+  std::vector<ava::event::RuntimeEvent> events;
+  run_options.event_sink = [&events](ava::event::RuntimeEvent const& event) {
+    events.push_back(event);
+    return ava::core::VoidResult{};
+  };
 
   auto result = ava::app::run_prompt(*session, "retry stale summary", provider, transport, run_options);
   auto entries = session->store.load();
@@ -1012,6 +1017,14 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   expect(entries && std::ranges::any_of(*entries,
                                         [](ava::session::SessionEntry const& entry) { return entry.data_json.find("concurrent change") != std::string::npos; }),
          "auto compaction retry test introduced a concurrent session change");
+  expect(std::ranges::any_of(events,
+                             [](ava::event::RuntimeEvent const& event) {
+                               auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
+                               return retry && retry->payload.reason == "stale_compaction_snapshot" && retry->payload.trigger == "auto" &&
+                                      retry->payload.attempt == 2 && retry->payload.max_attempts == 2 && retry->diagnostics.snapshot_entries > 0 &&
+                                      retry->diagnostics.current_entries > retry->diagnostics.snapshot_entries;
+                             }),
+         "stale auto compaction emits RetryEvent with internal snapshot diagnostics for typed live consumers");
 }
 
 void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
@@ -1095,7 +1108,9 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   expect(std::ranges::any_of(events,
                              [](ava::event::RuntimeEvent const& event) {
                                auto const* retry = ava::tests::runtime_event_as<ava::event::RetryEvent>(event);
-                               return retry && retry->payload.reason == "context_overflow" && retry->payload.attempt == 1 && retry->payload.max_attempts == 1;
+                               return retry && retry->payload.reason == "context_overflow" && retry->payload.trigger == "context_overflow" &&
+                                      retry->payload.attempt == 1 && retry->payload.max_attempts == 1 && retry->diagnostics.threshold_tokens > 0 &&
+                                      retry->diagnostics.snapshot_entries == 0 && retry->diagnostics.current_entries == 0;
                              }) &&
              std::ranges::any_of(events,
                                  [](ava::event::RuntimeEvent const& event) {

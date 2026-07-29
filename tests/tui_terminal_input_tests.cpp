@@ -598,8 +598,8 @@ void run_tui_terminal_input_tests_part_2()
              draft.kill_buffer == "\n",
          "tui draft editor joins the next line when deleting at line end");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) && draft.text == "join" && draft.cursor == 4 &&
-             draft.kill_buffer == "line",
-         "tui draft editor deletes following text after a line-end join");
+             draft.kill_buffer == "\nline",
+         "tui draft editor accumulates consecutive forward kills into one kill-ring entry");
   ava::tui::reset_composer_draft(draft, "last", 4);
   expect(!ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) && draft.text == "last" && draft.cursor == 4,
          "tui draft editor leaves final line end unchanged when there is nothing to delete");
@@ -664,16 +664,27 @@ void run_tui_terminal_input_tests_part_2()
              ring_draft.kill_buffer == "gamma",
          "tui draft editor records killed text in a ring");
   expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.text == "alpha " &&
-             ring_draft.kill_buffer == "beta ",
-         "tui draft editor keeps the most recent kill at the front of the ring");
-  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.text == "alpha beta ",
-         "tui draft editor yanks the newest kill-ring entry");
-  expect(
-      ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.text == "alpha gamma" && ring_draft.kill_buffer == "gamma",
-      "tui draft editor yank-pop swaps the previous yank with the next kill-ring entry");
-  expect(
-      ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.text == "alpha beta " && ring_draft.kill_buffer == "beta ",
-      "tui draft editor yank-pop cycles through the kill ring");
+             ring_draft.kill_buffer == "beta gamma" && ring_draft.kill_ring.size() == 1 && ring_draft.kill_ring.front() == "beta gamma",
+         "tui draft editor prepends consecutive backward kills into one kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.text == "alpha beta gamma",
+         "tui draft editor yanks the accumulated kill-ring entry");
+  ava::tui::reset_composer_draft(ring_draft, "one two three");
+  ring_draft.kill_ring.clear();
+  ring_draft.kill_buffer.clear();
+  ring_draft.kill_sequence = ava::tui::ComposerKillSequence::None;
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.kill_buffer == "three" &&
+             ring_draft.kill_ring.size() == 1,
+         "tui draft editor seeds a fresh kill-ring entry after reset");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::CursorLeft) &&
+             ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.kill_buffer == "two" &&
+             ring_draft.kill_ring.size() == 2 && ring_draft.kill_ring.front() == "two" && ring_draft.kill_ring[1] == "three",
+         "tui draft editor breaks kill accumulation after cursor movement");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.kill_buffer == "two",
+         "tui draft editor yanks the newest kill-ring entry after a broken sequence");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.kill_buffer == "three",
+         "tui draft editor yank-pop swaps the previous yank with the next kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.kill_buffer == "two",
+         "tui draft editor yank-pop cycles through the kill ring");
 
   std::vector<std::string> input_history;
   expect(!ava::tui::push_composer_input_history(input_history, "   \t  "), "tui input history ignores empty and whitespace-only submissions");
@@ -821,6 +832,161 @@ void run_tui_terminal_input_tests_part_2()
   expect(ava::tui::insert_composer_paste_text(paste_draft, long_single_line) && paste_draft.text == "[paste #1 2001 chars]" &&
              ava::tui::expanded_composer_draft_text(paste_draft) == long_single_line,
          "tui large single-line paste collapses by byte count and expands for submit");
+
+  // Wave A editor fidelity: cluster-aware editing, typing undo groups, kill accumulation.
+  auto const combining_acute = std::string("\xCC\x81");
+  auto const e_combining = std::string("e") + combining_acute;
+  auto const regional_c = std::string("\xF0\x9F\x87\xA8");
+  auto const regional_n = std::string("\xF0\x9F\x87\xB3");
+  auto const flag_cn = regional_c + regional_n;
+  auto const thumbs_up = std::string("\xF0\x9F\x91\x8D");
+  auto const light_skin_tone = std::string("\xF0\x9F\x8F\xBB");
+  auto const skin_tone_thumbs = thumbs_up + light_skin_tone;
+  auto const man = std::string("\xF0\x9F\x91\xA8");
+  auto const woman = std::string("\xF0\x9F\x91\xA9");
+  auto const girl = std::string("\xF0\x9F\x91\xA7");
+  auto const zwj = std::string("\xE2\x80\x8D");
+  auto const family_zwj = man + zwj + woman + zwj + girl;
+  auto const malformed_bytes = std::string("a") + std::string("\x80\xFF", 2) + "b";
+
+  expect(ava::tui::detail::terminal_text_cluster_bytes(e_combining, 0) == e_combining.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(flag_cn, 0) == flag_cn.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(skin_tone_thumbs, 0) == skin_tone_thumbs.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(family_zwj, 0) == family_zwj.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(malformed_bytes, 1) == 1,
+         "tui shared cluster helper covers combining marks, flags, skin tones, ZWJ families, and malformed bytes");
+
+  ava::tui::ComposerDraftState cluster_draft;
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + e_combining.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0,
+         "tui draft editor moves left over base+combining clusters atomically");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 + e_combining.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == cluster_draft.text.size(),
+         "tui draft editor moves right over base+combining clusters atomically");
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == std::string("x") + e_combining &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "x" &&
+             cluster_draft.kill_buffer.empty(),
+         "tui draft editor backspaces base+combining clusters without updating the kill ring");
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y", 1);
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text == "xy" && cluster_draft.cursor == 1,
+         "tui draft editor forward-deletes base+combining clusters atomically");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + flag_cn + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + flag_cn.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text == "ab",
+         "tui draft editor treats regional-indicator flag pairs as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + skin_tone_thumbs + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + skin_tone_thumbs.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "ab",
+         "tui draft editor treats emoji skin-tone modifier sequences as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + family_zwj + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + family_zwj.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "ab",
+         "tui draft editor treats family ZWJ emoji sequences as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, malformed_bytes);
+  expect(cluster_draft.text.size() == 4 && cluster_draft.cursor == 4, "tui draft editor loads malformed utf-8 draft at end");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) &&
+             cluster_draft.text == std::string("a") + std::string("\x80\xFF", 2) && cluster_draft.cursor == 3,
+         "tui draft editor backspaces trailing ascii after malformed utf-8");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) &&
+             cluster_draft.text == std::string("a") + std::string("\x80", 1) && cluster_draft.cursor == 2,
+         "tui draft editor backspaces the 0xFF malformed byte");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "a" && cluster_draft.cursor == 1,
+         "tui draft editor backspaces the 0x80 malformed byte");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text.empty(),
+         "tui draft editor forward-deletes the remaining ascii after malformed cleanup");
+  ava::tui::reset_composer_draft(cluster_draft, malformed_bytes, 1);
+  expect(cluster_draft.cursor == 1, "tui draft editor keeps the cursor on orphan utf-8 continuation bytes");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) &&
+             cluster_draft.text == std::string("a") + std::string("\xFF", 1) + "b" && cluster_draft.cursor == 1,
+         "tui draft editor forward-deletes malformed utf-8 one byte at a time");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 2,
+         "tui draft editor moves across malformed utf-8 one byte at a time");
+
+  auto const large_paste_for_atomic = std::string("line01\nline02\nline03\nline04\nline05\nline06\nline07\nline08\nline09\nline10\nline11");
+  ava::tui::ComposerDraftState paste_atomic_draft;
+  expect(ava::tui::insert_composer_draft_text(paste_atomic_draft, "A") && ava::tui::insert_composer_paste_text(paste_atomic_draft, large_paste_for_atomic) &&
+             ava::tui::insert_composer_draft_text(paste_atomic_draft, "B"),
+         "tui draft editor builds a paste-marker draft for atomicity checks");
+  auto const paste_marker_size = paste_atomic_draft.text.size() - 2;
+  paste_atomic_draft.cursor = paste_atomic_draft.text.size();
+  expect(ava::tui::apply_composer_draft_action(paste_atomic_draft, ava::tui::TuiAction::DeleteBackward) &&
+             paste_atomic_draft.text.size() == 1 + paste_marker_size &&
+             ava::tui::apply_composer_draft_action(paste_atomic_draft, ava::tui::TuiAction::DeleteBackward) && paste_atomic_draft.text == "A",
+         "tui draft editor deletes recorded paste markers as one atomic unit");
+
+  ava::tui::ComposerDraftState undo_group_draft;
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, "h") && ava::tui::insert_composer_draft_text(undo_group_draft, "i") &&
+             ava::tui::insert_composer_draft_text(undo_group_draft, "!") && undo_group_draft.text == "hi!" && undo_group_draft.undo_stack.size() == 1,
+         "tui draft editor coalesces contiguous ordinary typing into one undo group");
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, " ") && undo_group_draft.text == "hi! " && undo_group_draft.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups at whitespace");
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, "y") && ava::tui::insert_composer_draft_text(undo_group_draft, "o") &&
+             undo_group_draft.text == "hi! yo" && undo_group_draft.undo_stack.size() == 3,
+         "tui draft editor starts a new coalesced word-run undo group after whitespace");
+  expect(ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text == "hi! " &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text == "hi!" &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text.empty(),
+         "tui draft editor undoes coalesced word runs and whitespace boundaries as separate groups");
+  expect(ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi!" &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi! " &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi! yo",
+         "tui draft editor redo reapplies coalesced typing groups exactly");
+
+  ava::tui::ComposerDraftState newline_undo_draft;
+  expect(ava::tui::insert_composer_draft_text(newline_undo_draft, "ab") && ava::tui::insert_composer_draft_text(newline_undo_draft, "\n") &&
+             ava::tui::insert_composer_draft_text(newline_undo_draft, "cd") && newline_undo_draft.undo_stack.size() == 3,
+         "tui draft editor breaks typing undo groups at newlines");
+
+  ava::tui::ComposerDraftState cursor_break_draft;
+  expect(ava::tui::insert_composer_draft_text(cursor_break_draft, "ab") && cursor_break_draft.undo_stack.size() == 1,
+         "tui draft editor records one undo group for an initial word run");
+  expect(ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::CursorLeft) &&
+             ava::tui::insert_composer_draft_text(cursor_break_draft, "X") && cursor_break_draft.text == "aXb" && cursor_break_draft.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups after cursor movement");
+  expect(ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::Undo) && cursor_break_draft.text == "ab" &&
+             ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::Undo) && cursor_break_draft.text.empty(),
+         "tui draft editor undoes post-cursor-break inserts separately from the earlier word run");
+
+  ava::tui::ComposerDraftState undo_cap_draft;
+  for (int index = 0; index < 120; ++index)
+  {
+    static_cast<void>(ava::tui::insert_composer_draft_text(undo_cap_draft, "x"));
+    static_cast<void>(ava::tui::insert_composer_draft_text(undo_cap_draft, " "));
+  }
+  expect(undo_cap_draft.undo_stack.size() == 100, "tui draft editor caps undo history at 100 snapshots");
+
+  ava::tui::ComposerDraftState forward_kill_draft;
+  ava::tui::reset_composer_draft(forward_kill_draft, "alpha beta gamma", 0);
+  expect(ava::tui::apply_composer_draft_action(forward_kill_draft, ava::tui::TuiAction::DeleteWordForward) && forward_kill_draft.kill_buffer == "alpha" &&
+             ava::tui::apply_composer_draft_action(forward_kill_draft, ava::tui::TuiAction::DeleteWordForward) &&
+             forward_kill_draft.kill_buffer == "alpha beta" && forward_kill_draft.kill_ring.size() == 1,
+         "tui draft editor appends consecutive forward kills into one kill-ring entry");
+
+  ava::tui::ComposerDraftState kill_cap_ring;
+  for (int index = 0; index < 20; ++index)
+  {
+    auto piece = "w" + std::to_string(index);
+    kill_cap_ring.text = piece;
+    kill_cap_ring.cursor = piece.size();
+    kill_cap_ring.kill_sequence = ava::tui::ComposerKillSequence::None;
+    static_cast<void>(ava::tui::apply_composer_draft_action(kill_cap_ring, ava::tui::TuiAction::DeleteWordBackward));
+    // Break the kill sequence so each word becomes its own ring entry.
+    static_cast<void>(ava::tui::apply_composer_draft_action(kill_cap_ring, ava::tui::TuiAction::CursorLeft));
+  }
+  expect(kill_cap_ring.kill_ring.size() == 16 && kill_cap_ring.kill_ring.front() == "w19" && kill_cap_ring.kill_ring.back() == "w4",
+         "tui draft editor caps the kill ring at 16 entries");
 
   auto const split_empty = ava::tui::split_lines("");
   expect(split_empty.size() == 1 && split_empty.front().empty(), "tui split keeps empty input as one line");

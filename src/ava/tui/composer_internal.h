@@ -268,6 +268,10 @@ void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
 [[nodiscard]] std::size_t utf8_sequence_length(unsigned char byte);
 [[nodiscard]] bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint);
 [[nodiscard]] std::size_t codepoint_columns(char32_t codepoint);
+// Compact user-perceived cluster boundaries shared by rendering and the composer editor.
+// Covers base+combining/variation marks, regional-indicator pairs, emoji modifiers, and ZWJ
+// emoji sequences. Deliberately narrower than full Unicode UAX #29 grapheme segmentation.
+[[nodiscard]] std::size_t terminal_text_cluster_bytes(std::string_view text, std::size_t index);
 [[nodiscard]] TerminalTextCell terminal_text_cell(std::string_view text, std::size_t index);
 [[nodiscard]] bool skip_sgr_sequence(std::string_view text, std::size_t& index);
 [[nodiscard]] bool skip_osc_sequence(std::string_view text, std::size_t& index);

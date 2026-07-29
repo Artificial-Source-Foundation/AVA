@@ -41,29 +41,24 @@ enum class WordSegmentClass
 
 bool is_unicode_space_codepoint(char32_t codepoint)
 {
-  return codepoint == 0x00A0 || codepoint == 0x1680 || (codepoint >= 0x2000 && codepoint <= 0x200A) ||
-         codepoint == 0x2028 || codepoint == 0x2029 || codepoint == 0x202F || codepoint == 0x205F ||
-         codepoint == 0x3000;
+  return codepoint == 0x00A0 || codepoint == 0x1680 || (codepoint >= 0x2000 && codepoint <= 0x200A) || codepoint == 0x2028 || codepoint == 0x2029 ||
+         codepoint == 0x202F || codepoint == 0x205F || codepoint == 0x3000;
 }
 
 bool is_unicode_punctuation_codepoint(char32_t codepoint)
 {
-  return (codepoint >= 0x2000 && codepoint <= 0x206F) || (codepoint >= 0x2E00 && codepoint <= 0x2E7F) ||
-         (codepoint >= 0x3001 && codepoint <= 0x3003) || (codepoint >= 0x3008 && codepoint <= 0x3020) ||
-         codepoint == 0x3030 || codepoint == 0x303D || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
-         (codepoint >= 0xFE30 && codepoint <= 0xFE4F) || (codepoint >= 0xFF01 && codepoint <= 0xFF0F) ||
-         (codepoint >= 0xFF1A && codepoint <= 0xFF20) || (codepoint >= 0xFF3B && codepoint <= 0xFF40) ||
-         (codepoint >= 0xFF5B && codepoint <= 0xFF65);
+  return (codepoint >= 0x2000 && codepoint <= 0x206F) || (codepoint >= 0x2E00 && codepoint <= 0x2E7F) || (codepoint >= 0x3001 && codepoint <= 0x3003) ||
+         (codepoint >= 0x3008 && codepoint <= 0x3020) || codepoint == 0x3030 || codepoint == 0x303D || (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
+         (codepoint >= 0xFE30 && codepoint <= 0xFE4F) || (codepoint >= 0xFF01 && codepoint <= 0xFF0F) || (codepoint >= 0xFF1A && codepoint <= 0xFF20) ||
+         (codepoint >= 0xFF3B && codepoint <= 0xFF40) || (codepoint >= 0xFF5B && codepoint <= 0xFF65);
 }
 
 bool is_wide_word_codepoint(char32_t codepoint)
 {
-  return (codepoint >= 0x2E80 && codepoint <= 0x2EFF) || (codepoint >= 0x3040 && codepoint <= 0x30FF) ||
-         (codepoint >= 0x31F0 && codepoint <= 0x31FF) || (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||
-         (codepoint >= 0x4E00 && codepoint <= 0x9FFF) || (codepoint >= 0xA960 && codepoint <= 0xA97F) ||
-         (codepoint >= 0xAC00 && codepoint <= 0xD7A3) || (codepoint >= 0xF900 && codepoint <= 0xFAFF) ||
-         (codepoint >= 0xFF10 && codepoint <= 0xFF19) || (codepoint >= 0xFF21 && codepoint <= 0xFF3A) ||
-         (codepoint >= 0xFF41 && codepoint <= 0xFF5A) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
+  return (codepoint >= 0x2E80 && codepoint <= 0x2EFF) || (codepoint >= 0x3040 && codepoint <= 0x30FF) || (codepoint >= 0x31F0 && codepoint <= 0x31FF) ||
+         (codepoint >= 0x3400 && codepoint <= 0x4DBF) || (codepoint >= 0x4E00 && codepoint <= 0x9FFF) || (codepoint >= 0xA960 && codepoint <= 0xA97F) ||
+         (codepoint >= 0xAC00 && codepoint <= 0xD7A3) || (codepoint >= 0xF900 && codepoint <= 0xFAFF) || (codepoint >= 0xFF10 && codepoint <= 0xFF19) ||
+         (codepoint >= 0xFF21 && codepoint <= 0xFF3A) || (codepoint >= 0xFF41 && codepoint <= 0xFF5A) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
 }
 
 WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor)
@@ -93,7 +88,7 @@ WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor
   return WordSegmentClass::Word;
 }
 
-std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
+std::size_t previous_codepoint_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
   if (cursor == 0)
@@ -117,7 +112,7 @@ std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
   return cursor - 1;
 }
 
-std::size_t next_input_cursor(std::string_view text, std::size_t cursor)
+std::size_t next_codepoint_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = clamp_composer_draft_cursor(text, cursor);
   if (cursor >= text.size())
@@ -128,6 +123,58 @@ std::size_t next_input_cursor(std::string_view text, std::size_t cursor)
   if (length > 1 && detail::decode_utf8_codepoint(text, cursor, length, codepoint))
     return cursor + length;
   return cursor + 1;
+}
+
+// Shared with rendering via detail::terminal_text_cluster_bytes (compact rules, not full UAX #29).
+std::size_t next_cluster_cursor(std::string_view text, std::size_t cursor)
+{
+  cursor = clamp_composer_draft_cursor(text, cursor);
+  if (cursor >= text.size())
+    return text.size();
+  auto const bytes = detail::terminal_text_cluster_bytes(text, cursor);
+  return cursor + std::max<std::size_t>(bytes, 1);
+}
+
+std::size_t previous_cluster_cursor(std::string_view text, std::size_t cursor)
+{
+  cursor = clamp_composer_draft_cursor(text, cursor);
+  if (cursor == 0)
+    return 0;
+
+  // Walk cluster starts forward through the current line prefix so movement stays O(line).
+  auto scan_from = std::size_t{0};
+  auto const prev_break = text.rfind('\n', cursor - 1);
+  if (prev_break != std::string_view::npos)
+  {
+    if (prev_break + 1 == cursor)
+    {
+      // Cursor is at the start of a line; the previous cluster is the newline itself.
+      return prev_break;
+    }
+    scan_from = prev_break + 1;
+  }
+
+  auto previous = scan_from;
+  for (auto index = scan_from; index < cursor;)
+  {
+    previous = index;
+    auto const step = std::max<std::size_t>(detail::terminal_text_cluster_bytes(text, index), 1);
+    if (index + step > cursor)
+      return index;
+    index += step;
+  }
+  return previous;
+}
+
+// Compatibility aliases used by word/jump helpers that still classify by codepoint.
+std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
+{
+  return previous_codepoint_cursor(text, cursor);
+}
+
+std::size_t next_input_cursor(std::string_view text, std::size_t cursor)
+{
+  return next_codepoint_cursor(text, cursor);
 }
 
 std::size_t line_start_cursor(std::string_view text, std::size_t cursor)
@@ -196,23 +243,49 @@ void clear_vertical_tracking(ComposerDraftState& draft)
   draft.vertical_column = std::string::npos;
 }
 
+void clear_typing_undo_coalesce(ComposerDraftState& draft)
+{
+  draft.coalesce_typing_undo = false;
+}
+
+void clear_kill_sequence(ComposerDraftState& draft)
+{
+  draft.kill_sequence = ComposerKillSequence::None;
+}
+
 void clear_nonvertical_tracking(ComposerDraftState& draft)
 {
   clear_yank_tracking(draft);
   clear_vertical_tracking(draft);
+  clear_typing_undo_coalesce(draft);
+  clear_kill_sequence(draft);
+}
+
+bool insert_text_is_coalesceable_typing(std::string_view text)
+{
+  if (text.empty())
+    return false;
+  for (unsigned char const byte : text)
+  {
+    if (byte == static_cast<unsigned char>('\n') || byte == static_cast<unsigned char>('\r') || byte == static_cast<unsigned char>('\t') ||
+        std::isspace(byte) != 0)
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 ComposerDraftSnapshot current_snapshot(ComposerDraftState const& draft)
 {
   auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
-  return ComposerDraftSnapshot{
-      .text = draft.text, .cursor = cursor, .paste_entries = draft.paste_entries, .next_paste_id = draft.next_paste_id};
+  return ComposerDraftSnapshot{.text = draft.text, .cursor = cursor, .paste_entries = draft.paste_entries, .next_paste_id = draft.next_paste_id};
 }
 
 void push_snapshot(std::vector<ComposerDraftSnapshot>& stack, ComposerDraftSnapshot snapshot)
 {
-  if (!stack.empty() && stack.back().text == snapshot.text && stack.back().cursor == snapshot.cursor &&
-      stack.back().paste_entries == snapshot.paste_entries && stack.back().next_paste_id == snapshot.next_paste_id)
+  if (!stack.empty() && stack.back().text == snapshot.text && stack.back().cursor == snapshot.cursor && stack.back().paste_entries == snapshot.paste_entries &&
+      stack.back().next_paste_id == snapshot.next_paste_id)
     return;
   stack.push_back(std::move(snapshot));
   if (stack.size() > kMaxUndoItems)
@@ -235,21 +308,49 @@ void record_undo(ComposerDraftState& draft)
 {
   push_undo(draft);
   draft.redo_stack.clear();
-  clear_nonvertical_tracking(draft);
+  clear_yank_tracking(draft);
+  clear_vertical_tracking(draft);
+  clear_typing_undo_coalesce(draft);
+  clear_kill_sequence(draft);
 }
 
-void remember_kill(ComposerDraftState& draft, std::string killed)
+// Record an undo boundary without breaking an in-progress kill accumulation sequence.
+void record_undo_preserving_kill_sequence(ComposerDraftState& draft)
 {
-  if (killed.empty())
+  auto const kill_sequence = draft.kill_sequence;
+  push_undo(draft);
+  draft.redo_stack.clear();
+  clear_yank_tracking(draft);
+  clear_vertical_tracking(draft);
+  clear_typing_undo_coalesce(draft);
+  draft.kill_sequence = kill_sequence;
+}
+
+void remember_kill(ComposerDraftState& draft, std::string killed, ComposerKillSequence direction)
+{
+  if (killed.empty() || direction == ComposerKillSequence::None)
     return;
-  draft.kill_buffer = std::move(killed);
-  if (draft.kill_ring.empty() || draft.kill_ring.front() != draft.kill_buffer)
+
+  if (draft.kill_sequence == direction && !draft.kill_ring.empty())
   {
+    if (direction == ComposerKillSequence::Backward)
+      draft.kill_ring.front().insert(0, killed);
+    else
+      draft.kill_ring.front().append(killed);
+    draft.kill_buffer = draft.kill_ring.front();
+  }
+  else
+  {
+    draft.kill_buffer = std::move(killed);
     draft.kill_ring.insert(draft.kill_ring.begin(), draft.kill_buffer);
     if (draft.kill_ring.size() > kMaxKillRingItems)
       draft.kill_ring.resize(kMaxKillRingItems);
   }
-  clear_nonvertical_tracking(draft);
+
+  draft.kill_sequence = direction;
+  clear_yank_tracking(draft);
+  clear_vertical_tracking(draft);
+  clear_typing_undo_coalesce(draft);
 }
 
 void ensure_kill_ring(ComposerDraftState& draft)
@@ -287,8 +388,7 @@ struct PasteMarkerRange
 
 bool active_paste_entry_matches(ComposerDraftState const& draft, ComposerPasteEntry const& entry)
 {
-  return entry.start != std::string::npos && !entry.marker.empty() &&
-         entry.start + entry.marker.size() <= draft.text.size() &&
+  return entry.start != std::string::npos && !entry.marker.empty() && entry.start + entry.marker.size() <= draft.text.size() &&
          draft.text.compare(entry.start, entry.marker.size(), entry.marker) == 0;
 }
 
@@ -359,8 +459,7 @@ void shift_paste_markers_for_erase(ComposerDraftState& draft, std::size_t start,
   std::erase_if(draft.paste_entries, [](ComposerPasteEntry const& entry) { return entry.start == std::string::npos; });
 }
 
-void shift_paste_markers_for_replace(ComposerDraftState& draft, std::size_t start, std::size_t end,
-                                     std::size_t replacement_size)
+void shift_paste_markers_for_replace(ComposerDraftState& draft, std::size_t start, std::size_t end, std::size_t replacement_size)
 {
   if (end < start)
     std::swap(start, end);
@@ -386,7 +485,7 @@ std::size_t previous_atomic_input_cursor(ComposerDraftState const& draft)
 {
   if (auto marker = paste_marker_touching_left(draft, draft.cursor))
     return marker->start;
-  return previous_input_cursor(draft.text, draft.cursor);
+  return previous_cluster_cursor(draft.text, draft.cursor);
 }
 
 std::size_t next_atomic_input_cursor(ComposerDraftState const& draft)
@@ -394,7 +493,7 @@ std::size_t next_atomic_input_cursor(ComposerDraftState const& draft)
   auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
   if (auto marker = paste_marker_starting_at(draft, cursor))
     return marker->end;
-  return next_input_cursor(draft.text, cursor);
+  return next_cluster_cursor(draft.text, cursor);
 }
 
 std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
@@ -451,7 +550,7 @@ std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
   return cursor;
 }
 
-bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
+bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end, ComposerKillSequence kill_direction)
 {
   start = clamp_composer_draft_cursor(draft.text, start);
   end = clamp_composer_draft_cursor(draft.text, end);
@@ -460,8 +559,15 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
   if (start == end)
     return false;
   auto killed = draft.text.substr(start, end - start);
-  record_undo(draft);
-  remember_kill(draft, std::move(killed));
+  if (kill_direction == ComposerKillSequence::None)
+  {
+    record_undo(draft);
+  }
+  else
+  {
+    record_undo_preserving_kill_sequence(draft);
+    remember_kill(draft, std::move(killed), kill_direction);
+  }
   shift_paste_markers_for_erase(draft, start, end);
   draft.text.erase(start, end - start);
   draft.cursor = start;
@@ -473,10 +579,31 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end)
 std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor)
 {
   cursor = std::min(cursor, text.size());
-  while (cursor > 0 && cursor < text.size() && detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor])))
+  if (cursor == 0 || cursor >= text.size())
+    return cursor;
+  if (!detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor])))
+    return cursor;
+
+  // Only snap to a starter when this continuation belongs to a valid sequence covering `cursor`.
+  // Orphan continuation bytes stay on their own byte boundary so malformed UTF-8 remains editable.
+  auto start = cursor;
+  while (start > 0 && detail::is_utf8_continuation(static_cast<unsigned char>(text[start - 1])))
   {
-    --cursor;
+    --start;
   }
+  if (start == 0)
+    return cursor;
+
+  auto const starter = start - 1;
+  auto const expected_length = detail::utf8_sequence_length(static_cast<unsigned char>(text[starter]));
+  if (expected_length <= 1)
+    return cursor;
+
+  char32_t codepoint = 0;
+  if (!detail::decode_utf8_codepoint(text, starter, expected_length, codepoint))
+    return cursor;
+  if (starter < cursor && cursor < starter + expected_length)
+    return starter;
   return cursor;
 }
 
@@ -495,6 +622,28 @@ std::size_t clamp_composer_draft_cursor_to_atomic_boundary(ComposerDraftState co
       return left <= right ? entry.start : end;
     }
   }
+
+  if (cursor == 0 || cursor >= draft.text.size())
+    return cursor;
+
+  auto scan_from = std::size_t{0};
+  if (cursor > 0)
+  {
+    auto const prev_break = draft.text.rfind('\n', cursor - 1);
+    if (prev_break != std::string::npos)
+      scan_from = prev_break + 1;
+  }
+  for (auto index = scan_from; index < cursor;)
+  {
+    auto const step = std::max<std::size_t>(detail::terminal_text_cluster_bytes(draft.text, index), 1);
+    if (index + step > cursor)
+    {
+      auto const left = cursor - index;
+      auto const right = index + step - cursor;
+      return left <= right ? index : index + step;
+    }
+    index += step;
+  }
   return cursor;
 }
 
@@ -507,6 +656,8 @@ void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size
   draft.paste_entries.clear();
   draft.next_paste_id = 1;
   clear_nonvertical_tracking(draft);
+  draft.coalesce_typing_undo = false;
+  draft.kill_sequence = ComposerKillSequence::None;
 }
 
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
@@ -522,8 +673,7 @@ bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::si
   return true;
 }
 
-bool replace_composer_draft_range(ComposerDraftState& draft, std::size_t start, std::size_t end,
-                                  std::string_view replacement)
+bool replace_composer_draft_range(ComposerDraftState& draft, std::size_t start, std::size_t end, std::string_view replacement)
 {
   start = clamp_composer_draft_cursor(draft.text, start);
   end = clamp_composer_draft_cursor(draft.text, end);
@@ -542,11 +692,24 @@ bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text
 {
   if (text.empty())
     return false;
-  record_undo(draft);
+
   draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto const coalesce = draft.coalesce_typing_undo && insert_text_is_coalesceable_typing(text) && draft.kill_sequence == ComposerKillSequence::None;
+  if (!coalesce)
+    record_undo(draft);
+  else
+  {
+    // Extend the current typing undo group; still discard any redo branch.
+    draft.redo_stack.clear();
+    clear_yank_tracking(draft);
+    clear_vertical_tracking(draft);
+    clear_kill_sequence(draft);
+  }
+
   shift_paste_markers_for_insert(draft, draft.cursor, text.size());
   draft.text.insert(draft.cursor, text);
   draft.cursor += text.size();
+  draft.coalesce_typing_undo = insert_text_is_coalesceable_typing(text);
   return true;
 }
 
@@ -563,7 +726,13 @@ bool insert_composer_paste_text(ComposerDraftState& draft, std::string_view text
   if (text.empty())
     return false;
   if (!should_collapse_paste(text))
-    return insert_composer_draft_text(draft, text);
+  {
+    // Pastes never join ordinary typing undo groups, even when small enough to stay literal.
+    clear_typing_undo_coalesce(draft);
+    auto const changed = insert_composer_draft_text(draft, text);
+    clear_typing_undo_coalesce(draft);
+    return changed;
+  }
 
   record_undo(draft);
   auto const id = draft.next_paste_id++;
@@ -574,8 +743,8 @@ bool insert_composer_paste_text(ComposerDraftState& draft, std::string_view text
   shift_paste_markers_for_insert(draft, marker_start, marker_text.size());
   draft.text.insert(draft.cursor, marker_text);
   draft.cursor += marker_text.size();
-  draft.paste_entries.push_back(
-      ComposerPasteEntry{.id = id, .marker = std::move(marker), .text = std::string(text), .start = marker_start});
+  draft.paste_entries.push_back(ComposerPasteEntry{.id = id, .marker = std::move(marker), .text = std::string(text), .start = marker_start});
+  clear_typing_undo_coalesce(draft);
   return true;
 }
 
@@ -618,8 +787,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
         return false;
       {
         auto killed = draft.text;
-        record_undo(draft);
-        remember_kill(draft, std::move(killed));
+        record_undo_preserving_kill_sequence(draft);
+        remember_kill(draft, std::move(killed), ComposerKillSequence::Backward);
       }
       draft.text.clear();
       draft.cursor = 0;
@@ -627,17 +796,19 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
       draft.next_paste_id = 1;
       return true;
     case TuiAction::DeleteBackward:
-      return erase_range(draft, previous_atomic_input_cursor(draft), draft.cursor);
+      // Ordinary backspace deletes one cluster and does not contribute to the kill ring.
+      return erase_range(draft, previous_atomic_input_cursor(draft), draft.cursor, ComposerKillSequence::None);
     case TuiAction::DeleteForward:
-      return erase_range(draft, draft.cursor, next_atomic_input_cursor(draft));
+      // Ordinary forward-delete deletes one cluster and does not contribute to the kill ring.
+      return erase_range(draft, draft.cursor, next_atomic_input_cursor(draft), ComposerKillSequence::None);
     case TuiAction::DeleteWordBackward:
-      return erase_range(draft, previous_atomic_word_cursor(draft), draft.cursor);
+      return erase_range(draft, previous_atomic_word_cursor(draft), draft.cursor, ComposerKillSequence::Backward);
     case TuiAction::DeleteWordForward:
-      return erase_range(draft, draft.cursor, next_atomic_word_cursor(draft));
+      return erase_range(draft, draft.cursor, next_atomic_word_cursor(draft), ComposerKillSequence::Forward);
     case TuiAction::DeleteToLineStart:
-      return erase_range(draft, line_start_cursor(draft.text, draft.cursor), draft.cursor);
+      return erase_range(draft, line_start_cursor(draft.text, draft.cursor), draft.cursor, ComposerKillSequence::Backward);
     case TuiAction::DeleteToLineEnd:
-      return erase_range(draft, draft.cursor, delete_to_line_end_cursor(draft.text, draft.cursor));
+      return erase_range(draft, draft.cursor, delete_to_line_end_cursor(draft.text, draft.cursor), ComposerKillSequence::Forward);
     case TuiAction::CursorLeft:
       clear_nonvertical_tracking(draft);
       draft.cursor = previous_atomic_input_cursor(draft);
@@ -821,8 +992,7 @@ bool push_composer_input_history(std::vector<std::string>& history, std::string 
   history.push_back(std::move(input));
   if (history.size() > kMaxInputHistoryItems)
   {
-    history.erase(history.begin(),
-                  history.begin() + static_cast<std::ptrdiff_t>(history.size() - kMaxInputHistoryItems));
+    history.erase(history.begin(), history.begin() + static_cast<std::ptrdiff_t>(history.size() - kMaxInputHistoryItems));
   }
   return true;
 }
@@ -833,9 +1003,8 @@ void clear_composer_input_history_browse(std::optional<std::size_t>& history_ind
   draft_input.clear();
 }
 
-bool browse_composer_input_history(ComposerDraftState& draft, std::vector<std::string> const& history,
-                                   std::optional<std::size_t>& history_index, std::string& draft_input,
-                                   bool previous)
+bool browse_composer_input_history(ComposerDraftState& draft, std::vector<std::string> const& history, std::optional<std::size_t>& history_index,
+                                   std::string& draft_input, bool previous)
 {
   if (history.empty())
     return false;
@@ -901,9 +1070,8 @@ std::string expanded_composer_draft_text(ComposerDraftState const& draft)
   output.reserve(draft.text.size());
   for (std::size_t index = 0; index < draft.text.size();)
   {
-    auto const found = std::ranges::find_if(draft.paste_entries, [&](ComposerPasteEntry const& entry) {
-      return entry.start == index && active_paste_entry_matches(draft, entry);
-    });
+    auto const found = std::ranges::find_if(draft.paste_entries,
+                                            [&](ComposerPasteEntry const& entry) { return entry.start == index && active_paste_entry_matches(draft, entry); });
     if (found != draft.paste_entries.end())
     {
       output += found->text;

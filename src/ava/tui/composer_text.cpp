@@ -203,6 +203,15 @@ std::optional<DecodedCodepoint> decode_next_codepoint(std::string_view text, std
   return DecodedCodepoint{.codepoint = codepoint, .length = length};
 }
 
+bool is_cluster_extending_mark(char32_t codepoint)
+{
+  // Trailing marks that bind to a preceding base for cursor/editing atomicity.
+  // ZWJ/ZWNJ are handled only inside emoji sequences, not after ordinary bases.
+  if (codepoint == 0x200C || codepoint == 0x200D)
+    return false;
+  return is_zero_width_codepoint(codepoint) || is_variation_selector(codepoint);
+}
+
 std::optional<std::size_t> emoji_cluster_length(std::string_view text, std::size_t index, char32_t first, std::size_t first_length)
 {
   if (is_regional_indicator(first))
@@ -237,6 +246,33 @@ std::optional<std::size_t> emoji_cluster_length(std::string_view text, std::size
   return length;
 }
 
+// Compact cluster boundaries shared by rendering width and composer cursor/delete.
+// Not full UAX #29: base+marks, regional-indicator pairs, emoji modifiers, ZWJ emoji only.
+std::size_t terminal_text_cluster_bytes(std::string_view text, std::size_t index)
+{
+  if (index >= text.size())
+    return 0;
+  auto const length = utf8_sequence_length(static_cast<unsigned char>(text[index]));
+  char32_t codepoint = 0;
+  if (!decode_utf8_codepoint(text, index, length, codepoint))
+    return 1;
+  if (auto const cluster_length = emoji_cluster_length(text, index, codepoint, length))
+    return *cluster_length;
+
+  auto bytes = length;
+  // Orphan combining/variation marks stay single-codepoint clusters.
+  if (!is_cluster_extending_mark(codepoint))
+  {
+    while (auto const next = decode_next_codepoint(text, index + bytes))
+    {
+      if (!is_cluster_extending_mark(next->codepoint))
+        break;
+      bytes += next->length;
+    }
+  }
+  return bytes;
+}
+
 TerminalTextCell terminal_text_cell(std::string_view text, std::size_t index)
 {
   if (index >= text.size())
@@ -245,9 +281,10 @@ TerminalTextCell terminal_text_cell(std::string_view text, std::size_t index)
   char32_t codepoint = 0;
   if (!decode_utf8_codepoint(text, index, length, codepoint))
     return TerminalTextCell{.bytes = 1, .columns = 1, .valid = false};
-  if (auto const cluster_length = emoji_cluster_length(text, index, codepoint, length))
-    return TerminalTextCell{.bytes = *cluster_length, .columns = 2, .valid = true};
-  return TerminalTextCell{.bytes = length, .columns = codepoint_columns(codepoint), .valid = true};
+  auto const cluster_bytes = terminal_text_cluster_bytes(text, index);
+  if (emoji_cluster_length(text, index, codepoint, length))
+    return TerminalTextCell{.bytes = cluster_bytes, .columns = 2, .valid = true};
+  return TerminalTextCell{.bytes = cluster_bytes, .columns = codepoint_columns(codepoint), .valid = true};
 }
 
 bool skip_sgr_sequence(std::string_view text, std::size_t& index)

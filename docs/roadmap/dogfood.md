@@ -27,10 +27,10 @@ OpenAI continuation now persists each assistant turn as one ordered session-v4 t
 - ACP subprocess and official-SDK interop are credential-free.
 - MCP, plugin, fake-LSP, RPC, packaging, Kitty-image, OSC-8, and tmux terminal smokes are available without provider spend.
 - The frontend F0-F8 offline closure is complete as of 2026-07-23; see the [frontend roadmap](frontend.md) for the milestone record. This is offline evidence only and adds no live-provider claim.
-- The tmux smoke is split into 15 isolated scenarios and can run in parallel:
+- The tmux smoke is split into 17 isolated scenarios and can run in parallel:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 15 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 17 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Four additional gated direct PTY/protocol CTests cover Kitty, iTerm2, terminal lifecycle, and OSC 8/OSC 52. See [TESTING.md](../TESTING.md) for the current commands and prerequisite behavior.

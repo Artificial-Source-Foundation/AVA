@@ -184,8 +184,11 @@ AVA theme precedence is:
 1. `NO_COLOR`
 2. `AVA_TUI_THEME`
 3. `$XDG_CONFIG_HOME/ava/display.json`, including custom themes under `$XDG_CONFIG_HOME/ava/themes/*.json`
-4. terminal background inference from `COLORFGBG`
-5. built-in dark fallback
+4. startup OSC 11 terminal-background detection on direct terminals (skipped under tmux)
+5. terminal background inference from `COLORFGBG`
+6. built-in dark fallback
+
+Built-in light/dark keep the ordinary screen canvas at the terminal-default background.
 
 Useful one-shot overrides:
 
@@ -199,8 +202,9 @@ AVA_TUI_THEME=dark ava
 Notes:
 
 - `NO_COLOR=1` and `AVA_TUI_THEME=plain` preserve layout/content but strip ANSI styling and suppress graphics overlays.
-- `COLORFGBG` is only a hint when no explicit theme is set. AVA reads the final foreground/background field and chooses a light or dark built-in palette when it can infer luminance.
-- `/settings` reports the active theme source (`NO_COLOR`, `AVA_TUI_THEME`, `display.json`, `COLORFGBG`, or built-in). `/theme` persists normal display choices to `display.json`.
+- OSC 11 runs once at interactive startup on direct terminals and is skipped under tmux; it is not re-probed on suspend/resume.
+- `COLORFGBG` is only a hint when no explicit theme is set and OSC 11 did not decide. AVA reads the final foreground/background field and chooses a light or dark built-in palette when it can infer luminance.
+- `/settings` reports the active theme source (`NO_COLOR`, `AVA_TUI_THEME`, `display.json`, `OSC 11`, `COLORFGBG`, or built-in). `/theme` persists normal display choices to `display.json`.
 
 ## SSH, Containers, And Remote Terminals
 

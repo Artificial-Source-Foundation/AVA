@@ -146,10 +146,11 @@ The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5
 - `/tool [query]`: toggle Expanded presentation for the latest or matching tool card in the TUI; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI
 - `/copy [user|tool|diff|permission] [query]`: copy the latest AVA message, a selected public user turn, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
-- `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
+- `/search [query]`: open the TUI transcript finder over currently rendered message and tool-card items
+- `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode; `/thinking details` expands or collapses the latest completed long thinking block
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image into session-owned attachment storage and send it with the next normal TUI prompt; `/image` is an alias
 
-The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json` including custom themes under `$XDG_CONFIG_HOME/ava/themes/*.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback.
+The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json` including custom themes under `$XDG_CONFIG_HOME/ava/themes/*.json`, then startup OSC 11 on direct terminals (skipped under tmux), then `COLORFGBG`, then the built-in dark fallback. Built-in light/dark keep the ordinary canvas at the terminal-default background; `/settings` can report source `OSC 11`.
 - `/connect`: open provider and login method modals; `/login` is an alias
 - `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias, Ctrl+L opens the TUI model selector, and Ctrl+P cycles to the next configured or scoped enabled model between turns
 - `/scoped-models`: open the TUI scoped model-cycle selector to enable, disable, and order the Ctrl+P cycle; Ctrl+S persists the saved cycle in `models.json`

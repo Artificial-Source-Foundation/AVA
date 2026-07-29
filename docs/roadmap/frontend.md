@@ -65,12 +65,13 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 15 tmux scenarios:
+Current CTest inventory has 17 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`active_run`, `restore_followup`, `streaming_scroll`, `main_startup_trust_keybinds`,
-`main_models_selectors`, `main_editor_input`, `main_slash_completions`,
-`main_permission_flow`, `main_question_flow`, `main_session_mgmt`, and
-`main_paste_scrollback_attach`; plus four direct PTY CTests:
+`active_run`, `restore_followup`, `streaming_scroll`, `transcript_search`,
+`transcript_selection`, `main_startup_trust_keybinds`, `main_models_selectors`,
+`main_editor_input`, `main_slash_completions`, `main_permission_flow`,
+`main_question_flow`, `main_session_mgmt`, and `main_paste_scrollback_attach`;
+plus four direct PTY CTests:
 `ava_tui.kitty_image_smoke`, `ava_tui.iterm2_image_smoke`,
 `ava_tui.terminal_lifecycle_smoke`, and `ava_tui.osc8_smoke`.
 
@@ -110,7 +111,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 15 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 17 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -1425,11 +1426,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the fifteen isolated tmux scenarios only when the change touches their
+Run the seventeen isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 15 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 17 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1542,7 +1543,8 @@ Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 15 isolated scenarios;
-`streaming_scroll` and `active_run` measure idle/streaming flood responsiveness,
-active presentation commands, draft preservation, detached stability, prompt
-wheel ordering, resize synchronization, terminal hygiene, and cleanup.
+The credential-free fake-provider tmux matrix now has 17 isolated scenarios,
+including `transcript_search` and `transcript_selection`; `streaming_scroll` and
+`active_run` measure idle/streaming flood responsiveness, active presentation
+commands, draft preservation, detached stability, prompt wheel ordering, resize
+synchronization, terminal hygiene, and cleanup.

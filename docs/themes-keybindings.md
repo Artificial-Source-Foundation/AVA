@@ -257,13 +257,17 @@ Common user-facing action groups:
 | App controls | `app.clear` (`clear_input`, `clear`), `app.interrupt` (`interrupt`), `app.exit` (`exit`), `app.editor.external` (`external_editor`, `externalEditor`), `app.suspend` (`suspend`), `app.clipboard.pasteImage` (`clipboard_paste_image`, `pasteImage`) |
 | Completion and palettes | `tui.input.tab` (`autocomplete_accept`), `history_prev`, `history_next`, `palette_prev`, `palette_next`, `mode_toggle` |
 | Select-list modals | `tui.select.up/down/pageUp/pageDown/confirm/cancel`, plus aliases like `select_prev`, `selectPrev`, `select_confirm`, and `selectConfirm` |
-| Transcript and tool details | `tui.editor.pageUp`, `tui.editor.pageDown`, `app.tools.expand` (`details_toggle`, `expandTools`), `jump_to_bottom`, `message_prev`, `message_next` |
+| Transcript and tool details | `tui.editor.pageUp`, `tui.editor.pageDown`, `app.tools.expand` (`details_toggle`, `expandTools`), `jump_to_bottom` (default Ctrl+End), `message_prev` (default Alt+K), `message_next` (default Alt+J) |
 | Models and thinking | `app.model.select`, `app.model.cycleForward`, `app.model.cycleBackward`, `app.thinking.cycle`, `app.thinking.toggle`, `app.models.save`, `app.models.enableAll`, `app.models.clearAll`, `app.models.toggleProvider`, `app.models.reorderUp`, `app.models.reorderDown` |
 | Sessions and trees | `app.session.new/tree/fork/resume/togglePath/toggleSort/toggleNamedFilter/rename/delete/deleteNoninvasive`, `app.tree.foldOrUp/unfoldOrDown/editLabel/toggleLabelTimestamp/filter.labeledOnly/filter.all` |
 
 Run `/keybindings` to see the exact effective actions and keys for your build.
 Some actions intentionally have no default key until a modal or feature makes
-them useful.
+them useful. Defaults include `message_prev`=Alt+K, `message_next`=Alt+J, and
+`jump_to_bottom`=Ctrl+End. Plain Up/Down remain transcript scroll only.
+Alt+J/Alt+K can be rebound as editor aliases only by overriding `message_next` /
+`message_prev`; until then those keys jump between transcript messages rather
+than moving the composer cursor.
 
 ## Key names and conflict rules
 

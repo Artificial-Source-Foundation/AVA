@@ -323,6 +323,13 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
                                                                            std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
                                                                            bool compact_spacing);
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+// Click target for the first rendered "Thinking:" header line of a boundable completed thinking item.
+[[nodiscard]] std::optional<std::size_t> transcript_thinking_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+// Bounded completed-thinking preview: first 11 rendered content rows + one footer row.
+inline constexpr std::size_t kThinkingBoundedMaxRows = 12;
+inline constexpr std::size_t kThinkingBoundedContentRows = 11;
+// True when completed (non-live) thinking currently renders more than the bounded preview at width.
+[[nodiscard]] bool transcript_item_has_boundable_thinking(TranscriptItem const& item, std::size_t width, bool thinking_visible);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                                bool compact_spacing = false);

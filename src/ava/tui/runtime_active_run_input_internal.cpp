@@ -170,6 +170,26 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
     return renderer_.request_render();
   }
+  if (submitted_command == "/thinking" || submitted_command == "/thinking details")
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    if (submitted_command == "/thinking details")
+    {
+      if (!navigation_.toggle_latest_thinking_details())
+      {
+        snapshot.status = "no completed long thinking block to expand";
+        static_cast<void>(beep());
+      }
+    }
+    else
+    {
+      snapshot.thinking_visible = !snapshot.thinking_visible;
+      ++snapshot.transcript_generation;
+      snapshot.status = snapshot.thinking_visible ? "thinking visible" : "thinking hidden";
+    }
+    return renderer_.request_render();
+  }
   if (auto const tool_query = tool_command_argument(submitted_command))
   {
     push_history(input_history, submitted_command);

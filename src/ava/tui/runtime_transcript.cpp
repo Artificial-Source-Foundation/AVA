@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/text.h"
 #include "ava/tui/tool_cards.h"
@@ -277,6 +278,54 @@ void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> cons
   }
 }
 
+namespace {
+
+bool item_hosts_thinking_content(TranscriptItem const& item)
+{
+  if (item.tool)
+    return false;
+  if (item.label == "thinking")
+    return !item.text.empty() || !text_empty(item.text_model);
+  if (item.label == "ava")
+    return !item.thinking.empty() || !text_empty(item.thinking_model);
+  return false;
+}
+
+}  // namespace
+
+std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript)
+{
+  std::vector<std::pair<std::size_t, bool>> overrides;
+  for (std::size_t index = 0; index < transcript.size(); ++index)
+  {
+    if (transcript[index].thinking_expanded && item_hosts_thinking_content(transcript[index]))
+      overrides.emplace_back(index, true);
+  }
+  return overrides;
+}
+
+void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
+                              std::ptrdiff_t item_index_shift)
+{
+  for (auto const& [old_index, expanded] : overrides)
+  {
+    if (!expanded)
+      continue;
+    auto const shifted = static_cast<std::ptrdiff_t>(old_index) + item_index_shift;
+    if (shifted < 0)
+      continue;
+    auto const new_index = static_cast<std::size_t>(shifted);
+    if (new_index >= transcript.size())
+      continue;
+    auto& item = transcript[new_index];
+    // Refuse stale index ownership onto a replacement non-thinking slot (for example a
+    // newly projected tool/text tail that landed on a previously expanded index).
+    if (!item_hosts_thinking_content(item))
+      continue;
+    item.thinking_expanded = true;
+  }
+}
+
 std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
 {
   for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
@@ -367,6 +416,33 @@ std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<Trans
     if (!item.tool || !detail::tool_card_matches_copy_query(*item.tool, query))
       continue;
     item.tool->details_visible = detail::tool_card_presentation(*item.tool, inherited) != ToolPresentation::Expanded;
+    return index - 1;
+  }
+  return std::nullopt;
+}
+
+bool transcript_item_thinking_is_boundable(TranscriptItem const& item, std::size_t width, bool thinking_visible)
+{
+  return detail::transcript_item_has_boundable_thinking(item, width, thinking_visible);
+}
+
+bool toggle_thinking_expansion_at(std::vector<TranscriptItem>& transcript, std::size_t item_index, std::size_t width, bool thinking_visible)
+{
+  if (item_index >= transcript.size())
+    return false;
+  auto& item = transcript[item_index];
+  if (!detail::transcript_item_has_boundable_thinking(item, width, thinking_visible))
+    return false;
+  item.thinking_expanded = !item.thinking_expanded;
+  return true;
+}
+
+std::optional<std::size_t> toggle_latest_boundable_thinking(std::vector<TranscriptItem>& transcript, std::size_t width, bool thinking_visible)
+{
+  for (std::size_t index = transcript.size(); index > 0; --index)
+  {
+    if (!toggle_thinking_expansion_at(transcript, index - 1, width, thinking_visible))
+      continue;
     return index - 1;
   }
   return std::nullopt;

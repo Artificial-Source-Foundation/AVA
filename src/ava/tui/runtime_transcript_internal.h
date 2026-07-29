@@ -45,6 +45,12 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 [[nodiscard]] std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript);
 void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript);
+// Capture/carry completed thinking expansion by exact transcript index ownership.
+// Callers must apply CappedTranscriptSnapshotUpdate::item_index_shift so leading
+// eviction remaps indices; never match on content prefix/length heuristics.
+[[nodiscard]] std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript);
+void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
+                              std::ptrdiff_t item_index_shift);
 [[nodiscard]] std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string diff_transcript_text(std::string_view title, std::string_view diff);
 [[nodiscard]] std::optional<std::string> latest_permission_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
@@ -67,5 +73,15 @@ inline std::optional<std::size_t> toggle_latest_matching_tool_details(std::vecto
 {
   return toggle_latest_matching_tool_details(transcript, query, expanded ? ToolPresentation::Expanded : ToolPresentation::Compact);
 }
+
+// Completed thinking that currently renders more than the bounded preview rows.
+// Live append-only pending reasoning is never boundable.
+[[nodiscard]] bool transcript_item_thinking_is_boundable(TranscriptItem const& item, std::size_t width, bool thinking_visible = true);
+// Toggles only the latest completed boundable thinking item. Returns its index.
+[[nodiscard]] std::optional<std::size_t> toggle_latest_boundable_thinking(std::vector<TranscriptItem>& transcript, std::size_t width,
+                                                                          bool thinking_visible = true);
+// Toggles one transcript item when it currently hosts boundable completed thinking.
+[[nodiscard]] bool toggle_thinking_expansion_at(std::vector<TranscriptItem>& transcript, std::size_t item_index, std::size_t width,
+                                                bool thinking_visible = true);
 
 }  // namespace ava::tui

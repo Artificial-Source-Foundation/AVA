@@ -101,6 +101,10 @@ struct TranscriptItem
   std::string meta = {};
   std::string thinking = {};
   Text thinking_model = {};
+  // Presentation-only: completed long thinking defaults to a bounded preview.
+  // Live append-only pending reasoning ignores this and always renders fully.
+  // Expansion is not persisted across process/session reload.
+  bool thinking_expanded = false;
   std::optional<ToolTimelineItem> tool = std::nullopt;
   // Runtime event snapshots set this only when they can prove that one stable
   // stream item retains its complete previous source prefix.

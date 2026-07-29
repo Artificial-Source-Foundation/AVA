@@ -571,14 +571,36 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
-    if (submitted == "/thinking")
+    if (submitted == "/thinking" || submitted == "/thinking details")
     {
       push_history(input_history, submitted);
-      action_controller_.toggle_thinking_visibility();
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-      push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                               .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
-                                               .meta = assistant_meta_for_snapshot(snapshot)});
+      if (submitted == "/thinking details")
+      {
+        auto const item_index = navigation_.toggle_latest_thinking_details();
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        if (item_index)
+        {
+          push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                   .text = snapshot.transcript[*item_index].thinking_expanded ? "latest thinking details are now expanded"
+                                                                                                              : "latest thinking details are now collapsed",
+                                                   .meta = assistant_meta_for_snapshot(snapshot)});
+        }
+        else
+        {
+          push_transcript(snapshot,
+                          TranscriptItem{.label = "ava", .text = "no completed long thinking block to expand", .meta = assistant_meta_for_snapshot(snapshot)});
+          snapshot.status = "no completed long thinking block to expand";
+          static_cast<void>(beep());
+        }
+      }
+      else
+      {
+        action_controller_.toggle_thinking_visibility();
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                 .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
+                                                 .meta = assistant_meta_for_snapshot(snapshot)});
+      }
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};

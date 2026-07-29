@@ -100,6 +100,11 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
       if (navigation_.toggle_tool_details_at(*tool_index))
         return to_input_handling(renderer_.request_render());
     }
+    if (auto const thinking_index = detail::transcript_thinking_header_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
+    {
+      if (navigation_.toggle_thinking_at(*thinking_index))
+        return to_input_handling(renderer_.request_render());
+    }
     if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
     {
       draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);

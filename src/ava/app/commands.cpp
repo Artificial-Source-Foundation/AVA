@@ -1127,9 +1127,14 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
         "tool "
         "[query] for tool details, /copy diff [query] for unified diffs, or /copy permission [query] for permission audit details.");
   }
-  if (request.command == "/thinking")
+  if (request.command == "/thinking" || request.command == "/thinking details")
   {
-    return handled_text("Thinking visibility is a TUI display toggle. It does not change provider reasoning mode.");
+    return handled_text(
+        "Thinking visibility is a TUI display toggle. It does not change provider reasoning mode. Bare /thinking shows or hides all inline thinking. In the "
+        "TUI, "
+        "/thinking details toggles the latest completed long thinking block between its bounded preview and full text; mouse-click the Thinking: header for "
+        "the "
+        "same per-item expand/collapse. Expansion is presentation-only and is not persisted across reload.");
   }
   if (starts_with_command(request.command, "/attach"))
   {

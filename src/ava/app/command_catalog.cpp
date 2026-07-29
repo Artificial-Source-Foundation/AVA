@@ -69,7 +69,10 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .category = "Deferred",
                           .enabled = false,
                           .disabled_reason = "package install/update is deferred pending local-source, provenance, trust, rollback, and compatibility policy"},
-      CommandCatalogEntry{.command = "/thinking", .description = "Toggle inline thinking block visibility", .category = "General"},
+      CommandCatalogEntry{.command = "/thinking",
+                          .description = "Toggle inline thinking visibility, or expand/collapse the latest long thinking block",
+                          .hint = "[details]",
+                          .category = "General"},
       CommandCatalogEntry{
           .command = "/attach", .aliases = {"/image"}, .description = "Attach an image to the next TUI prompt", .hint = "<path>", .category = "Files"},
       CommandCatalogEntry{

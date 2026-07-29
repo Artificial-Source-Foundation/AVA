@@ -365,8 +365,13 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
          "command dispatcher recognizes /fork-from as a TUI user-turn fork picker");
   auto thinking = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking"});
   expect(thinking && thinking->handled && !thinking->output.empty() && thinking->output[0].find("TUI display toggle") != std::string::npos &&
-             thinking->output[0].find("does not change provider reasoning mode") != std::string::npos,
+             thinking->output[0].find("does not change provider reasoning mode") != std::string::npos &&
+             thinking->output[0].find("/thinking details") != std::string::npos,
          "command dispatcher recognizes /thinking as display-only instead of changing backend reasoning mode");
+  auto thinking_details = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking details"});
+  expect(
+      thinking_details && thinking_details->handled && !thinking_details->output.empty() && thinking_details->output[0].find("Thinking:") != std::string::npos,
+      "command dispatcher documents /thinking details as the per-item expand fallback");
   {
     ScopedEnvVar no_color_guard("NO_COLOR", "");
     ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");

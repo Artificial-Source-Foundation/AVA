@@ -106,7 +106,9 @@ using runtime_commands::should_show_slash_command_output_as_status;
 using runtime_input::poll_curses_input;
 using runtime_transcript::apply_assistant_turn_meta;
 using runtime_transcript::assistant_meta_for_snapshot;
+using runtime_transcript::capture_thinking_expansion;
 using runtime_transcript::capture_tool_detail_visibility;
+using runtime_transcript::carry_thinking_expansion;
 using runtime_transcript::carry_tool_detail_visibility;
 using runtime_transcript::push_fallback_assistant_outputs;
 using runtime_transcript::push_history;
@@ -239,9 +241,11 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     apply_assistant_turn_meta(turn_transcript, assistant_meta_for_snapshot(snapshot, std::chrono::steady_clock::now() - turn_started_at),
                               snapshot.thinking_visible);
     auto const tool_detail_overrides = capture_tool_detail_visibility(snapshot.transcript);
+    auto const thinking_expansion_overrides = capture_thinking_expansion(snapshot.transcript);
     auto const capped_update =
         apply_capped_transcript_snapshot(snapshot.transcript, submitted_transcript, std::move(turn_transcript), turn_snapshot_leading_evictions);
     carry_tool_detail_visibility(tool_detail_overrides, snapshot.transcript);
+    carry_thinking_expansion(thinking_expansion_overrides, snapshot.transcript, capped_update.item_index_shift);
     turn_snapshot_leading_evictions = capped_update.leading_evictions;
     ++snapshot.transcript_generation;
     auto const changed_from_item_index =

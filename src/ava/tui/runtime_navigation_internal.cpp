@@ -171,6 +171,63 @@ std::optional<std::size_t> RuntimeNavigationController::toggle_matching_tool_det
   return item_index;
 }
 
+bool RuntimeNavigationController::toggle_thinking_at(std::size_t item_index)
+{
+  renderer_.synchronize_detached_transcript_layout();
+  if (item_index >= snapshot_.transcript.size())
+    return false;
+  auto anchor = detail::TranscriptViewportAnchor{};
+  auto const preserve_viewport = renderer_.transcript_scroll_offset > 0;
+  if (preserve_viewport)
+  {
+    auto const old_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, renderer_.completion_cache,
+                                                                                     snapshot_.file_references_generation, renderer_.transcript_layout_cache,
+                                                                                     snapshot_.transcript_generation);
+    anchor = detail::capture_transcript_viewport_anchor(renderer_.transcript_layout_cache.layout, old_max_scroll, renderer_.transcript_scroll_offset);
+  }
+  auto const width = composer_main_width(snapshot_);
+  if (!toggle_thinking_expansion_at(snapshot_.transcript, item_index, width, snapshot_.thinking_visible))
+    return false;
+  ++snapshot_.transcript_generation;
+  if (preserve_viewport)
+  {
+    auto const new_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, renderer_.completion_cache,
+                                                                                     snapshot_.file_references_generation, renderer_.transcript_layout_cache,
+                                                                                     snapshot_.transcript_generation);
+    renderer_.transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, renderer_.transcript_layout_cache.layout, new_max_scroll, 0);
+  }
+  snapshot_.status = snapshot_.transcript[item_index].thinking_expanded ? "thinking details expanded" : "thinking details collapsed";
+  return true;
+}
+
+std::optional<std::size_t> RuntimeNavigationController::toggle_latest_thinking_details()
+{
+  renderer_.synchronize_detached_transcript_layout();
+  auto anchor = detail::TranscriptViewportAnchor{};
+  auto const preserve_viewport = renderer_.transcript_scroll_offset > 0;
+  if (preserve_viewport)
+  {
+    auto const old_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, renderer_.completion_cache,
+                                                                                     snapshot_.file_references_generation, renderer_.transcript_layout_cache,
+                                                                                     snapshot_.transcript_generation);
+    anchor = detail::capture_transcript_viewport_anchor(renderer_.transcript_layout_cache.layout, old_max_scroll, renderer_.transcript_scroll_offset);
+  }
+  auto const width = composer_main_width(snapshot_);
+  auto const item_index = toggle_latest_boundable_thinking(snapshot_.transcript, width, snapshot_.thinking_visible);
+  if (!item_index)
+    return std::nullopt;
+  ++snapshot_.transcript_generation;
+  if (preserve_viewport)
+  {
+    auto const new_max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, renderer_.completion_cache,
+                                                                                     snapshot_.file_references_generation, renderer_.transcript_layout_cache,
+                                                                                     snapshot_.transcript_generation);
+    renderer_.transcript_scroll_offset = detail::restore_transcript_viewport_anchor(anchor, renderer_.transcript_layout_cache.layout, new_max_scroll, 0);
+  }
+  snapshot_.status = snapshot_.transcript[*item_index].thinking_expanded ? "thinking details expanded" : "thinking details collapsed";
+  return item_index;
+}
+
 bool RuntimeNavigationController::sidebar_drawer_focused() const
 {
   return snapshot_.sidebar_drawer_visible && snapshot_.sidebar.has_value() && !snapshot_.permission_prompt && !snapshot_.question_prompt &&

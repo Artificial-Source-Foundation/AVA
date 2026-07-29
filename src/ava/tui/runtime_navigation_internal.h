@@ -43,6 +43,8 @@ class RuntimeNavigationController final
   void scroll_down(std::size_t amount);
   [[nodiscard]] bool toggle_tool_details_at(std::size_t item_index);
   [[nodiscard]] std::optional<std::size_t> toggle_matching_tool_details(std::string_view query);
+  [[nodiscard]] bool toggle_thinking_at(std::size_t item_index);
+  [[nodiscard]] std::optional<std::size_t> toggle_latest_thinking_details();
 
   [[nodiscard]] bool sidebar_drawer_focused() const;
   void close_sidebar_drawer();

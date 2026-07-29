@@ -1723,16 +1723,25 @@ std::size_t composer_main_width(ComposerSnapshot const& snapshot)
   return composer_canvas_layout(snapshot).content_width;
 }
 
-std::optional<std::size_t> detail::transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+namespace {
+
+struct TranscriptHeaderHitGeometry
+{
+  std::size_t width = 0;
+  std::size_t item_index = 0;
+  bool valid = false;
+};
+
+TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
 {
   if (row == 0 || column == 0 || snapshot.sidebar_drawer_visible || snapshot.select_list || (snapshot.question_prompt && snapshot.question_prompt->modal))
-    return std::nullopt;
+    return {};
 
   auto const canvas = composer_canvas_layout(snapshot);
   auto const width = canvas.content_width;
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   if (column <= canvas.left || column > canvas.left + width)
-    return std::nullopt;
+    return {};
   column -= canvas.left;
 
   auto main = snapshot;
@@ -1753,28 +1762,49 @@ std::optional<std::size_t> detail::transcript_tool_card_header_for_screen_positi
   auto const transcript_height = vertical_layout.transcript_height;
   auto const row_index = row - 1;
   if (row_index >= transcript_height)
-    return std::nullopt;
+    return {};
 
   auto const layout = detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, snapshot.thinking_visible,
                                                        detail::composer_layout_policy(snapshot, height).compact_transcript_spacing);
   if (layout.lines.empty())
-    return std::nullopt;
+    return {};
   auto const max_scroll = layout.lines.size() > transcript_height ? layout.lines.size() - transcript_height : std::size_t{0};
   auto const visible_start = max_scroll - std::min(snapshot.transcript_scroll_offset, max_scroll);
   auto const line_index = visible_start + row_index;
   if (line_index >= layout.lines.size())
-    return std::nullopt;
+    return {};
 
   auto const content = std::ranges::find(layout.content_starts, line_index);
   if (content == layout.content_starts.end())
-    return std::nullopt;
+    return {};
   auto const position = static_cast<std::size_t>(content - layout.content_starts.begin());
   if (position >= layout.message_item_indices.size())
-    return std::nullopt;
+    return {};
   auto const item_index = layout.message_item_indices[position];
-  if (item_index >= snapshot.transcript.size() || !snapshot.transcript[item_index].tool || column <= 2 || column > width - std::min<std::size_t>(2, width))
+  if (item_index >= snapshot.transcript.size() || column <= 2 || column > width - std::min<std::size_t>(2, width))
+    return {};
+  return TranscriptHeaderHitGeometry{.width = width, .item_index = item_index, .valid = true};
+}
+
+}  // namespace
+
+std::optional<std::size_t> detail::transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  auto const hit = transcript_header_hit_geometry(snapshot, row, column);
+  if (!hit.valid || !snapshot.transcript[hit.item_index].tool)
     return std::nullopt;
-  return item_index;
+  return hit.item_index;
+}
+
+std::optional<std::size_t> detail::transcript_thinking_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  auto const hit = transcript_header_hit_geometry(snapshot, row, column);
+  if (!hit.valid)
+    return std::nullopt;
+  auto const& item = snapshot.transcript[hit.item_index];
+  if (!transcript_item_has_boundable_thinking(item, hit.width, snapshot.thinking_visible))
+    return std::nullopt;
+  return hit.item_index;
 }
 
 std::optional<ComposerPaletteScreenLayout> detail::composer_palette_screen_layout_cached(ComposerSnapshot const& snapshot,

@@ -426,6 +426,57 @@ void test_transcript_search_realigns_context_metadata_before_later_tail_update()
          "four-tool match, and touches only the owner and changed tail");
 }
 
+void test_transcript_search_bounded_thinking_hidden_tail_and_generation()
+{
+  auto long_thinking = std::string{};
+  for (std::size_t index = 1; index <= 24; ++index)
+  {
+    long_thinking += "unique-hidden-tail-token-" + std::to_string(index);
+    if (index < 24)
+      long_thinking.push_back('\n');
+  }
+  ava::tui::ComposerSnapshot snapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_thinking_search",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "thinking", .text = long_thinking},
+                     ava::tui::TranscriptItem{.label = "ava", .text = "assistant after thinking"}},
+      .width = 80,
+      .height = 40,
+      .thinking_visible = true,
+  };
+
+  auto collapsed_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, snapshot.thinking_visible, false);
+  auto hidden_matches = ava::tui::detail::build_transcript_search_matches(snapshot, collapsed_layout, "unique-hidden-tail-token-24");
+  auto visible_matches = ava::tui::detail::build_transcript_search_matches(snapshot, collapsed_layout, "unique-hidden-tail-token-1");
+  expect(hidden_matches.empty() && !visible_matches.empty(),
+         "transcript search misses the collapsed thinking hidden tail and still hits currently rendered thinking rows");
+
+  snapshot.transcript[0].thinking_expanded = true;
+  ++snapshot.transcript_generation;
+  auto expanded_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, snapshot.thinking_visible, false);
+  auto expanded_matches = ava::tui::detail::build_transcript_search_matches(snapshot, expanded_layout, "unique-hidden-tail-token-24");
+  expect(expanded_matches.size() == 1 && expanded_matches.front().item_index == 0,
+         "transcript search hits the previously hidden thinking tail after explicit expand");
+
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("unique-hidden-tail-token-24"));
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, 80, snapshot.tool_presentation, true, false, 0, 0));
+  expect(cache.matches().size() == 1 && cache.matches().front().item_index == 0, "search projection cache indexes expanded thinking tails after rebuild");
+  auto const before_builds = cache.authoritative_mutation_item_render_count();
+  // Positive index shift: a retained prefix item is inserted ahead of the expanded thinking block.
+  snapshot.transcript.insert(snapshot.transcript.begin(), ava::tui::TranscriptItem{.label = "you", .text = "prefix"});
+  ++snapshot.transcript_generation;
+  auto const update = cache.refresh_after_transcript_mutation(snapshot, 80, snapshot.tool_presentation, true, false, 1, snapshot.transcript.size());
+  expect(cache.authoritative_mutation_item_render_count() > before_builds &&
+             std::ranges::any_of(cache.matches(), [](auto const& match) { return match.item_index == 1; }),
+         "thinking search cache realigns match item indices across a positive cap/index shift");
+  static_cast<void>(update);
+}
+
 void test_transcript_search_details_and_queries_are_bounded()
 {
   ava::tui::ComposerSnapshot snapshot;
@@ -457,5 +508,6 @@ void run_tui_transcript_search_tests()
   test_transcript_search_rebuilds_positive_shift_join_boundary();
   test_transcript_search_rebuilds_positive_shift_shortened_context_heading();
   test_transcript_search_realigns_context_metadata_before_later_tail_update();
+  test_transcript_search_bounded_thinking_hidden_tail_and_generation();
   test_transcript_search_details_and_queries_are_bounded();
 }

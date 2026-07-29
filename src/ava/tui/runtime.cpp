@@ -222,6 +222,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_up = [&](std::size_t amount) { navigation.scroll_up(amount); };
   auto scroll_down = [&](std::size_t amount) { navigation.scroll_down(amount); };
   auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
+  auto toggle_thinking_at = [&](std::size_t item_index) { return navigation.toggle_thinking_at(item_index); };
 
   auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
@@ -1399,6 +1400,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
       else if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {
         static_cast<void>(toggle_tool_details_at(*tool_index));
+      }
+      else if (auto const thinking_index = detail::transcript_thinking_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+      {
+        static_cast<void>(toggle_thinking_at(*thinking_index));
       }
       else if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
       {

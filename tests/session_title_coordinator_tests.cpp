@@ -176,7 +176,7 @@ ava::core::Result<ava::app::runtime::Session> open_title_session(std::filesystem
   options.current_dir = workspace;
   options.paths = std::move(paths);
   options.session_title_coordinator = std::move(coordinator);
-  return ava::app::open_runtime_session(options, {.sessionless = sessionless,
+  return ava::app::runtime::Session::open_runtime_session(options, {.sessionless = sessionless,
                                                   .requested_session_id = std::nullopt,
                                                   .fork_session_id = std::nullopt,
                                                   .initial_session_name = std::nullopt,
@@ -218,7 +218,7 @@ void test_title_config_uses_logical_runtime_anchors()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open_runtime_session(options);
   auto config_anchor =
       session ? session->anchor_set()->find_anchor(paths.ava_config_dir) : ava::core::Result<ava::core::AnchorSet::AnchorRef>(std::unexpected(session.error()));
   auto state_anchor =

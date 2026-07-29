@@ -34,7 +34,7 @@ ava::app::runtime::Session open_test_session(std::filesystem::path const& root, 
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open_runtime_session(options);
   expect(session.has_value(), "command registry test opens runtime session");
   return std::move(*session);
 }

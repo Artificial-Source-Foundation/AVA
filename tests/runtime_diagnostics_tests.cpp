@@ -370,7 +370,7 @@ ava::core::Result<ava::app::runtime::Session> open_diagnostic_session(std::files
   options.current_dir = workspace;
   options.paths = paths;
   options.diagnostics = std::move(diagnostics);
-  return ava::app::open_runtime_session(options, {.sessionless = true,
+  return ava::app::runtime::Session::open_runtime_session(options, {.sessionless = true,
                                                   .requested_session_id = std::nullopt,
                                                   .fork_session_id = std::nullopt,
                                                   .initial_session_name = std::nullopt,

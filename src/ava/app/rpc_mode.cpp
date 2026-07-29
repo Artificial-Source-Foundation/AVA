@@ -1128,7 +1128,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
 
-  auto session = open_runtime_session(options.open_context, options.lifecycle_request);
+  auto session = runtime::Session::open_runtime_session(options.open_context, options.lifecycle_request);
   if (!session)
   {
     err << session.error().format() << '\n';

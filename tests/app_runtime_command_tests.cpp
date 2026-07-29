@@ -112,7 +112,7 @@ void test_app_command_dispatcher()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "command dispatcher test opens runtime session");
   if (!session)
     return;

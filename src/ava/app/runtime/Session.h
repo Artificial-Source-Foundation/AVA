@@ -188,10 +188,34 @@ class Session : protected Session_aggregate_base
 
   // Move constructors.
   Session(Session&& session) = default;
+
+ private:
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
+
+  static ava::core::Result<Session> construct_runtime_session(
+      RuntimeOpenContext const& context, SessionLifecycleRequest const& request,
+      ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
+      bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
+      std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
+
+ public:
+  // Open a runtime session using stable `context` and the one-shot lifecycle
+  // `request`.
+  //
+  // An empty request creates a persistent session. Returns failure when selectors
+  // conflict or the selected session cannot be created, recovered, or opened.
+  static ava::core::Result<Session> open_runtime_session(RuntimeOpenContext const& context, SessionLifecycleRequest const& request = {});
+
+  // Consume an already-owned persistent store and its lease without reopening by path.
+  // Inputs remain intact on failure so callers can roll back by stable identity.
+  static ava::core::Result<Session> open_owned_runtime_session(
+      RuntimeOpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
+
+  Session create_detached_session(
+    ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
 
   // Accessors.
 
@@ -311,7 +335,7 @@ class Session : protected Session_aggregate_base
   // This is the visible-session detach boundary: when `replacement` targets a
   // different session the previously visible parent is released so another AVA
   // process may activate it. Always succeeds.
-  [[nodiscard]] ava::core::VoidResult replace_with(runtime::Session&& replacement);
+  [[nodiscard]] ava::core::VoidResult replace_with(Session&& replacement);
 
   // Recover torn-tail and incomplete-assistant-output suffix entries from the
   // session identified by `source_session_id` so a follow-up mutation
@@ -334,7 +358,7 @@ class Session : protected Session_aggregate_base
   // `base_context`, including model pinning and exact-ID behavior, is retained.
   // An ephemeral session's AnchorSet is not inherited because its temporary
   // spill root cannot authorize a new persistent or ephemeral store.
-  [[nodiscard]] runtime::RuntimeOpenContext replacement_open_context(runtime::RuntimeOpenContext const& base_context) const;
+  [[nodiscard]] RuntimeOpenContext replacement_open_context(runtime::RuntimeOpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
@@ -360,7 +384,7 @@ class Session : protected Session_aggregate_base
   //
   // `prompt_state` is consumed regardless of failure. Returns failure only when
   // refresh_parent_configuration rejects the configuration update.
-  [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::PromptState prompt_state);
+  [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(PromptState prompt_state);
 
   // Switch the active model to `model`, re-deriving the prompt state for the
   // current mode and clearing any active reasoning selection.
@@ -376,7 +400,7 @@ class Session : protected Session_aggregate_base
   // and resolved through the model's supported levels. Returns false (without
   // writing) when the resolved selection equals the active one. Returns failure
   // when the model rejects the level or the append/refresh route rejects the change.
-  [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(std::optional<runtime::ReasoningSelection> selection);
+  [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(std::optional<ReasoningSelection> selection);
 
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata() const;
 

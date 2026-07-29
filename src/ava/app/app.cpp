@@ -806,7 +806,7 @@ int run(int argc, char** argv)
         std::cin, std::cout, std::cerr, ava::app::rpc::RpcInputWake{});
   }
 
-  auto session = ava::app::open_runtime_session(open_context, lifecycle_request);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context, lifecycle_request);
   if (!session)
   {
     std::cerr << session.error().format() << '\n';

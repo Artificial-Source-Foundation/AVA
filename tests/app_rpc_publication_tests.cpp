@@ -190,7 +190,7 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC prompt publication gate test opens runtime session");
   if (!session)
     return;
@@ -237,7 +237,7 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC parent/follow-up publication test opens runtime session");
   if (!session)
     return;
@@ -291,7 +291,7 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC blocked-publication EOF test opens runtime session");
   if (!session)
     return;
@@ -350,7 +350,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
-    auto session = ava::app::open_runtime_session(open_context);
+    auto session = ava::app::runtime::Session::open_runtime_session(open_context);
     expect(session.has_value(), "RPC direct publication gate test opens runtime session");
     if (session)
     {
@@ -393,7 +393,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
-    auto session = ava::app::open_runtime_session(open_context);
+    auto session = ava::app::runtime::Session::open_runtime_session(open_context);
     expect(session.has_value(), "RPC compaction publication gate test opens runtime session");
     if (session)
     {
@@ -437,7 +437,7 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC output-failure wake test opens runtime session");
   if (!session)
     return;

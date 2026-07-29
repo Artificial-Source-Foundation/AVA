@@ -633,7 +633,7 @@ void test_app_rpc_utf8_recovery_and_framing()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC invalid UTF-8 recovery test opens runtime session");
   if (!session)
     return;

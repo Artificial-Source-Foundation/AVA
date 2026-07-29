@@ -347,7 +347,7 @@ void test_app_print_text_mode_outputs_final_text_only()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print text test opens runtime session");
   if (!session)
     return;
@@ -384,7 +384,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print terminal sanitize test opens runtime session");
   if (!session)
     return;
@@ -410,7 +410,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   expect(out.str() == "safe ?]52;c;QUJD? text\nnext  line" && out.str().find('\x1b') == std::string::npos && err.str().empty(),
          "print text mode strips terminal controls from tty-bound final output while preserving line breaks");
 
-  auto error_session = ava::app::open_runtime_session(open_context);
+  auto error_session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(error_session.has_value(), "print terminal sanitize error test opens runtime session");
   if (!error_session)
     return;
@@ -442,7 +442,7 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print text streaming test opens runtime session");
   if (!session)
     return;
@@ -473,7 +473,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print text stdout failure test opens runtime session");
   if (!session)
     return;
@@ -514,7 +514,7 @@ void test_app_print_mode_uses_headless_permission_policy()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print policy test opens runtime session");
   if (!session)
     return;
@@ -574,7 +574,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print permission denial test opens runtime session");
   if (!session)
     return;
@@ -628,7 +628,7 @@ void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime authority-root test opens a session");
   if (!session)
     return;
@@ -661,7 +661,7 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print model-command persistent Deny test opens runtime session");
   if (!session)
     return;
@@ -734,7 +734,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print persistent permission rule test opens runtime session");
   if (!session)
     return;
@@ -1048,7 +1048,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print json test opens runtime session");
   if (!session)
     return;
@@ -1077,7 +1077,7 @@ void test_app_print_json_mode_outputs_runtime_events()
              jsonl.find("\"payload\":{\"text\":\"json answer\"}") != std::string::npos && last_line.find("\"name\":\"done\"") != std::string::npos,
          "print json mode writes JSONL event envelopes ending in done");
 
-  auto error_session = ava::app::open_runtime_session(open_context);
+  auto error_session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(error_session.has_value(), "print json error test opens runtime session");
   if (!error_session)
     return;
@@ -1117,7 +1117,7 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "print json streaming test opens runtime session");
   if (!session)
     return;

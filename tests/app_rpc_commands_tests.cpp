@@ -54,7 +54,7 @@ void test_app_rpc_model_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC model command test opens runtime session");
   if (!session)
     return;
@@ -118,7 +118,7 @@ void test_app_rpc_reasoning_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC reasoning command test opens runtime session");
   if (!session)
     return;
@@ -174,7 +174,7 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC reasoning serialization test opens runtime session");
   if (!session)
     return;
@@ -223,7 +223,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC protocol/session test opens runtime session");
   if (!session)
     return;
@@ -444,7 +444,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
     options.current_dir = options.workspace_dir;
     options.paths = app_test_paths(root / std::string(name));
     std::filesystem::create_directories(options.workspace_dir);
-    return ava::app::open_runtime_session(options);
+    return ava::app::runtime::Session::open_runtime_session(options);
   };
   auto append_v4_text_turn = [](ava::app::runtime::Session& session, std::size_t index, std::string text) {
     auto const turn_id = "rpc_cap_turn_" + std::to_string(index);
@@ -517,7 +517,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC protocol error test opens runtime session");
   if (!session)
     return;
@@ -569,7 +569,7 @@ void test_app_rpc_mcp_command_responses()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC MCP command test opens runtime session");
   if (!session)
     return;
@@ -633,7 +633,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "RPC command test opens runtime session");
   if (!session)
     return;

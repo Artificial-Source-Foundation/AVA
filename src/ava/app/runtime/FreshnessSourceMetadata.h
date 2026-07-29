@@ -21,6 +21,8 @@ enum class FreshnessSourceKind
   PluginSkill,
 };
 
+[[nodiscard]] std::string to_string(runtime::FreshnessSourceKind kind);
+
 // Record one tracked freshness source: its producer kind, human-readable scope/name and a content fingerprint for change detection.
 struct FreshnessSourceMetadata
 {

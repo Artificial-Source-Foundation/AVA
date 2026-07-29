@@ -26,7 +26,7 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   auto context = current.replacement_open_context({});
   runtime::SessionLifecycleRequest request;
   request.sessionless = current.sessionless();
-  return open_runtime_session(context, request);
+  return runtime::Session::open_runtime_session(context, request);
 }
 
 ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, std::string_view name, ava::session::SessionBranchMode mode)
@@ -64,7 +64,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   auto const created_session_id = branched->store.session_id();
   auto const branch_from_entry_id = branched->branch_from_entry_id;
   auto owned_options = session.replacement_open_context({});
-  auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
+  auto opened = runtime::Session::open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
   if (!opened)
   {
     auto error = std::move(opened.error());

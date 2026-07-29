@@ -5,8 +5,8 @@
 #include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/plugin_event_hooks.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/session_run_controller.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
 #include "ava/plugin/diagnostics.h"
@@ -255,32 +255,30 @@ std::string dynamic_resource_manifest_json(std::string id, std::string script_na
          "}";
 }
 
+// Open a trusted, sessionless runtime through the production lifecycle API for plugin command tests.
+//
+// The caller supplies the isolated XDG paths and workspace. Test setup failures are reported before
+// returning the successfully opened Session by value.
 ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
 {
-  auto store = ava::session::SessionStore::create_ephemeral(workspace);
-  expect(store.has_value(), store ? "plugin command test session store opens" : "plugin command test session store opens: " + store.error().format());
-  auto target = store ? ava::session::SessionAppendTarget::create_ephemeral(*store)
-                      : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(store.error()));
-  expect(target.has_value(),
-         target ? "plugin command test session append target opens" : "plugin command test session append target opens: " + target.error().format());
-  ava::config::ModelInfo model;
-  model.provider_id = "openai";
-  model.model_id = "gpt-test";
-  ava::app::ProjectTrustState trust;
-  trust.workspace_dir = workspace;
-  trust.trust_file = paths.ava_state_dir / "trusted-projects.json";
-  trust.decision = ava::app::ProjectTrustDecision::Trusted;
-  ava::app::runtime::InvocationInputs invocation_inputs = {
-      .workspace_dir = workspace, .current_dir = workspace, .paths = paths, .sessionless = store ? store->is_ephemeral() : false};
-  ava::app::runtime::SessionResources session_resources{
-      .lease = {}, .run_controller = std::make_unique<ava::app::SessionRunController>(target ? std::move(*target) : nullptr)};
-  return ava::app::runtime::Session_aggregate_base{.invocation_inputs_ = std::move(invocation_inputs),
-                                                   .resolved_prompt_state_ = {},
-                                                   .model_selection_ = {.model = std::move(model)},
-                                                   .trust_state_ = {.project_trust = std::move(trust)},
-                                                   .resources_ = std::move(session_resources),
-                                                   .store = std::move(*store),
-                                                   .created = false};
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "plugin command test workspace is trusted"
+                                     : "plugin command test workspace is trusted: " + trusted.error().format());
+
+  ava::app::runtime::RuntimeOpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  auto session = ava::app::runtime::Session::open_runtime_session(context, {.sessionless = true,
+                                                                            .requested_session_id = std::nullopt,
+                                                                            .fork_session_id = std::nullopt,
+                                                                            .initial_session_name = std::nullopt,
+                                                                            .continue_last_session = false,
+                                                                            .initial_reasoning_level = std::nullopt,
+                                                                            .expected_original_cwd = std::nullopt});
+  expect(session.has_value(), session ? "plugin command test session opens"
+                                      : "plugin command test session opens: " + session.error().format());
+  return std::move(*session);
 }
 
 std::string command_output_text(ava::core::Result<ava::app::CommandResult> const& command)

@@ -51,7 +51,7 @@ void test_app_session_jsonl_import_export_portable_attachments()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "portable JSONL attachment test opens runtime session");
   if (!session)
     return;
@@ -125,7 +125,7 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "private JSONL export test opens a runtime session");
   if (!session)
     return;
@@ -198,7 +198,7 @@ void test_app_session_branch_commands()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "slash branch command test opens runtime session");
   if (!session)
     return;
@@ -279,7 +279,7 @@ void test_app_session_new_resume_commands()
   open_context.additional_writable_dirs = {writable_dir};
   open_context.prompt_overrides.system_prompt = "navigation context sentinel";
   open_context.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 123456, .max_line_bytes = 12345, .max_entries = 1234};
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "slash new/resume command test opens runtime session");
   if (!session)
     return;
@@ -331,7 +331,7 @@ void test_app_session_new_resume_commands()
          "slash /new uses the selector's Untitled session fallback in title-first lifecycle receipts");
 
   auto sessionless_options = open_context;
-  auto sessionless = ava::app::open_runtime_session(sessionless_options, {.sessionless = true,
+  auto sessionless = ava::app::runtime::Session::open_runtime_session(sessionless_options, {.sessionless = true,
                                                                           .requested_session_id = std::nullopt,
                                                                           .fork_session_id = std::nullopt,
                                                                           .initial_session_name = std::nullopt,
@@ -341,7 +341,10 @@ void test_app_session_new_resume_commands()
   expect(sessionless.has_value(), "slash new/resume test opens an ephemeral current session");
   if (!sessionless)
     return;
-  session = std::move(sessionless);
+  auto replaced = session->replace_with(std::move(*sessionless));
+  expect(replaced.has_value(), "slash new/resume test replaces the current session through its lifecycle API");
+  if (!replaced)
+    return;
 
   auto ephemeral_fresh = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new"});
   expect(ephemeral_fresh && ephemeral_fresh->handled && session->sessionless(),
@@ -365,7 +368,7 @@ void test_app_session_metadata_commands()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "slash metadata command test opens runtime session");
   if (!session)
     return;

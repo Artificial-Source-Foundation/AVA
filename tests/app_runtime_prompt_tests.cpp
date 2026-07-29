@@ -155,7 +155,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
   open_context.prompt_overrides.system_prompt = "ACP_BASE_PROMPT_CANARY_5fa7";
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime opens the ambient extension isolation fixture");
   if (!session)
     return;
@@ -294,7 +294,7 @@ void test_app_run_prompt_emits_events()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime run test opens session");
   if (!session)
     return;
@@ -352,7 +352,7 @@ void test_app_run_prompt_expands_file_references()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime file reference test opens session");
   if (!session)
     return;
@@ -408,7 +408,7 @@ void test_app_run_prompt_sends_imported_image_attachment()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime image attachment test opens session");
   if (!session)
     return;
@@ -458,7 +458,7 @@ void test_app_clipboard_image_file_override_imports_attachment()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime clipboard image test opens session");
   if (!session)
     return;
@@ -487,7 +487,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime provider retry test opens session");
   if (!session)
     return;
@@ -569,7 +569,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "observed runtime compaction test opens session");
   if (!session)
     return;
@@ -660,7 +660,7 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime tool progress test opens session");
   if (!session)
     return;
@@ -752,7 +752,7 @@ void test_app_first_run_auth_onboarding()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "first-run onboarding test opens session");
   if (!session)
     return;
@@ -798,7 +798,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
   expect(session.has_value(), "runtime event sink failure test opens session");
   if (!session)
     return;

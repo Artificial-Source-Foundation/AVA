@@ -63,7 +63,7 @@ ava::core::Result<runtime::Session> reopen_session(runtime::Session const& curre
   auto context = current.replacement_open_context({});
   runtime::SessionLifecycleRequest request;
   request.requested_session_id = std::string(session_id);
-  return open_runtime_session(context, request);
+  return runtime::Session::open_runtime_session(context, request);
 }
 
 }  // namespace ava::app::session_command_support

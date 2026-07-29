@@ -297,7 +297,7 @@ DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFact
   options.paths = fixture.paths;
   options.subagent_coordinator = fixture.coordinator;
   options.subagent_delivery_manager = fixture.manager;
-  auto session = ava::app::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open_runtime_session(options);
   expect(session.has_value(), "delivery fixture opens parent runtime");
   if (session)
     fixture.session.emplace(std::move(*session));
@@ -402,7 +402,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   continue_options.paths = fixture.paths;
   continue_options.subagent_coordinator = fixture.coordinator;
   continue_options.subagent_delivery_manager = fixture.manager;
-  auto continued = ava::app::open_runtime_session(continue_options, {.sessionless = false,
+  auto continued = ava::app::runtime::Session::open_runtime_session(continue_options, {.sessionless = false,
                                                                      .requested_session_id = std::nullopt,
                                                                      .fork_session_id = std::nullopt,
                                                                      .initial_session_name = std::nullopt,
@@ -457,7 +457,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   ava::app::runtime::RuntimeOpenContext reopen = base;
   reopen.workspace_dir = fixture.session->workspace_dir();
   reopen.current_dir = fixture.session->current_dir();
-  auto retained = ava::app::open_runtime_session(reopen, {.sessionless = false,
+  auto retained = ava::app::runtime::Session::open_runtime_session(reopen, {.sessionless = false,
                                                           .requested_session_id = parent_id.substr(0, 12),
                                                           .fork_session_id = std::nullopt,
                                                           .initial_session_name = std::nullopt,
@@ -500,7 +500,7 @@ void test_retained_session_workspace_isolation()
   foreign.exact_session_id = true;
   foreign.subagent_coordinator = fixture.coordinator;
   foreign.subagent_delivery_manager = fixture.manager;
-  auto rejected = ava::app::open_runtime_session(foreign, {.sessionless = false,
+  auto rejected = ava::app::runtime::Session::open_runtime_session(foreign, {.sessionless = false,
                                                            .requested_session_id = fixture.session->store.session_id(),
                                                            .fork_session_id = std::nullopt,
                                                            .initial_session_name = std::nullopt,
@@ -650,7 +650,7 @@ void test_bounded_delivery_retries()
   open.paths = paths;
   open.subagent_coordinator = coordinator;
   open.subagent_delivery_manager = manager;
-  auto session = ava::app::open_runtime_session(open);
+  auto session = ava::app::runtime::Session::open_runtime_session(open);
   if (!session)
   {
     expect(false, "bounded retry parent opens");
@@ -691,19 +691,22 @@ void test_bounded_delivery_retries()
     std::this_thread::yield();
   }
   auto const exhaustion_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-  ava::core::Result<std::optional<ava::app::runtime::Session>> retained = std::optional<ava::app::runtime::Session>{};
+  bool retained_parent_released = false;
   while (std::chrono::steady_clock::now() < exhaustion_deadline)
   {
     auto pending_now = coordinator->pending_deliveries(session->store.session_id());
-    retained = manager->retained_session(session->store.session_id(), session->workspace_dir(), true);
+    auto retained = manager->retained_session(session->store.session_id(), session->workspace_dir(), true);
     if (pending_now && pending_now->empty() && retained && !*retained)
+    {
+      retained_parent_released = true;
       break;
+    }
     std::this_thread::yield();
   }
   auto pending = coordinator->pending_deliveries(session->store.session_id());
   auto result = coordinator->result(session->store.session_id(), started->job.identity.job_id);
   expect(attempts == 2 && factories == 2 && pending && pending->empty() && result && result->job.delivery == ava::agent::SubagentDeliveryState::Attempting &&
-             retained && !*retained,
+              retained_parent_released,
          "automatic delivery internally settles bounded retry exhaustion, releases its capsule, and preserves the public job contract");
   manager->shutdown();
 }
@@ -747,7 +750,7 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   open.paths = paths;
   open.subagent_coordinator = coordinator;
   open.subagent_delivery_manager = manager;
-  auto session = ava::app::open_runtime_session(open);
+  auto session = ava::app::runtime::Session::open_runtime_session(open);
   if (!session)
     return;
   ava::app::runtime::RunOptions options;

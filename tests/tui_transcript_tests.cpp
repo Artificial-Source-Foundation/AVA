@@ -1426,6 +1426,112 @@ void test_tui_bounded_thinking_disclosure_render_and_toggle()
     auto before = rebuilt.back().label;
     ava::tui::runtime_transcript::carry_thinking_expansion(overrides, rebuilt, 0);
     expect(before == "ava" && !rebuilt.back().thinking_expanded, "stale expansion override does not attach onto a replacement non-thinking tail item");
+
+    // BT-001: submitted-prefix stale true flags must not resurrect a current-UI collapse.
+    // Start with a submitted thinking item expanded (as at run start), collapse it in the
+    // current UI, keep a different current expanded item, then production apply/capture/carry.
+    {
+      std::vector<ava::tui::TranscriptItem> submitted_prefix{
+          ava::tui::TranscriptItem{.label = "you", .text = "seed"},
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true},  // expanded at run start
+          ava::tui::TranscriptItem{.label = "ava", .text = "prior answer"},
+      };
+      // Current UI: user collapsed the submitted-prefix thinking and expanded a later turn item.
+      std::vector<ava::tui::TranscriptItem> current_ui = submitted_prefix;
+      current_ui[1].thinking_expanded = false;
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "live tail"});
+      auto const current_overrides = ava::tui::runtime_transcript::capture_thinking_expansion(current_ui);
+      expect(current_overrides.size() == 1 && current_overrides.front().first == 3 && current_overrides.front().second,
+             "capture records only the currently expanded thinking index, not the collapsed submitted-prefix item");
+
+      // Shift zero: apply restores submitted true flags; carry must clear them and reapply current set.
+      std::vector<ava::tui::TranscriptItem> fresh_turn{
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "ava", .text = "live tail"},
+      };
+      std::vector<ava::tui::TranscriptItem> destination;
+      auto const zero = ava::tui::apply_capped_transcript_snapshot(destination, submitted_prefix, fresh_turn, 0);
+      expect(zero.item_index_shift == 0 && destination[1].thinking_expanded,
+             "apply_capped_transcript_snapshot restores submitted-prefix thinking_expanded=true before carry");
+      ava::tui::runtime_transcript::carry_thinking_expansion(current_overrides, destination, zero.item_index_shift);
+      expect(zero.item_index_shift == 0 && !destination[1].thinking_expanded && destination[1].label == "thinking" && destination[3].thinking_expanded &&
+                 destination[3].label == "thinking",
+             "shift-zero carry keeps a current-UI collapse collapsed and a current expansion expanded");
+
+      // Positive cap eviction / nonzero shift: same collapse authority after index remap.
+      submitted_prefix.clear();
+      submitted_prefix.reserve(ava::tui::kMaxTranscriptItems);
+      for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems - 4; ++index)
+        submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "you", .text = "pad " + std::to_string(index)});
+      auto const collapsed_submitted_index = submitted_prefix.size();
+      submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "prior answer"});
+      current_ui = submitted_prefix;
+      current_ui[collapsed_submitted_index].thinking_expanded = false;
+      auto const current_expanded_index = current_ui.size();
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body});  // duplicate stays collapsed
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "tail"});
+      auto const cap_overrides = ava::tui::runtime_transcript::capture_thinking_expansion(current_ui);
+      expect(cap_overrides.size() == 1 && cap_overrides.front().first == current_expanded_index,
+             "cap-path capture still records only the current expanded index");
+      // destination size = (kMax-2 submitted) + 3 turn = kMax+1 => 1 leading eviction, shift=-1.
+      std::vector<ava::tui::TranscriptItem> turn_cap{
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "ava", .text = "tail"},
+      };
+      auto const cap = ava::tui::apply_capped_transcript_snapshot(destination, submitted_prefix, turn_cap, 0);
+      ava::tui::runtime_transcript::carry_thinking_expansion(cap_overrides, destination, cap.item_index_shift);
+      auto const new_collapsed = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(collapsed_submitted_index) + cap.item_index_shift);
+      auto const new_expanded = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(current_expanded_index) + cap.item_index_shift);
+      expect(cap.leading_evictions == 1 && cap.item_index_shift == -1 && new_collapsed < destination.size() && new_expanded < destination.size() &&
+                 !destination[new_collapsed].thinking_expanded && destination[new_collapsed].label == "thinking" &&
+                 destination[new_expanded].thinking_expanded && destination[new_expanded].label == "thinking" &&
+                 !destination[new_expanded + 1].thinking_expanded,
+             "positive cap shift carry keeps submitted-prefix collapse collapsed, current expansion expanded, and duplicates independent");
+    }
+  }
+
+  // BT-002: idle /thinking details must snapshot expansion before cmd/status pushes that cap-truncate.
+  {
+    ava::tui::ComposerSnapshot idle_snapshot;
+    idle_snapshot.mode = "build";
+    idle_snapshot.provider = "openai";
+    idle_snapshot.model = "gpt-5.5";
+    idle_snapshot.session_id = "session_thinking_details_cap";
+    idle_snapshot.status = "ready";
+    idle_snapshot.width = 100;
+    idle_snapshot.height = 40;
+    idle_snapshot.thinking_visible = true;
+    idle_snapshot.transcript.reserve(ava::tui::kMaxTranscriptItems);
+    for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems - 1; ++index)
+      idle_snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "you", .text = "pad " + std::to_string(index)});
+    idle_snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body});
+    expect(idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && !idle_snapshot.transcript.back().thinking_expanded,
+           "idle /thinking details fixture starts at the transcript cap with collapsed latest thinking");
+
+    auto const width = ava::tui::composer_main_width(idle_snapshot);
+    auto const item_index = ava::tui::toggle_latest_boundable_thinking(idle_snapshot.transcript, width, idle_snapshot.thinking_visible);
+    expect(item_index && *item_index == ava::tui::kMaxTranscriptItems - 1 && idle_snapshot.transcript[*item_index].thinking_expanded,
+           "toggle expands the latest boundable thinking at the pre-push index");
+    // Production must snapshot before any push_transcript: head eviction shifts indices.
+    auto const expanded_after_toggle = idle_snapshot.transcript[*item_index].thinking_expanded;
+    auto const cmd_shift = ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "cmd", .text = "/thinking details"});
+    expect(cmd_shift == -1 && idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && idle_snapshot.transcript.back().label == "cmd",
+           "cmd push at the cap drops the first item and appends the command row");
+    // Post-push re-read at the old index is the BT-002 hazard: it now points at the cmd row.
+    expect(idle_snapshot.transcript[*item_index].label == "cmd" && !idle_snapshot.transcript[*item_index].thinking_expanded,
+           "cap truncation shifts the toggled thinking index onto the new cmd row");
+    auto const shifted_thinking = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*item_index) + cmd_shift);
+    expect(shifted_thinking < idle_snapshot.transcript.size() && idle_snapshot.transcript[shifted_thinking].label == "thinking" &&
+               idle_snapshot.transcript[shifted_thinking].thinking_expanded == expanded_after_toggle && expanded_after_toggle,
+           "actual toggled thinking remains expanded after the cap shift");
+    std::string const confirmation = expanded_after_toggle ? "latest thinking details are now expanded" : "latest thinking details are now collapsed";
+    ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "ava", .text = confirmation});
+    expect(confirmation == "latest thinking details are now expanded" && idle_snapshot.transcript.back().text == confirmation,
+           "visible idle /thinking details confirmation matches the actual toggled state after cap truncation");
   }
 
   // Hit-test: Thinking header toggles only boundable completed items; tools still win first.

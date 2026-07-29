@@ -46,8 +46,10 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 [[nodiscard]] std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript);
 void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript);
 // Capture/carry completed thinking expansion by exact transcript index ownership.
-// Callers must apply CappedTranscriptSnapshotUpdate::item_index_shift so leading
-// eviction remaps indices; never match on content prefix/length heuristics.
+// capture records only currently-true flags; carry clears destination expansion then
+// writes only those true indices (after item_index_shift remap). Captured current-UI
+// expansion is authoritative after apply_capped_transcript_snapshot so submitted-prefix
+// stale true flags cannot resurrect a collapse. Never match on content heuristics.
 [[nodiscard]] std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript);
 void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
                               std::ptrdiff_t item_index_shift);

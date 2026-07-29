@@ -577,12 +577,17 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       if (submitted == "/thinking details")
       {
         auto const item_index = navigation_.toggle_latest_thinking_details();
+        // Snapshot expansion before cmd/status pushes: at kMaxTranscriptItems, push
+        // truncates the head and shifts indices, so a post-push bool read is stale.
+        std::optional<bool> expanded_after_toggle;
+        if (item_index && *item_index < snapshot.transcript.size())
+          expanded_after_toggle = snapshot.transcript[*item_index].thinking_expanded;
         push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        if (item_index)
+        if (expanded_after_toggle)
         {
           push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                                   .text = snapshot.transcript[*item_index].thinking_expanded ? "latest thinking details are now expanded"
-                                                                                                              : "latest thinking details are now collapsed",
+                                                   .text = *expanded_after_toggle ? "latest thinking details are now expanded"
+                                                                                  : "latest thinking details are now collapsed",
                                                    .meta = assistant_meta_for_snapshot(snapshot)});
         }
         else

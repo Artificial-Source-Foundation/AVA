@@ -307,6 +307,10 @@ std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector
 void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
                               std::ptrdiff_t item_index_shift)
 {
+  // Captured current-UI true flags are authoritative after apply_capped_transcript_snapshot.
+  // Apply copies submitted_transcript, which can restore stale true flags from a prior turn;
+  // clear destination expansion before remapping only the currently expanded indices.
+  for (auto& item : transcript) item.thinking_expanded = false;
   for (auto const& [old_index, expanded] : overrides)
   {
     if (!expanded)

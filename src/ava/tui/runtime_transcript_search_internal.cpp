@@ -460,6 +460,20 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::refresh_after_transcript
     projections_.insert(projections_.begin(), restored_prefix_items, TranscriptSearchProjection{});
   }
   projections_.resize(new_projection_size);
+  if (item_index_shift != 0)
+  {
+    auto context_run_offset = std::size_t{0};
+    for (std::size_t item_index = 0; item_index < projections_.size(); ++item_index)
+    {
+      auto const is_context = context_gathering_item(snapshot.transcript[item_index]);
+      if (!is_context || item_index == 0 || !projections_[item_index - 1].context_gathering)
+        context_run_offset = 0;
+      else
+        ++context_run_offset;
+      projections_[item_index].context_gathering = is_context;
+      projections_[item_index].context_run_offset = context_run_offset;
+    }
+  }
 
   changed_from_item_index = std::min(changed_from_item_index, new_projection_size);
   add_affected(changed_from_item_index, item_index_shift == 0 ? std::max(old_projection_size, new_projection_size) : new_projection_size);

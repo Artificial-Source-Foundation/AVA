@@ -315,6 +315,40 @@ void test_transcript_search_rebuilds_positive_shift_shortened_context_heading()
       "the stale four-tool search match with the authoritative two-tool heading");
 }
 
+void test_transcript_search_realigns_context_metadata_before_later_tail_update()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.tool_presentation = ava::tui::ToolPresentation::Compact;
+  snapshot.transcript = {context_tool("read_file", "first context"), context_tool("grep", "second context")};
+  auto layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("tools"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+
+  snapshot.transcript.insert(snapshot.transcript.begin(), context_tool("glob", "restored context"));
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, layout, 1, snapshot.transcript.size()));
+  auto const restored_matches = cache.matches();
+  auto const before_tail_builds = cache.projection_build_count();
+  auto const before_tail_layout_visits = cache.layout_position_visit_count();
+  auto const before_tail_evaluations = cache.match_projection_evaluation_count();
+  auto const before_tail_realignments = cache.match_entry_realign_count();
+  auto const before_tail_splices = cache.match_entry_splice_count();
+
+  snapshot.transcript.push_back(context_tool("list_directory", "appended context"));
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  auto const tail_update = cache.refresh_after_transcript_mutation(snapshot, layout, 0, 3);
+  auto const& appended_matches = cache.matches();
+  expect(restored_matches.size() == 1 && restored_matches.front().item_index == 0 && restored_matches.front().detail.find("3 tools") != std::string::npos &&
+             appended_matches.size() == 1 && appended_matches.front().item_index == 0 && appended_matches.front().detail.find("4 tools") != std::string::npos &&
+             appended_matches.front().detail.find("3 tools") == std::string::npos && tail_update.first_changed_match_row == 0 &&
+             cache.projection_build_count() == before_tail_builds + 2 && cache.layout_position_visit_count() == before_tail_layout_visits + 2 &&
+             cache.match_projection_evaluation_count() == before_tail_evaluations + 2 && cache.match_entry_realign_count() == before_tail_realignments &&
+             cache.match_entry_splice_count() == before_tail_splices + 1,
+         "a restored context tool realigns retained run metadata so a later shift-zero append invalidates the true heading owner, produces the authoritative "
+         "four-tool match, and touches only the owner and changed tail");
+}
+
 void test_transcript_search_details_and_queries_are_bounded()
 {
   ava::tui::ComposerSnapshot snapshot;
@@ -343,5 +377,6 @@ void run_tui_transcript_search_tests()
   test_transcript_search_rebuilds_negative_shift_render_boundaries();
   test_transcript_search_rebuilds_positive_shift_join_boundary();
   test_transcript_search_rebuilds_positive_shift_shortened_context_heading();
+  test_transcript_search_realigns_context_metadata_before_later_tail_update();
   test_transcript_search_details_and_queries_are_bounded();
 }

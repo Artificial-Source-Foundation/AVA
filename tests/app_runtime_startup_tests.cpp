@@ -10,7 +10,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
@@ -107,7 +107,7 @@ void test_app_runtime_open_session_and_context_prompt()
     file << "global runtime instructions\n";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = current;
   open_context.mode = ava::agent::Mode::Plan;
@@ -138,7 +138,7 @@ void test_app_runtime_open_session_and_context_prompt()
          "runtime session appends session_start on creation");
 
   auto const session_id = session->store.session_id();
-  ava::app::runtime::RuntimeOpenContext reopen_context;
+  ava::app::runtime::OpenContext reopen_context;
   reopen_context.workspace_dir = workspace;
   reopen_context.current_dir = current;
   reopen_context.mode = ava::agent::Mode::Plan;
@@ -194,7 +194,7 @@ void test_app_runtime_preserves_legacy_subagent_job_tree()
   expect(captured && before_names == std::vector<std::string>({"parent.jsonl", "sentinel.bin"}),
          "runtime legacy-tree fixture captures exact names and metadata before construction");
 
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -248,7 +248,7 @@ void test_app_active_context_status_tracks_compaction_projection()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -296,7 +296,7 @@ void test_app_runtime_no_session_mode()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -354,7 +354,7 @@ void test_app_runtime_replacement_open_context()
   std::filesystem::create_directories(writable_dir);
 
   auto diagnostics = std::make_shared<ava::diagnostics::RuntimeDiagnostics>(paths);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = current_dir;
   open_context.mode = ava::agent::Mode::Plan;
@@ -373,7 +373,7 @@ void test_app_runtime_replacement_open_context()
   if (!session)
     return;
 
-  ava::app::runtime::RuntimeOpenContext base_context;
+  ava::app::runtime::OpenContext base_context;
   base_context.workspace_dir = root / "wrong-workspace";
   base_context.current_dir = root / "wrong-current";
   base_context.pin_model_override = true;
@@ -397,7 +397,7 @@ void test_app_runtime_replacement_open_context()
   expect(replacement.pin_model_override && replacement.exact_session_id,
          "replacement context retains frontend policy that is not represented by Session state");
 
-  ava::app::runtime::RuntimeOpenContext at_context;
+  ava::app::runtime::OpenContext at_context;
   at_context.paths = paths;
   auto created_at = ava::app::create_runtime_session_at(at_context, workspace, current_dir);
   auto created_metadata = created_at ? ava::session::load_session_metadata(created_at->store)
@@ -414,7 +414,7 @@ void test_app_runtime_session_startup_options()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext named_options;
+  ava::app::runtime::OpenContext named_options;
   named_options.workspace_dir = workspace;
   named_options.current_dir = workspace;
   named_options.mode = ava::agent::Mode::Build;
@@ -441,7 +441,7 @@ void test_app_runtime_session_startup_options()
 
   auto custom_paths = paths;
   custom_paths.sessions_dir = root / "custom-sessions";
-  ava::app::runtime::RuntimeOpenContext custom_options;
+  ava::app::runtime::OpenContext custom_options;
   custom_options.workspace_dir = workspace;
   custom_options.current_dir = workspace;
   custom_options.paths = custom_paths;
@@ -455,7 +455,7 @@ void test_app_runtime_session_startup_options()
   expect(custom_sessions && custom_sessions->size() == 1 && custom_sessions->front().session_id == custom->store.session_id(),
          "runtime custom session directory has its own session listing");
 
-  ava::app::runtime::RuntimeOpenContext active_source_fork_options;
+  ava::app::runtime::OpenContext active_source_fork_options;
   active_source_fork_options.workspace_dir = workspace;
   active_source_fork_options.current_dir = workspace;
   active_source_fork_options.paths = paths;
@@ -471,7 +471,7 @@ void test_app_runtime_session_startup_options()
 
   named = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before startup fork"));
 
-  ava::app::runtime::RuntimeOpenContext fork_options;
+  ava::app::runtime::OpenContext fork_options;
   fork_options.workspace_dir = workspace;
   fork_options.current_dir = workspace;
   fork_options.paths = paths;
@@ -540,7 +540,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
 
-    ava::app::runtime::RuntimeOpenContext seed_options;
+    ava::app::runtime::OpenContext seed_options;
     seed_options.workspace_dir = workspace;
     seed_options.current_dir = workspace;
     seed_options.paths = paths;
@@ -575,7 +575,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext seed_options;
+  ava::app::runtime::OpenContext seed_options;
   seed_options.workspace_dir = workspace;
   seed_options.current_dir = workspace;
   seed_options.paths = paths;
@@ -623,7 +623,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   auto const bounded_workspace = bounded_root / "workspace";
   auto const bounded_paths = app_test_paths(bounded_root);
   std::filesystem::create_directories(bounded_workspace);
-  ava::app::runtime::RuntimeOpenContext bounded_seed_options;
+  ava::app::runtime::OpenContext bounded_seed_options;
   bounded_seed_options.workspace_dir = bounded_workspace;
   bounded_seed_options.current_dir = bounded_workspace;
   bounded_seed_options.paths = bounded_paths;
@@ -696,7 +696,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -902,7 +902,7 @@ void test_app_runtime_cli_prompt_overrides()
   expect(trusted.has_value(),
          trusted ? "cli prompt override test trusts project resources" : "cli prompt override test trusts project resources: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;

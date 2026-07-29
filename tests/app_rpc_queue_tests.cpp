@@ -122,7 +122,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -179,7 +179,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
     file << "outside cancel note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -232,7 +232,7 @@ void test_app_rpc_steer_applies_before_next_provider_request()
     file << "outside steer note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -289,7 +289,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
     file << "outside follow note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -351,7 +351,7 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
                                                                                           .source_path = {}});
   expect(stored.has_value(), "RPC prompt start failure test stores expired credential");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -405,7 +405,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
     file << "outside follow steer note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -471,7 +471,7 @@ void test_app_rpc_queue_limit_rejects_new_items()
     file << "outside queue limit note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -527,7 +527,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
     file << "outside eof note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -581,7 +581,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
     file << "outside cancel queue note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -647,7 +647,7 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "RPC direct queue workspace is owner-only for sealed command planning");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -698,7 +698,7 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
   auto const outside_path = root / "outside.txt";
   write_app_test_file(outside_path, "duplicate id note");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -755,7 +755,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
     file << "outside reject note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

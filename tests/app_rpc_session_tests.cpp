@@ -47,7 +47,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -82,7 +82,7 @@ void test_app_rpc_state_list_sessions_and_open_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -123,7 +123,7 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -248,7 +248,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -310,7 +310,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -354,7 +354,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -421,7 +421,7 @@ void test_app_rpc_session_fork_and_clone_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -491,7 +491,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -566,7 +566,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -612,7 +612,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

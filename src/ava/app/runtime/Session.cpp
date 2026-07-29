@@ -466,7 +466,7 @@ ava::core::Result<std::string> resolve_session_id(std::filesystem::path const& w
   return matches.front();
 }
 
-ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resolve_runtime_directories(RuntimeOpenContext const& context)
+ava::core::Result<std::pair<std::filesystem::path, std::filesystem::path>> resolve_runtime_directories(OpenContext const& context)
 {
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
@@ -494,7 +494,7 @@ ava::core::VoidResult reconcile_committed_function_calls(std::shared_ptr<ava::se
       *read_authority, [append_target](ava::session::SessionEntry entry) { return append_target->append(entry); }, limits);
 }
 
-ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_context(RuntimeOpenContext const& context)
+ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for_context(OpenContext const& context)
 {
   if (context.subagent_delivery_manager)
     return context.subagent_delivery_manager;
@@ -505,7 +505,7 @@ ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> delivery_manager_for
   return SubagentDeliveryManager::create({.coordinator = std::move(*coordinator)});
 }
 
-ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_for_context(RuntimeOpenContext const& context,
+ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_for_context(OpenContext const& context,
                                                                                           std::shared_ptr<ava::core::AnchorSet> const& anchor_set)
 {
   if (context.session_title_coordinator)
@@ -520,7 +520,7 @@ ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_fo
 
 //static
 ava::core::Result<Session> Session::construct(
-    RuntimeOpenContext const& context, runtime::SessionLifecycleRequest const& request,
+    OpenContext const& context, runtime::SessionLifecycleRequest const& request,
     ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
     bool load_existing_entries, bool should_append_session_start, bool append_initial_session_name,
     std::shared_ptr<SubagentDeliveryManager> delivery_manager, std::shared_ptr<SessionTitleCoordinator> title_coordinator)
@@ -776,7 +776,7 @@ ava::core::Result<Session> Session::construct(
 }
 
 //static
-ava::core::Result<Session> Session::open(runtime::RuntimeOpenContext const& context, runtime::SessionLifecycleRequest const& request)
+ava::core::Result<Session> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
 {
   if (request.requested_session_id && request.continue_last_session)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
@@ -920,7 +920,7 @@ ava::core::Result<Session> Session::open(runtime::RuntimeOpenContext const& cont
 
 //static
 ava::core::Result<Session> Session::open_owned(
-    RuntimeOpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
+    OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires a persistent session"));
@@ -1044,7 +1044,7 @@ ava::core::VoidResult Session::recover_source_session_for_mutation(std::string c
   return {};
 }
 
-RuntimeOpenContext Session::replacement_open_context(runtime::RuntimeOpenContext const& base_context) const
+OpenContext Session::replacement_open_context(runtime::OpenContext const& base_context) const
 {
   auto context = base_context;
   context.workspace_dir = workspace_dir();

@@ -762,7 +762,7 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
   {

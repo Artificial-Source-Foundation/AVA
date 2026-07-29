@@ -265,7 +265,7 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   expect(trusted.has_value(), trusted ? "plugin command test workspace is trusted"
                                      : "plugin command test workspace is trusted: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext context;
+  ava::app::runtime::OpenContext context;
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;

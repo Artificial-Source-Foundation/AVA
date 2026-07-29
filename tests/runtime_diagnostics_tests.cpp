@@ -365,7 +365,7 @@ ava::core::Result<ava::app::runtime::Session> open_diagnostic_session(std::files
   auto const paths = app_test_paths(root);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;

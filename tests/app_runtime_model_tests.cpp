@@ -9,7 +9,7 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/RunOptions.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_model.h"
 #include "ava/agent/message_builder.h"
@@ -162,7 +162,7 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -316,7 +316,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
     })JSON";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -360,7 +360,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
           R"JSON({"previous_provider":"anthropic","previous_model":"claude-test","provider":"anthropic","model":"claude-test","display_name":"Claude Test","family":"claude-test","api_family":"anthropic_messages","input_modalities":["text"],"output_modalities":["text"],"reasoning_levels":[],"compatibility_quirks":["test_quirk","\uD83D\uDE00"],"context_window_tokens":999,"max_output_tokens":123,"supports_tools":false,"supports_streaming":true,"supports_reasoning":false,"reports_usage":true})JSON"});
   expect(appended_escaped_model_change.has_value(), "runtime model switch test seeds escaped unicode metadata");
 
-  ava::app::runtime::RuntimeOpenContext reopen_context = open_context;
+  ava::app::runtime::OpenContext reopen_context = open_context;
   std::error_code remove_error;
   std::filesystem::remove(paths.models_file, remove_error);
   auto same_process_contested = ava::app::runtime::Session::open(reopen_context, {.sessionless = false,
@@ -476,7 +476,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     })JSON";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -715,7 +715,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     })JSON";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -763,7 +763,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     expect(reasoning_changes == 1, "runtime reasoning selection appends one durable reasoning_change entry");
   }
 
-  ava::app::runtime::RuntimeOpenContext reopen_context = open_context;
+  ava::app::runtime::OpenContext reopen_context = open_context;
   auto reopened = ava::app::runtime::Session::open(reopen_context, {.sessionless = false,
                                                                   .requested_session_id = session_id,
                                                                   .fork_session_id = std::nullopt,
@@ -879,7 +879,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
 
-    ava::app::runtime::RuntimeOpenContext options;
+    ava::app::runtime::OpenContext options;
     options.workspace_dir = workspace;
     options.current_dir = workspace;
     options.paths = paths;
@@ -919,7 +919,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
 
-    ava::app::runtime::RuntimeOpenContext seed_options;
+    ava::app::runtime::OpenContext seed_options;
     seed_options.workspace_dir = workspace;
     seed_options.current_dir = workspace;
     seed_options.paths = paths;
@@ -968,7 +968,7 @@ void test_app_runtime_initial_reasoning_level_option()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

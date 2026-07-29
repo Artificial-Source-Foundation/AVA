@@ -7,7 +7,7 @@
 #include "ava/app/command_sessions.h"
 #include "ava/app/commands.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/session/assistant_output.h"
@@ -46,7 +46,7 @@ void test_app_session_jsonl_import_export_portable_attachments()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -120,7 +120,7 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -193,7 +193,7 @@ void test_app_session_branch_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -270,7 +270,7 @@ void test_app_session_new_resume_commands()
   std::filesystem::create_directories(workspace);
   std::filesystem::create_directories(writable_dir);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -363,7 +363,7 @@ void test_app_session_metadata_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;

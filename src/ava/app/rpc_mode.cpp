@@ -349,7 +349,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
 }  // namespace
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::RuntimeOpenContext const& open_context,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context,
                                    ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
                                    runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out)
 {
@@ -1089,7 +1089,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in,
                                    std::ostream& out, rpc::RpcInputWake wake)
 {
@@ -1097,21 +1097,21 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::Runtim
   return run_rpc_loop(session, open_context, provider, transport, auth_transport, std::move(runtime_options), input, out);
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out,
                                    rpc::RpcInputWake wake)
 {
   return run_rpc_loop(session, open_context, provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in,
                                    std::ostream& out)
 {
   return run_rpc_loop(session, open_context, provider, transport, auth_transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out)
 {
   return run_rpc_loop(session, open_context, provider, transport, transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});

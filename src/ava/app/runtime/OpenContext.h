@@ -34,7 +34,7 @@ namespace ava::app::runtime {
 //
 // Long-lived frontends may reuse one context across lifecycle requests. paths
 // defaults to the process-wide XDG layout.
-struct RuntimeOpenContext
+struct OpenContext
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;

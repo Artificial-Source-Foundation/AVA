@@ -10,7 +10,7 @@
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/RunOptions.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/mode.h"
@@ -149,7 +149,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
       diagnostics.plugins, [plugin_id](ava::plugin::PluginStatus const& status) { return status.plugin.manifest.id == plugin_id && status.enabled; });
   expect(plugin_diagnostic_enabled, "ambient extension isolation fixture diagnostics report its plugin enabled");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -289,7 +289,7 @@ void test_app_run_prompt_emits_events()
     file << "runtime run context\n";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -347,7 +347,7 @@ void test_app_run_prompt_expands_file_references()
     file << "int spaced_reference_symbol() { return 24; }\n";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -403,7 +403,7 @@ void test_app_run_prompt_sends_imported_image_attachment()
   auto const image_path = workspace / "screen.png";
   write_app_test_file(image_path, app_tiny_png_bytes());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -453,7 +453,7 @@ void test_app_clipboard_image_file_override_imports_attachment()
   auto const image_path = workspace / "clipboard.png";
   write_app_test_file(image_path, app_tiny_png_bytes());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -482,7 +482,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -565,7 +565,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -655,7 +655,7 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   expect(::chmod(temp_root().c_str(), S_IRWXU) == 0 && ::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "runtime tool progress workspace is owner-only for sealed command planning");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -747,7 +747,7 @@ void test_app_first_run_auth_onboarding()
   setenv("XDG_STATE_HOME", state_home_text.c_str(), 1);
   setenv("XDG_DATA_HOME", data_home_text.c_str(), 1);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -793,7 +793,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
     file << "event sink cancel data";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;

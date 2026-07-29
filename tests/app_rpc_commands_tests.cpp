@@ -50,7 +50,7 @@ void test_app_rpc_model_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -114,7 +114,7 @@ void test_app_rpc_reasoning_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -170,7 +170,7 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -219,7 +219,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -439,7 +439,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::filesystem::permissions(root, std::filesystem::perms::owner_all);
 
   auto open_session = [&](std::string_view name) {
-    ava::app::runtime::RuntimeOpenContext options;
+    ava::app::runtime::OpenContext options;
     options.workspace_dir = workspace / std::string(name);
     options.current_dir = options.workspace_dir;
     options.paths = app_test_paths(root / std::string(name));
@@ -513,7 +513,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -565,7 +565,7 @@ void test_app_rpc_mcp_command_responses()
   expect(trusted.has_value(),
          trusted ? "RPC MCP command test trusts project config" : "RPC MCP command test trusts project config: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -629,7 +629,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
   expect(trusted.has_value(),
          trusted ? "RPC command test trusts project plugin resources" : "RPC command test trusts project plugin resources: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

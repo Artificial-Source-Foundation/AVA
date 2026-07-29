@@ -291,7 +291,7 @@ DeliveryFixture make_fixture(std::string_view name, std::shared_ptr<DeliveryFact
   if (!manager)
     return fixture;
   fixture.manager = *manager;
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = fixture.paths;
@@ -396,7 +396,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(fixture.manager->refresh_parent(*fixture.session, options).has_value(), "navigation parent capsule refreshes");
   auto const parent_id = fixture.session->store.session_id();
   auto* const parent_controller = fixture.session->run_controller().get();
-  ava::app::runtime::RuntimeOpenContext continue_options;
+  ava::app::runtime::OpenContext continue_options;
   continue_options.workspace_dir = fixture.session->workspace_dir();
   continue_options.current_dir = fixture.session->current_dir();
   continue_options.paths = fixture.paths;
@@ -443,7 +443,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(building && awaiting && completing && completed, "active parent turn closes before synthetic delivery admission");
   expect(admission->wait_reached(), "delivery worker reaches pre-admission after the parent controller becomes idle");
 
-  ava::app::runtime::RuntimeOpenContext base;
+  ava::app::runtime::OpenContext base;
   base.paths = fixture.paths;
   base.subagent_coordinator = fixture.coordinator;
   base.subagent_delivery_manager = fixture.manager;
@@ -454,7 +454,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   auto replacement_id = replacement->store.session_id();
   expect(fixture.session->replace_with(std::move(*replacement)).has_value(), "navigation replaces the visible session");
 
-  ava::app::runtime::RuntimeOpenContext reopen = base;
+  ava::app::runtime::OpenContext reopen = base;
   reopen.workspace_dir = fixture.session->workspace_dir();
   reopen.current_dir = fixture.session->current_dir();
   auto retained = ava::app::runtime::Session::open(reopen, {.sessionless = false,
@@ -493,7 +493,7 @@ void test_retained_session_workspace_isolation()
 
   auto const foreign_workspace = fixture.root / "foreign-workspace";
   std::filesystem::create_directories(foreign_workspace);
-  ava::app::runtime::RuntimeOpenContext foreign;
+  ava::app::runtime::OpenContext foreign;
   foreign.workspace_dir = foreign_workspace;
   foreign.current_dir = foreign_workspace;
   foreign.paths = fixture.paths;
@@ -644,7 +644,7 @@ void test_bounded_delivery_retries()
     return;
   }
   auto manager = *manager_result;
-  ava::app::runtime::RuntimeOpenContext open;
+  ava::app::runtime::OpenContext open;
   open.workspace_dir = workspace;
   open.current_dir = workspace;
   open.paths = paths;
@@ -744,7 +744,7 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   if (!manager_result)
     return;
   auto manager = *manager_result;
-  ava::app::runtime::RuntimeOpenContext open;
+  ava::app::runtime::OpenContext open;
   open.workspace_dir = workspace;
   open.current_dir = workspace;
   open.paths = paths;

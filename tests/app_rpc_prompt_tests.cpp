@@ -49,7 +49,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -99,7 +99,7 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -149,7 +149,7 @@ void test_app_rpc_prompt_imports_image_attachments()
   auto const image_path = workspace / "screen.png";
   write_app_test_file(image_path, rpc_tiny_png_bytes());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -206,7 +206,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -264,7 +264,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -300,7 +300,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -346,7 +346,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -398,7 +398,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -455,7 +455,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
                                                                                           .source_path = {}});
   expect(stored.has_value(), "RPC OAuth refresh test stores expired credential");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;

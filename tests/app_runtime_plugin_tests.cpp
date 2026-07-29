@@ -11,7 +11,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/RunOptions.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/tool_dispatcher.h"
@@ -122,7 +122,7 @@ void test_app_runtime_project_trust_malformed_diagnostics()
 
   write_app_test_file(ava::app::project_trust_file(paths), "{\"schema_version\":1,\"decisions\":[\n");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -187,7 +187,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
   expect(enabled.has_value(), enabled ? "plugin resource autoload test enables project plugin"
                                       : "plugin resource autoload test enables project plugin: " + enabled.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -319,7 +319,7 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
                                                          ava::plugin::PluginScope::Project);
   expect(global_enabled.has_value() && project_enabled.has_value(), "plugin resource trust-gate test enables global and project plugins");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -386,7 +386,7 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
   expect(enabled.has_value(),
          enabled ? "plugin resource failure test enables project plugin" : "plugin resource failure test enables project plugin: " + enabled.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -436,7 +436,7 @@ void test_app_runtime_plugin_install_remove_commands()
                                std::filesystem::perm_options::replace, source_permissions_error);
   expect(!source_permissions_error, "plugin install/remove command test widens source file permissions");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -581,7 +581,7 @@ void test_app_context_reports_lsp_config_load_errors()
   expect(trusted.has_value(), trusted ? "LSP context diagnostic test trusts project resources"
                                       : "LSP context diagnostic test trusts project resources: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

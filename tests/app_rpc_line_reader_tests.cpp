@@ -229,7 +229,7 @@ void test_app_rpc_unterminated_final_command_executes()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -258,7 +258,7 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

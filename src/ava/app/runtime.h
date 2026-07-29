@@ -1,7 +1,7 @@
 #pragma once
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
-#include "runtime/RuntimeOpenContext.h"
+#include "runtime/OpenContext.h"
 #include "runtime/SessionLifecycleRequest.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"

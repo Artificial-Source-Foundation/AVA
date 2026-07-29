@@ -30,7 +30,7 @@ using namespace ava::tests;
 ava::app::runtime::Session open_test_session(std::filesystem::path const& root, std::filesystem::path const& workspace)
 {
   auto paths = app_test_paths(root);
-  ava::app::runtime::RuntimeOpenContext options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;

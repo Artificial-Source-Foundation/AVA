@@ -342,7 +342,7 @@ void test_app_print_text_mode_outputs_final_text_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -379,7 +379,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -437,7 +437,7 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -468,7 +468,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -509,7 +509,7 @@ void test_app_print_mode_uses_headless_permission_policy()
     file << "outside print policy";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -569,7 +569,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
     file << "outside print deny";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -624,7 +624,7 @@ void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -656,7 +656,7 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "print model-command persistent Deny fixture keeps sealed planning roots owner-only");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
@@ -730,7 +730,7 @@ void test_app_print_mode_uses_persistent_permission_rules()
   auto const outside_path = root / "outside-print-rule.txt";
   write_app_test_file(outside_path, "outside print persistent rule note");
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -1043,7 +1043,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;
@@ -1112,7 +1112,7 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;

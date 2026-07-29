@@ -6,7 +6,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/RuntimeOpenContext.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/agent/mode.h"
 
 #include <filesystem>
@@ -107,7 +107,7 @@ void test_app_command_dispatcher()
   expect(trusted.has_value(),
          trusted ? "command dispatcher test trusts project resources" : "command dispatcher test trusts project resources: " + trusted.error().format());
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Plan;

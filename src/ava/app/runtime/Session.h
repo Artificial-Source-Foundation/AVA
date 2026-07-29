@@ -5,7 +5,7 @@
 #include "FreshnessSourceMetadata.h"
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
-#include "RuntimeOpenContext.h"
+#include "OpenContext.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
@@ -39,9 +39,9 @@ namespace ava::app::runtime {
 
 // Invocation inputs.
 //
-// Mirrors of RuntimeOpenContext describing how this session was opened. None of
+// Mirrors of OpenContext describing how this session was opened. None of
 // these are restored from the store on resume; each is sourced from the
-// RuntimeOpenContext of the current process invocation.
+// OpenContext of the current process invocation.
 //
 struct InvocationInputs
 {
@@ -196,7 +196,7 @@ class Session : protected Session_aggregate_base
   Session& operator=(Session&& session) = default;
 
   static ava::core::Result<Session> construct(
-      RuntimeOpenContext const& context, SessionLifecycleRequest const& request,
+      OpenContext const& context, SessionLifecycleRequest const& request,
       ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
       bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
       std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
@@ -207,12 +207,12 @@ class Session : protected Session_aggregate_base
   //
   // An empty request creates a persistent session. Returns failure when selectors
   // conflict or the selected session cannot be created, recovered, or opened.
-  static ava::core::Result<Session> open(RuntimeOpenContext const& context, SessionLifecycleRequest const& request = {});
+  static ava::core::Result<Session> open(OpenContext const& context, SessionLifecycleRequest const& request = {});
 
   // Consume an already-owned persistent store and its lease without reopening by path.
   // Inputs remain intact on failure so callers can roll back by stable identity.
   static ava::core::Result<Session> open_owned(
-      RuntimeOpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
+      OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
 
   Session create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
@@ -351,14 +351,14 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::core::VoidResult recover_source_session_for_mutation(std::string const& source_session_id,
                                                                           std::optional<ava::session::SessionLease>& temporary_source_lease);
 
-  // Build replacement RuntimeOpenContext from this session and `base_context`.
+  // Build replacement OpenContext from this session and `base_context`.
   //
   // Runtime context, filesystem policy, resolved read limits, and shared
   // application services are inherited from this session. Frontend policy in
   // `base_context`, including model pinning and exact-ID behavior, is retained.
   // An ephemeral session's AnchorSet is not inherited because its temporary
   // spill root cannot authorize a new persistent or ephemeral store.
-  [[nodiscard]] RuntimeOpenContext replacement_open_context(runtime::RuntimeOpenContext const& base_context) const;
+  [[nodiscard]] OpenContext replacement_open_context(runtime::OpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);

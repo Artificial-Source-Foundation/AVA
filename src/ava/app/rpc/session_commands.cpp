@@ -51,7 +51,7 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::RuntimeOpenContext const& open_context,
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenContext const& open_context,
                                                                 RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())

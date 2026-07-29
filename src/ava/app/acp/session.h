@@ -57,7 +57,7 @@ struct AcpSessionOptions
 {
   std::filesystem::path launch_root;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
-  runtime::RuntimeOpenContext open_context;
+  runtime::OpenContext open_context;
   runtime::RunOptions run_options;
   RuntimeProviderRunBundleFactory provider_bundle_factory;
   // Shared because every host on one connection must retain the same immutable

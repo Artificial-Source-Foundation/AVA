@@ -186,7 +186,7 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -233,7 +233,7 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   auto const outside_path = root / "outside.txt";
   std::filesystem::create_directories(workspace);
   write_app_test_file(outside_path, "parent follow-up publication");
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -287,7 +287,7 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -346,7 +346,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
-    ava::app::runtime::RuntimeOpenContext open_context;
+    ava::app::runtime::OpenContext open_context;
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
@@ -389,7 +389,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
-    ava::app::runtime::RuntimeOpenContext open_context;
+    ava::app::runtime::OpenContext open_context;
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
@@ -433,7 +433,7 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

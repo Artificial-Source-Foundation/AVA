@@ -51,7 +51,7 @@ std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::
   return roots;
 }
 
-ava::core::Result<runtime::Session> create_runtime_session_at(runtime::RuntimeOpenContext context, std::filesystem::path const& workspace_root,
+ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenContext context, std::filesystem::path const& workspace_root,
                                                               std::filesystem::path const& current_dir)
 {
   context.workspace_dir = workspace_root;
@@ -59,7 +59,7 @@ ava::core::Result<runtime::Session> create_runtime_session_at(runtime::RuntimeOp
   return runtime::Session::open(context);
 }
 
-ava::core::Result<runtime::Session> open_runtime_session_at(runtime::RuntimeOpenContext context, std::filesystem::path const& workspace_root,
+ava::core::Result<runtime::Session> open_runtime_session_at(runtime::OpenContext context, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir, runtime::SessionLifecycleRequest request)
 {
   context.workspace_dir = workspace_root;
@@ -67,13 +67,13 @@ ava::core::Result<runtime::Session> open_runtime_session_at(runtime::RuntimeOpen
   return runtime::Session::open(context, request);
 }
 
-ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context)
+ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::OpenContext const& base_context)
 {
   auto context = current.replacement_open_context(base_context);
   return create_runtime_session_at(std::move(context), current.workspace_dir(), current.current_dir());
 }
 
-ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context,
+ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenContext const& base_context,
                                                               runtime::SessionLifecycleRequest request)
 {
   auto context = current.replacement_open_context(base_context);

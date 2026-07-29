@@ -136,7 +136,7 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
@@ -309,7 +309,7 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
@@ -382,7 +382,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
     file << "outside permission note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -439,7 +439,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
       file << "outside permission note";
     }
 
-    ava::app::runtime::RuntimeOpenContext open_context;
+    ava::app::runtime::OpenContext open_context;
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
@@ -507,7 +507,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
     file << "outside grant note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -568,7 +568,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
@@ -696,7 +696,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   std::filesystem::create_directories(workspace);
   auto const paths = app_test_paths(root);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -786,7 +786,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   std::filesystem::create_directories(workspace);
   auto const outside_path = root / "outside-created.txt";
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -847,7 +847,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
     file << "outside persistent rule note";
   }
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -928,7 +928,7 @@ void test_app_rpc_question_reply_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -977,7 +977,7 @@ void test_app_rpc_question_reply_selected_option_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
@@ -1031,7 +1031,7 @@ void test_app_rpc_question_reply_selected_options_flow()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::RuntimeOpenContext open_context;
+  ava::app::runtime::OpenContext open_context;
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;

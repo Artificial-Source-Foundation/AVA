@@ -11,6 +11,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_user_turns.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
 #include "ava/session/export.h"
@@ -300,6 +301,12 @@ void test_app_session_fork_from_entry_and_user_turns()
              listed->turns[2].preview == "gamma third",
          "user-turn listing returns stable public user entry ids and terminal-neutral previews while excluding assistant/internal replay");
 
+  auto picker = ava::app::user_turn_selector_view(*session, "Fork from user turn", "Enter fork");
+  expect(picker && picker->title == "Fork from user turn" && picker->selected_item_index == 0 && picker->items.size() == 3 &&
+             picker->items[0].value == "entry_user_c" && picker->items[1].value == "entry_user_b" && picker->items[2].value == "entry_user_a" &&
+             picker->items[2].label == "alpha first line",
+         "session-backed user-turn selector is newest-first with stable entry ids from the bound read authority");
+
   auto capped = ava::app::list_session_user_turns(*session, 2);
   expect(capped && capped->truncated_before && capped->turns.size() == 2 && capped->turns[0].entry_id == "entry_user_b" &&
              capped->turns[1].entry_id == "entry_user_c",
@@ -309,10 +316,22 @@ void test_app_session_fork_from_entry_and_user_turns()
   auto assistant_text = ava::app::read_session_user_turn_text(*session, "entry_assistant_a");
   auto missing_text = ava::app::read_session_user_turn_text(*session, "entry_missing");
   auto internal_text = ava::app::read_session_user_turn_text(*session, "entry_user_internal");
-  expect(exact_text && *exact_text == "alpha first\nline" && !assistant_text && assistant_text.error().category() == ava::core::ErrorCategory::NotFound &&
-             !missing_text && missing_text.error().category() == ava::core::ErrorCategory::NotFound && !internal_text &&
+  expect(exact_text && *exact_text == "alpha first\nline" && *exact_text != listed->turns[0].preview && !assistant_text &&
+             assistant_text.error().category() == ava::core::ErrorCategory::NotFound && !missing_text &&
+             missing_text.error().category() == ava::core::ErrorCategory::NotFound && !internal_text &&
              internal_text.error().category() == ava::core::ErrorCategory::NotFound,
-         "full-text user-turn reads are exact and reject assistant/missing/internal-replay ids");
+         "full-text user-turn reads are exact (not the bounded preview) and reject assistant/missing/internal-replay ids");
+
+  // Copy path re-reads by stable id at action time; oversized payloads fail the existing OSC 52 bound.
+  std::string earlier_entry_id = "entry_user_a";
+  if (picker && picker->items.size() >= 3)
+    earlier_entry_id = picker->items[2].value;
+  auto const copy_text = ava::app::read_session_user_turn_text(*session, earlier_entry_id);
+  expect(copy_text && *copy_text == "alpha first\nline",
+         "copy-user path re-reads exact full text for the selected earlier entry id rather than the preview row");
+  auto const oversized_copy =
+      ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence(std::string(ava::tui::runtime_transcript::kMaxTerminalClipboardTextBytes + 1, 'z'));
+  expect(!oversized_copy, "user-turn clipboard path rejects payloads above the existing 64 KiB OSC 52 bound without truncation");
 
   auto const source_session_id = session->store.session_id();
   auto listed_before = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
@@ -337,17 +356,18 @@ void test_app_session_fork_from_entry_and_user_turns()
   expect(resumed_source && resumed_source->handled && session->store.session_id() == source_session_id,
          "fork-from-entry test resumes the original source before the explicit cut");
 
-  auto cut_fork = ava::app::run_fork_command(*session, "Cut fork", "entry_user_a");
+  // Prove the picker-selected earlier id (not the tip / latest user turn) reaches the branch path.
+  auto cut_fork = ava::app::run_fork_command(*session, "Cut fork", earlier_entry_id);
   auto const cut_session_id = session->store.session_id();
   auto cut_metadata = ava::session::load_session_metadata(session->store);
   auto cut_entries = session->store.load();
   expect(cut_fork && cut_fork->handled && cut_session_id != source_session_id && cut_session_id != tip_session_id && cut_metadata &&
-             cut_metadata->branch_from_entry_id == "entry_user_a" && cut_metadata->branch_origin == "fork" && cut_entries &&
-             std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_a"; }) &&
+             cut_metadata->branch_from_entry_id == earlier_entry_id && cut_metadata->branch_origin == "fork" && cut_entries &&
+             std::ranges::any_of(*cut_entries, [&](ava::session::SessionEntry const& entry) { return entry.id == earlier_entry_id; }) &&
              !std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_b"; }) &&
              !std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_assistant_a"; }) &&
-             cut_fork->output[0].find("at entry_user_a") != std::string::npos,
-         "explicit user-entry fork cuts history at that exact entry id");
+             cut_fork->output[0].find("at " + earlier_entry_id) != std::string::npos,
+         "picker-selected earlier user-entry fork cuts history at that exact entry id rather than the tip");
 
   ava::app::runtime::OpenOptions ephemeral_options = open_options;
   ephemeral_options.sessionless = true;
@@ -373,6 +393,21 @@ void test_app_session_fork_from_entry_and_user_turns()
              ephemeral_listed->turns[0].preview == "ephemeral body" && ephemeral_text && *ephemeral_text == "ephemeral body" && !ephemeral_assistant &&
              ephemeral_assistant.error().category() == ava::core::ErrorCategory::NotFound,
          "ephemeral read authority supports the same public user-turn list and exact-text helpers");
+  auto ephemeral_picker = ava::app::user_turn_selector_view(*ephemeral, "Copy user turn");
+  expect(ephemeral_picker && ephemeral_picker->items.size() == 1 && ephemeral_picker->items[0].value == "ephemeral_user",
+         "ephemeral sessions open the same user-turn selector through SessionReadAuthority");
+
+  ava::app::runtime::OpenOptions empty_options = open_options;
+  empty_options.sessionless = true;
+  auto empty_session = ava::app::open_runtime_session(empty_options);
+  expect(empty_session.has_value(), "empty user-turn selector test opens an ephemeral session");
+  if (empty_session)
+  {
+    auto empty_picker = ava::app::user_turn_selector_view(*empty_session, "Fork from user turn");
+    expect(!empty_picker && empty_picker.error().category() == ava::core::ErrorCategory::NotFound &&
+               empty_picker.error().message().find("no public user turns available") != std::string::npos,
+           "empty user-turn sessions fail closed with an actionable status instead of opening a fork transition");
+  }
 }
 
 void test_app_session_new_resume_commands()

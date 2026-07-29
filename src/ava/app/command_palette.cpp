@@ -6,6 +6,7 @@
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/session_user_turns.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -15,6 +16,7 @@
 #include "ava/session/session_tree.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/registry.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
 #include <cctype>
@@ -147,7 +149,8 @@ std::vector<WorkspacePathCandidate> walk_workspace_path_candidates(runtime::Sess
     return candidates;
 
   std::size_t visited = 0;
-  for (std::filesystem::recursive_directory_iterator it(session.current_dir(), error), end; it != end && visited < kMaxPathCompletionVisited; it.increment(error))
+  for (std::filesystem::recursive_directory_iterator it(session.current_dir(), error), end; it != end && visited < kMaxPathCompletionVisited;
+       it.increment(error))
   {
     if (error)
     {
@@ -1057,7 +1060,7 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
     return std::unexpected(std::move(metadata.error()));
 
   ava::session::SessionSummary summary{.session_id = metadata->session_id,
-                                       .path = session.store.session_path(), //FIXME: race condition? Shouldn't this come from metadata too?
+                                       .path = session.store.session_path(), // FIXME: race condition? Shouldn't this come from metadata too?
                                        .last_updated = entries->empty() ? std::string{} : entries->back().timestamp,
                                        .entry_count = entries->size(),
                                        .original_cwd = metadata->original_cwd,
@@ -1472,6 +1475,58 @@ std::optional<std::string> session_selector_child_target(ava::session::SessionTr
       return child_id;
   }
   return std::nullopt;
+}
+
+tui::SelectListView user_turn_selector_view(std::vector<SessionUserTurn> turns, std::string title, std::string footer_hint, std::string initial_query,
+                                            bool truncated_before)
+{
+  // Newest first so Enter on the initial selection forks/copies the latest public user turn.
+  std::ranges::reverse(turns);
+
+  tui::SelectListView view{
+      .title = std::move(title),
+      .subtitle = truncated_before ? std::string("newest retained turns · older history omitted") : std::string{},
+      .items = {},
+      .selected_item_index = 0,
+      .query = std::move(initial_query),
+      .placeholder = "Search user turns",
+      .empty_text = "No user turns match",
+      .footer_hint = std::move(footer_hint),
+  };
+  view.items.reserve(turns.size());
+  for (auto& turn : turns)
+  {
+    auto label = turn.preview.empty() ? std::string("(empty user turn)") : std::move(turn.preview);
+    view.items.push_back(tui::SelectListItemView{
+        .value = std::move(turn.entry_id),
+        .label = std::move(label),
+        .description = {},
+        .group = {},
+        .detail = std::move(turn.timestamp),
+        .badge = {},
+        .current = false,
+        .enabled = true,
+        .disabled_reason = {},
+    });
+  }
+  if (!view.query.empty())
+    view.selected_item_index = tui::clamp_select_list_selection(view, 0);
+  return view;
+}
+
+ava::core::Result<tui::SelectListView> user_turn_selector_view(runtime::Session const& session, std::string title, std::string footer_hint,
+                                                               std::string initial_query)
+{
+  auto listed = list_session_user_turns(session);
+  if (!listed)
+    return std::unexpected(std::move(listed.error()));
+  if (listed->turns.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "no public user turns available");
+    error.with_context("operation", "user_turn_selector_view");
+    return std::unexpected(std::move(error));
+  }
+  return user_turn_selector_view(std::move(listed->turns), std::move(title), std::move(footer_hint), std::move(initial_query), listed->truncated_before);
 }
 
 }  // namespace ava::app

@@ -124,7 +124,7 @@ Reference: [iTerm2 OSC 8 documentation](https://iterm2.com/documentation-escape-
 
 ## OSC 52 Clipboard Copy
 
-The TUI `/copy` command copies through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, tool details, diffs, and permission details.
+The TUI `/copy` command copies through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation.
 
 AVA rejects empty clipboard text and any payload larger than 64 KiB (65,536 raw bytes) without emitting a partial sequence or spawning an external clipboard helper. Oversized copies report the existing clipboard failure status.
 

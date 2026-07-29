@@ -156,6 +156,10 @@ struct TuiRuntimeOptions
   std::function<SelectListView()> model_selector_view;
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
+  // Open searchable public user-turn pickers. Fail closed with Result when the
+  // bound session authority has no public user turns or cannot list them.
+  std::function<ava::core::Result<SelectListView>()> on_open_fork_user_turn_selector;
+  std::function<ava::core::Result<SelectListView>(std::string_view initial_query)> on_open_copy_user_turn_selector;
   std::function<SelectListView()> on_session_selector_sort_cycle;
   std::function<SelectListView()> on_session_selector_named_filter_toggle;
   std::function<SelectListView()> on_session_selector_path_display_toggle;
@@ -169,6 +173,10 @@ struct TuiRuntimeOptions
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
+  // Fork at the selected public user entry id through the normal branch path.
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view entry_id)> on_fork_user_turn_selected;
+  // Re-read exact public user-turn text by stable entry id at action time.
+  std::function<ava::core::Result<std::string>(std::string_view entry_id)> on_read_user_turn_text;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view)> on_scoped_model_toggled;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_enable_all;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_clear_all;

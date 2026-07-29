@@ -14,6 +14,7 @@
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
@@ -41,6 +42,7 @@ using runtime_input::printable_jump_target;
 using runtime_input::read_curses_input_with_timeout;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_from_answer;
+using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
@@ -857,6 +859,65 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             snapshot.status = selected.error().format();
             static_cast<void>(beep());
+          }
+        }
+        else if (resolved_list == ActiveSelectList::ForkUserTurn && options.on_fork_user_turn_selected)
+        {
+          if (selected_value.empty())
+          {
+            snapshot.status = "no user turn selected";
+            static_cast<void>(beep());
+          }
+          else
+          {
+            auto selected =
+                dispatch_tui_selector_authority(snapshot, "forking session…", render, [&]() { return options.on_fork_user_turn_selected(selected_value); });
+            if (selected)
+            {
+              // Same transition boundary as session open: clear the prior
+              // transcript and announce the fork/switch status.
+              apply_opened_session_snapshot(std::move(*selected), true);
+            }
+            else
+            {
+              snapshot.status = selected.error().format();
+              static_cast<void>(beep());
+            }
+          }
+        }
+        else if (resolved_list == ActiveSelectList::CopyUserTurn && options.on_read_user_turn_text)
+        {
+          if (selected_value.empty())
+          {
+            snapshot.status = "no user turn selected";
+            push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+            transcript_scroll_offset = 0;
+            static_cast<void>(beep());
+          }
+          else
+          {
+            auto text = options.on_read_user_turn_text(selected_value);
+            if (!text)
+            {
+              snapshot.status = text.error().format();
+              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+              static_cast<void>(beep());
+            }
+            else if (copy_text_to_terminal_clipboard(*text))
+            {
+              snapshot.status = "copied user turn to clipboard";
+              push_transcript(snapshot, TranscriptItem{.label = "status", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+            }
+            else
+            {
+              // Truthful failure covers empty text and the 64 KiB OSC 52 bound.
+              snapshot.status = "clipboard copy failed";
+              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+              static_cast<void>(beep());
+            }
           }
         }
         else if (resolved_list == ActiveSelectList::Settings && options.on_settings_selected)

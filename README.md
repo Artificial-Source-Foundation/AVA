@@ -145,7 +145,7 @@ The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5
 - Ctrl+V: import a PNG/JPEG/WebP/GIF image from the clipboard as a pending attachment when a supported clipboard helper is available
 - `/tool [query]`: toggle Expanded presentation for the latest or matching tool card in the TUI; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI
-- `/copy [tool|diff|permission] [query]`: copy the latest AVA message, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
+- `/copy [user|tool|diff|permission] [query]`: copy the latest AVA message, a selected public user turn, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
 - `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image into session-owned attachment storage and send it with the next normal TUI prompt; `/image` is an alias
 
@@ -155,6 +155,7 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/scoped-models`: open the TUI scoped model-cycle selector to enable, disable, and order the Ctrl+P cycle; Ctrl+S persists the saved cycle in `models.json`
 - `/sessions [--archived] [query|id]`, `/sessions rename <id> <name|--clear>`, `/sessions labels <id> <label...|--clear>`, `/sessions archive <id> --confirm`, or `/sessions unarchive <id>`: show the resumable session tree, rename/label sessions, or hide/restore sessions without deleting their JSONL files; `/tree` is an alias for the tree view
 - `/fork [name]`: fork the current session at its latest entry and switch to the branch
+- `/fork-from`: fork from a selected public user turn in the TUI and switch to the branch
 - `/clone [name]`: clone the full current session and switch to the copy
 - `/new [name]`: start a fresh session and switch to it
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty

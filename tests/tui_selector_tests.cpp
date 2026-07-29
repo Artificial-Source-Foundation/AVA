@@ -135,8 +135,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/parent.jsonl",
                                                                                                  .last_updated = "2026-05-06T08:00:00Z",
                                                                                                  .entry_count = 6},
-                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_parent",
-                                                                                                        .name = "Parent session",
+                                                         .metadata = ava::session::SessionMetadataView{.session_id = "session_parent",
+                                                                                                       .name = "Parent session",
                                                                                                        .labels = {"root"},
                                                                                                        .labels_updated = "2026-05-06T08:05:00Z",
                                                                                                        .parent_session_id = {},
@@ -150,8 +150,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/child.jsonl",
                                                                                                  .last_updated = "2026-05-06T10:00:00Z",
                                                                                                  .entry_count = 11},
-                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_child",
-                                                                                                        .name = "Review branch",
+                                                         .metadata = ava::session::SessionMetadataView{.session_id = "session_child",
+                                                                                                       .name = "Review branch",
                                                                                                        .labels = {"review", "ui"},
                                                                                                        .labels_updated = "2026-05-06T10:05:00Z",
                                                                                                        .parent_session_id = "session_parent",
@@ -218,9 +218,14 @@ void run_tui_selector_tests()
       .summary =
           ava::session::SessionSummary{
               .session_id = "session_unnamed", .path = "/tmp/ava/sessions/unnamed.jsonl", .last_updated = "2026-05-06T11:00:00Z", .entry_count = 2},
-      .metadata =
-           ava::session::SessionMetadataView{
-               .session_id = "session_unnamed", .name = {}, .labels = {}, .parent_session_id = {}, .source_session_id = {}, .branch_from_entry_id = {}, .branch_origin = "root", .actor = "test"},
+      .metadata = ava::session::SessionMetadataView{.session_id = "session_unnamed",
+                                                    .name = {},
+                                                    .labels = {},
+                                                    .parent_session_id = {},
+                                                    .source_session_id = {},
+                                                    .branch_from_entry_id = {},
+                                                    .branch_origin = "root",
+                                                    .actor = "test"},
       .children = {},
       .current = false});
   auto named_only_sessions = ava::app::session_selector_view(tree_with_unnamed, ava::app::SessionSelectorSort::Name, "Ctrl+N show all", true);
@@ -738,4 +743,78 @@ void run_tui_selector_tests()
                std::ranges::all_of(plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
            "settings view reports active NO_COLOR plain display mode without ANSI styling");
   }
+
+  std::vector<ava::app::SessionUserTurn> user_turns{
+      ava::app::SessionUserTurn{.entry_id = "entry_user_a", .timestamp = "2026-05-08T00:00:01Z", .preview = "alpha first line"},
+      ava::app::SessionUserTurn{.entry_id = "entry_user_b", .timestamp = "2026-05-08T00:00:03Z", .preview = "beta second"},
+      ava::app::SessionUserTurn{.entry_id = "entry_user_c", .timestamp = "2026-05-08T00:00:06Z", .preview = "gamma third"},
+  };
+  auto fork_picker = ava::app::user_turn_selector_view(user_turns, "Fork from user turn", "Enter fork · Esc cancel");
+  expect(fork_picker.title == "Fork from user turn" && fork_picker.selected_item_index == 0 && fork_picker.items.size() == 3 &&
+             fork_picker.items[0].value == "entry_user_c" && fork_picker.items[0].label == "gamma third" &&
+             fork_picker.items[0].detail == "2026-05-08T00:00:06Z" && fork_picker.items[1].value == "entry_user_b" &&
+             fork_picker.items[2].value == "entry_user_a" && fork_picker.placeholder == "Search user turns",
+         "user-turn picker lists newest public turns first with stable entry ids and bounded previews");
+  fork_picker.query = "beta";
+  auto const beta_matches = ava::tui::filter_select_list_items(fork_picker);
+  expect(beta_matches.size() == 1 && fork_picker.items[beta_matches.front()].value == "entry_user_b", "user-turn picker filters by bounded preview text");
+  auto filtered_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'x'});
+  expect(filtered_input.action == ava::tui::SelectListInputAction::Redraw && filtered_input.query == "betax",
+         "user-turn picker accepts incremental filter input without mutation");
+  fork_picker.query = "beta";
+  fork_picker.selected_item_index = ava::tui::clamp_select_list_selection(fork_picker, 0);
+  auto resolve_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(resolve_input.action == ava::tui::SelectListInputAction::Resolve && resolve_input.selected_item_index == 1 &&
+             fork_picker.items[resolve_input.selected_item_index].value == "entry_user_b",
+         "user-turn picker Enter resolves the filtered earlier entry id rather than the tip");
+  auto cancel_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
+  expect(cancel_input.action == ava::tui::SelectListInputAction::Cancel, "user-turn picker Escape cancels without mutation");
+
+  auto empty_result = ava::app::user_turn_selector_view(std::vector<ava::app::SessionUserTurn>{}, "Fork from user turn");
+  expect(empty_result.items.empty() && empty_result.empty_text == "No user turns match",
+         "user-turn picker builder retains empty-list semantics for callers that surface status without opening");
+
+  for (auto const height : {std::size_t{8}, std::size_t{10}, std::size_t{12}})
+  {
+    auto tall_picker = fork_picker;
+    tall_picker.query.clear();
+    tall_picker.selected_item_index = 2;
+    auto snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                               .provider = "openai",
+                                               .model = "gpt-5.5",
+                                               .session_id = "session_test",
+                                               .input = "",
+                                               .status = "fork-from selector opened",
+                                               .transcript = {},
+                                               .select_list = tall_picker,
+                                               .width = 80,
+                                               .height = height};
+    auto const frame = ava::tui::render_composer(snapshot);
+    auto const selected_line = std::ranges::find_if(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("›") != std::string::npos && visible.find("alpha first line") != std::string::npos;
+    });
+    expect(selected_line != frame.end(), "user-turn picker keeps the selected older turn visible at tiny terminal heights");
+    if (selected_line != frame.end())
+    {
+      auto const hit = ava::tui::select_list_selection_for_screen_position(snapshot, static_cast<std::size_t>(selected_line - frame.begin()) + 1, 20);
+      expect(hit && *hit == 2, "user-turn picker mouse hit-testing shares the rendered selected row");
+    }
+  }
+
+  auto prompt_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "write_file", .operation = "write_file", .target = "src/main.cpp", .reason = "test"},
+      .select_list = fork_picker,
+      .width = 80,
+      .height = 24};
+  // Permission prompts outrank selectors for hit testing; the select-list path must not claim the click.
+  auto const blocked_hit = ava::tui::select_list_selection_for_screen_position(prompt_snapshot, 8, 10);
+  expect(!blocked_hit, "active permission prompts outrank user-turn selector hit testing");
 }

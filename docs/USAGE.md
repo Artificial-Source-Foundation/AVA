@@ -159,7 +159,7 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 - `/details [compact|rich|expanded]` or Ctrl+O: select tool-card presentation; Rich is the default, and bare `/details` or Ctrl+O toggles Rich and Expanded
 - `/tool [query]`: show the latest or matching expanded tool card in the TUI transcript; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI transcript
-- `/copy [tool|diff|permission] [query]`: copy the latest AVA message, latest or matching tool-card details, latest or matching unified diff, or latest or matching permission audit details through the terminal clipboard path
+- `/copy [user|tool|diff|permission] [query]`: copy the latest AVA message, a selected public user turn, latest or matching tool-card details, latest or matching unified diff, or latest or matching permission audit details through the terminal clipboard path. Exact `/copy user` opens a searchable newest-first user-turn picker and re-reads the full turn text by stable entry id on Enter; any remaining text seeds the picker filter. Existing `tool`/`diff`/`permission` targets and their plural aliases are unchanged.
 - `/thinking`: toggle inline thinking block visibility in the TUI without changing provider reasoning mode
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image and send it with the next normal TUI prompt; `/image` is an alias, and Ctrl+V imports a supported clipboard image when `wl-paste` or `xclip` can read one
 - `/connect`: open provider and login method modals; `/login` is an alias
@@ -171,6 +171,7 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 - `/sessions labels <id> <label...|--clear>`: set or clear labels on a session without switching to it
 - `/sessions archive <id> --confirm` and `/sessions unarchive <id>`: hide or restore a non-current session without deleting its JSONL file
 - `/fork [name]`: fork the current session at its latest entry and switch to the new branch
+- `/fork-from`: open a searchable newest-first picker of public user turns and fork at the selected stable entry id, then switch to the new branch; Esc cancels without mutation
 - `/clone [name]`: clone the full current session and switch to the copy
 - `/new [name]`: start a fresh session and switch to it
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty

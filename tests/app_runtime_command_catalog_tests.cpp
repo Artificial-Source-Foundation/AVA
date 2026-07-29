@@ -63,9 +63,13 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "slash catalog exposes /tool for visible TUI tool-card inspection");
   expect(diff_item != nullptr && diff_item->hint == "[query]" && diff_item->description.find("latest or matching tool diff") != std::string::npos,
          "slash catalog exposes /diff for visible TUI tool-diff inspection");
-  expect(copy_item != nullptr && copy_item->hint.empty() && copy_item->description.find("latest AVA message") != std::string::npos &&
-             copy_item->description.find("tool") != std::string::npos && copy_item->description.find("permission details") != std::string::npos,
-         "slash catalog exposes Pi-style /copy clipboard command without blocking exact-submit behavior");
+  expect(copy_item != nullptr && copy_item->hint.find("user") != std::string::npos && copy_item->description.find("latest AVA message") != std::string::npos &&
+             copy_item->description.find("user turn") != std::string::npos && copy_item->description.find("tool") != std::string::npos &&
+             copy_item->description.find("permission details") != std::string::npos,
+         "slash catalog exposes Pi-style /copy clipboard command including user-turn picker without blocking exact-submit behavior");
+  auto const* fork_from_item = tui_test_support::find_slash_command_item(slash_items, "/fork-from");
+  expect(fork_from_item != nullptr && fork_from_item->description.find("public user turn") != std::string::npos,
+         "slash catalog exposes /fork-from user-turn fork picker");
   expect(scoped_models_item != nullptr && scoped_models_item->description.find("Ctrl+P cycling") != std::string::npos,
          "slash catalog exposes Pi-style /scoped-models model cycle selector entry point");
   expect(models_item != nullptr && models_item->hint == "[query]" && models_item->description.find("model selector") != std::string::npos,

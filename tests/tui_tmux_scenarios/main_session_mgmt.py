@@ -282,6 +282,19 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "Enter")
     wait_for(tmux_exe, session, r"session name set: \"Branch parent\"", "branch parent session name")
     send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/fork-from")
+    send_keys(tmux_exe, session, "Enter")
+    # Command-only sessions have no public user turns; the picker fails closed with status.
+    empty_fork_from = wait_for(
+        tmux_exe,
+        session,
+        r"no public user turns available|Fork from user turn",
+        "fork-from empty-or-picker status on command-only session",
+    )
+    if "Fork from user turn" in empty_fork_from:
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Fork from user turn", "fork-from picker closed without mutation")
+    send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/fork Branch child")
     send_keys(tmux_exe, session, "Enter")
     wait_for(

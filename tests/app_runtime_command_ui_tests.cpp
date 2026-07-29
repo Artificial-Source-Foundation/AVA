@@ -337,10 +337,15 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
          "command dispatcher recognizes filtered /diff as a TUI transcript inspection command");
   auto copy = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy tool"});
   expect(copy && copy->handled && !copy->output.empty() && copy->output[0].find("/copy for the latest AVA message") != std::string::npos &&
+             copy->output[0].find("/copy user [query] to pick a public user turn") != std::string::npos &&
              copy->output[0].find("/copy tool [query] for tool details") != std::string::npos &&
              copy->output[0].find("/copy diff [query] for unified diffs") != std::string::npos &&
              copy->output[0].find("/copy permission [query] for permission audit details") != std::string::npos,
          "command dispatcher recognizes /copy as a TUI clipboard command");
+  auto copy_user = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy user"});
+  expect(copy_user && copy_user->handled && !copy_user->output.empty() &&
+             copy_user->output[0].find("/copy user [query] to pick a public user turn") != std::string::npos,
+         "command dispatcher recognizes exact /copy user as a TUI user-turn clipboard target");
   auto copy_diff = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy diff src/main.cpp"});
   expect(
       copy_diff && copy_diff->handled && !copy_diff->output.empty() && copy_diff->output[0].find("/copy diff [query] for unified diffs") != std::string::npos,
@@ -352,8 +357,12 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
   auto unsupported_copy = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy branch"});
   expect(unsupported_copy && unsupported_copy->handled && !unsupported_copy->output.empty() &&
              unsupported_copy->output[0].find("unsupported copy target: branch") != std::string::npos &&
-             unsupported_copy->output[0].find("supported: tool [query], diff [query], permission [query]") != std::string::npos,
+             unsupported_copy->output[0].find("supported: user [query], tool [query], diff [query], permission [query]") != std::string::npos,
          "command dispatcher reports unsupported copy targets");
+  auto fork_from = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/fork-from"});
+  expect(fork_from && fork_from->handled && !fork_from->output.empty() && fork_from->output[0].find("interactive TUI") != std::string::npos &&
+             fork_from->output[0].find("/fork-from") != std::string::npos && fork_from->output[0].find("/fork [name]") != std::string::npos,
+         "command dispatcher recognizes /fork-from as a TUI user-turn fork picker");
   auto thinking = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking"});
   expect(thinking && thinking->handled && !thinking->output.empty() && thinking->output[0].find("TUI display toggle") != std::string::npos &&
              thinking->output[0].find("does not change provider reasoning mode") != std::string::npos,

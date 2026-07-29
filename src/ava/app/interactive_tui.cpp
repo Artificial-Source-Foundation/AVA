@@ -2,6 +2,7 @@
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_sessions.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/interactive_run_queue.h"
@@ -12,6 +13,7 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/session_user_turns.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/config/model_profiles.h"
@@ -94,7 +96,7 @@ int run_tui(ShellState state)
   auto capture_title_catalog_changes = [&state, &application_catalog]() {
     auto const cursor = application_catalog.title_catalog_cursor();
     return state.session.session_title_coordinator() ? state.session.session_title_coordinator()->catalog_changes_since(cursor)
-                                                   : ava::app::SessionTitleCatalogChanges{.cursor = cursor};
+                                                     : ava::app::SessionTitleCatalogChanges{.cursor = cursor};
   };
   auto refresh_title_catalog = [&state, &application_catalog, &hotkeys, &capture_title_catalog_changes]() -> ava::core::Result<bool> {
     if (!state.session.session_title_coordinator())
@@ -427,6 +429,12 @@ int run_tui(ShellState state)
             session_selector_show_label_time = false;
             return session_selector_snapshot();
           },
+      .on_open_fork_user_turn_selector = [&state]() -> ava::core::Result<ava::tui::SelectListView> {
+        return ava::app::user_turn_selector_view(state.session, "Fork from user turn", "Enter fork · type to filter · Esc cancel");
+      },
+      .on_open_copy_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
+        return ava::app::user_turn_selector_view(state.session, "Copy user turn", "Enter copy · type to filter · Esc cancel", std::string(initial_query));
+      },
       .on_session_selector_sort_cycle =
           [&session_selector_sort, &session_selector_snapshot]() {
             session_selector_sort = ava::app::next_session_selector_sort(session_selector_sort);
@@ -537,6 +545,33 @@ int run_tui(ShellState state)
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
+      },
+      .on_fork_user_turn_selected = [&state, &state_snapshot, &application_catalog, &hotkeys,
+                                     &refresh_session_tree_catalog](std::string_view entry_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        if (entry_id.empty())
+        {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "fork-from selection is missing entry id"));
+        }
+        auto forked = ava::app::run_fork_command(state.session, {}, entry_id);
+        if (!forked)
+          return std::unexpected(std::move(forked.error()));
+        if (forked->session_tree_changed)
+        {
+          if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
+            return std::unexpected(std::move(refreshed.error()));
+        }
+        else
+        {
+          application_catalog.retarget_session(state.session.store.session_id());
+          application_catalog.refresh_values(state.session, hotkeys);
+        }
+        auto status = forked->output.empty() ? std::string("forked session") : forked->output.front();
+        if (auto const newline = status.find('\n'); newline != std::string::npos)
+          status.erase(newline);
+        return state_snapshot(std::move(status));
+      },
+      .on_read_user_turn_text = [&state](std::string_view entry_id) -> ava::core::Result<std::string> {
+        return ava::app::read_session_user_turn_text(state.session, entry_id);
       },
       .on_scoped_model_toggled = [&state](ava::tui::SelectListView const& previous, std::string_view value) -> ava::core::Result<ava::tui::SelectListView> {
         return toggle_scoped_model(state.session, previous, value);

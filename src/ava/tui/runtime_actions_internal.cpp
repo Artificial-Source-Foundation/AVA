@@ -375,6 +375,56 @@ bool RuntimeActionController::open_session_selector()
   return renderer_.request_render();
 }
 
+bool RuntimeActionController::open_fork_user_turn_selector()
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!options_.on_open_fork_user_turn_selector)
+  {
+    snapshot.status = "fork-from selector unavailable";
+    static_cast<void>(beep());
+    return true;
+  }
+  auto opened = options_.on_open_fork_user_turn_selector();
+  if (!opened)
+  {
+    snapshot.status = opened.error().format();
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*opened);
+  active_select_list_ = ActiveSelectList::ForkUserTurn;
+  snapshot.status = "fork-from selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
+bool RuntimeActionController::open_copy_user_turn_selector(std::string_view initial_query)
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!options_.on_open_copy_user_turn_selector)
+  {
+    snapshot.status = "copy user-turn selector unavailable";
+    static_cast<void>(beep());
+    return true;
+  }
+  auto opened = options_.on_open_copy_user_turn_selector(initial_query);
+  if (!opened)
+  {
+    snapshot.status = opened.error().format();
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*opened);
+  active_select_list_ = ActiveSelectList::CopyUserTurn;
+  snapshot.status = "copy user-turn selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
 void RuntimeActionController::cycle_model(bool forward)
 {
   auto& snapshot = presentation_state_.snapshot;

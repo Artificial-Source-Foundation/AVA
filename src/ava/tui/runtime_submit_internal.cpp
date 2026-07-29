@@ -221,6 +221,15 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
+    if (exact_command(submitted, "/fork-from") && options_.on_open_fork_user_turn_selector)
+    {
+      push_history(input_history, submitted);
+      if (!action_controller_.open_fork_user_turn_selector())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
     if (auto search_query = search_command_argument(submitted))
     {
       push_history(input_history, submitted);
@@ -464,6 +473,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       auto const target = parse_copy_target(*copy_target);
+      // Exact target name "user" opens the public user-turn picker. No alias is
+      // accepted; remaining text becomes the selector's initial filter query.
+      if (target.name == "user" && options_.on_open_copy_user_turn_selector)
+      {
+        if (!action_controller_.open_copy_user_turn_selector(target.query))
+        {
+          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+        }
+        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+      }
       std::optional<std::string> copy_text;
       std::string copied_status;
       std::string missing_status;
@@ -493,11 +512,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         copied_status = target.query.empty() ? "copied latest permission details to clipboard" : "copied matching permission details to clipboard";
         missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
       }
+      else if (target.name == "user")
+      {
+        valid_target = false;
+        snapshot.status = "copy user-turn selector unavailable";
+      }
       else
       {
         valid_target = false;
-        snapshot.status =
-            "invalid_argument: unsupported copy target\n  target: " + target.name + "\n  supported: tool [query], diff [query], permission [query]";
+        snapshot.status = "invalid_argument: unsupported copy target\n  target: " + target.name +
+                          "\n  supported: user [query], tool [query], diff [query], permission [query]";
       }
 
       if (valid_target)

@@ -1513,10 +1513,154 @@ void test_tui_f5_progressive_tool_details()
            "tui F5 progressive tool details retain compact NO_COLOR bounds");
   }
 }
+
+bool line_has_intraline_emphasis(std::string const& line)
+{
+  // Changed middle is marked with bold + underline while the role color remains.
+  return line.find("\x1b[1m") != std::string::npos && line.find("\x1b[4m") != std::string::npos;
+}
+
+std::string find_plain_diff_line(std::vector<std::string> const& lines, std::string_view needle)
+{
+  for (auto const& line : lines)
+  {
+    auto const plain = strip_sgr(line);
+    if (plain.find(needle) != std::string::npos)
+      return plain;
+  }
+  return {};
+}
+
+std::string find_styled_diff_line(std::vector<std::string> const& lines, std::string_view needle)
+{
+  for (auto const& line : lines)
+  {
+    if (strip_sgr(line).find(needle) != std::string::npos)
+      return line;
+  }
+  return {};
+}
+
+void test_tui_diff_intraline_emphasis()
+{
+  auto const one_to_one =
+      ava::tui::detail::render_unified_diff_body("--- note.txt\n+++ note.txt\n@@ -1,1 +1,1 @@\n-hello world\n+hello earth\n", false, 120, "", 20);
+  auto const removed = find_styled_diff_line(one_to_one, "-hello world");
+  auto const added = find_styled_diff_line(one_to_one, "+hello earth");
+  expect(!removed.empty() && !added.empty() && line_has_intraline_emphasis(removed) && line_has_intraline_emphasis(added) &&
+             removed.find("\x1b[38;2;248;113;113m") != std::string::npos && added.find("\x1b[38;2;52;211;153m") != std::string::npos &&
+             strip_sgr(removed).find("1") != std::string::npos && strip_sgr(added).find("1") != std::string::npos &&
+             strip_sgr(removed).find("-hello world") != std::string::npos && strip_sgr(added).find("+hello earth") != std::string::npos,
+         "tui 1:1 replacement pairs emphasize the changed middle while keeping role colors and gutters");
+
+  auto const multi =
+      ava::tui::detail::render_unified_diff_body("--- m.txt\n+++ m.txt\n@@ -1,2 +1,2 @@\n-alpha one\n-beta two\n+alpha ONE\n+beta TWO\n", false, 120, "", 20);
+  expect(line_has_intraline_emphasis(find_styled_diff_line(multi, "-alpha one")) && line_has_intraline_emphasis(find_styled_diff_line(multi, "+alpha ONE")) &&
+             line_has_intraline_emphasis(find_styled_diff_line(multi, "-beta two")) && line_has_intraline_emphasis(find_styled_diff_line(multi, "+beta TWO")),
+         "tui equal multi-line replacement runs pair by ordinal for intra-line emphasis");
+
+  auto const unequal = ava::tui::detail::render_unified_diff_body("--- u.txt\n+++ u.txt\n@@ -1,2 +1,1 @@\n-first\n-second\n+only\n", false, 120, "", 20);
+  expect(!line_has_intraline_emphasis(find_styled_diff_line(unequal, "-first")) && !line_has_intraline_emphasis(find_styled_diff_line(unequal, "-second")) &&
+             !line_has_intraline_emphasis(find_styled_diff_line(unequal, "+only")),
+         "tui unequal replacement runs keep whole-line diff styling without intra-line pairs");
+
+  // "café 🌍 end" vs "café 🌎 end" — shared UTF-8/emoji prefix and suffix.
+  auto const utf8 = ava::tui::detail::render_unified_diff_body("--- e.txt\n+++ e.txt\n@@ -1 +1 @@\n-café 🌍 end\n+café 🌎 end\n", false, 120, "", 20);
+  auto const utf8_removed = find_styled_diff_line(utf8, "café 🌍 end");
+  auto const utf8_added = find_styled_diff_line(utf8, "café 🌎 end");
+  expect(line_has_intraline_emphasis(utf8_removed) && line_has_intraline_emphasis(utf8_added) &&
+             strip_sgr(utf8_removed).find("café 🌍 end") != std::string::npos && strip_sgr(utf8_added).find("café 🌎 end") != std::string::npos,
+         "tui intra-line prefix/suffix matching respects UTF-8 and emoji cluster boundaries");
+
+  // Both sides carry a visible non-empty middle (punctuation vs spaces).
+  auto const whitespace_both = ava::tui::detail::render_unified_diff_body("--- w.txt\n+++ w.txt\n@@ -1 +1 @@\n-a-b\n+a b\n", false, 120, "", 20);
+  auto const ws_both_removed = find_styled_diff_line(whitespace_both, "-a-b");
+  auto const ws_both_added = find_styled_diff_line(whitespace_both, "+a b");
+  expect(line_has_intraline_emphasis(ws_both_removed) && line_has_intraline_emphasis(ws_both_added) &&
+             strip_sgr(ws_both_removed).find("-a-b") != std::string::npos && strip_sgr(ws_both_added).find("+a b") != std::string::npos,
+         "tui whitespace/punctuation replacement middles stay emphasizeable on both sides");
+
+  // Extra spaces only on one side: emphasize the visible middle, never fabricate glyphs.
+  auto const whitespace_one = ava::tui::detail::render_unified_diff_body("--- w2.txt\n+++ w2.txt\n@@ -1 +1 @@\n-a b\n+a  b\n", false, 120, "", 20);
+  auto const ws_one_removed = find_styled_diff_line(whitespace_one, "-a b");
+  auto const ws_one_added = find_styled_diff_line(whitespace_one, "+a  b");
+  expect(!ws_one_removed.empty() && !ws_one_added.empty() && line_has_intraline_emphasis(ws_one_added) &&
+             strip_sgr(ws_one_removed).find("-a b") != std::string::npos && strip_sgr(ws_one_added).find("+a  b") != std::string::npos &&
+             strip_sgr(ws_one_added).find("+a   b") == std::string::npos,
+         "tui one-sided whitespace-only middles emphasize only visible spans without fabricated glyphs");
+
+  auto const wrapped = ava::tui::detail::render_unified_diff_body(
+      "--- long.txt\n+++ long.txt\n@@ -1 +1 @@\n-prefix CHANGED_OLD trailing material that forces width wrapping in the diff body\n"
+      "+prefix CHANGED_NEW trailing material that forces width wrapping in the diff body\n",
+      false, 48, "  ", 20);
+  expect(std::ranges::all_of(wrapped, [](std::string const& line) { return visible_columns(line) <= 48; }) &&
+             std::ranges::any_of(wrapped, [](std::string const& line) { return strip_sgr(line).find("prefix") != std::string::npos; }),
+         "tui long intra-line diff rows remain width-safe under existing wrapping");
+
+  auto const numbered = ava::tui::detail::render_unified_diff_body("--- n.txt\n+++ n.txt\n@@ -10,1 +10,1 @@\n-value old\n+value new\n", false, 120, "", 20);
+  auto const numbered_removed = find_plain_diff_line(numbered, "-value old");
+  auto const numbered_added = find_plain_diff_line(numbered, "+value new");
+  expect(numbered_removed.find("10") != std::string::npos && numbered_added.find("10") != std::string::npos &&
+             line_has_intraline_emphasis(find_styled_diff_line(numbered, "-value old")),
+         "tui intra-line emphasis preserves existing line-number gutters");
+
+  // Exact plain-text parity: stripped markup matches a no-emphasis structural reading.
+  auto const parity_source = "--- p.txt\n+++ p.txt\n@@ -1,2 +1,2 @@\n-keep change_me tail\n context\n+keep CHANGE_ME tail\n context\n";
+  auto const parity = ava::tui::detail::render_unified_diff_body(parity_source, false, 120, "|", 20);
+  expect(find_plain_diff_line(parity, "-keep change_me tail").find("|") != std::string::npos &&
+             find_plain_diff_line(parity, "+keep CHANGE_ME tail").find("keep CHANGE_ME tail") != std::string::npos &&
+             find_plain_diff_line(parity, "context").find("context") != std::string::npos &&
+             std::ranges::none_of(parity,
+                                  [](std::string const& line) {
+                                    auto const plain = strip_sgr(line);
+                                    return plain.find("\x1b") != std::string::npos;
+                                  }),
+         "tui stripped intra-line diff markup preserves exact plain-text content and prefixes");
+
+  // Cap/truncation markers remain unchanged when the body exceeds max_lines.
+  std::string many_lines = "--- t.txt\n+++ t.txt\n@@ -1,12 +1,12 @@\n";
+  for (int i = 0; i < 12; ++i)
+  {
+    many_lines += "-old" + std::to_string(i) + "\n";
+    many_lines += "+new" + std::to_string(i) + "\n";
+  }
+  auto const capped = ava::tui::detail::render_unified_diff_body(many_lines, true, 100, "", 6);
+  expect(capped.size() == 6 &&
+             std::ranges::any_of(capped, [](std::string const& line) { return strip_sgr(line).find("diff lines hidden") != std::string::npos; }) &&
+             std::ranges::any_of(capped, [](std::string const& line) { return strip_sgr(line).find("[diff truncated]") != std::string::npos; }),
+         "tui intra-line emphasis leaves existing diff row caps and truncation markers unchanged");
+
+  {
+    ScopedEnvVar no_color("NO_COLOR", "1");
+    auto const plain_card = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_test",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.tool =
+                                                    ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                               .name = "edit_file",
+                                                                               .argument_summary = "path=note.txt",
+                                                                               .result_summary = "edited",
+                                                                               .details_visible = true,
+                                                                               .diff = "--- note.txt\n+++ note.txt\n@@ -1 +1 @@\n-hello world\n+hello earth\n",
+                                                                               .changed_paths = {"note.txt"}}}},
+        .width = 100,
+        .height = 18,
+        .tool_presentation = ava::tui::ToolPresentation::Compact});
+    expect(std::ranges::all_of(plain_card, [](std::string const& line) { return line.find('\x1b') == std::string::npos; }) &&
+               std::ranges::any_of(plain_card, [](std::string const& line) { return line.find("-hello world") != std::string::npos; }) &&
+               std::ranges::any_of(plain_card, [](std::string const& line) { return line.find("+hello earth") != std::string::npos; }),
+           "tui NO_COLOR/plain fallback strips intra-line emphasis and retains readable diff text");
+  }
+}
 }  // namespace
 
 void run_tui_tool_card_detail_tests()
 {
   test_tui_large_tool_output_preview_is_bounded();
   test_tui_f5_progressive_tool_details();
+  test_tui_diff_intraline_emphasis();
 }

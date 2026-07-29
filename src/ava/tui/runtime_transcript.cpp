@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -158,7 +159,13 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 std::string base64_encode(std::string_view text)
 {
   std::string output;
-  output.reserve(((text.size() + 2) / 3) * 4);
+  // encoded_size = ceil(n / 3) * 4 = ((n + 2) / 3) * 4 — guard both steps.
+  if (text.size() <= std::numeric_limits<std::size_t>::max() - 2)
+  {
+    auto const groups = (text.size() + 2) / 3;
+    if (groups <= std::numeric_limits<std::size_t>::max() / 4)
+      output.reserve(groups * 4);
+  }
   for (std::size_t index = 0; index < text.size(); index += 3)
   {
     auto const first = static_cast<unsigned char>(text[index]);
@@ -173,12 +180,31 @@ std::string base64_encode(std::string_view text)
   return output;
 }
 
+std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view text)
+{
+  if (text.empty() || text.size() > kMaxTerminalClipboardTextBytes)
+    return std::nullopt;
+
+  constexpr std::string_view kPrefix = "\x1b]52;c;";
+  constexpr std::string_view kSuffix = "\x1b\\";
+  auto const encoded = base64_encode(text);
+
+  // Bound above keeps prefix + encoded + suffix well inside size_t.
+  auto const total_size = kPrefix.size() + encoded.size() + kSuffix.size();
+  std::string sequence;
+  sequence.reserve(total_size);
+  sequence.append(kPrefix);
+  sequence.append(encoded);
+  sequence.append(kSuffix);
+  return sequence;
+}
+
 bool copy_text_to_terminal_clipboard(std::string_view text)
 {
-  if (text.empty())
+  auto sequence = try_build_osc52_clipboard_sequence(text);
+  if (!sequence.has_value())
     return false;
-  auto sequence = std::string("\x1b]52;c;") + base64_encode(text) + "\x1b\\";
-  return write_all_to_stdout(sequence);
+  return write_all_to_stdout(*sequence);
 }
 
 std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer)

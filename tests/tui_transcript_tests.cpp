@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -1178,6 +1179,56 @@ void test_tui_very_long_transcript_performance_budget()
          "tui very long transcript stress validates that scroll offsets change visible transcript content");
   expect(elapsed < std::chrono::seconds(20), "tui very long transcript performance budget keeps full redraw viable for real-world scrollback scale");
 }
+void test_tui_osc52_clipboard_sequence_bounds()
+{
+  using ava::tui::runtime_transcript::base64_encode;
+  using ava::tui::runtime_transcript::kMaxTerminalClipboardTextBytes;
+  using ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence;
+
+  constexpr std::string_view kPrefix = "\x1b]52;c;";
+  constexpr std::string_view kSuffix = "\x1b\\";
+
+  auto const assert_valid_sequence = [&](std::string_view raw, std::string const& sequence, std::string_view label) {
+    expect(sequence.starts_with(kPrefix) && sequence.ends_with(kSuffix),
+           std::string("OSC 52 sequence keeps exact plain prefix and ST terminator for ") + std::string(label));
+    auto const payload = sequence.substr(kPrefix.size(), sequence.size() - kPrefix.size() - kSuffix.size());
+    expect(payload == base64_encode(raw), std::string("OSC 52 payload is the base64 encoding of source for ") + std::string(label));
+    expect(payload.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") == std::string::npos,
+           std::string("OSC 52 payload stays within the base64 alphabet for ") + std::string(label));
+    // Source controls must not appear raw inside the base64 body (only in the fixed OSC framing).
+    expect(payload.find('\x1b') == std::string::npos && payload.find('\0') == std::string::npos && payload.find('\a') == std::string::npos,
+           std::string("OSC 52 payload contains no raw source control bytes for ") + std::string(label));
+  };
+
+  expect(kMaxTerminalClipboardTextBytes == 65'536, "terminal clipboard ceiling is the documented 64 KiB bound");
+  expect(!try_build_osc52_clipboard_sequence("").has_value(), "empty clipboard text builds no OSC 52 sequence");
+
+  auto const one_byte = try_build_osc52_clipboard_sequence("a");
+  expect(one_byte.has_value() && *one_byte == std::string(kPrefix) + "YQ==" + std::string(kSuffix),
+         "one-byte clipboard text builds the exact OSC 52 ST sequence");
+  assert_valid_sequence("a", *one_byte, "one-byte");
+
+  constexpr std::string_view kUnicode = "界π";
+  auto const unicode = try_build_osc52_clipboard_sequence(kUnicode);
+  expect(unicode.has_value(), "Unicode clipboard text builds an OSC 52 sequence");
+  assert_valid_sequence(kUnicode, *unicode, "unicode");
+
+  std::string const controls("pre\x1b\0\amid", 8);
+  auto const control_seq = try_build_osc52_clipboard_sequence(controls);
+  expect(control_seq.has_value(), "embedded ESC/NUL/BEL clipboard text builds an OSC 52 sequence");
+  assert_valid_sequence(controls, *control_seq, "embedded-controls");
+  // Full sequence framing uses ESC only at the known OSC/ST edges, never from the source body.
+  expect(control_seq->find('\0') == std::string::npos && control_seq->find('\a') == std::string::npos,
+         "accepted OSC 52 sequence never carries raw NUL or BEL from source text");
+
+  std::string const exact(kMaxTerminalClipboardTextBytes, 'x');
+  auto const exact_seq = try_build_osc52_clipboard_sequence(exact);
+  expect(exact_seq.has_value(), "exactly 64 KiB clipboard text is accepted");
+  assert_valid_sequence(exact, *exact_seq, "exact-64KiB");
+
+  std::string const oversized(kMaxTerminalClipboardTextBytes + 1, 'y');
+  expect(!try_build_osc52_clipboard_sequence(oversized).has_value(), "65,537-byte clipboard text is rejected without building a sequence");
+}
 }  // namespace
 
 void run_tui_large_render_performance_tests()
@@ -1187,6 +1238,7 @@ void run_tui_large_render_performance_tests()
 
 void run_tui_transcript_hierarchy_tests()
 {
+  test_tui_osc52_clipboard_sequence_bounds();
   test_tui_f2_transcript_hierarchy_and_tool_shell();
   test_tui_detached_transcript_anchor_survives_capped_eviction();
   test_tui_detached_append_defers_layout_until_anchor_recovery();

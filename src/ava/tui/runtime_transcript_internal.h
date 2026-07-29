@@ -26,11 +26,19 @@ struct CappedTranscriptSnapshotUpdate
 
 namespace runtime_transcript {
 
+// Conservative raw clipboard text ceiling for OSC 52 copies. Empty or larger
+// inputs are rejected (no silent truncation) so terminals never receive an
+// unbounded paste payload through AVA's direct plain OSC 52 path.
+inline constexpr std::size_t kMaxTerminalClipboardTextBytes = 65'536;  // 64 KiB
+
 [[nodiscard]] std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot,
                                                       std::optional<std::chrono::steady_clock::duration> elapsed = std::nullopt);
 void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible = true);
 std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
 [[nodiscard]] std::string base64_encode(std::string_view text);
+// Pure OSC 52 sequence builder: ESC ] 52 ; c ; <base64> ST (ESC \). Returns
+// nullopt for empty or oversized text and never truncates. No tmux DCS wrap.
+[[nodiscard]] std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view text);
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
 [[nodiscard]] std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript);

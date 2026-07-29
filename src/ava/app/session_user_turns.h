@@ -48,4 +48,9 @@ struct SessionUserTurnList
 // assistant, internal-replay, and non-user ids fail closed as NotFound.
 [[nodiscard]] ava::core::Result<std::string> read_session_user_turn_text(runtime::Session const& session, std::string_view entry_id);
 
+// /fork-from requires a persistent (non-sessionless) session. Ephemeral
+// sessions keep /copy user; this guard fails closed with an actionable error
+// before the picker opens or a selection mutates presentation.
+[[nodiscard]] ava::core::VoidResult require_persistent_session_for_fork_from(runtime::Session const& session);
+
 }  // namespace ava::app

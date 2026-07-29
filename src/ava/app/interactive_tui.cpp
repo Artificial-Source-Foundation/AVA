@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/command_sessions.h"
@@ -429,8 +430,12 @@ int run_tui(ShellState state)
             session_selector_show_label_time = false;
             return session_selector_snapshot();
           },
-      .on_open_fork_user_turn_selector = [&state]() -> ava::core::Result<ava::tui::SelectListView> {
-        return ava::app::user_turn_selector_view(state.session, "Fork from user turn", "Enter fork · type to filter · Esc cancel");
+      .on_open_fork_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
+        // F-001: refuse sessionless /fork-from before listing/selecting so a later
+        // handled no-op cannot open a picker that wipes the live transcript.
+        if (auto allowed = ava::app::require_persistent_session_for_fork_from(state.session); !allowed)
+          return std::unexpected(std::move(allowed.error()));
+        return ava::app::user_turn_selector_view(state.session, "Fork from user turn", "Enter fork · type to filter · Esc cancel", std::string(initial_query));
       },
       .on_open_copy_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
         return ava::app::user_turn_selector_view(state.session, "Copy user turn", "Enter copy · type to filter · Esc cancel", std::string(initial_query));
@@ -552,22 +557,56 @@ int run_tui(ShellState state)
         {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "fork-from selection is missing entry id"));
         }
+        if (auto allowed = ava::app::require_persistent_session_for_fork_from(state.session); !allowed)
+          return std::unexpected(std::move(allowed.error()));
+        auto const before_session_id = state.session.store.session_id();
+        auto const before_session_path = state.session.store.session_path().string();
         auto forked = ava::app::run_fork_command(state.session, {}, entry_id);
         if (!forked)
           return std::unexpected(std::move(forked.error()));
-        if (forked->session_tree_changed)
+
+        auto const after_session_id = state.session.store.session_id();
+        auto const after_session_path = state.session.store.session_path().string();
+        // F-001 defense: never return an "opened" snapshot when authority did not
+        // switch (for example sessionless handled success with no branch).
+        if (after_session_id == before_session_id && after_session_path == before_session_path)
         {
-          if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
-            return std::unexpected(std::move(refreshed.error()));
+          auto message = forked->output.empty() ? std::string("fork-from did not switch sessions") : forked->output.front();
+          if (auto const newline = message.find('\n'); newline != std::string::npos)
+            message.erase(newline);
+          auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+          error.with_context("operation", "on_fork_user_turn_selected");
+          error.with_context("session_id", before_session_id);
+          return std::unexpected(std::move(error));
         }
-        else
-        {
-          application_catalog.retarget_session(state.session.store.session_id());
-          application_catalog.refresh_values(state.session, hotkeys);
-        }
+
         auto status = forked->output.empty() ? std::string("forked session") : forked->output.front();
         if (auto const newline = status.find('\n'); newline != std::string::npos)
           status.erase(newline);
+
+        // F-002: after a successful switch always return/apply the post-fork
+        // snapshot. Catalog refresh is soft and visible — never error after
+        // mutation and never keep old presentation over the new authority.
+        if (forked->session_tree_changed)
+        {
+          if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
+          {
+            application_catalog.retarget_session(after_session_id);
+            application_catalog.refresh_values(state.session, hotkeys);
+            auto warning = ava::app::sanitize_inline_text(refreshed.error().format());
+            if (auto const newline = warning.find('\n'); newline != std::string::npos)
+              warning.erase(newline);
+            if (!status.empty())
+              status += " · ";
+            status += "session tree refresh deferred: ";
+            status += warning;
+          }
+        }
+        else
+        {
+          application_catalog.retarget_session(after_session_id);
+          application_catalog.refresh_values(state.session, hotkeys);
+        }
         return state_snapshot(std::move(status));
       },
       .on_read_user_turn_text = [&state](std::string_view entry_id) -> ava::core::Result<std::string> {

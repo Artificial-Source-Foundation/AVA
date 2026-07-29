@@ -136,6 +136,20 @@ std::optional<std::string> search_command_argument(std::string_view submitted)
   return std::nullopt;
 }
 
+std::optional<std::string> fork_from_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kForkFrom = "/fork-from";
+  if (submitted == kForkFrom)
+    return std::string{};
+  if (submitted.starts_with(kForkFrom) && submitted.size() > kForkFrom.size() && std::isspace(static_cast<unsigned char>(submitted[kForkFrom.size()])) != 0)
+  {
+    return trim_view_to_string(submitted.substr(kForkFrom.size() + 1));
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> attach_command_argument(std::string_view submitted)
 {
   auto const normalized = trim_view_to_string(submitted);

@@ -37,6 +37,7 @@ enum class ReloadTarget
 [[nodiscard]] std::optional<std::string> tool_command_argument(std::string_view submitted);
 [[nodiscard]] std::optional<std::string> diff_command_argument(std::string_view submitted);
 [[nodiscard]] std::optional<std::string> search_command_argument(std::string_view submitted);
+[[nodiscard]] std::optional<std::string> fork_from_command_argument(std::string_view submitted);
 [[nodiscard]] std::optional<std::string> attach_command_argument(std::string_view submitted);
 [[nodiscard]] CopyTarget parse_copy_target(std::string_view argument);
 [[nodiscard]] std::optional<ReloadTarget> reload_target_from_argument(std::string_view target);

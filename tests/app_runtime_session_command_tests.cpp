@@ -396,6 +396,18 @@ void test_app_session_fork_from_entry_and_user_turns()
   auto ephemeral_picker = ava::app::user_turn_selector_view(*ephemeral, "Copy user turn");
   expect(ephemeral_picker && ephemeral_picker->items.size() == 1 && ephemeral_picker->items[0].value == "ephemeral_user",
          "ephemeral sessions open the same user-turn selector through SessionReadAuthority");
+  auto ephemeral_copy = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_user");
+  expect(ephemeral_copy && *ephemeral_copy == "ephemeral body", "/copy user continues to work for ephemeral/sessionless public turns");
+  auto sessionless_fork_guard = ava::app::require_persistent_session_for_fork_from(*ephemeral);
+  expect(!sessionless_fork_guard && sessionless_fork_guard.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             sessionless_fork_guard.error().message().find("sessionless") != std::string::npos &&
+             sessionless_fork_guard.error().message().find("/copy user") != std::string::npos,
+         "sessionless /fork-from fails closed before picker open with an actionable persistent-session error");
+  auto const ephemeral_id_before = ephemeral->store.session_id();
+  auto sessionless_fork = ava::app::run_fork_command(*ephemeral, {}, "ephemeral_user");
+  expect(sessionless_fork && sessionless_fork->handled && !sessionless_fork->session_tree_changed && ephemeral->store.session_id() == ephemeral_id_before &&
+             !sessionless_fork->output.empty() && sessionless_fork->output[0].find("sessionless") != std::string::npos,
+         "sessionless run_fork_command remains a non-switching handled result that must not be treated as an opened snapshot");
 
   ava::app::runtime::OpenOptions empty_options = open_options;
   empty_options.sessionless = true;

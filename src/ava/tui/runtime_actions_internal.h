@@ -37,7 +37,7 @@ class RuntimeActionController final
   [[nodiscard]] bool open_model_selector();
   [[nodiscard]] bool open_scoped_model_selector();
   [[nodiscard]] bool open_session_selector();
-  [[nodiscard]] bool open_fork_user_turn_selector();
+  [[nodiscard]] bool open_fork_user_turn_selector(std::string_view initial_query = {});
   [[nodiscard]] bool open_copy_user_turn_selector(std::string_view initial_query = {});
   void cycle_model(bool forward);
 

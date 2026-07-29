@@ -171,7 +171,7 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 - `/sessions labels <id> <label...|--clear>`: set or clear labels on a session without switching to it
 - `/sessions archive <id> --confirm` and `/sessions unarchive <id>`: hide or restore a non-current session without deleting its JSONL file
 - `/fork [name]`: fork the current session at its latest entry and switch to the new branch
-- `/fork-from`: open a searchable newest-first picker of public user turns and fork at the selected stable entry id, then switch to the new branch; Esc cancels without mutation
+- `/fork-from [query]`: open a searchable newest-first picker of public user turns and fork at the selected stable entry id, then switch to the new branch; any remaining text seeds the picker filter. Sessionless/ephemeral sessions refuse `/fork-from` with an actionable error (`/copy user` still works). Esc cancels without mutation
 - `/clone [name]`: clone the full current session and switch to the copy
 - `/new [name]`: start a fresh session and switch to it
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty

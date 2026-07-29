@@ -35,6 +35,7 @@ add_library(ava_tui
   "runtime_navigation_internal.cpp"
   "runtime_transcript.cpp"
   "runtime_transcript_search_internal.cpp"
+  "runtime_user_turn_selection_internal.cpp"
   "session_grants.cpp"
   "terminal.cpp"
   "terminal_image.cpp"

@@ -157,8 +157,9 @@ struct TuiRuntimeOptions
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
   // Open searchable public user-turn pickers. Fail closed with Result when the
-  // bound session authority has no public user turns or cannot list them.
-  std::function<ava::core::Result<SelectListView>()> on_open_fork_user_turn_selector;
+  // bound session authority has no public user turns, is sessionless for fork-from,
+  // or cannot list them. Optional initial_query seeds the picker filter.
+  std::function<ava::core::Result<SelectListView>(std::string_view initial_query)> on_open_fork_user_turn_selector;
   std::function<ava::core::Result<SelectListView>(std::string_view initial_query)> on_open_copy_user_turn_selector;
   std::function<SelectListView()> on_session_selector_sort_cycle;
   std::function<SelectListView()> on_session_selector_named_filter_toggle;

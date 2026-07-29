@@ -211,4 +211,14 @@ ava::core::Result<std::string> read_session_user_turn_text(runtime::Session cons
   return std::unexpected(std::move(error));
 }
 
+ava::core::VoidResult require_persistent_session_for_fork_from(runtime::Session const& session)
+{
+  if (!session.sessionless())
+    return {};
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
+                                "Cannot fork-from a sessionless session. Start a persistent session first; /copy user still works for ephemeral turns.");
+  error.with_context("operation", "require_persistent_session_for_fork_from");
+  return std::unexpected(std::move(error));
+}
+
 }  // namespace ava::app

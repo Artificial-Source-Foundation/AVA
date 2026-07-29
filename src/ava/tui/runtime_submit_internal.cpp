@@ -26,6 +26,7 @@ using runtime_commands::attach_command_argument;
 using runtime_commands::copy_command_argument;
 using runtime_commands::diff_command_argument;
 using runtime_commands::exact_command;
+using runtime_commands::fork_from_command_argument;
 using runtime_commands::parse_copy_target;
 using runtime_commands::reload_command_argument;
 using runtime_commands::reload_target_from_argument;
@@ -221,10 +222,10 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
-    if (exact_command(submitted, "/fork-from") && options_.on_open_fork_user_turn_selector)
+    if (auto fork_from_query = fork_from_command_argument(submitted); fork_from_query && options_.on_open_fork_user_turn_selector)
     {
       push_history(input_history, submitted);
-      if (!action_controller_.open_fork_user_turn_selector())
+      if (!action_controller_.open_fork_user_turn_selector(*fork_from_query))
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }

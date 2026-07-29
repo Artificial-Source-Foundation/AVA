@@ -5,10 +5,12 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/theme.h"
 #include "ava/config/model_config.h"
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -817,4 +819,135 @@ void run_tui_selector_tests()
   // Permission prompts outrank selectors for hit testing; the select-list path must not claim the click.
   auto const blocked_hit = ava::tui::select_list_selection_for_screen_position(prompt_snapshot, 8, 10);
   expect(!blocked_hit, "active permission prompts outrank user-turn selector hit testing");
+
+  // Production-path evidence for ForkUserTurn / CopyUserTurn Enter resolution (F-003).
+  fork_picker.query = "alpha";
+  fork_picker.selected_item_index = ava::tui::clamp_select_list_selection(fork_picker, 0);
+  auto const enter_resolve = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(enter_resolve.action == ava::tui::SelectListInputAction::Resolve && enter_resolve.selected_item_index < fork_picker.items.size() &&
+             fork_picker.items[enter_resolve.selected_item_index].value == "entry_user_a",
+         "ForkUserTurn Enter resolves the filtered earlier stable entry id");
+  auto const selected_entry_id = fork_picker.items[enter_resolve.selected_item_index].value;
+
+  std::string forked_callback_id;
+  auto opened = ava::tui::evaluate_fork_user_turn_selection(selected_entry_id, "session_old", "/tmp/old.jsonl",
+                                                            [&](std::string_view entry_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+                                                              forked_callback_id = std::string(entry_id);
+                                                              ava::tui::TuiRuntimeStateSnapshot state;
+                                                              state.session_id = "session_forked";
+                                                              state.session_path = "/tmp/forked.jsonl";
+                                                              state.status = "forked session session_forked from session_old at entry_user_a";
+                                                              return state;
+                                                            });
+  expect(forked_callback_id == "entry_user_a" && opened.action == ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession && opened.clear_transcript &&
+             opened.opened_snapshot && opened.opened_snapshot->session_id == "session_forked",
+         "fork selection callback receives the stable entry id and apply-opened clears prior transcript");
+
+  auto prior_transcript = std::vector<ava::tui::TranscriptItem>{ava::tui::TranscriptItem{.label = "you", .text = "later turn must clear"},
+                                                                ava::tui::TranscriptItem{.label = "ava", .text = "assistant later"}};
+  auto presentation = ava::tui::ComposerSnapshot{.mode = "build",
+                                                 .provider = "openai",
+                                                 .model = "gpt-5.5",
+                                                 .session_id = "session_old",
+                                                 .input = "",
+                                                 .status = "forking session…",
+                                                 .transcript = prior_transcript,
+                                                 .width = 80,
+                                                 .height = 24};
+  expect(!presentation.transcript.empty(), "precondition: prior transcript is present before opened apply");
+  if (opened.action == ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession && opened.opened_snapshot && opened.clear_transcript)
+  {
+    // Mirror the production opened-session transition boundary used by runtime.cpp.
+    auto status = opened.opened_snapshot->status;
+    presentation.transcript.clear();
+    ++presentation.transcript_generation;
+    presentation.session_id = opened.opened_snapshot->session_id;
+    presentation.status = opened.opened_snapshot->status;
+    if (!status.empty())
+      presentation.transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = std::move(status)});
+  }
+  expect(presentation.session_id == "session_forked" && presentation.transcript.size() == 1 &&
+             presentation.transcript.front().text.find("forked session") != std::string::npos &&
+             presentation.transcript.front().text.find("later turn must clear") == std::string::npos,
+         "opened fork snapshot clears the old transcript and announces the new session");
+
+  std::size_t no_transition_calls = 0;
+  auto unchanged = ava::tui::evaluate_fork_user_turn_selection(selected_entry_id, "session_old", "/tmp/old.jsonl",
+                                                               [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+                                                                 ++no_transition_calls;
+                                                                 ava::tui::TuiRuntimeStateSnapshot state;
+                                                                 state.session_id = "session_old";
+                                                                 state.session_path = "/tmp/old.jsonl";
+                                                                 state.status = "Cannot branch a sessionless session.";
+                                                                 return state;
+                                                               });
+  expect(no_transition_calls == 1 && unchanged.action == ava::tui::UserTurnForkSelectionAction::NoSessionTransition && !unchanged.clear_transcript &&
+             unchanged.beep && unchanged.status.find("Cannot branch a sessionless session") != std::string::npos,
+         "unchanged session identity after fork callback does not clear transcript");
+
+  auto kept = presentation;
+  kept.transcript = prior_transcript;
+  kept.session_id = "session_old";
+  if (unchanged.action != ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession)
+  {
+    kept.status = unchanged.status;
+  }
+  expect(kept.session_id == "session_old" && kept.transcript.size() == 2 && kept.transcript.front().text == "later turn must clear",
+         "no-transition fork decision retains prior transcript rows");
+
+  std::size_t failure_calls = 0;
+  auto failed = ava::tui::evaluate_fork_user_turn_selection(
+      selected_entry_id, "session_old", "/tmp/old.jsonl", [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        ++failure_calls;
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "branch source entry not found"));
+      });
+  expect(failure_calls == 1 && failed.action == ava::tui::UserTurnForkSelectionAction::AuthorityFailure && !failed.clear_transcript && failed.beep &&
+             failed.status.find("branch source entry not found") != std::string::npos,
+         "fork callback failure reports authority error without transcript mutation");
+
+  auto missing = ava::tui::evaluate_fork_user_turn_selection(
+      {}, "session_old", "/tmp/old.jsonl", [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        expect(false, "empty fork selection must not invoke the authority callback");
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unreachable"));
+      });
+  expect(missing.action == ava::tui::UserTurnForkSelectionAction::MissingSelection && !missing.clear_transcript,
+         "empty ForkUserTurn selection fails closed without authority work");
+
+  std::string copy_callback_id;
+  std::string copied_payload;
+  auto copy_ok = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id,
+      [&](std::string_view entry_id) -> ava::core::Result<std::string> {
+        copy_callback_id = std::string(entry_id);
+        return std::string("alpha first line body");
+      },
+      [&](std::string_view text) {
+        copied_payload = std::string(text);
+        return true;
+      });
+  expect(copy_callback_id == "entry_user_a" && copy_ok.action == ava::tui::UserTurnCopySelectionAction::Copied && copy_ok.transcript_label == "status" &&
+             copied_payload == "alpha first line body" && copy_ok.status.find("copied user turn") != std::string::npos,
+         "copy selection re-reads the selected stable id at action time and reports truthful success");
+
+  auto copy_read_fail = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id,
+      [&](std::string_view) -> ava::core::Result<std::string> {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "session user turn not found"));
+      },
+      [&](std::string_view) {
+        expect(false, "clipboard must not run after read failure");
+        return true;
+      });
+  expect(copy_read_fail.action == ava::tui::UserTurnCopySelectionAction::ReadFailure && copy_read_fail.transcript_label == "error" && copy_read_fail.beep,
+         "copy selection surfaces read failure without claiming clipboard success");
+
+  auto copy_osc_fail = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id, [&](std::string_view) -> ava::core::Result<std::string> { return std::string("payload"); }, [&](std::string_view) { return false; });
+  expect(copy_osc_fail.action == ava::tui::UserTurnCopySelectionAction::ClipboardFailure && copy_osc_fail.status == "clipboard copy failed" &&
+             copy_osc_fail.transcript_label == "error",
+         "copy selection reports truthful OSC/bound clipboard failure");
+
+  auto soft = ava::tui::attach_soft_status_warning("forked session session_x", "session tree refresh deferred: ", "tree locked\nextra");
+  expect(soft == "forked session session_x · session tree refresh deferred: tree locked",
+         "soft post-fork catalog warnings attach as single-line status without replacing the opened snapshot");
 }

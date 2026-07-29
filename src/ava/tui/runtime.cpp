@@ -16,6 +16,7 @@
 #include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
+#include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
@@ -863,62 +864,48 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (resolved_list == ActiveSelectList::ForkUserTurn && options.on_fork_user_turn_selected)
         {
+          auto const presentation_session_id = snapshot.session_id;
+          auto const presentation_session_path = presentation_state.sidebar.session_path;
+          UserTurnForkSelectionDecision decision;
           if (selected_value.empty())
           {
-            snapshot.status = "no user turn selected";
-            static_cast<void>(beep());
+            decision =
+                evaluate_fork_user_turn_selection(selected_value, presentation_session_id, presentation_session_path, options.on_fork_user_turn_selected);
           }
           else
           {
-            auto selected =
-                dispatch_tui_selector_authority(snapshot, "forking session…", render, [&]() { return options.on_fork_user_turn_selected(selected_value); });
-            if (selected)
+            // Paint truthful pending authority status before the blocking fork
+            // callback, matching other session-open selectors.
+            snapshot.status = "forking session…";
+            if (!render())
             {
-              // Same transition boundary as session open: clear the prior
-              // transcript and announce the fork/switch status.
-              apply_opened_session_snapshot(std::move(*selected), true);
+              terminal_write_failed = true;
+              break;
             }
-            else
-            {
-              snapshot.status = selected.error().format();
+            decision =
+                evaluate_fork_user_turn_selection(selected_value, presentation_session_id, presentation_session_path, options.on_fork_user_turn_selected);
+          }
+          if (decision.action == UserTurnForkSelectionAction::ApplyOpenedSession && decision.opened_snapshot)
+          {
+            // Same transition boundary as session open: clear the prior
+            // transcript only when session identity actually changed.
+            apply_opened_session_snapshot(std::move(*decision.opened_snapshot), true);
+          }
+          else
+          {
+            snapshot.status = std::move(decision.status);
+            if (decision.beep)
               static_cast<void>(beep());
-            }
           }
         }
         else if (resolved_list == ActiveSelectList::CopyUserTurn && options.on_read_user_turn_text)
         {
-          if (selected_value.empty())
-          {
-            snapshot.status = "no user turn selected";
-            push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-            transcript_scroll_offset = 0;
+          auto decision = evaluate_copy_user_turn_selection(selected_value, options.on_read_user_turn_text, copy_text_to_terminal_clipboard);
+          snapshot.status = decision.status;
+          push_transcript(snapshot, TranscriptItem{.label = decision.transcript_label, .text = snapshot.status});
+          transcript_scroll_offset = 0;
+          if (decision.beep)
             static_cast<void>(beep());
-          }
-          else
-          {
-            auto text = options.on_read_user_turn_text(selected_value);
-            if (!text)
-            {
-              snapshot.status = text.error().format();
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
-              static_cast<void>(beep());
-            }
-            else if (copy_text_to_terminal_clipboard(*text))
-            {
-              snapshot.status = "copied user turn to clipboard";
-              push_transcript(snapshot, TranscriptItem{.label = "status", .text = snapshot.status});
-              transcript_scroll_offset = 0;
-            }
-            else
-            {
-              // Truthful failure covers empty text and the 64 KiB OSC 52 bound.
-              snapshot.status = "clipboard copy failed";
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
-              static_cast<void>(beep());
-            }
-          }
         }
         else if (resolved_list == ActiveSelectList::Settings && options.on_settings_selected)
         {

@@ -375,7 +375,7 @@ bool RuntimeActionController::open_session_selector()
   return renderer_.request_render();
 }
 
-bool RuntimeActionController::open_fork_user_turn_selector()
+bool RuntimeActionController::open_fork_user_turn_selector(std::string_view initial_query)
 {
   auto& snapshot = presentation_state_.snapshot;
   if (!options_.on_open_fork_user_turn_selector)
@@ -384,7 +384,7 @@ bool RuntimeActionController::open_fork_user_turn_selector()
     static_cast<void>(beep());
     return true;
   }
-  auto opened = options_.on_open_fork_user_turn_selector();
+  auto opened = options_.on_open_fork_user_turn_selector(initial_query);
   if (!opened)
   {
     snapshot.status = opened.error().format();

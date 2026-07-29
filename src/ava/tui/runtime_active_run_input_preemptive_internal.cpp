@@ -18,6 +18,15 @@
 namespace ava::tui {
 using runtime_input::printable_jump_target;
 
+detail::ActiveRunCancelDisposition detail::active_run_cancel_disposition(bool has_draft_selection, bool has_transcript_selection) noexcept
+{
+  if (has_draft_selection)
+    return ActiveRunCancelDisposition::ClearDraftSelection;
+  if (has_transcript_selection)
+    return ActiveRunCancelDisposition::ClearTranscriptSelection;
+  return ActiveRunCancelDisposition::RequestStop;
+}
+
 // Sidebar drawer, jump mode, cancel/copy/interrupt/exit, character/selection
 // and CtrlHome/CtrlEnd. These preempt all draft, completion, and view input.
 RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_preemptive_input(RuntimeActiveRunState& state,
@@ -66,13 +75,19 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
   }
   if (active_event.key == Key::Escape || is_action(active_event, TuiAction::Cancel))
   {
-    if (renderer_.has_transcript_selection())
+    switch (detail::active_run_cancel_disposition(draft_state.selection_bounds().has_value(), renderer_.has_transcript_selection()))
     {
-      renderer_.clear_transcript_selection();
-      snapshot.status.clear();
-      return to_input_handling(renderer_.request_render());
+      case detail::ActiveRunCancelDisposition::ClearDraftSelection:
+        draft_state.clear_selection();
+        snapshot.status.clear();
+        return to_input_handling(renderer_.request_render());
+      case detail::ActiveRunCancelDisposition::ClearTranscriptSelection:
+        renderer_.clear_transcript_selection();
+        snapshot.status.clear();
+        return to_input_handling(renderer_.request_render());
+      case detail::ActiveRunCancelDisposition::RequestStop:
+        return to_input_handling(request_stop(state));
     }
-    return to_input_handling(request_stop(state));
   }
   if (is_action(active_event, TuiAction::CopySelection) && draft_state.selection_bounds())
   {

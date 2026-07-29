@@ -80,6 +80,15 @@ enum class RetainedInputDispatchResult
 [[nodiscard]] RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(
     std::function<PendingPromptServiceResult()> const& service_pending_prompt, std::function<bool()> const& dispatch_input);
 
+enum class ActiveRunCancelDisposition
+{
+  ClearDraftSelection,
+  ClearTranscriptSelection,
+  RequestStop,
+};
+
+[[nodiscard]] ActiveRunCancelDisposition active_run_cancel_disposition(bool has_draft_selection, bool has_transcript_selection) noexcept;
+
 }  // namespace detail
 
 struct RuntimeActiveRunOutcome

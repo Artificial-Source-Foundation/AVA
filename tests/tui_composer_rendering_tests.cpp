@@ -665,6 +665,14 @@ void run_tui_composer_rendering_tests_part_1()
            "ordinary retained input keeps the second prompt check and discards the event when that check claims a prompt");
   }
   {
+    using ava::tui::detail::ActiveRunCancelDisposition;
+    expect(ava::tui::detail::active_run_cancel_disposition(true, false) == ActiveRunCancelDisposition::ClearDraftSelection &&
+               ava::tui::detail::active_run_cancel_disposition(true, true) == ActiveRunCancelDisposition::ClearDraftSelection &&
+               ava::tui::detail::active_run_cancel_disposition(false, true) == ActiveRunCancelDisposition::ClearTranscriptSelection &&
+               ava::tui::detail::active_run_cancel_disposition(false, false) == ActiveRunCancelDisposition::RequestStop,
+           "active-run cancel clears a composer selection before a transcript selection and requests stop only after both are absent");
+  }
+  {
     auto const unchanged =
         ava::tui::detail::changed_screen_rows({"row 0", "\x1b[1mrow 1\x1b[0m", "row 2"}, {"row 0", "\x1b[1mrow 1\x1b[0m", "row 2"}, {}, false);
     auto const styled_change =

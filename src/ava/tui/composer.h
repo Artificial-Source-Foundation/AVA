@@ -503,6 +503,15 @@ struct ComposerSnapshot
   std::size_t input_cursor = std::string::npos;
   std::size_t input_selection_start = std::string::npos;
   std::size_t input_selection_end = std::string::npos;
+  // Rendered transcript drag-selection endpoints (content-relative). Values use
+  // std::string::npos item indices when inactive. See
+  // runtime_transcript_selection_internal.h for the message_starts origin contract.
+  std::size_t transcript_selection_anchor_item = std::string::npos;
+  std::size_t transcript_selection_anchor_line = 0;
+  std::size_t transcript_selection_anchor_column = 0;
+  std::size_t transcript_selection_focus_item = std::string::npos;
+  std::size_t transcript_selection_focus_line = 0;
+  std::size_t transcript_selection_focus_column = 0;
   std::optional<SidebarSnapshot> sidebar = std::nullopt;
   bool sidebar_drawer_visible = false;
   std::size_t sidebar_drawer_scroll_offset = 0;

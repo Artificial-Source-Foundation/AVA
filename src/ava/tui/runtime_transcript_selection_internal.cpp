@@ -1,0 +1,806 @@
+#include "sys.h"
+#include "ava/tui/runtime_transcript_selection_internal.h"
+
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/theme.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <limits>
+#include <utility>
+#include <curses.h>
+
+namespace ava::tui {
+namespace {
+
+constexpr std::size_t kSelectionCopySoftCeiling = runtime_transcript::kMaxTerminalClipboardTextBytes;
+
+bool is_c0_or_del(unsigned char byte)
+{
+  return byte < 0x20U || byte == 0x7FU;
+}
+
+bool is_c1_control(char32_t codepoint)
+{
+  return codepoint >= 0x80 && codepoint <= 0x9F;
+}
+
+std::string strip_controls_keep_newline_tab(std::string_view text)
+{
+  std::string out;
+  out.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();)
+  {
+    auto const before = index;
+    if (detail::skip_sgr_sequence(text, index) || detail::skip_osc_sequence(text, index))
+      continue;
+    auto const byte = static_cast<unsigned char>(text[before]);
+    if (byte == '\n' || byte == '\t')
+    {
+      out.push_back(static_cast<char>(byte));
+      ++index;
+      continue;
+    }
+    if (is_c0_or_del(byte))
+    {
+      ++index;
+      continue;
+    }
+    auto const cell = detail::terminal_text_cell(text, before);
+    if (!cell.valid)
+    {
+      ++index;
+      continue;
+    }
+    char32_t codepoint = 0;
+    auto const length = detail::utf8_sequence_length(byte);
+    if (detail::decode_utf8_codepoint(text, before, length, codepoint) && is_c1_control(codepoint))
+    {
+      index = before + cell.bytes;
+      continue;
+    }
+    out.append(text.substr(before, cell.bytes));
+    index = before + cell.bytes;
+  }
+  return out;
+}
+
+std::size_t item_line_count(detail::TranscriptLayout const& layout, std::size_t position)
+{
+  if (position >= layout.message_starts.size())
+    return 0;
+  auto const start = layout.message_starts[position];
+  auto const end = position + 1 < layout.message_starts.size() ? layout.message_starts[position + 1] : layout.lines.size();
+  // Skip unowned roomy spacer that may sit between this block and the next
+  // message_starts (spacer is emitted before the next message_starts).
+  return end > start ? end - start : 0;
+}
+
+std::optional<std::size_t> position_for_item(detail::TranscriptLayout const& layout, std::size_t item_index)
+{
+  auto const it = std::ranges::find(layout.message_item_indices, item_index);
+  if (it == layout.message_item_indices.end())
+    return std::nullopt;
+  return static_cast<std::size_t>(it - layout.message_item_indices.begin());
+}
+
+bool endpoint_on_header_line(detail::TranscriptLayout const& layout, TranscriptSelectionEndpoint const& endpoint)
+{
+  auto const position = position_for_item(layout, endpoint.item_index);
+  if (!position || *position >= layout.content_starts.size() || *position >= layout.message_starts.size())
+    return false;
+  auto const absolute = layout.message_starts[*position] + endpoint.line_offset;
+  return absolute == layout.content_starts[*position];
+}
+
+std::string plain_slice(std::string_view plain_row, std::size_t column_start, std::size_t column_end)
+{
+  if (column_start >= column_end)
+    return {};
+  std::string out;
+  std::size_t column = 0;
+  for (std::size_t index = 0; index < plain_row.size() && column < column_end;)
+  {
+    auto const cell = detail::terminal_text_cell(plain_row, index);
+    auto const next_column = column + std::max<std::size_t>(cell.columns, 1);
+    if (next_column > column_start && column < column_end)
+      out.append(plain_row.substr(index, cell.bytes));
+    index += std::max<std::size_t>(cell.bytes, 1);
+    column = next_column;
+  }
+  return out;
+}
+
+bool append_bounded(std::string& out, std::string_view chunk, std::size_t max_bytes, bool& oversize)
+{
+  if (oversize)
+    return false;
+  if (chunk.empty())
+    return true;
+  if (out.size() >= max_bytes)
+  {
+    oversize = true;
+    return false;
+  }
+  auto const remaining = max_bytes - out.size();
+  if (chunk.size() > remaining)
+  {
+    // Stop at max_bytes+1 observation without keeping a truncated payload.
+    oversize = true;
+    out.clear();
+    return false;
+  }
+  out.append(chunk);
+  return true;
+}
+
+}  // namespace
+
+std::string transcript_selection_plain_row(std::string_view styled_line)
+{
+  return strip_controls_keep_newline_tab(styled_line);
+}
+
+std::size_t transcript_selection_plain_columns(std::string_view plain_row)
+{
+  return detail::terminal_text_columns(plain_row);
+}
+
+std::size_t snap_display_column(std::string_view plain_row, std::size_t display_column, bool prefer_end_on_half)
+{
+  std::size_t column = 0;
+  std::size_t last_boundary = 0;
+  for (std::size_t index = 0; index < plain_row.size();)
+  {
+    auto const cell = detail::terminal_text_cell(plain_row, index);
+    auto const columns = std::max<std::size_t>(cell.columns, 1);
+    if (display_column <= column)
+      return column;
+    if (display_column < column + columns)
+    {
+      auto const into = display_column - column;
+      if (prefer_end_on_half)
+        return into * 2 >= columns ? column + columns : column;
+      return into * 2 > columns ? column + columns : column;
+    }
+    index += std::max<std::size_t>(cell.bytes, 1);
+    column += columns;
+    last_boundary = column;
+  }
+  return std::min(display_column, last_boundary);
+}
+
+std::optional<std::size_t> absolute_line_for_endpoint(detail::TranscriptLayout const& layout, TranscriptSelectionEndpoint const& endpoint)
+{
+  auto const position = position_for_item(layout, endpoint.item_index);
+  if (!position)
+    return std::nullopt;
+  auto const start = layout.message_starts[*position];
+  auto const count = item_line_count(layout, *position);
+  if (endpoint.line_offset >= count)
+    return std::nullopt;
+  auto const absolute = start + endpoint.line_offset;
+  if (absolute >= layout.lines.size())
+    return std::nullopt;
+  return absolute;
+}
+
+std::optional<TranscriptSelectionEndpoint> endpoint_for_absolute_line(detail::TranscriptLayout const& layout, std::size_t absolute_line,
+                                                                      std::size_t display_column)
+{
+  if (layout.message_starts.empty() || absolute_line >= layout.lines.size())
+    return std::nullopt;
+  auto starts = layout.message_starts;
+  auto it = std::ranges::upper_bound(starts, absolute_line);
+  if (it == starts.begin())
+    return std::nullopt;  // unowned leading spacer
+  --it;
+  auto const position = static_cast<std::size_t>(it - starts.begin());
+  if (position >= layout.message_item_indices.size())
+    return std::nullopt;
+  auto const start = layout.message_starts[position];
+  auto const count = item_line_count(layout, position);
+  if (absolute_line < start || absolute_line >= start + count)
+    return std::nullopt;
+  auto const plain = transcript_selection_plain_row(layout.lines[absolute_line]);
+  auto const snapped = snap_display_column(plain, display_column, /*prefer_end_on_half=*/false);
+  return TranscriptSelectionEndpoint{.item_index = layout.message_item_indices[position],
+                                     .line_offset = absolute_line - start,
+                                     .display_column = snapped};
+}
+
+bool endpoint_less(TranscriptSelectionEndpoint const& left, TranscriptSelectionEndpoint const& right, detail::TranscriptLayout const& layout)
+{
+  auto const left_abs = absolute_line_for_endpoint(layout, left);
+  auto const right_abs = absolute_line_for_endpoint(layout, right);
+  if (!left_abs || !right_abs)
+    return false;
+  if (*left_abs != *right_abs)
+    return *left_abs < *right_abs;
+  return left.display_column < right.display_column;
+}
+
+std::pair<TranscriptSelectionEndpoint, TranscriptSelectionEndpoint> ordered_endpoints(TranscriptSelectionRange const& range,
+                                                                                      detail::TranscriptLayout const& layout)
+{
+  if (endpoint_less(range.focus, range.anchor, layout))
+    return {range.focus, range.anchor};
+  return {range.anchor, range.focus};
+}
+
+TranscriptSelectionExtractResult extract_transcript_selection_text(detail::TranscriptLayout const& layout, TranscriptSelectionRange const& range,
+                                                                   std::size_t max_bytes)
+{
+  TranscriptSelectionExtractResult result;
+  auto const ordered = ordered_endpoints(range, layout);
+  auto const start_abs = absolute_line_for_endpoint(layout, ordered.first);
+  auto const end_abs = absolute_line_for_endpoint(layout, ordered.second);
+  if (!start_abs || !end_abs || *start_abs > *end_abs)
+    return result;
+
+  // Bound construction: stop once more than max_bytes would be required
+  // (observe max_bytes+1 without retaining a truncated payload).
+  auto const hard_limit = max_bytes;
+  for (std::size_t line = *start_abs; line <= *end_abs; ++line)
+  {
+    ++result.examined_rows;
+    auto const plain = transcript_selection_plain_row(layout.lines[line]);
+    auto const line_columns = transcript_selection_plain_columns(plain);
+    auto col_start = line == *start_abs ? ordered.first.display_column : 0;
+    auto col_end = line == *end_abs ? ordered.second.display_column : line_columns;
+    col_start = std::min(col_start, line_columns);
+    col_end = std::min(col_end, line_columns);
+    if (col_start > col_end)
+      std::swap(col_start, col_end);
+    auto slice = plain_slice(plain, col_start, col_end);
+    if (line > *start_abs)
+    {
+      if (!append_bounded(result.text, "\n", hard_limit, result.oversize))
+      {
+        result.text.clear();
+        return result;
+      }
+    }
+    if (!append_bounded(result.text, slice, hard_limit, result.oversize))
+    {
+      result.text.clear();
+      return result;
+    }
+  }
+  if (result.text.empty() && !result.oversize)
+  {
+    // Empty selection (caret-only) is not copyable.
+  }
+  return result;
+}
+
+std::string apply_transcript_selection_highlight(std::string_view styled_line, std::size_t column_start, std::size_t column_end, bool plain_output)
+{
+  if (plain_output || column_start >= column_end)
+    return std::string(styled_line);
+
+  std::string out;
+  out.reserve(styled_line.size() + 16);
+  std::size_t column = 0;
+  bool in_selection = false;
+  auto open_selection = [&] {
+    if (!in_selection)
+    {
+      out += detail::kReverseVideo;
+      in_selection = true;
+    }
+  };
+  auto close_selection = [&] {
+    if (in_selection)
+    {
+      out += detail::kSgrReset;
+      in_selection = false;
+    }
+  };
+
+  for (std::size_t index = 0; index < styled_line.size();)
+  {
+    auto before = index;
+    if (detail::skip_sgr_sequence(styled_line, index) || detail::skip_osc_sequence(styled_line, index))
+    {
+      // Close reverse around foreign SGR so theme colors restore cleanly after.
+      auto const was_selected = in_selection;
+      close_selection();
+      out.append(styled_line.substr(before, index - before));
+      if (was_selected && column >= column_start && column < column_end)
+        open_selection();
+      continue;
+    }
+    auto const cell = detail::terminal_text_cell(styled_line, before);
+    auto const columns = std::max<std::size_t>(cell.columns, 1);
+    auto const next_column = column + columns;
+    auto const selected = next_column > column_start && column < column_end;
+    if (selected)
+      open_selection();
+    else
+      close_selection();
+    out.append(styled_line.substr(before, cell.bytes));
+    index = before + std::max<std::size_t>(cell.bytes, 1);
+    column = next_column;
+  }
+  close_selection();
+  return out;
+}
+
+void apply_transcript_selection_overlay(std::vector<std::string>& visible_lines, detail::TranscriptLayout const& layout, TranscriptSelectionRange const& range,
+                                        std::size_t visible_start, bool plain_output)
+{
+  if (visible_lines.empty())
+    return;
+  auto const ordered = ordered_endpoints(range, layout);
+  auto const start_abs = absolute_line_for_endpoint(layout, ordered.first);
+  auto const end_abs = absolute_line_for_endpoint(layout, ordered.second);
+  if (!start_abs || !end_abs || *start_abs > *end_abs)
+    return;
+
+  for (std::size_t row = 0; row < visible_lines.size(); ++row)
+  {
+    auto const absolute = visible_start + row;
+    if (absolute < *start_abs || absolute > *end_abs || absolute >= layout.lines.size())
+      continue;
+    auto const plain = transcript_selection_plain_row(layout.lines[absolute]);
+    auto const line_columns = transcript_selection_plain_columns(plain);
+    auto col_start = absolute == *start_abs ? ordered.first.display_column : 0;
+    auto col_end = absolute == *end_abs ? ordered.second.display_column : line_columns;
+    col_start = std::min(col_start, line_columns);
+    col_end = std::min(col_end, line_columns);
+    if (col_start >= col_end)
+      continue;
+    // Overlay mutates only the visible frame copy, never layout.lines.
+    visible_lines[row] = apply_transcript_selection_highlight(visible_lines[row], col_start, col_end, plain_output);
+  }
+}
+
+void RuntimeTranscriptSelectionState::clear() noexcept
+{
+  range_.reset();
+  drag_ = DragKind::None;
+  armed_header_item_.reset();
+  armed_tool_header_ = false;
+  armed_thinking_header_ = false;
+}
+
+bool RuntimeTranscriptSelectionState::empty() const noexcept
+{
+  return !range_;
+}
+
+bool RuntimeTranscriptSelectionState::dragging() const noexcept
+{
+  return drag_ != DragKind::None;
+}
+
+std::optional<TranscriptSelectionRange> RuntimeTranscriptSelectionState::range() const noexcept
+{
+  return range_;
+}
+
+void RuntimeTranscriptSelectionState::publish(ComposerSnapshot& snapshot) const
+{
+  if (!range_)
+  {
+    snapshot.transcript_selection_anchor_item = std::string::npos;
+    snapshot.transcript_selection_anchor_line = 0;
+    snapshot.transcript_selection_anchor_column = 0;
+    snapshot.transcript_selection_focus_item = std::string::npos;
+    snapshot.transcript_selection_focus_line = 0;
+    snapshot.transcript_selection_focus_column = 0;
+    return;
+  }
+  snapshot.transcript_selection_anchor_item = range_->anchor.item_index;
+  snapshot.transcript_selection_anchor_line = range_->anchor.line_offset;
+  snapshot.transcript_selection_anchor_column = range_->anchor.display_column;
+  snapshot.transcript_selection_focus_item = range_->focus.item_index;
+  snapshot.transcript_selection_focus_line = range_->focus.line_offset;
+  snapshot.transcript_selection_focus_column = range_->focus.display_column;
+}
+
+void RuntimeTranscriptSelectionState::rebind_authority(detail::TranscriptLayout const& layout, std::size_t layout_generation, std::size_t width,
+                                                       ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+{
+  authority_generation_ = layout_generation;
+  authority_width_ = width;
+  authority_tool_presentation_ = tool_presentation;
+  authority_thinking_visible_ = thinking_visible;
+  authority_compact_spacing_ = compact_spacing;
+  authority_valid_ = true;
+  remap_or_clear(layout);
+}
+
+void RuntimeTranscriptSelectionState::apply_item_index_shift(std::ptrdiff_t item_index_shift, detail::TranscriptLayout const& layout)
+{
+  if (!range_ || item_index_shift == 0)
+  {
+    if (range_)
+      remap_or_clear(layout);
+    return;
+  }
+  auto shift_one = [item_index_shift](std::size_t index) -> std::optional<std::size_t> {
+    auto const shifted = static_cast<std::ptrdiff_t>(index) + item_index_shift;
+    if (shifted < 0)
+      return std::nullopt;
+    return static_cast<std::size_t>(shifted);
+  };
+  auto anchor_item = shift_one(range_->anchor.item_index);
+  auto focus_item = shift_one(range_->focus.item_index);
+  if (!anchor_item || !focus_item)
+  {
+    clear();
+    return;
+  }
+  range_->anchor.item_index = *anchor_item;
+  range_->focus.item_index = *focus_item;
+  if (armed_header_item_)
+  {
+    if (auto shifted = shift_one(*armed_header_item_))
+      armed_header_item_ = *shifted;
+    else
+      armed_header_item_.reset();
+  }
+  remap_or_clear(layout);
+}
+
+void RuntimeTranscriptSelectionState::remap_or_clear(detail::TranscriptLayout const& layout)
+{
+  if (!range_)
+    return;
+  auto remap_one = [&](TranscriptSelectionEndpoint endpoint) -> std::optional<TranscriptSelectionEndpoint> {
+    auto const absolute = absolute_line_for_endpoint(layout, endpoint);
+    if (!absolute)
+      return std::nullopt;
+    auto const plain = transcript_selection_plain_row(layout.lines[*absolute]);
+    endpoint.display_column = snap_display_column(plain, endpoint.display_column, false);
+    auto const max_columns = transcript_selection_plain_columns(plain);
+    if (endpoint.display_column > max_columns)
+      endpoint.display_column = max_columns;
+    return endpoint;
+  };
+  auto anchor = remap_one(range_->anchor);
+  auto focus = remap_one(range_->focus);
+  if (!anchor || !focus)
+  {
+    clear();
+    return;
+  }
+  range_ = TranscriptSelectionRange{.anchor = *anchor, .focus = *focus};
+}
+
+bool RuntimeTranscriptSelectionState::has_compatible_authority(detail::TranscriptLayoutCache const& cache) const noexcept
+{
+  return authority_valid_ && cache.valid && cache.transcript_generation == authority_generation_ && cache.width == authority_width_ &&
+         cache.tool_presentation == authority_tool_presentation_ && cache.thinking_visible == authority_thinking_visible_ &&
+         cache.compact_spacing == authority_compact_spacing_;
+}
+
+void RuntimeTranscriptSelectionState::ensure_authority(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache& layout_cache)
+{
+  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  auto const width = composer_canvas_layout(snapshot).content_width;
+  auto const compact = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
+  detail::refresh_transcript_layout_cache(layout_cache, snapshot.transcript, snapshot.transcript_generation, width, snapshot.tool_presentation,
+                                          snapshot.thinking_visible, compact);
+  if (!has_compatible_authority(layout_cache))
+  {
+    rebind_authority(layout_cache.layout, layout_cache.transcript_generation, layout_cache.width, layout_cache.tool_presentation, layout_cache.thinking_visible,
+                     layout_cache.compact_spacing);
+  }
+  else
+  {
+    remap_or_clear(layout_cache.layout);
+  }
+}
+
+std::optional<TranscriptSelectionViewport> RuntimeTranscriptSelectionState::viewport_for(ComposerSnapshot const& snapshot,
+                                                                                         detail::TranscriptLayoutCache const& cache) const
+{
+  if (!cache.valid)
+    return std::nullopt;
+  auto const body = detail::transcript_body_screen_geometry(snapshot);
+  if (!body.valid)
+    return std::nullopt;
+  auto const max_scroll = detail::cached_transcript_max_scroll_offset(cache, body.transcript_height);
+  auto const scroll = std::min(snapshot.transcript_scroll_offset, max_scroll);
+  auto const visible_start =
+      cache.layout.lines.size() > body.transcript_height ? (cache.layout.lines.size() - body.transcript_height - scroll) : std::size_t{0};
+  return TranscriptSelectionViewport{.transcript_height = body.transcript_height,
+                                     .content_width = body.content_width,
+                                     .canvas_left = body.canvas_left,
+                                     .max_scroll_offset = max_scroll,
+                                     .scroll_offset = scroll,
+                                     .visible_start = visible_start};
+}
+
+std::optional<TranscriptSelectionHit> RuntimeTranscriptSelectionState::hit_test(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache const& cache,
+                                                                                std::size_t row, std::size_t column) const
+{
+  auto const viewport = viewport_for(snapshot, cache);
+  if (!viewport || row == 0 || column == 0)
+    return std::nullopt;
+  if (column <= viewport->canvas_left || column > viewport->canvas_left + viewport->content_width)
+    return std::nullopt;
+  auto const content_column = column - viewport->canvas_left;
+  auto const row_index = row - 1;
+  if (row_index >= viewport->transcript_height)
+    return std::nullopt;
+  auto const absolute = viewport->visible_start + row_index;
+  if (absolute >= cache.layout.lines.size())
+    return std::nullopt;
+
+  auto const plain = transcript_selection_plain_row(cache.layout.lines[absolute]);
+  // Prefer end snap when the pointer is past mid-glyph so drag ranges feel natural.
+  auto const display_column = snap_display_column(plain, content_column > 0 ? content_column - 1 : 0, /*prefer_end_on_half=*/true);
+  auto endpoint = endpoint_for_absolute_line(cache.layout, absolute, display_column);
+  if (!endpoint)
+    return std::nullopt;
+
+  TranscriptSelectionHit hit{.endpoint = *endpoint, .absolute_line = absolute};
+  auto const position = position_for_item(cache.layout, endpoint->item_index);
+  if (position && *position < cache.layout.content_starts.size() && cache.layout.content_starts[*position] == absolute)
+  {
+    hit.on_header = true;
+    if (endpoint->item_index < snapshot.transcript.size())
+    {
+      auto const& item = snapshot.transcript[endpoint->item_index];
+      hit.tool_header = item.tool.has_value();
+      hit.thinking_header = detail::transcript_item_has_boundable_thinking(item, viewport->content_width, snapshot.thinking_visible);
+    }
+  }
+  return hit;
+}
+
+void RuntimeTranscriptSelectionState::begin_selection(TranscriptSelectionEndpoint const& endpoint, RuntimeDraftState* draft_state)
+{
+  if (draft_state)
+    draft_state->clear_selection();
+  range_ = TranscriptSelectionRange{.anchor = endpoint, .focus = endpoint};
+  drag_ = DragKind::Selecting;
+  armed_header_item_.reset();
+  armed_tool_header_ = false;
+  armed_thinking_header_ = false;
+}
+
+void RuntimeTranscriptSelectionState::extend_selection(TranscriptSelectionEndpoint const& endpoint)
+{
+  if (!range_)
+  {
+    range_ = TranscriptSelectionRange{.anchor = endpoint, .focus = endpoint};
+  }
+  else
+  {
+    range_->focus = endpoint;
+  }
+  drag_ = DragKind::Selecting;
+  armed_header_item_.reset();
+  armed_tool_header_ = false;
+  armed_thinking_header_ = false;
+}
+
+void RuntimeTranscriptSelectionState::arm_header(std::size_t item_index, bool tool_header, bool thinking_header)
+{
+  drag_ = DragKind::HeaderArmed;
+  armed_header_item_ = item_index;
+  armed_tool_header_ = tool_header;
+  armed_thinking_header_ = thinking_header;
+}
+
+bool RuntimeTranscriptSelectionState::finish_header_click(std::function<bool(std::size_t)> const& toggle_tool,
+                                                          std::function<bool(std::size_t)> const& toggle_thinking)
+{
+  if (!armed_header_item_)
+    return false;
+  auto const item = *armed_header_item_;
+  auto const tool = armed_tool_header_;
+  auto const thinking = armed_thinking_header_;
+  armed_header_item_.reset();
+  armed_tool_header_ = false;
+  armed_thinking_header_ = false;
+  drag_ = DragKind::None;
+  if (tool && toggle_tool)
+    return toggle_tool(item);
+  if (thinking && toggle_thinking)
+    return toggle_thinking(item);
+  return false;
+}
+
+bool RuntimeTranscriptSelectionState::autoscroll_for_row(ComposerSnapshot& snapshot, TranscriptSelectionViewport const& viewport, std::size_t screen_row,
+                                                         std::size_t& transcript_scroll_offset)
+{
+  if (viewport.transcript_height == 0 || screen_row == 0)
+    return false;
+  auto const row_index = screen_row - 1;
+  bool changed = false;
+  if (row_index == 0 && transcript_scroll_offset < viewport.max_scroll_offset)
+  {
+    ++transcript_scroll_offset;
+    changed = true;
+  }
+  else if (row_index + 1 >= viewport.transcript_height && transcript_scroll_offset > 0)
+  {
+    --transcript_scroll_offset;
+    changed = true;
+  }
+  if (changed)
+    snapshot.transcript_scroll_offset = transcript_scroll_offset;
+  return changed;
+}
+
+TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(InputEvent const& event, ComposerSnapshot& snapshot,
+                                                                              detail::TranscriptLayoutCache& layout_cache, RuntimeDraftState* draft_state,
+                                                                              std::size_t& transcript_scroll_offset,
+                                                                              std::function<bool(std::size_t)> const& toggle_tool,
+                                                                              std::function<bool(std::size_t)> const& toggle_thinking)
+{
+  auto const key = event.key;
+  if (key != Key::MouseLeftPress && key != Key::MouseLeftDrag && key != Key::MouseLeftRelease && key != Key::MouseLeftClick)
+    return TranscriptSelectionMouseResult::Ignored;
+
+  // Prompts/questions/permissions/select lists/palettes own the pointer first.
+  if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible)
+  {
+    if (dragging())
+      clear();
+    return TranscriptSelectionMouseResult::Ignored;
+  }
+
+  ensure_authority(snapshot, layout_cache);
+  if (!layout_cache.valid)
+  {
+    clear();
+    return TranscriptSelectionMouseResult::Ignored;
+  }
+
+  auto const hit = hit_test(snapshot, layout_cache, event.mouse_row, event.mouse_column);
+
+  if (key == Key::MouseLeftPress)
+  {
+    if (!hit)
+    {
+      // Press outside transcript body: clear armed header / selection drag, keep
+      // existing selection until a new body selection starts or composer claims.
+      if (drag_ == DragKind::HeaderArmed || drag_ == DragKind::Selecting)
+      {
+        drag_ = DragKind::None;
+        armed_header_item_.reset();
+      }
+      return TranscriptSelectionMouseResult::Ignored;
+    }
+    if (hit->on_header && (hit->tool_header || hit->thinking_header))
+    {
+      arm_header(hit->endpoint.item_index, hit->tool_header, hit->thinking_header);
+      // Do not start a selection yet; drag converts the arm into selection.
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    begin_selection(hit->endpoint, draft_state);
+    snapshot.status = "selection active";
+    return TranscriptSelectionMouseResult::HandledNeedsRender;
+  }
+
+  if (key == Key::MouseLeftDrag)
+  {
+    if (drag_ == DragKind::None && !hit)
+      return TranscriptSelectionMouseResult::Ignored;
+
+    auto viewport = viewport_for(snapshot, layout_cache);
+    if (viewport)
+      static_cast<void>(autoscroll_for_row(snapshot, *viewport, event.mouse_row, transcript_scroll_offset));
+
+    // Re-hit after possible autoscroll using updated scroll.
+    ensure_authority(snapshot, layout_cache);
+    auto drag_hit = hit_test(snapshot, layout_cache, event.mouse_row, event.mouse_column);
+    if (!drag_hit)
+    {
+      // Clamp to nearest transcript edge row when dragging past the viewport.
+      viewport = viewport_for(snapshot, layout_cache);
+      if (!viewport || layout_cache.layout.lines.empty())
+        return dragging() ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
+      auto const edge_row = event.mouse_row <= 1 ? std::size_t{1} : viewport->transcript_height;
+      drag_hit = hit_test(snapshot, layout_cache, edge_row, std::max(viewport->canvas_left + 1, event.mouse_column));
+      if (!drag_hit)
+        return dragging() ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
+    }
+
+    if (drag_ == DragKind::HeaderArmed)
+    {
+      // Drag after header press becomes selection and never toggles.
+      begin_selection(drag_hit->endpoint, draft_state);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    if (drag_ == DragKind::Selecting || range_)
+    {
+      if (drag_ != DragKind::Selecting && draft_state)
+        draft_state->clear_selection();
+      extend_selection(drag_hit->endpoint);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    return TranscriptSelectionMouseResult::Ignored;
+  }
+
+  if (key == Key::MouseLeftRelease)
+  {
+    if (drag_ == DragKind::HeaderArmed)
+    {
+      auto const toggled = finish_header_click(toggle_tool, toggle_thinking);
+      return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
+    }
+    if (drag_ == DragKind::Selecting)
+    {
+      drag_ = DragKind::None;
+      if (range_ && !endpoint_less(range_->anchor, range_->focus, layout_cache.layout) && !endpoint_less(range_->focus, range_->anchor, layout_cache.layout) &&
+          range_->anchor.display_column == range_->focus.display_column)
+      {
+        // Zero-width press/release: keep caret-less empty selection cleared.
+        clear();
+        snapshot.status.clear();
+      }
+      else if (range_)
+      {
+        snapshot.status = "selection active";
+      }
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    return TranscriptSelectionMouseResult::Ignored;
+  }
+
+  // Complete click (ncurses CLICKED or terminals that only emit click).
+  if (key == Key::MouseLeftClick)
+  {
+    if (!hit)
+      return TranscriptSelectionMouseResult::Ignored;
+    if (hit->on_header && (hit->tool_header || hit->thinking_header))
+    {
+      clear();
+      bool toggled = false;
+      if (hit->tool_header && toggle_tool)
+        toggled = toggle_tool(hit->endpoint.item_index);
+      else if (hit->thinking_header && toggle_thinking)
+        toggled = toggle_thinking(hit->endpoint.item_index);
+      return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
+    }
+    // Body click without drag: place a collapsed selection cleared immediately
+    // so ordinary clicks do not leave a sticky highlight.
+    clear();
+    return TranscriptSelectionMouseResult::Ignored;
+  }
+
+  return TranscriptSelectionMouseResult::Ignored;
+}
+
+bool RuntimeTranscriptSelectionState::copy_selection(ComposerSnapshot& snapshot, detail::TranscriptLayout const& layout)
+{
+  if (!range_)
+  {
+    snapshot.status = "no selection to copy";
+    static_cast<void>(beep());
+    return false;
+  }
+  auto extracted = extract_transcript_selection_text(layout, *range_, kSelectionCopySoftCeiling);
+  if (extracted.oversize)
+  {
+    snapshot.status = "selection too large to copy";
+    static_cast<void>(beep());
+    return false;
+  }
+  if (extracted.text.empty())
+  {
+    snapshot.status = "no selection to copy";
+    static_cast<void>(beep());
+    return false;
+  }
+  auto const copied = runtime_transcript::copy_text_to_terminal_clipboard(extracted.text);
+  snapshot.status = copied ? "copied selection to clipboard" : "clipboard copy failed";
+  if (!copied)
+    static_cast<void>(beep());
+  // Keep selection after success.
+  return copied;
+}
+
+}  // namespace ava::tui

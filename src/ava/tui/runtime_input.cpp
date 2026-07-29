@@ -488,6 +488,11 @@ RuntimeInput read_curses_input_from_terminal()
         MEVENT mouse{};
         if (getmouse(&mouse) != OK)
           return unknown_input();
+        // Shift-modified mouse is ignored so terminal-native Shift selection remains.
+#ifdef BUTTON_SHIFT
+        if (mouse_state_matches(mouse.bstate, BUTTON_SHIFT))
+          return unknown_input();
+#endif
         if (mouse_state_matches(mouse.bstate, BUTTON4_PRESSED))
         {
           return mouse_key_input(Key::MouseWheelUp, mouse);
@@ -496,9 +501,21 @@ RuntimeInput read_curses_input_from_terminal()
         {
           return mouse_key_input(Key::MouseWheelDown, mouse);
         }
-        if ((mouse.bstate & BUTTON1_CLICKED) != 0)
+        if (mouse_state_matches(mouse.bstate, BUTTON1_RELEASED))
+        {
+          return mouse_key_input(Key::MouseLeftRelease, mouse);
+        }
+        if (mouse_state_matches(mouse.bstate, BUTTON1_CLICKED))
         {
           return mouse_key_input(Key::MouseLeftClick, mouse);
+        }
+        if (mouse_state_matches(mouse.bstate, REPORT_MOUSE_POSITION))
+        {
+          return mouse_key_input(Key::MouseLeftDrag, mouse);
+        }
+        if (mouse_state_matches(mouse.bstate, BUTTON1_PRESSED))
+        {
+          return mouse_key_input(Key::MouseLeftPress, mouse);
         }
         return unknown_input();
       }

@@ -71,6 +71,7 @@ enum class Key
   ShiftCtrlEnd,
   MouseWheelUp,
   MouseWheelDown,
+  MouseLeftPress,
   MouseLeftClick,
   MouseLeftDrag,
   MouseLeftRelease,

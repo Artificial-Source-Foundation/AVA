@@ -325,6 +325,18 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 // Click target for the first rendered "Thinking:" header line of a boundable completed thinking item.
 [[nodiscard]] std::optional<std::size_t> transcript_thinking_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+
+// Shared transcript body geometry used by header hit-testing and rendered selection.
+struct TranscriptBodyScreenGeometry
+{
+  std::size_t transcript_height = 0;
+  std::size_t content_width = 0;
+  std::size_t canvas_left = 0;
+  bool valid = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+[[nodiscard]] TranscriptBodyScreenGeometry transcript_body_screen_geometry(ComposerSnapshot const& snapshot);
 // Bounded completed-thinking preview: first 11 rendered content rows + one footer row.
 inline constexpr std::size_t kThinkingBoundedMaxRows = 12;
 inline constexpr std::size_t kThinkingBoundedContentRows = 11;

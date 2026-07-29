@@ -116,8 +116,14 @@ void apply_mouse_enabled(bool enabled) noexcept
       if (has_mouse())
       {
         mmask_t previous_mask = 0;
-        mmask_t const mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
+        // Press/drag/release for transcript and composer selection, plus wheel.
+        // BUTTON1_CLICKED covers terminals that only synthesize complete clicks.
+        // REPORT_MOUSE_POSITION delivers drag motion while button 1 is held.
+        mmask_t const mask = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED | REPORT_MOUSE_POSITION | BUTTON4_PRESSED | BUTTON5_PRESSED;
         static_cast<void>(mousemask(mask, &previous_mask));
+        // Prefer separate press/release reports over collapsed click synthesis when
+        // the terminal can deliver them; zero disables click-interval collapsing.
+        static_cast<void>(mouseinterval(0));
       }
     }
     else
@@ -1142,8 +1148,15 @@ std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
   auto const final = sequence[index];
   auto const is_motion = (button_code & 32) != 0;
   auto const is_wheel = (button_code & 64) != 0;
+  // SGR modifier bits: 4 = Shift, 8 = Meta/Alt, 16 = Control. AVA ignores
+  // Shift-modified mouse so terminal-native Shift selection remains available.
+  auto const has_shift = (button_code & 4) != 0;
   auto const base_button = button_code & 3;
-  if (is_wheel && final == 'M')
+  if (has_shift && !is_wheel)
+  {
+    key = Key::Unknown;
+  }
+  else if (is_wheel && final == 'M')
   {
     key = (button_code & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
   }
@@ -1157,7 +1170,7 @@ std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
   }
   else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel)
   {
-    key = Key::MouseLeftClick;
+    key = Key::MouseLeftPress;
   }
   return InputEvent{.key = key,
                     .character = '\0',
@@ -1191,8 +1204,15 @@ std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
   auto key = Key::Unknown;
   auto const is_motion = (button & 32U) != 0;
   auto const is_wheel = (button & 64U) != 0;
+  // Legacy mouse encoding: bit 2 (value 4) is Shift. Ignore Shift-modified
+  // button reports so terminal-native Shift selection remains available.
+  auto const has_shift = (button & 4U) != 0;
   auto const base_button = button & 3U;
-  if (is_wheel)
+  if (has_shift && !is_wheel)
+  {
+    key = Key::Unknown;
+  }
+  else if (is_wheel)
   {
     key = (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
   }
@@ -1206,7 +1226,7 @@ std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
   }
   else if (!is_motion && base_button == 0U)
   {
-    key = Key::MouseLeftClick;
+    key = Key::MouseLeftPress;
   }
   return InputEvent{.key = key,
                     .character = '\0',

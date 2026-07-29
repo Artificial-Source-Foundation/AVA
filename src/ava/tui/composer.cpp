@@ -1630,7 +1630,11 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
   auto const transcript_height = vertical_layout.transcript_height;
   std::vector<std::string> visible_transcript;
   detail::TranscriptLayoutCache local_transcript_cache;
-  if (snapshot.transcript_scroll_offset > 0)
+  auto const selection_active = snapshot.transcript_selection_anchor_item != std::string::npos && snapshot.transcript_selection_focus_item != std::string::npos;
+  // Selection paint/hit-test share the full TranscriptLayout authority. While a
+  // selection is active, force the full-layout visible path so the overlay maps
+  // exactly onto the rows currently drawn from that authority.
+  if (snapshot.transcript_scroll_offset > 0 || selection_active)
   {
     auto& active_cache = transcript_cache ? *transcript_cache : local_transcript_cache;
     auto const compact_spacing = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
@@ -1646,6 +1650,29 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
                                               snapshot.thinking_visible, compact_spacing);
     }
     visible_transcript = detail::cached_visible_transcript_lines(active_cache, transcript_height, snapshot.transcript_scroll_offset);
+    if (selection_active && active_cache.valid)
+    {
+      auto const max_scroll = detail::cached_transcript_max_scroll_offset(active_cache, transcript_height);
+      auto const scroll = std::min(snapshot.transcript_scroll_offset, max_scroll);
+      auto const visible_start =
+          active_cache.layout.lines.size() > transcript_height ? (active_cache.layout.lines.size() - transcript_height - scroll) : std::size_t{0};
+      TranscriptSelectionRange const range{
+          .anchor =
+              TranscriptSelectionEndpoint{
+                  .item_index = snapshot.transcript_selection_anchor_item,
+                  .line_offset = snapshot.transcript_selection_anchor_line,
+                  .display_column = snapshot.transcript_selection_anchor_column,
+              },
+          .focus =
+              TranscriptSelectionEndpoint{
+                  .item_index = snapshot.transcript_selection_focus_item,
+                  .line_offset = snapshot.transcript_selection_focus_line,
+                  .display_column = snapshot.transcript_selection_focus_column,
+              },
+      };
+      // Non-mutating overlay: only the visible frame copy is highlighted.
+      apply_transcript_selection_overlay(visible_transcript, active_cache.layout, range, visible_start, tui_plain_output());
+    }
   }
   else
   {
@@ -1787,6 +1814,35 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
 }
 
 }  // namespace
+
+detail::TranscriptBodyScreenGeometry detail::transcript_body_screen_geometry(ComposerSnapshot const& snapshot)
+{
+  if (snapshot.sidebar_drawer_visible || snapshot.select_list || (snapshot.question_prompt && snapshot.question_prompt->modal) || snapshot.permission_prompt)
+    return {};
+
+  auto const canvas = composer_canvas_layout(snapshot);
+  auto const width = canvas.content_width;
+  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  auto main = snapshot;
+  main.width = width;
+  main.height = height;
+  main.sidebar = std::nullopt;
+  detail::CompletionMatchCache completion_cache;
+  detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
+  std::size_t composer_lines = 0;
+  std::vector<std::string> permission_lines;
+  std::vector<std::string> question_lines;
+  std::vector<std::string> status_lines;
+  std::vector<std::string> palette_lines;
+  std::vector<std::string> queued_lines;
+  PendingAttachmentRender attachments;
+  auto const vertical_layout = calculate_composer_vertical_layout(main, completion_cache, width, height, composer_lines, permission_lines, question_lines,
+                                                                  status_lines, palette_lines, queued_lines, attachments, false);
+  if (vertical_layout.transcript_height == 0)
+    return {};
+  return TranscriptBodyScreenGeometry{
+      .transcript_height = vertical_layout.transcript_height, .content_width = width, .canvas_left = canvas.left, .valid = true};
+}
 
 std::optional<std::size_t> detail::transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
 {

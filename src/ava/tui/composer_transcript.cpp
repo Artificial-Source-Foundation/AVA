@@ -2335,6 +2335,7 @@ TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& tra
     if (block.empty())
       continue;
 
+    layout.block_boundaries.push_back(layout.lines.size());
     if (roomy_transcript_spacing(width, compact_spacing) && !layout.lines.empty() && starts_visual_group(transcript, index, thinking_visible))
       layout.lines.emplace_back();
     layout.message_starts.push_back(layout.lines.size());

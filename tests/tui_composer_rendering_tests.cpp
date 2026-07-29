@@ -61,16 +61,21 @@ bool test_transcript_search_controller_tail_refresh_avoids_full_layout()
     static_cast<void>(start_color());
     static_cast<void>(use_default_colors());
   }
-  static_cast<void>(resizeterm(12, 80));
+  static_cast<void>(resizeterm(20, 180));
 
   ava::tui::TuiRuntimeOptions options;
   options.session_id = "search_tail_direct_refresh";
+  options.mode = "build";
+  options.provider = "fake";
+  options.model = "idle-sidebar-model";
+  options.workspace = "/workspace/search-tail";
   options.initial_transcript.reserve(ava::tui::kMaxTranscriptItems);
   for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems; ++index)
   {
     options.initial_transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "retained item [" + std::to_string(index) + "]"});
   }
   ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.sidebar = presentation.sidebar;
   ava::tui::RuntimeDraftState draft_state;
   ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
   ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
@@ -87,8 +92,9 @@ bool test_transcript_search_controller_tail_refresh_avoids_full_layout()
   controller.refresh_after_transcript_mutation(0, ava::tui::kMaxTranscriptItems - 1);
   auto const after = controller.diagnostics();
 
-  auto const passed =
+  auto const direct_refresh_passed =
       opened && presentation.snapshot.select_list && presentation.snapshot.select_list->items.size() == ava::tui::kMaxTranscriptItems &&
+      ava::tui::composer_canvas_layout(presentation.snapshot).content_width == 120 && renderer.transcript_layout_cache.width == 141 &&
       full_layout_builds == 1 && before.authoritative_mutation_item_render_count == 0 && before.projection_build_count == ava::tui::kMaxTranscriptItems &&
       before.layout_position_visit_count == ava::tui::kMaxTranscriptItems && before.match_projection_evaluation_count == ava::tui::kMaxTranscriptItems &&
       before.match_entry_realign_count == 0 && before.match_entry_splice_count == 0 && before.modal_row_build_count == ava::tui::kMaxTranscriptItems &&
@@ -99,11 +105,17 @@ bool test_transcript_search_controller_tail_refresh_avoids_full_layout()
       after.modal_row_build_count == before.modal_row_build_count + 1 && renderer.transcript_layout_cache.layout_build_count == full_layout_builds &&
       renderer.has_deferred_detached_transcript_update();
 
+  controller.refresh_after_resize();
+  auto const full_sync_passed = presentation.snapshot.select_list && presentation.snapshot.select_list->items.size() == ava::tui::kMaxTranscriptItems &&
+                                ava::tui::composer_canvas_layout(presentation.snapshot).content_width == 120 && renderer.transcript_layout_cache.width == 141 &&
+                                renderer.transcript_layout_cache.layout_build_count == full_layout_builds + 1 &&
+                                !renderer.has_deferred_detached_transcript_update();
+
   static_cast<void>(endwin());
   delscreen(screen);
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
-  return passed;
+  return direct_refresh_passed && full_sync_passed;
 }
 
 bool test_atomic_search_input_prompt_precedence()
@@ -248,8 +260,10 @@ bool test_atomic_search_input_prompt_precedence()
 void run_tui_prompt_search_race_tests()
 {
   expect(test_transcript_search_controller_tail_refresh_avoids_full_layout(),
-         "an open 1,000-item transcript search shift-zero tail refresh directly renders and updates exactly one authoritative item/projection/match/modal row "
-         "without rebuilding the renderer layout or synchronizing its deferred viewport");
+         "an open 1,000-item transcript search over a roomy 180x20 idle-sidebar layout keeps the captured 141-column transcript geometry while its modal "
+         "uses the 120-column canvas, then a shift-zero tail refresh directly renders and updates exactly one authoritative item/projection/match/modal row "
+         "without rebuilding the renderer layout or synchronizing its deferred viewport; a later explicit full synchronization projects only the search modal, "
+         "rebuilds the same 141-column underlying layout once, restores the modal, and consumes the deferred viewport");
   expect(test_atomic_search_input_prompt_precedence(),
          "actual prompt-coordinator locking linearizes retained search input before provider enqueue, then lets the queued prompt discard stale input and run "
          "before-prompt ahead of nested resolution across 50 synchronized repetitions");

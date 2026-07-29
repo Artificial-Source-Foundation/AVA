@@ -211,7 +211,7 @@ ava::tui::TranscriptItem context_tool(std::string name, std::string result)
                                                                      .lifecycle = ava::tui::ToolLifecycleState::Complete}};
 }
 
-void test_transcript_search_direct_item_render_matches_full_layout_projection()
+void test_transcript_search_roomy_direct_item_render_matches_full_layout_projection()
 {
   ava::tui::ComposerSnapshot snapshot;
   snapshot.tool_presentation = ava::tui::ToolPresentation::Rich;
@@ -227,16 +227,18 @@ void test_transcript_search_direct_item_render_matches_full_layout_projection()
                                                                   .lifecycle = ava::tui::ToolLifecycleState::Complete}},
       ava::tui::TranscriptItem{.label = "ava", .text = "DUPLICATE TOOL RESULT"},
       ava::tui::TranscriptItem{.label = "ava", .text = "visible answer", .thinking = "hidden reasoning"},
+      ava::tui::TranscriptItem{.label = "you", .text = "roomy user turn"},
       ava::tui::TranscriptItem{.label = "thinking", .text = "hidden standalone thinking"},
   };
-  constexpr auto width = std::size_t{42};
-  auto const layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, snapshot.thinking_visible, true);
+  constexpr auto width = std::size_t{48};
+  auto const layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, snapshot.thinking_visible, false);
 
-  bool blocks_match = true;
+  auto roomy_gap_present = false;
+  bool blocks_match = layout.block_boundaries.size() == layout.message_starts.size();
   for (std::size_t item_index = 0; item_index < snapshot.transcript.size(); ++item_index)
   {
     auto const direct = ava::tui::detail::render_transcript_search_item_lines(snapshot.transcript, item_index, width, snapshot.tool_presentation,
-                                                                              snapshot.thinking_visible, true);
+                                                                              snapshot.thinking_visible, false);
     auto const position = std::ranges::find(layout.message_item_indices, item_index);
     if (position == layout.message_item_indices.end())
     {
@@ -245,7 +247,8 @@ void test_transcript_search_direct_item_render_matches_full_layout_projection()
     }
     auto const position_index = static_cast<std::size_t>(position - layout.message_item_indices.begin());
     auto const start = layout.message_starts[position_index];
-    auto const end = position_index + 1 < layout.message_starts.size() ? layout.message_starts[position_index + 1] : layout.lines.size();
+    auto const end = position_index + 1 < layout.block_boundaries.size() ? layout.block_boundaries[position_index + 1] : layout.lines.size();
+    roomy_gap_present = roomy_gap_present || layout.block_boundaries[position_index] < start;
     blocks_match = blocks_match && direct == std::vector<std::string>(layout.lines.begin() + static_cast<std::ptrdiff_t>(start),
                                                                       layout.lines.begin() + static_cast<std::ptrdiff_t>(end));
   }
@@ -254,7 +257,7 @@ void test_transcript_search_direct_item_render_matches_full_layout_projection()
   static_cast<void>(cache.update_query(""));
   static_cast<void>(cache.rebuild_all(snapshot, layout));
   auto const full_matches = cache.matches();
-  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, width, snapshot.tool_presentation, snapshot.thinking_visible, true, 0, 0));
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, width, snapshot.tool_presentation, snapshot.thinking_visible, false, 0, 0));
   auto const& direct_matches = cache.matches();
   auto projections_match = full_matches.size() == direct_matches.size();
   for (std::size_t index = 0; projections_match && index < full_matches.size(); ++index)
@@ -262,10 +265,35 @@ void test_transcript_search_direct_item_render_matches_full_layout_projection()
     projections_match = full_matches[index].item_index == direct_matches[index].item_index && full_matches[index].identity == direct_matches[index].identity &&
                         full_matches[index].detail == direct_matches[index].detail;
   }
-  expect(
-      blocks_match && projections_match && cache.authoritative_mutation_item_render_count() == snapshot.transcript.size(),
-      "direct mutation rendering exactly matches full-layout search blocks and projections for context headings, wrapped rich tool cards, suppressed duplicate "
-      "results, visible assistant prose, and hidden thinking items");
+  expect(roomy_gap_present && blocks_match && projections_match && cache.authoritative_mutation_item_render_count() == snapshot.transcript.size(),
+         "roomy direct mutation rendering exactly matches full-layout search blocks and projections while excluding decorative inter-group spacing for context "
+         "headings, wrapped rich tool cards, suppressed duplicate results, visible assistant prose, and hidden thinking items");
+}
+
+void test_transcript_search_trailing_space_literal_survives_direct_mutation()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.transcript = {
+      ava::tui::TranscriptItem{.label = "ava", .text = "literal trailing result\n\ncontinued inside item"},
+      ava::tui::TranscriptItem{.label = "you", .text = "next visual group"},
+  };
+  constexpr auto width = std::size_t{80};
+  auto const layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, true, false);
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("result "));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const full_matches = cache.matches();
+  auto const blank_row_matches = ava::tui::detail::build_transcript_search_matches(snapshot, layout, "result  continued");
+
+  snapshot.transcript.front().text = "literal trailing result\n\ncontinued inside mutated item";
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, width, snapshot.tool_presentation, true, false, 0, 0));
+  auto const direct_matches = cache.matches();
+
+  expect(layout.block_boundaries.size() == 2 && layout.block_boundaries[1] < layout.message_starts[1] && full_matches.size() == 1 &&
+             full_matches.front().item_index == 0 && blank_row_matches.size() == 1 && blank_row_matches.front().item_index == 0 && direct_matches.size() == 1 &&
+             direct_matches.front().item_index == 0,
+         "a literal query ending in a space matches an actual blank row inside an item before and after direct mutation, while decorative roomy spacing before "
+         "the next visual group belongs to neither projection");
 }
 
 void test_transcript_search_rebuilds_negative_shift_render_boundaries()
@@ -423,7 +451,8 @@ void run_tui_transcript_search_tests()
   test_transcript_search_uses_current_rendered_tool_and_thinking_presentation();
   test_transcript_search_is_stable_across_render_widths();
   test_transcript_search_projection_match_and_modal_updates_are_suffix_bounded();
-  test_transcript_search_direct_item_render_matches_full_layout_projection();
+  test_transcript_search_roomy_direct_item_render_matches_full_layout_projection();
+  test_transcript_search_trailing_space_literal_survives_direct_mutation();
   test_transcript_search_rebuilds_negative_shift_render_boundaries();
   test_transcript_search_rebuilds_positive_shift_join_boundary();
   test_transcript_search_rebuilds_positive_shift_shortened_context_heading();

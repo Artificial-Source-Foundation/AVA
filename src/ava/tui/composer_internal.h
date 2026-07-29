@@ -157,6 +157,7 @@ struct CompletionMatchCache
 struct TranscriptLayout
 {
   std::vector<std::string> lines = {};
+  std::vector<std::size_t> block_boundaries = {};
   std::vector<std::size_t> message_starts = {};
   std::vector<std::size_t> content_starts = {};
   std::vector<std::size_t> message_item_indices = {};

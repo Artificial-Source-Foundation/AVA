@@ -208,7 +208,18 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
 {
   auto const item_index = layout.message_item_indices[position];
   auto const start = std::min(layout.message_starts[position], layout.lines.size());
-  auto const end = position + 1 < layout.message_starts.size() ? std::min(layout.message_starts[position + 1], layout.lines.size()) : layout.lines.size();
+  auto end = layout.lines.size();
+  if (position + 1 < layout.message_starts.size())
+  {
+    auto const next_start = std::min(layout.message_starts[position + 1], layout.lines.size());
+    end = next_start;
+    if (layout.block_boundaries.size() == layout.message_starts.size())
+    {
+      auto const next_boundary = std::min(layout.block_boundaries[position + 1], layout.lines.size());
+      if (next_boundary >= start && next_boundary <= next_start)
+        end = next_boundary;
+    }
+  }
   return build_projection_from_lines(snapshot, item_index, layout.lines, start, end);
 }
 
@@ -627,6 +638,37 @@ void update_transcript_search_select_list_rows(SelectListView& view, std::vector
 
 }  // namespace detail
 
+namespace {
+
+class ScopedTranscriptSearchModalProjection final
+{
+ public:
+  ScopedTranscriptSearchModalProjection(ComposerSnapshot& snapshot, bool project) : snapshot_(snapshot)
+  {
+    if (!project || !snapshot_.select_list)
+      return;
+    select_list_ = std::move(snapshot_.select_list);
+    snapshot_.select_list.reset();
+  }
+
+  ScopedTranscriptSearchModalProjection(ScopedTranscriptSearchModalProjection const&) = delete;
+  ScopedTranscriptSearchModalProjection& operator=(ScopedTranscriptSearchModalProjection const&) = delete;
+
+  ~ScopedTranscriptSearchModalProjection()
+  {
+    if (select_list_)
+      snapshot_.select_list = std::move(select_list_);
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  ComposerSnapshot& snapshot_;
+  std::optional<SelectListView> select_list_ = std::nullopt;
+};
+
+}  // namespace
+
 TranscriptSearchController::TranscriptSearchController(RuntimePresentationState& presentation_state, RuntimeRenderer& renderer,
                                                        RuntimeNavigationController& navigation, ActiveSelectList& active_select_list)
     : presentation_state_(presentation_state), renderer_(renderer), navigation_(navigation), active_select_list_(active_select_list)
@@ -641,10 +683,11 @@ bool TranscriptSearchController::is_open() const noexcept
 void TranscriptSearchController::refresh_authoritative_layout()
 {
   auto& snapshot = presentation_state_.snapshot;
-  renderer_.synchronize_detached_transcript_layout();
   auto const [width, height] = terminal_size();
   snapshot.width = width;
   snapshot.height = height;
+  ScopedTranscriptSearchModalProjection project_search_modal(snapshot, is_open());
+  renderer_.synchronize_detached_transcript_layout();
   static_cast<void>(detail::composer_max_transcript_scroll_offset_cached(snapshot, width, height, renderer_.completion_cache,
                                                                          snapshot.file_references_generation, renderer_.transcript_layout_cache,
                                                                          snapshot.transcript_generation));
@@ -752,10 +795,9 @@ void TranscriptSearchController::refresh_after_transcript_mutation(std::ptrdiff_
   snapshot.width = terminal_width;
   snapshot.height = terminal_height;
   auto const compact_spacing = detail::composer_layout_policy(snapshot, terminal_height).compact_transcript_spacing;
-  auto const settings_compatible =
-      authoritative_settings_valid_ && terminal_width == authoritative_terminal_width_ && terminal_height == authoritative_terminal_height_ &&
-      composer_canvas_layout(snapshot).content_width == authoritative_layout_width_ && snapshot.tool_presentation == authoritative_tool_presentation_ &&
-      snapshot.thinking_visible == authoritative_thinking_visible_ && compact_spacing == authoritative_compact_spacing_;
+  auto const settings_compatible = authoritative_settings_valid_ && terminal_width == authoritative_terminal_width_ &&
+                                   terminal_height == authoritative_terminal_height_ && snapshot.tool_presentation == authoritative_tool_presentation_ &&
+                                   snapshot.thinking_visible == authoritative_thinking_visible_ && compact_spacing == authoritative_compact_spacing_;
   if (!settings_compatible)
   {
     refresh_authoritative_layout();

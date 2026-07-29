@@ -164,7 +164,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
 
   if (parts.size() == 1)
   {
-    auto metadata = target->load_runtime_metadata();
+    auto metadata = target->load_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session " + target->store.session_id() + " labels: <none>")
@@ -232,7 +232,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   if (!target)
     return std::unexpected(std::move(target.error()));
 
-  auto current_metadata = target->load_runtime_metadata();
+  auto current_metadata = target->load_metadata();
   if (!current_metadata)
     return std::unexpected(std::move(current_metadata.error()));
   if (current_metadata->archived == archived)

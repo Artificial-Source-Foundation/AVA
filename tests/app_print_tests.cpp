@@ -616,7 +616,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
          "print mode emits actionable permission denial diagnostics to stderr");
 }
 
-void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
+void test_runtime_ava_authority_roots_are_shared_with_direct_tool_context()
 {
   auto const root = create_empty_root("app-runtime-command-authority-roots");
   auto const workspace = root / "workspace";
@@ -632,7 +632,7 @@ void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
   if (!session)
     return;
 
-  auto const roots = session->command_authority_roots_for_session();
+  auto const roots = session->ava_authority_roots();
   auto const direct_context = ava::app::make_tool_context(*session, nullptr);
   auto const contains = [&roots](std::filesystem::path const& path) {
     auto const normalized = path.lexically_normal();
@@ -1151,7 +1151,7 @@ void run_app_print_tests()
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
   test_app_print_mode_default_permission_denial_is_actionable();
-  test_runtime_command_authority_roots_are_shared_with_direct_tool_context();
+  test_runtime_ava_authority_roots_are_shared_with_direct_tool_context();
   test_app_print_mode_model_command_persistent_deny_preflight();
   test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();

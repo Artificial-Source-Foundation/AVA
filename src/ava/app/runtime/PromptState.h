@@ -14,7 +14,7 @@ namespace ava::app::runtime {
 // Bundle the assembled prompts for one mode: the active agent mode, base prompt metadata, contributing context and freshness sources, the ordinary system
 // prompt, and its ambient-extension-free runtime variant.
 //
-// select_runtime_prompt_state builds this aggregate; apply_runtime_prompt_state copies it back into a Session.
+// select_runtime_prompt_state builds this aggregate; apply_prompt_state copies it back into a Session.
 struct PromptState
 {
   ava::agent::Mode mode = ava::agent::Mode::Build;

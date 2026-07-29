@@ -345,7 +345,7 @@ void test_direct_provider_generation_is_isolated()
   expect(metadata && metadata->effective_title() == "Direct Fake Provider Session Title" && isolated_request,
          "direct title provider makes one bounded tool-free request and persists only its sanitized title metadata");
   auto list_json = session->list_sessions_result_json();
-  auto tree_json = session->session_tree_result_json();
+  auto tree_json = session->tree_result_json();
   auto metadata_json = metadata ? ava::session::session_metadata_json(*metadata) : std::string{};
   expect(list_json && tree_json && list_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
              tree_json->find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&

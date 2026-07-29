@@ -106,7 +106,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
 
   auto const previous_session_id = session.store.session_id();
   auto previous_session_title = std::string("Untitled session");
-  if (auto metadata = session.load_runtime_metadata(); metadata && !metadata->effective_title().empty())
+  if (auto metadata = session.load_metadata(); metadata && !metadata->effective_title().empty())
     previous_session_title = sanitize_inline_text(metadata->effective_title());
 
   auto const trimmed_name = trim_ascii(name);
@@ -193,7 +193,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   auto const parts = split_command_arguments(labels);
   if (parts.empty())
   {
-    auto metadata = session.load_runtime_metadata();
+    auto metadata = session.load_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session labels: <none>") : std::string("session labels: ") + labels_text(metadata->labels);
@@ -232,11 +232,11 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = session.append_runtime_mode_change(new_mode); !appended)
+  if (auto appended = session.append_mode_change(new_mode); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }
-  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_prompt_state(std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   add_output(result, "mode switched to " + ava::agent::to_string(session.mode()));
   return result;

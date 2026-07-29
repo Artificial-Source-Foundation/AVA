@@ -271,7 +271,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
   if (command.type == "session_tree")
   {
-    auto tree_json = session_ts::rat(session)->session_tree_result_json();
+    auto tree_json = session_ts::rat(session)->tree_result_json();
     if (!tree_json)
       return handled(write_error(context.output, command.id, tree_json.error()));
     return handled(write_success(context.output, command.id, *tree_json));
@@ -303,7 +303,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    auto stats_json = session_ts::rat(session)->session_stats_result_json();
+    auto stats_json = session_ts::rat(session)->stats_result_json();
     if (!stats_json)
       return handled(write_error(context.output, command.id, stats_json.error()));
     return handled(write_success(context.output, command.id, *stats_json));
@@ -315,7 +315,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    auto validation_json = session_ts::rat(session)->session_validation_result_json();
+    auto validation_json = session_ts::rat(session)->validation_result_json();
     if (!validation_json)
       return handled(write_error(context.output, command.id, validation_json.error()));
     return handled(write_success(context.output, command.id, *validation_json));
@@ -323,7 +323,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
   if (command.type == "session_metadata")
   {
-    auto metadata = session_ts::rat(session)->load_runtime_metadata();
+    auto metadata = session_ts::rat(session)->load_metadata();
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(*metadata)));
@@ -440,7 +440,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!selected)
       return handled(write_error(context.output, command.id, selected.error()));
 
-    auto switched = session_w->switch_runtime_model(std::move(*selected));
+    auto switched = session_w->switch_model(std::move(*selected));
     if (!switched)
       return handled(write_error(context.output, command.id, switched.error()));
     return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));
@@ -472,7 +472,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     session_ts::wat session_w(session);
-    auto changed = session_w->set_runtime_reasoning(std::move(selection));
+    auto changed = session_w->set_reasoning(std::move(selection));
     if (!changed)
       return handled(write_error(context.output, command.id, changed.error()));
     return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));
@@ -495,7 +495,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, source_session_id.error()));
 
     std::optional<ava::session::SessionLease> temporary_source_lease;
-    if (auto recovered = session_w->recover_source_session_for_mutation(*source_session_id, temporary_source_lease); !recovered)
+    if (auto recovered = session_w->recover_source_for_mutation(*source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
 
     auto const* source_lease = *source_session_id == session_w->store.session_id() ? &session_w->lease() : &*temporary_source_lease;
@@ -565,7 +565,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, source_session_id.error()));
     bool const current_source = *source_session_id == session_w->store.session_id();
     std::optional<ava::session::SessionLease> temporary_source_lease;
-    if (auto recovered = session_w->recover_source_session_for_mutation(*source_session_id, temporary_source_lease); !recovered)
+    if (auto recovered = session_w->recover_source_for_mutation(*source_session_id, temporary_source_lease); !recovered)
       return handled(write_error(context.output, command.id, recovered.error()));
     auto const* source_lease = current_source ? &session_w->lease() : &*temporary_source_lease;
     auto options = ava::session::BranchSummaryOptions{.workspace_dir = session_w->workspace_dir(),

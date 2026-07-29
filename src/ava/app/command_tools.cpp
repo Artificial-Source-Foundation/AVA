@@ -171,7 +171,7 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
         return session.append_owned(std::move(entry));
       },
       .anchor_set = session.anchor_set(),
-      .ava_authority_roots = session.command_authority_roots_for_session(),
+      .ava_authority_roots = session.ava_authority_roots(),
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
       .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,

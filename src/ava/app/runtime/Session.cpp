@@ -1059,8 +1059,8 @@ ava::core::VoidResult Session::replace_with(Session&& replacement)
   return {};
 }
 
-ava::core::VoidResult Session::recover_source_session_for_mutation(std::string const& source_session_id,
-                                                                   std::optional<ava::session::SessionLease>& temporary_source_lease)
+ava::core::VoidResult Session::recover_source_for_mutation(std::string const& source_session_id,
+                                                            std::optional<ava::session::SessionLease>& temporary_source_lease)
 {
   if (source_session_id == store.session_id())
   {
@@ -1126,7 +1126,7 @@ ava::core::Result<ava::session::SessionMetadataView> Session::append_metadata(av
   return ava::session::session_metadata_from_entries(store.session_id(), *entries);
 }
 
-ava::core::VoidResult Session::append_runtime_mode_change(ava::agent::Mode mode)
+ava::core::VoidResult Session::append_mode_change(ava::agent::Mode mode)
 {
   return append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                  .parent_id = "",
@@ -1158,7 +1158,7 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
     selection = std::move(*selected);
   }
 
-  auto changed = set_runtime_reasoning(std::move(selection));
+  auto changed = set_reasoning(std::move(selection));
   if (!changed)
   {
     auto error = std::move(changed.error());
@@ -1168,7 +1168,7 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
   return {};
 }
 
-ava::core::VoidResult Session::apply_runtime_prompt_state(PromptState prompt_state)
+ava::core::VoidResult Session::apply_prompt_state(PromptState prompt_state)
 {
   resolve_prompt_state() = ResolvedPromptState{.mode = prompt_state.mode,
                                                .base_prompt = std::move(prompt_state.base_prompt),
@@ -1179,7 +1179,7 @@ ava::core::VoidResult Session::apply_runtime_prompt_state(PromptState prompt_sta
   return refresh_parent_configuration();
 }
 
-ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo model)
+ava::core::Result<bool> Session::switch_model(ava::config::ModelInfo model)
 {
   if (this->model().provider_id == model.provider_id && this->model().model_id == model.model_id)
     return false;
@@ -1207,7 +1207,7 @@ ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo mod
   return true;
 }
 
-ava::core::Result<bool> Session::set_runtime_reasoning(std::optional<ReasoningSelection> selection)
+ava::core::Result<bool> Session::set_reasoning(std::optional<ReasoningSelection> selection)
 {
   if (selection)
   {
@@ -1232,7 +1232,7 @@ ava::core::Result<bool> Session::set_runtime_reasoning(std::optional<ReasoningSe
   return true;
 }
 
-ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metadata() const
+ava::core::Result<ava::session::SessionMetadataView> Session::load_metadata() const
 {
   auto read_authority = this->read_authority();
   if (!read_authority)
@@ -1243,7 +1243,7 @@ ava::core::Result<ava::session::SessionMetadataView> Session::load_runtime_metad
   return ava::session::session_metadata_from_entries(store.session_id(), *entries);
 }
 
-std::vector<std::filesystem::path> Session::command_authority_roots_for_session() const
+std::vector<std::filesystem::path> Session::ava_authority_roots() const
 {
   std::vector<std::filesystem::path> roots;
   roots.reserve(kMaxCommandAuthorityRoots);
@@ -1275,7 +1275,7 @@ ava::core::Result<std::string> Session::list_sessions_result_json() const
   return rpc::detail::SessionResultSerializer({}, *this).list_sessions_result_json();
 }
 
-ava::core::Result<std::string> Session::session_tree_result_json() const
+ava::core::Result<std::string> Session::tree_result_json() const
 {
   return rpc::detail::SessionResultSerializer({}, *this).session_tree_result_json();
 }
@@ -1285,12 +1285,12 @@ ava::core::Result<std::string> Session::list_models_result_json() const
   return rpc::detail::SessionResultSerializer({}, *this).list_models_result_json();
 }
 
-ava::core::Result<std::string> Session::session_stats_result_json() const
+ava::core::Result<std::string> Session::stats_result_json() const
 {
   return rpc::detail::SessionResultSerializer({}, *this).session_stats_result_json();
 }
 
-ava::core::Result<std::string> Session::session_validation_result_json() const
+ava::core::Result<std::string> Session::validation_result_json() const
 {
   return rpc::detail::SessionResultSerializer({}, *this).session_validation_result_json();
 }

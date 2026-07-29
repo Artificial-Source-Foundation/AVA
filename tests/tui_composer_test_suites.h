@@ -25,6 +25,7 @@ void run_tui_session_grant_tests();
 void run_tui_text_model_conversion_tests();
 void run_tui_runtime_event_state_tests();
 void run_tui_terminal_virtual_smoke_tests();
+void run_tui_terminal_osc11_theme_tests();
 void run_tui_large_render_performance_tests();
 void run_tui_tool_card_detail_tests();
 void run_tui_transcript_hierarchy_tests();

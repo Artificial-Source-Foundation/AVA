@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -146,6 +147,15 @@ enum class KeyboardProtocolResponseAction
   DisableModifyOtherKeys
 };
 
+struct TerminalBackgroundColor
+{
+  int red = 0;
+  int green = 0;
+  int blue = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 class CursesSession
 {
  public:
@@ -188,6 +198,12 @@ void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::string_view sequence, bool kitty_response_seen,
                                                                                         bool modify_other_keys_enabled);
 [[nodiscard]] bool terminal_keyboard_protocol_handle_response(std::string_view sequence);
+[[nodiscard]] std::string_view terminal_background_query_sequence();
+[[nodiscard]] std::optional<TerminalBackgroundColor> terminal_osc11_background_response(std::string_view sequence);
+void arm_terminal_background_response_handler();
+void disarm_terminal_background_response_handler();
+[[nodiscard]] bool terminal_background_response_handler_armed();
+[[nodiscard]] bool terminal_background_response_handle(std::string_view sequence);
 [[nodiscard]] InputEvent terminal_escape_sequence_event(std::string_view sequence);
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_complete(std::string_view sequence);

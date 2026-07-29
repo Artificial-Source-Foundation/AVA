@@ -5,12 +5,15 @@
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
+#include "ava/tui/theme.h"
 
 #include <algorithm>
+#include <chrono>
 #include <clocale>
 #include <cstddef>
 #include <cstdio>
@@ -1539,4 +1542,382 @@ void test_ncurses_newterm_smoke_without_real_tty()
 void run_tui_terminal_virtual_smoke_tests()
 {
   test_ncurses_newterm_smoke_without_real_tty();
+}
+
+namespace {
+
+std::string osc11_response(std::string_view payload, bool use_st = false)
+{
+  std::string sequence = "]11;";
+  sequence.append(payload);
+  if (use_st)
+  {
+    sequence.push_back('\x1b');
+    sequence.push_back('\\');
+  }
+  else
+  {
+    sequence.push_back('\a');
+  }
+  return sequence;
+}
+
+bool color_eq(std::optional<ava::tui::TerminalBackgroundColor> const& color, int red, int green, int blue)
+{
+  return color && color->red == red && color->green == green && color->blue == blue;
+}
+
+void push_bytes_to_curses(std::string_view bytes)
+{
+  for (auto it = bytes.rbegin(); it != bytes.rend(); ++it)
+  {
+    auto const value = static_cast<unsigned char>(*it);
+    expect(unget_wch(static_cast<wchar_t>(value)) != ERR, "osc11 tests can unget terminal bytes into ncurses");
+  }
+}
+
+void test_osc11_background_parser()
+{
+  expect(ava::tui::terminal_background_query_sequence() == std::string_view("\x1b]11;?\x1b\\"),
+         "terminal background probe emits OSC 11 query terminated with ST");
+
+  expect(color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:f/f/f")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:ff/ff/ff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:fff/fff/fff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:ffff/ffff/ffff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:0000/0000/0000")), 0, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:8080/8080/8080")), 128, 128, 128) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:Ab/Cd/Ef")), 171, 205, 239) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgba:ff/ff/ff/80")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgba:ffff/0000/0000/8000")), 255, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#ffffff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#000000")), 0, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#FFFFFFFFFFFF", true)), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#8080ffff0000")), 128, 255, 0),
+         "OSC 11 parser accepts rgb/rgba/# forms across hex widths and case with BEL or ST");
+
+  auto const light = ava::tui::terminal_osc11_background_response(osc11_response("rgb:eeee/eeee/eeee"));
+  auto const dark = ava::tui::terminal_osc11_background_response(osc11_response("#202020"));
+  expect(light && dark && (((light->red * 299) + (light->green * 587) + (light->blue * 114)) / 1000) >= 180 &&
+             (((dark->red * 299) + (dark->green * 587) + (dark->blue * 114)) / 1000) < 180,
+         "OSC 11 parser preserves channel values that classify above and below luminance 180");
+
+  std::string oversized = "]11;rgb:";
+  oversized.append(300, 'f');
+  oversized.push_back('\a');
+  expect(!ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff\a") && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/ff") &&
+             !ava::tui::terminal_osc11_background_response("]12;rgb:ff/ff/ff\a") && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/fff/ff\a") &&
+             !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/fg\a") && !ava::tui::terminal_osc11_background_response("]11;rgba:ff/ff/ff/zz\a") &&
+             !ava::tui::terminal_osc11_background_response("]11;#fff\a") && !ava::tui::terminal_osc11_background_response("]11;#gg0000\a") &&
+             !ava::tui::terminal_osc11_background_response(oversized) && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/ff/ff\a"),
+         "OSC 11 parser rejects malformed, oversized, wrong-OSC, missing-terminator, unequal-width, and bad-alpha replies");
+}
+
+void test_osc11_theme_precedence_and_reset()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  expect(ava::tui::tui_theme_needs_terminal_background_probe(), "automatic theme selection requests an OSC 11 terminal-background probe");
+
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  auto active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "OSC 11" && active.detail == "terminal background appears dark from OSC 11" &&
+             active.revision == "osc11-dark",
+         "detected OSC 11 dark appearance beats disagreeing COLORFGBG light inference without exposing raw color data");
+
+  {
+    ScopedEnvVar explicit_light("AVA_TUI_THEME", "light");
+    expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "explicit AVA_TUI_THEME disables the OSC 11 probe");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "AVA_TUI_THEME",
+           "explicit AVA_TUI_THEME light wins over disagreeing OSC 11 detection");
+  }
+
+  {
+    ScopedEnvVar explicit_dark("AVA_TUI_THEME", "dark");
+    ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "AVA_TUI_THEME",
+           "explicit AVA_TUI_THEME dark wins over disagreeing OSC 11 light detection");
+  }
+
+  {
+    ScopedEnvVar explicit_plain("AVA_TUI_THEME", "plain");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Plain && active.badge == "AVA_TUI_THEME", "explicit plain theme wins over OSC 11 detection");
+  }
+
+  {
+    ScopedEnvVar no_color_on("NO_COLOR", "1");
+    expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "NO_COLOR disables the OSC 11 probe");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Plain && active.badge == "NO_COLOR", "NO_COLOR still outranks OSC 11 detection");
+  }
+
+  ava::tui::set_tui_config_theme("light");
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "configured display.json theme disables the OSC 11 probe");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "display.json", "configured light theme wins over disagreeing OSC 11 detection");
+
+  ava::tui::TuiCustomTheme custom{
+      .name = "sunrise",
+      .path = "/tmp/sunrise.json",
+      .palette = ava::tui::TuiThemePalette{.text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255},
+      .revision = "custom-rev"};
+  ava::tui::set_tui_config_theme("sunrise", custom);
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "configured custom theme disables the OSC 11 probe");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Custom && active.name == "sunrise" && active.badge == "display.json",
+         "configured custom theme wins over OSC 11 detection");
+
+  ava::tui::set_tui_config_theme(std::nullopt);
+  {
+    ScopedEnvVar unknown_theme("AVA_TUI_THEME", "auto");
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "unknown/auto AVA_TUI_THEME keeps automatic probe semantics");
+    ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "OSC 11", "unknown/auto AVA_TUI_THEME falls through to OSC 11 detection");
+  }
+
+  ava::tui::reset_detected_terminal_background_appearance();
+  expect(!ava::tui::detected_terminal_background_appearance(), "reset clears session-scoped OSC 11 detection");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "COLORFGBG", "after OSC 11 reset, COLORFGBG inference remains the next fallback");
+
+  {
+    ScopedEnvVar clear_colorfgbg("COLORFGBG", "");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "built-in", "without OSC 11 or COLORFGBG the built-in dark fallback is unchanged");
+  }
+
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+}
+
+void test_startup_input_fifo_order_and_cap()
+{
+  ava::tui::runtime_input::clear_startup_input_queue();
+  expect(ava::tui::runtime_input::startup_input_queue_size() == 0, "startup input queue begins empty");
+
+  auto key = [](ava::tui::Key k) {
+    return ava::tui::runtime_input::RuntimeInput{.event = ava::tui::InputEvent{.key = k, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
+                                                 .text = {},
+                                                 .bracketed_paste = false,
+                                                 .resize = false};
+  };
+  auto character = [](char ch) {
+    return ava::tui::runtime_input::RuntimeInput{
+        .event = ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = ch, .text = std::string(1, ch), .mouse_column = 0, .mouse_row = 0},
+        .text = std::string(1, ch),
+        .bracketed_paste = false,
+        .resize = false};
+  };
+  auto paste = ava::tui::runtime_input::RuntimeInput{
+      .event = ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'p', .text = "pasted", .mouse_column = 0, .mouse_row = 0},
+      .text = "pasted",
+      .bracketed_paste = true,
+      .resize = false};
+  auto resize = ava::tui::runtime_input::RuntimeInput{
+      .event = ava::tui::InputEvent{.key = ava::tui::Key::Unknown, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
+      .text = {},
+      .bracketed_paste = false,
+      .resize = true};
+
+  expect(ava::tui::runtime_input::enqueue_startup_input(character('a')) && ava::tui::runtime_input::enqueue_startup_input(resize) &&
+             ava::tui::runtime_input::enqueue_startup_input(key(ava::tui::Key::Enter)) && ava::tui::runtime_input::enqueue_startup_input(std::move(paste)) &&
+             ava::tui::runtime_input::startup_input_queue_size() == 4,
+         "startup input queue preserves insertion order for key, resize, and complete paste events");
+
+  auto first = ava::tui::runtime_input::poll_curses_input();
+  auto second = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(0));
+  expect(first && first->event.key == ava::tui::Key::Character && first->text == "a" && second && second->resize &&
+             ava::tui::runtime_input::startup_input_queue_size() == 2,
+         "poll and timeout reads drain the startup FIFO before touching ncurses");
+
+  // Blocking drain of remaining queued events does not require a live curses screen.
+  auto third = ava::tui::runtime_input::read_curses_input();
+  auto fourth = ava::tui::runtime_input::read_curses_input();
+  expect(
+      third.event.key == ava::tui::Key::Enter && fourth.bracketed_paste && fourth.text == "pasted" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+      "blocking reads drain remaining startup FIFO events in order");
+
+  for (std::size_t index = 0; index < 64; ++index)
+  {
+    expect(ava::tui::runtime_input::enqueue_startup_input(character(static_cast<char>('0' + (index % 10)))), "startup input queue accepts up to 64 events");
+  }
+  expect(!ava::tui::runtime_input::enqueue_startup_input(character('x')) && ava::tui::runtime_input::startup_input_queue_size() == 64,
+         "startup input queue rejects events beyond the 64-event cap");
+  ava::tui::runtime_input::clear_startup_input_queue();
+  expect(ava::tui::runtime_input::startup_input_queue_size() == 0, "clear empties the startup input queue between sessions");
+}
+
+void test_osc11_handler_arming_and_virtual_probe()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto const light_reply = osc11_response("rgb:ffff/ffff/ffff");
+  expect(!ava::tui::terminal_background_response_handle(light_reply) && !ava::tui::detected_terminal_background_appearance(),
+         "disarmed OSC 11 replies never mutate theme state");
+
+  ava::tui::arm_terminal_background_response_handler();
+  expect(ava::tui::terminal_background_response_handler_armed(), "OSC 11 response handler can be armed");
+  expect(!ava::tui::terminal_background_response_handle("]12;rgb:ff/ff/ff\a") && !ava::tui::detected_terminal_background_appearance(),
+         "armed handler ignores non-OSC-11 control replies without mutation");
+  expect(!ava::tui::terminal_background_response_handle("]11;rgb:ff/ff\a") && !ava::tui::detected_terminal_background_appearance(),
+         "armed handler ignores malformed OSC 11 payloads without mutation");
+  expect(ava::tui::terminal_background_response_handle(light_reply) &&
+             ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light,
+         "armed handler accepts a valid light OSC 11 reply");
+  ava::tui::disarm_terminal_background_response_handler();
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  expect(input != nullptr && output != nullptr, "OSC 11 virtual probe can create temporary streams");
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, "OSC 11 virtual probe creates an ncurses screen");
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  static_cast<void>(set_term(screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+
+  // OSC 11 light reply (chunk-assembled by the ordinary escape reader), a Kitty
+  // keyboard flags reply, then a plain typed key. Bytes are ungot in reverse so
+  // the probe observes them in this order.
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += light_reply;
+  feed.push_back('\x1b');
+  feed += "[?5u";
+  feed.push_back('z');
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto const active = ava::tui::active_tui_theme();
+  expect(ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light && active.kind == ava::tui::TuiThemeKind::Light &&
+             active.badge == "OSC 11" && active.detail.find("OSC 11") != std::string::npos && active.detail.find("ffff") == std::string::npos,
+         "virtual probe applies OSC 11 light theme without exposing raw reply bytes");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  expect(queued && queued->event.key == ava::tui::Key::Character && queued->text == "z" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         "virtual probe preserves a key typed during OSC 11 drain and discards Kitty protocol replies");
+
+  // Ensure no raw OSC payload leaked into the queued event text.
+  expect(!queued->text.contains("]11") && !queued->text.contains("rgb:"), "startup FIFO never surfaces raw OSC 11 reply contents");
+
+  auto const snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                   .provider = "openai",
+                                                   .model = "gpt-5.5",
+                                                   .session_id = "session_osc11",
+                                                   .input = queued->text,
+                                                   .status = "ready",
+                                                   .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "osc11 contrast"}},
+                                                   .width = 80,
+                                                   .height = 14,
+                                                   .input_cursor = queued->text.size()};
+  expect(ava::tui::draw_screen(snapshot), "first rendered frame after OSC 11 detection draws successfully");
+  if (has_colors())
+  {
+    short foreground = 0;
+    short background = 0;
+    auto const bkgd_cell = getbkgd(stdscr);
+    auto const pair = static_cast<short>(PAIR_NUMBER(bkgd_cell));
+    expect(pair_content(pair, &foreground, &background) == OK && background == -1,
+           "OSC 11 light selection keeps the ordinary screen canvas on terminal-default background");
+  }
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+}
+
+void test_osc11_tmux_skip_semantics()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  expect(ava::tui::tui_theme_needs_terminal_background_probe(), "probe remains desired when theme selection is automatic");
+
+  {
+    ScopedEnvVar tmux_guard("TMUX", "/tmp/tmux-1000/default,1,0");
+    ScopedEnvVar term_guard("TERM", "xterm-256color");
+    // Environment skip is enforced by runtime startup; the probe-need predicate stays
+    // about theme automation only. Document the split here so tmux smoke stays aligned.
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "TMUX does not change automatic theme selection; runtime skips the query separately");
+  }
+
+  {
+    ScopedEnvVar tmux_guard("TMUX", "");
+    ScopedEnvVar term_guard("TERM", "tmux-256color");
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "TERM=tmux* still leaves theme selection automatic while runtime skips the OSC 11 query");
+  }
+
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+  auto active = ava::tui::active_tui_theme();
+  expect(active.badge == "OSC 11", "prior detection remains visible until session reset");
+  ava::tui::reset_detected_terminal_background_appearance();
+  active = ava::tui::active_tui_theme();
+  expect(active.badge == "built-in", "session reset clears OSC 11 detection so the next session cannot inherit it");
+}
+
+}  // namespace
+
+void run_tui_terminal_osc11_theme_tests()
+{
+  test_osc11_background_parser();
+  test_osc11_theme_precedence_and_reset();
+  test_startup_input_fifo_order_and_cap();
+  test_osc11_handler_arming_and_virtual_probe();
+  test_osc11_tmux_skip_semantics();
 }

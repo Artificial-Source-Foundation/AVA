@@ -6,6 +6,7 @@
 #include <climits>
 #include <cstddef>
 #include <cwchar>
+#include <deque>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,6 +18,13 @@ namespace {
 
 constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
 constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
+constexpr std::size_t kStartupInputQueueCap = 64;
+
+std::deque<RuntimeInput>& startup_input_queue_storage()
+{
+  static std::deque<RuntimeInput> queue;
+  return queue;
+}
 
 bool mouse_state_matches(mmask_t state, mmask_t mask)
 {
@@ -182,6 +190,8 @@ std::optional<RuntimeInput> read_escape_sequence_input()
     return std::nullopt;
   if (terminal_keyboard_protocol_handle_response(consumed))
     return unknown_input();
+  if (terminal_background_response_handle(consumed))
+    return unknown_input();
   if (consumed == "[200~")
     return read_bracketed_paste();
   if (auto event = terminal_escape_sequence_event(consumed); event.key != Key::Unknown)
@@ -191,6 +201,16 @@ std::optional<RuntimeInput> read_escape_sequence_input()
     return unknown_input();
   }
   return unknown_input();
+}
+
+std::optional<RuntimeInput> take_startup_input()
+{
+  auto& queue = startup_input_queue_storage();
+  if (queue.empty())
+    return std::nullopt;
+  auto input = std::move(queue.front());
+  queue.pop_front();
+  return input;
 }
 
 }  // namespace
@@ -231,7 +251,26 @@ std::optional<std::string> printable_jump_target(RuntimeInput const& input)
   return text.substr(0, length);
 }
 
-RuntimeInput read_curses_input()
+void clear_startup_input_queue()
+{
+  startup_input_queue_storage().clear();
+}
+
+std::size_t startup_input_queue_size()
+{
+  return startup_input_queue_storage().size();
+}
+
+bool enqueue_startup_input(RuntimeInput input)
+{
+  auto& queue = startup_input_queue_storage();
+  if (queue.size() >= kStartupInputQueueCap)
+    return false;
+  queue.push_back(std::move(input));
+  return true;
+}
+
+RuntimeInput read_curses_input_from_terminal()
 {
   wint_t value = 0;
   auto const result = wget_wch(stdscr, &value);
@@ -551,6 +590,13 @@ RuntimeInput read_curses_input()
   return unknown_input();
 }
 
+RuntimeInput read_curses_input()
+{
+  if (auto queued = take_startup_input())
+    return *queued;
+  return read_curses_input_from_terminal();
+}
+
 bool empty_curses_input(RuntimeInput const& input)
 {
   return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste;
@@ -558,8 +604,10 @@ bool empty_curses_input(RuntimeInput const& input)
 
 std::optional<RuntimeInput> poll_curses_input()
 {
+  if (auto queued = take_startup_input())
+    return queued;
   static_cast<void>(wtimeout(stdscr, 0));
-  auto input = read_curses_input();
+  auto input = read_curses_input_from_terminal();
   static_cast<void>(wtimeout(stdscr, -1));
   if (empty_curses_input(input))
   {
@@ -570,12 +618,37 @@ std::optional<RuntimeInput> poll_curses_input()
 
 std::optional<RuntimeInput> read_curses_input_with_timeout(std::chrono::milliseconds timeout)
 {
+  if (auto queued = take_startup_input())
+    return queued;
   static_cast<void>(wtimeout(stdscr, static_cast<int>(timeout.count())));
-  auto input = read_curses_input();
+  auto input = read_curses_input_from_terminal();
   static_cast<void>(wtimeout(stdscr, -1));
   if (empty_curses_input(input))
     return std::nullopt;
   return input;
+}
+
+void drain_startup_probe_input(std::chrono::milliseconds deadline)
+{
+  using clock = std::chrono::steady_clock;
+  auto const started = clock::now();
+  while (startup_input_queue_storage().size() < kStartupInputQueueCap)
+  {
+    auto const elapsed = clock::now() - started;
+    if (elapsed >= deadline)
+      break;
+    auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - elapsed);
+    if (remaining.count() <= 0)
+      break;
+
+    static_cast<void>(wtimeout(stdscr, static_cast<int>(remaining.count())));
+    auto input = read_curses_input_from_terminal();
+    static_cast<void>(wtimeout(stdscr, -1));
+    if (empty_curses_input(input))
+      continue;
+    if (!enqueue_startup_input(std::move(input)))
+      break;
+  }
 }
 
 }  // namespace ava::tui::runtime_input

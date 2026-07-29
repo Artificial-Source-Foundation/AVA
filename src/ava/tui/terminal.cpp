@@ -8,8 +8,10 @@
 #error "AVA requires ncursesw with wide-character support."
 #endif
 
+#include "ava/tui/theme.h"
 #include "ava/core/error.h"
 
+#include <cctype>
 #include <clocale>
 #include <csignal>
 #include <cstdio>
@@ -22,15 +24,18 @@ namespace ava::tui {
 namespace {
 
 constexpr int kTerminalEscapeDelayMs = 100;
+constexpr std::size_t kOsc11ResponseMaxBytes = 256;
 constexpr std::string_view kKittyKeyboardPushSequence = "\x1b[>5u";
 constexpr std::string_view kKittyKeyboardQuerySequence = "\x1b[>5u\x1b[?u\x1b[c";
 constexpr std::string_view kKittyKeyboardPopSequence = "\x1b[<u";
 constexpr std::string_view kModifyOtherKeysEnableSequence = "\x1b[>4;2m";
 constexpr std::string_view kModifyOtherKeysDisableSequence = "\x1b[>4;0m";
+constexpr std::string_view kTerminalBackgroundQuerySequence = "\x1b]11;?\x1b\\";
 
 sig_atomic_t volatile g_terminal_signal = 0;
 bool g_keyboard_protocol_kitty_response_seen = false;
 bool g_modify_other_keys_enabled = false;
+bool g_terminal_background_response_handler_armed = false;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
 
@@ -1190,6 +1195,119 @@ bool is_control_string_complete(std::string_view sequence)
   return sequence.front() == ']' && sequence.find('\a') != std::string_view::npos;
 }
 
+std::optional<int> hex_digit_value(char ch)
+{
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  if (ch >= 'a' && ch <= 'f')
+    return 10 + (ch - 'a');
+  if (ch >= 'A' && ch <= 'F')
+    return 10 + (ch - 'A');
+  return std::nullopt;
+}
+
+std::optional<int> parse_hex_channel(std::string_view text)
+{
+  if (text.empty() || text.size() > 4)
+    return std::nullopt;
+
+  unsigned value = 0;
+  for (char const ch : text)
+  {
+    auto const digit = hex_digit_value(ch);
+    if (!digit)
+      return std::nullopt;
+    value = (value << 4U) | static_cast<unsigned>(*digit);
+  }
+
+  auto const max_value = (1U << (static_cast<unsigned>(text.size()) * 4U)) - 1U;
+  if (max_value == 0)
+    return std::nullopt;
+  return static_cast<int>((value * 255U) / max_value);
+}
+
+std::optional<TerminalBackgroundColor> parse_rgb_slash_color(std::string_view payload, bool allow_alpha)
+{
+  auto const prefix = allow_alpha ? std::string_view("rgba:") : std::string_view("rgb:");
+  if (!payload.starts_with(prefix))
+    return std::nullopt;
+  payload.remove_prefix(prefix.size());
+
+  auto next_component = [&](bool last) -> std::optional<std::string_view> {
+    if (payload.empty())
+      return std::nullopt;
+    if (last)
+    {
+      auto const component = payload;
+      payload = {};
+      return component;
+    }
+    auto const separator = payload.find('/');
+    if (separator == std::string_view::npos)
+      return std::nullopt;
+    auto const component = payload.substr(0, separator);
+    payload.remove_prefix(separator + 1);
+    return component;
+  };
+
+  auto const red_text = next_component(false);
+  auto const green_text = next_component(false);
+  auto const blue_text = next_component(!allow_alpha);
+  if (!red_text || !green_text || !blue_text)
+    return std::nullopt;
+  if (red_text->size() != green_text->size() || green_text->size() != blue_text->size())
+    return std::nullopt;
+
+  auto const red = parse_hex_channel(*red_text);
+  auto const green = parse_hex_channel(*green_text);
+  auto const blue = parse_hex_channel(*blue_text);
+  if (!red || !green || !blue)
+    return std::nullopt;
+
+  if (allow_alpha)
+  {
+    auto const alpha_text = next_component(true);
+    if (!alpha_text || alpha_text->size() != red_text->size() || !parse_hex_channel(*alpha_text))
+      return std::nullopt;
+  }
+
+  if (!payload.empty())
+    return std::nullopt;
+
+  return TerminalBackgroundColor{.red = *red, .green = *green, .blue = *blue};
+}
+
+std::optional<TerminalBackgroundColor> parse_hash_color(std::string_view payload)
+{
+  if (!payload.starts_with('#') || (payload.size() != 7 && payload.size() != 13))
+    return std::nullopt;
+
+  auto const width = payload.size() == 7 ? std::size_t{2} : std::size_t{4};
+  auto const red = parse_hex_channel(payload.substr(1, width));
+  auto const green = parse_hex_channel(payload.substr(1 + width, width));
+  auto const blue = parse_hex_channel(payload.substr(1 + (2 * width), width));
+  if (!red || !green || !blue)
+    return std::nullopt;
+  return TerminalBackgroundColor{.red = *red, .green = *green, .blue = *blue};
+}
+
+std::optional<std::string_view> osc11_payload(std::string_view sequence)
+{
+  if (sequence.size() > kOsc11ResponseMaxBytes || !sequence.starts_with("]11;"))
+    return std::nullopt;
+
+  if (sequence.back() == '\a')
+    return sequence.substr(4, sequence.size() - 5);
+  if (ends_with_string_terminator(sequence))
+    return sequence.substr(4, sequence.size() - 6);
+  return std::nullopt;
+}
+
+int rgb_luminance(TerminalBackgroundColor const& color)
+{
+  return ((color.red * 299) + (color.green * 587) + (color.blue * 114)) / 1000;
+}
+
 }  // namespace
 
 CursesSession::CursesSession(void* screen) : screen_(screen), active_(screen != nullptr)
@@ -1452,6 +1570,53 @@ bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
   }
 
   return false;
+}
+
+std::string_view terminal_background_query_sequence()
+{
+  return kTerminalBackgroundQuerySequence;
+}
+
+std::optional<TerminalBackgroundColor> terminal_osc11_background_response(std::string_view sequence)
+{
+  auto const payload = osc11_payload(sequence);
+  if (!payload)
+    return std::nullopt;
+
+  if (auto color = parse_rgb_slash_color(*payload, false))
+    return color;
+  if (auto color = parse_rgb_slash_color(*payload, true))
+    return color;
+  return parse_hash_color(*payload);
+}
+
+void arm_terminal_background_response_handler()
+{
+  g_terminal_background_response_handler_armed = true;
+}
+
+void disarm_terminal_background_response_handler()
+{
+  g_terminal_background_response_handler_armed = false;
+}
+
+bool terminal_background_response_handler_armed()
+{
+  return g_terminal_background_response_handler_armed;
+}
+
+bool terminal_background_response_handle(std::string_view sequence)
+{
+  if (!g_terminal_background_response_handler_armed)
+    return false;
+
+  auto const color = terminal_osc11_background_response(sequence);
+  if (!color)
+    return false;
+
+  auto const appearance = rgb_luminance(*color) >= 180 ? TerminalBackgroundAppearance::Light : TerminalBackgroundAppearance::Dark;
+  set_detected_terminal_background_appearance(appearance);
+  return true;
 }
 
 InputEvent terminal_escape_sequence_event(std::string_view sequence)

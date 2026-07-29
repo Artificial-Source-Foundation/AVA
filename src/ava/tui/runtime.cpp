@@ -18,6 +18,7 @@
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/theme.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -25,6 +26,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -52,6 +55,8 @@ namespace {
 constexpr std::size_t kKeyboardScrollRows = 3;
 constexpr std::size_t kMouseWheelScrollRows = 1;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
+constexpr auto kTerminalBackgroundProbeDeadline = std::chrono::milliseconds(50);
+
 class ComposerTerminalGraphicsGuard
 {
  public:
@@ -62,6 +67,58 @@ class ComposerTerminalGraphicsGuard
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+// Session-scoped OSC 11 detection and startup-input FIFO ownership. Reset before
+// each interactive TUI session and again on every exit so sequential sessions and
+// tests never inherit a prior probe result or queued startup events.
+class TerminalBackgroundDetectionGuard
+{
+ public:
+  TerminalBackgroundDetectionGuard()
+  {
+    disarm_terminal_background_response_handler();
+    reset_detected_terminal_background_appearance();
+    runtime_input::clear_startup_input_queue();
+  }
+
+  TerminalBackgroundDetectionGuard(TerminalBackgroundDetectionGuard const&) = delete;
+  TerminalBackgroundDetectionGuard& operator=(TerminalBackgroundDetectionGuard const&) = delete;
+
+  ~TerminalBackgroundDetectionGuard()
+  {
+    disarm_terminal_background_response_handler();
+    reset_detected_terminal_background_appearance();
+    runtime_input::clear_startup_input_queue();
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+bool terminal_background_probe_environment_allowed()
+{
+  auto const* tmux = std::getenv("TMUX");
+  if (tmux != nullptr && tmux[0] != '\0')
+    return false;
+
+  auto const* term = std::getenv("TERM");
+  if (term == nullptr || term[0] == '\0')
+    return true;
+
+  std::string_view const term_value(term);
+  return !term_value.starts_with("tmux");
+}
+
+void maybe_probe_terminal_background_appearance()
+{
+  if (!tui_theme_needs_terminal_background_probe() || !terminal_background_probe_environment_allowed())
+    return;
+
+  arm_terminal_background_response_handler();
+  static_cast<void>(std::fwrite(terminal_background_query_sequence().data(), 1, terminal_background_query_sequence().size(), stdout));
+  static_cast<void>(std::fflush(stdout));
+  runtime_input::drain_startup_probe_input(kTerminalBackgroundProbeDeadline);
+  disarm_terminal_background_response_handler();
+}
 
 }  // namespace
 
@@ -92,6 +149,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     return 1;
   }
   ComposerTerminalGraphicsGuard graphics_cleanup;
+  // Probe the direct terminal background once after enter and before first paint.
+  // No re-probe on suspend/resume and no late theme flip after presentation starts.
+  TerminalBackgroundDetectionGuard terminal_background_detection;
+  maybe_probe_terminal_background_appearance();
 
   RuntimePresentationState presentation_state(options);
   auto& snapshot = presentation_state.snapshot;

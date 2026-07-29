@@ -68,8 +68,10 @@ The active theme is resolved in this order:
 1. `NO_COLOR` with any non-empty value forces `plain` mode.
 2. `AVA_TUI_THEME=dark|light|plain` overrides persisted config for this process.
 3. `display.json` selects a built-in theme or a valid custom theme.
-4. `COLORFGBG` background inference selects `light` or `dark` when available.
-5. Built-in `dark` is the fallback.
+4. Startup OSC 11 terminal-background detection selects `light` or `dark` when
+   theme selection is still automatic.
+5. `COLORFGBG` background inference selects `light` or `dark` when available.
+6. Built-in `dark` is the fallback.
 
 Examples:
 
@@ -81,10 +83,35 @@ COLORFGBG='15;0' ava
 ```
 
 `AVA_TUI_THEME` only selects built-in themes. Use `display.json` or `/theme` for
-custom themes. Unknown `AVA_TUI_THEME` values are ignored rather than written to
-config. `COLORFGBG` uses the last `;`- or `:`-separated numeric field as the
-terminal background color index; light backgrounds select `light`, and darker
-backgrounds select `dark`.
+custom themes. Explicit `dark`, `light`, `plain`, and custom selections always
+win over detection. Unknown or `auto` `AVA_TUI_THEME` values are ignored rather
+than written to config and keep the ordinary automatic fallback path.
+
+When theme selection is still automatic at interactive TUI startup, AVA queries
+the direct terminal background once with OSC 11 (`ESC ]11;? ESC \`) after the
+curses session enters and before the first paint. A strict response parser accepts
+only OSC 11 replies terminated by BEL or ST, bounded to 256 bytes, in the forms
+`rgb:R/G/B`, `rgba:R/G/B/A` (alpha ignored when valid), `#RRGGBB`, and
+`#RRRRGGGGBBBB` with equal 1-4 hex channel widths. Channels are scaled to 0..255
+and classified with the existing integer luminance threshold of 180
+(`(R*299 + G*587 + B*114) / 1000`). `/settings` reports the source as `OSC 11`
+without exposing raw color data. Built-in light/dark palettes keep the ordinary
+screen canvas at the terminal-default background (`screen_bg = -1`).
+
+The query is skipped under tmux (`TMUX` set or `TERM` starting with `tmux`); AVA
+does not attempt tmux passthrough wrapping. Detection is session-scoped: it is
+reset before each interactive TUI session and again on every exit, is not
+re-probed on suspend/resume, and never flips the theme after first paint. Keys,
+resizes, and complete bracketed pastes observed while waiting for the reply are
+preserved in order for the composer; keyboard-protocol replies and OSC control
+replies remain discard-only. The main probe drain budget is 50 ms; escape
+assembly begun at that edge may still use its ordinary 50 ms budget, and a
+bracketed paste already begun may finish under its ordinary 1 s cap so the paste
+stays atomic.
+
+`COLORFGBG` remains a lower-precedence hint when OSC 11 is unavailable. AVA reads
+the final `;`- or `:`-separated numeric field as the terminal background color
+index; light backgrounds select `light`, and darker backgrounds select `dark`.
 
 ## Custom `themes/*.json`
 

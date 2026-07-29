@@ -1,8 +1,8 @@
 #include "sys.h"
 #include "ava/tui/theme.h"
 
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
@@ -31,6 +31,12 @@ std::optional<TuiCustomTheme>& config_custom_theme_storage()
   return theme;
 }
 
+std::optional<TerminalBackgroundAppearance>& detected_terminal_background_storage()
+{
+  static std::optional<TerminalBackgroundAppearance> appearance;
+  return appearance;
+}
+
 bool env_enabled(char const* name)
 {
   auto const* value = std::getenv(name);
@@ -41,8 +47,7 @@ std::string lower_ascii(std::string_view text)
 {
   std::string lowered;
   lowered.reserve(text.size());
-  for (char const ch : text)
-    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
@@ -54,10 +59,8 @@ std::string theme_env_value()
 
 std::string_view trim_ascii(std::string_view text)
 {
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0)
-    text.remove_prefix(1);
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0)
-    text.remove_suffix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) text.remove_suffix(1);
   return text;
 }
 
@@ -90,8 +93,7 @@ std::optional<int> colorfgbg_background_index()
 
 std::optional<int> xterm_color_luminance(int index)
 {
-  static constexpr int ansi16_luminance[] = {0,   76,  150, 114, 29,  105, 178, 229,
-                                             127, 127, 200, 226, 105, 170, 221, 255};
+  static constexpr int ansi16_luminance[] = {0, 76, 150, 114, 29, 105, 178, 229, 127, 127, 200, 226, 105, 170, 221, 255};
   if (index >= 0 && index < 16)
     return ansi16_luminance[index];
 
@@ -169,6 +171,34 @@ TuiThemeInfo theme_info_for_custom(TuiCustomTheme const& theme)
                       .revision = theme.revision};
 }
 
+std::optional<TuiThemeInfo> theme_info_for_detected_terminal_background()
+{
+  std::optional<TerminalBackgroundAppearance> appearance;
+  {
+    std::lock_guard lock(config_theme_mutex());
+    appearance = detected_terminal_background_storage();
+  }
+  if (!appearance)
+    return std::nullopt;
+
+  if (*appearance == TerminalBackgroundAppearance::Light)
+  {
+    return TuiThemeInfo{.kind = TuiThemeKind::Light,
+                        .name = "ava-light",
+                        .detail = "terminal background appears light from OSC 11",
+                        .badge = "OSC 11",
+                        .palette = std::nullopt,
+                        .revision = "osc11-light"};
+  }
+
+  return TuiThemeInfo{.kind = TuiThemeKind::Dark,
+                      .name = "ava-dark",
+                      .detail = "terminal background appears dark from OSC 11",
+                      .badge = "OSC 11",
+                      .palette = std::nullopt,
+                      .revision = "osc11-dark"};
+}
+
 std::optional<TuiThemeInfo> theme_info_for_terminal_background()
 {
   auto const background = colorfgbg_background_index();
@@ -197,6 +227,28 @@ std::optional<TuiThemeInfo> theme_info_for_terminal_background()
                       .revision = "colorfgbg-dark"};
 }
 
+bool theme_selection_is_automatic()
+{
+  if (env_enabled("NO_COLOR"))
+    return false;
+
+  auto const requested = theme_env_value();
+  if (theme_info_for_request(requested, "AVA_TUI_THEME"))
+    return false;
+
+  auto const configured = configured_theme_value();
+  if (configured)
+  {
+    if (theme_info_for_request(*configured, "display.json"))
+      return false;
+    auto const custom_theme = configured_custom_theme_value();
+    if (custom_theme && custom_theme->name == *configured)
+      return false;
+  }
+
+  return true;
+}
+
 }  // namespace
 
 void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCustomTheme> custom_theme)
@@ -210,14 +262,33 @@ void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCus
   config_custom_theme_storage() = std::move(custom_theme);
 }
 
+void set_detected_terminal_background_appearance(std::optional<TerminalBackgroundAppearance> appearance)
+{
+  std::lock_guard lock(config_theme_mutex());
+  detected_terminal_background_storage() = appearance;
+}
+
+void reset_detected_terminal_background_appearance()
+{
+  set_detected_terminal_background_appearance(std::nullopt);
+}
+
+std::optional<TerminalBackgroundAppearance> detected_terminal_background_appearance()
+{
+  std::lock_guard lock(config_theme_mutex());
+  return detected_terminal_background_storage();
+}
+
+bool tui_theme_needs_terminal_background_probe()
+{
+  return theme_selection_is_automatic();
+}
+
 TuiThemeInfo active_tui_theme()
 {
   if (env_enabled("NO_COLOR"))
   {
-    return TuiThemeInfo{.kind = TuiThemeKind::Plain,
-                        .name = "plain",
-                        .detail = "NO_COLOR disables ANSI styling",
-                        .badge = "NO_COLOR"};
+    return TuiThemeInfo{.kind = TuiThemeKind::Plain, .name = "plain", .detail = "NO_COLOR disables ANSI styling", .badge = "NO_COLOR"};
   }
 
   auto const requested = theme_env_value();
@@ -236,13 +307,15 @@ TuiThemeInfo active_tui_theme()
       return theme_info_for_custom(*custom_theme);
   }
 
+  if (auto detected_theme = theme_info_for_detected_terminal_background())
+    return *detected_theme;
+
   if (auto terminal_theme = theme_info_for_terminal_background())
     return *terminal_theme;
 
   return TuiThemeInfo{.kind = TuiThemeKind::Dark,
                       .name = "ava-dark",
-                      .detail = requested.empty() ? std::string("built-in dark ncurses token palette")
-                                                  : std::string("unknown AVA_TUI_THEME ignored"),
+                      .detail = requested.empty() ? std::string("built-in dark ncurses token palette") : std::string("unknown AVA_TUI_THEME ignored"),
                       .badge = requested.empty() ? std::string("built-in") : std::string("built-in fallback"),
                       .palette = std::nullopt,
                       .revision = requested.empty() ? std::string("built-in-dark") : std::string("built-in-dark-fallback")};

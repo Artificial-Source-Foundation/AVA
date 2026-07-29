@@ -36,7 +36,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
   auto& completion_cache = renderer_.completion_cache;
 
   if (active_event.key == Key::MouseLeftPress || active_event.key == Key::MouseLeftClick || active_event.key == Key::MouseLeftDrag ||
-      active_event.key == Key::MouseLeftRelease)
+      active_event.key == Key::MouseLeftRelease || active_event.key == Key::MousePointerCancel)
   {
     auto const begins_click = active_event.key == Key::MouseLeftPress || active_event.key == Key::MouseLeftClick;
     if (begins_click)

@@ -1380,7 +1380,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       scroll_down(kMouseWheelScrollRows);
     }
-    else if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick || event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease)
+    else if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick || event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease ||
+             event.key == Key::MousePointerCancel)
     {
       pending_escape_clear = false;
       auto const begins_click = event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick;

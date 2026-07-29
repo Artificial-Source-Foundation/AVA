@@ -117,8 +117,12 @@ class RuntimeRenderer final
                                                                                  std::function<bool(std::size_t)> const& toggle_thinking);
   [[nodiscard]] bool copy_transcript_selection();
   void clear_transcript_selection();
+  // Ends Selecting/HeaderArmed and draft mouse-select without discarding a committed
+  // transcript range. Used on Shift cancel, suspend/editor handoff, and mouse rearm.
+  void cancel_pointer_interaction();
   void note_live_transcript_selection_item_shift(std::ptrdiff_t item_index_shift) noexcept;
   [[nodiscard]] bool has_transcript_selection() const noexcept;
+  [[nodiscard]] bool has_pointer_interaction() const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionRange> transcript_selection_range() const noexcept;
 
   std::size_t transcript_scroll_offset = 0;

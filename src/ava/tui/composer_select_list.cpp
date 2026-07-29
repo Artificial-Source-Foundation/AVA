@@ -596,6 +596,7 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
+    case Key::MousePointerCancel:
     case Key::F1:
     case Key::F2:
     case Key::F3:

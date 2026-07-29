@@ -193,9 +193,22 @@ TranscriptSelectionMouseResult RuntimeRenderer::handle_transcript_selection_mous
                                                                                   std::function<bool(std::size_t)> const& toggle_thinking)
 {
   std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  if (event.key == Key::MousePointerCancel)
+  {
+    auto const had_interaction = transcript_selection_.dragging() || draft_state_.mouse_selecting;
+    transcript_selection_.cancel_pointer_interaction();
+    draft_state_.mouse_selecting = false;
+    transcript_selection_.publish(snapshot_);
+    return had_interaction ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
+  }
+  // Frozen detached layouts keep geometry authority. Header toggles and live snapshot
+  // lookups map through the exact accumulated deferred item_index_shift; body drag does
+  // not force a live rebuild here.
+  auto const frozen_to_live_item_index_shift = deferred_detached_viewport_ ? deferred_detached_viewport_->item_index_shift : std::ptrdiff_t{0};
   if (!prepare_transcript_selection_authority())
     return TranscriptSelectionMouseResult::Ignored;
-  return transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset, toggle_tool, toggle_thinking);
+  return transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset, frozen_to_live_item_index_shift,
+                                            toggle_tool, toggle_thinking);
 }
 
 bool RuntimeRenderer::copy_transcript_selection()
@@ -212,15 +225,30 @@ void RuntimeRenderer::clear_transcript_selection()
   transcript_selection_.publish(snapshot_);
 }
 
+void RuntimeRenderer::cancel_pointer_interaction()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.cancel_pointer_interaction();
+  draft_state_.mouse_selecting = false;
+  transcript_selection_.publish(snapshot_);
+}
+
 void RuntimeRenderer::note_live_transcript_selection_item_shift(std::ptrdiff_t item_index_shift) noexcept
 {
-  if (!transcript_selection_.empty())
+  // HeaderArmed has no committed range but still owns a live item index that must track
+  // leading eviction between press and release while the layout is not frozen.
+  if (!transcript_selection_.empty() || transcript_selection_.dragging())
     pending_live_selection_item_index_shift_ += item_index_shift;
 }
 
 bool RuntimeRenderer::has_transcript_selection() const noexcept
 {
   return !transcript_selection_.empty();
+}
+
+bool RuntimeRenderer::has_pointer_interaction() const noexcept
+{
+  return transcript_selection_.dragging() || draft_state_.mouse_selecting;
 }
 
 std::optional<TranscriptSelectionRange> RuntimeRenderer::transcript_selection_range() const noexcept

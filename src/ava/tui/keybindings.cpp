@@ -1583,6 +1583,8 @@ std::string key_display(Key key)
       return "MouseLeftDrag";
     case Key::MouseLeftRelease:
       return "MouseLeftRelease";
+    case Key::MousePointerCancel:
+      return "MousePointerCancel";
     case Key::Character:
     case Key::Unknown:
       return "";

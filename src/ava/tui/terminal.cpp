@@ -105,6 +105,30 @@ void write_terminal_sequence(std::string_view sequence)
   static_cast<void>(std::fflush(stdout));
 }
 
+void reset_ncurses_left_mouse_button_state() noexcept
+{
+#ifdef NCURSES_MOUSE_VERSION
+  // Only touch ncurses mouse state when a screen is active. Pure sequence tests
+  // still track ownership without requiring newterm.
+  if (stdscr == nullptr || !has_mouse())
+    return;
+  if (g_mouse_enabled)
+  {
+    mmask_t previous_mask = 0;
+    // Re-arm the owned mask so any incomplete button-down state is dropped at the
+    // protocol boundary (Shift cancel, disable/rearm, suspend/editor handoff).
+    mmask_t const mask = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED | REPORT_MOUSE_POSITION | BUTTON4_PRESSED | BUTTON5_PRESSED;
+    static_cast<void>(mousemask(0, &previous_mask));
+    static_cast<void>(mousemask(mask, &previous_mask));
+    static_cast<void>(mouseinterval(0));
+  }
+  else
+  {
+    static_cast<void>(mousemask(0, nullptr));
+  }
+#endif
+}
+
 void apply_mouse_enabled(bool enabled) noexcept
 {
   if (g_mouse_enabled == enabled)
@@ -112,37 +136,13 @@ void apply_mouse_enabled(bool enabled) noexcept
   // A protocol boundary invalidates any incomplete press/drag lifecycle. This
   // also prevents a motion report after suspend/resume from becoming a drag.
   g_left_mouse_down = false;
-#ifdef NCURSES_MOUSE_VERSION
-  // Only touch ncurses mouse state when a screen is active. Pure sequence tests
-  // still track ownership without requiring newterm.
-  if (stdscr != nullptr)
-  {
-    if (enabled)
-    {
-      if (has_mouse())
-      {
-        mmask_t previous_mask = 0;
-        // Press/drag/release for transcript and composer selection, plus wheel.
-        // BUTTON1_CLICKED covers terminals that only synthesize complete clicks.
-        // REPORT_MOUSE_POSITION delivers drag motion while button 1 is held.
-        mmask_t const mask = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED | REPORT_MOUSE_POSITION | BUTTON4_PRESSED | BUTTON5_PRESSED;
-        static_cast<void>(mousemask(mask, &previous_mask));
-        // Prefer separate press/release reports over collapsed click synthesis when
-        // the terminal can deliver them; zero disables click-interval collapsing.
-        static_cast<void>(mouseinterval(0));
-      }
-    }
-    else
-    {
-      static_cast<void>(mousemask(0, nullptr));
-    }
-  }
-#endif
+  // Publish the target enablement before resetting ncurses so re-arm uses the new mask.
+  g_mouse_enabled = enabled;
+  reset_ncurses_left_mouse_button_state();
   // ncurses mouse activation is conditional on its runtime driver probe. Own
   // the portable xterm protocol boundary explicitly as well so SGR reports work
   // through multiplexers where has_mouse() remains false.
   write_terminal_sequence(enabled ? kMouseEnableSequence : kMouseDisableSequence);
-  g_mouse_enabled = enabled;
 }
 
 void set_bracketed_paste(bool enabled)
@@ -1151,10 +1151,11 @@ InputEvent normalized_left_mouse_event(bool shift, bool wheel_up, bool wheel_dow
   }
   else if (shift)
   {
-    // Shift belongs to terminal-native selection. Close AVA's lifecycle without
-    // consuming the report so a later unmodified hover cannot extend a drag.
+    // Shift belongs to terminal-native selection. Cancel AVA pointer ownership so a
+    // later unmodified hover/release cannot extend or toggle an armed interaction.
     g_left_mouse_down = false;
-    return event;
+    reset_ncurses_left_mouse_button_state();
+    event.key = Key::MousePointerCancel;
   }
   else if (clicked)
   {
@@ -1881,6 +1882,7 @@ InputEvent terminal_ncurses_mouse_event(std::uint64_t button_state, std::size_t 
 void terminal_reset_mouse_tracking() noexcept
 {
   g_left_mouse_down = false;
+  reset_ncurses_left_mouse_button_state();
 }
 
 InputEvent terminal_escape_sequence_event(std::string_view sequence)

@@ -76,6 +76,9 @@ enum class Key
   MouseLeftClick,
   MouseLeftDrag,
   MouseLeftRelease,
+  // Cancels an in-progress AVA press/drag/header-arm without starting selection.
+  // Emitted for Shift-modified button reports and shared protocol handoff boundaries.
+  MousePointerCancel,
   ShiftEnter,
   CtrlEnter,
   AltEnter,
@@ -260,6 +263,9 @@ void disarm_terminal_background_response_handler();
 // Stateful ncurses mouse normalization. Motion is a drag only while AVA owns a
 // preceding left press; Shift reports are ignored and releases close ownership.
 [[nodiscard]] InputEvent terminal_ncurses_mouse_event(std::uint64_t button_state, std::size_t column, std::size_t row);
+// Clears owned left-button press tracking and any incomplete drag lifecycle. Safe
+// before/after protocol disable/rearm and after Shift-modified reports so a later
+// unmodified hover/release cannot extend a cancelled interaction.
 void terminal_reset_mouse_tracking() noexcept;
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_complete(std::string_view sequence);

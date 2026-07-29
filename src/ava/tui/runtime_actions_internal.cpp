@@ -175,6 +175,10 @@ bool RuntimeActionController::open_external_editor()
   draft_state_.path_completion_force_active = false;
   draft_state_.draft_scroll_offset = 0;
   draft_state_.clear_selection();
+  // Protocol handoff invalidates any incomplete press/drag/header arm while preserving
+  // a committed transcript range.
+  renderer_.cancel_pointer_interaction();
+  terminal_reset_mouse_tracking();
   snapshot.status = "opening external editor";
   if (!renderer_.render())
     return false;
@@ -219,6 +223,9 @@ bool RuntimeActionController::suspend_to_background()
   draft_state_.path_completion_force_active = false;
   draft_state_.draft_scroll_offset = 0;
   draft_state_.clear_selection();
+  // Suspend handoff cancels in-flight pointer interaction; committed ranges remain.
+  renderer_.cancel_pointer_interaction();
+  terminal_reset_mouse_tracking();
 
   {
     SignalBlockGuard block_signals;

@@ -87,6 +87,10 @@ struct TranscriptSelectionViewport
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Map a frozen/pre-shift transcript item index through a cap/eviction shift.
+// Fail closed on overflow or leading eviction of the source index.
+[[nodiscard]] std::optional<std::size_t> shift_transcript_selection_item_index(std::size_t item_index, std::ptrdiff_t item_index_shift) noexcept;
+
 // Pure geometry/extract helpers (layout-authority only; no snapshot mutation).
 [[nodiscard]] std::string transcript_selection_plain_row(std::string_view styled_line);
 [[nodiscard]] std::size_t transcript_selection_plain_columns(std::string_view plain_row);
@@ -118,6 +122,9 @@ class RuntimeTranscriptSelectionState final
 {
  public:
   void clear() noexcept;
+  // Ends Selecting/HeaderArmed without discarding a committed range. Used for
+  // Shift-modified reports, suspend/editor handoff, and mouse protocol boundaries.
+  void cancel_pointer_interaction() noexcept;
   [[nodiscard]] bool empty() const noexcept;
   [[nodiscard]] bool dragging() const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionRange> range() const noexcept;
@@ -134,9 +141,14 @@ class RuntimeTranscriptSelectionState final
   // refreshes or mutates the cache; invalid authority fails closed.
   [[nodiscard]] bool ensure_authority(detail::TranscriptLayoutCache const& layout_cache, ComposerSnapshot const* snapshot = nullptr);
 
+  // `frozen_to_live_item_index_shift` maps frozen detached layout item indices onto
+  // the live transcript (accumulated deferred cap shift). Geometry/hit-testing keep
+  // the frozen authority; only snapshot lookups and header toggles apply the shift.
+  // Pass 0 when the layout authority is already live. Fail closed on overflow/eviction.
   [[nodiscard]] TranscriptSelectionMouseResult handle_mouse(InputEvent const& event, ComposerSnapshot& snapshot,
                                                             detail::TranscriptLayoutCache const& layout_cache, RuntimeDraftState* draft_state,
-                                                            std::size_t& transcript_scroll_offset, std::function<bool(std::size_t)> const& toggle_tool,
+                                                            std::size_t& transcript_scroll_offset, std::ptrdiff_t frozen_to_live_item_index_shift,
+                                                            std::function<bool(std::size_t)> const& toggle_tool,
                                                             std::function<bool(std::size_t)> const& toggle_thinking);
 
   [[nodiscard]] bool copy_selection(ComposerSnapshot& snapshot, detail::TranscriptLayoutCache const& layout_cache);
@@ -172,14 +184,20 @@ class RuntimeTranscriptSelectionState final
   [[nodiscard]] bool has_compatible_authority(detail::TranscriptLayoutCache const& cache) const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionViewport> viewport_for(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache const& cache) const;
   [[nodiscard]] std::optional<TranscriptSelectionHit> hit_test(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache const& cache, std::size_t row,
-                                                               std::size_t column) const;
+                                                               std::size_t column, std::ptrdiff_t frozen_to_live_item_index_shift) const;
   [[nodiscard]] static std::optional<ItemSourceAuthority> source_authority(ComposerSnapshot const& snapshot, std::size_t item_index);
   [[nodiscard]] static bool source_authority_compatible(ItemSourceAuthority const& previous, ItemSourceAuthority const& current);
   [[nodiscard]] bool refresh_source_authorities_or_clear(ComposerSnapshot const& snapshot);
-  void begin_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot, RuntimeDraftState* draft_state);
-  void extend_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot);
-  void arm_header(TranscriptSelectionEndpoint endpoint, bool tool_header, bool thinking_header);
-  [[nodiscard]] bool finish_header_click(std::function<bool(std::size_t)> const& toggle_tool, std::function<bool(std::size_t)> const& toggle_thinking);
+  void begin_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot, RuntimeDraftState* draft_state,
+                       std::ptrdiff_t frozen_to_live_item_index_shift);
+  void extend_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift);
+  void arm_header(TranscriptSelectionEndpoint endpoint, bool tool_header, bool thinking_header, ComposerSnapshot const& snapshot,
+                  std::ptrdiff_t frozen_to_live_item_index_shift);
+  [[nodiscard]] bool finish_header_click(ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift,
+                                         std::function<bool(std::size_t)> const& toggle_tool, std::function<bool(std::size_t)> const& toggle_thinking);
+  [[nodiscard]] bool toggle_header_at_frozen_item(ComposerSnapshot const& snapshot, std::size_t frozen_item_index, bool tool_header, bool thinking_header,
+                                                  std::ptrdiff_t frozen_to_live_item_index_shift, std::function<bool(std::size_t)> const& toggle_tool,
+                                                  std::function<bool(std::size_t)> const& toggle_thinking) const;
   [[nodiscard]] bool autoscroll_for_row(ComposerSnapshot& snapshot, TranscriptSelectionViewport const& viewport, std::size_t screen_row,
                                         std::size_t& transcript_scroll_offset);
 
@@ -189,6 +207,7 @@ class RuntimeTranscriptSelectionState final
   DragKind drag_ = DragKind::None;
   std::optional<std::size_t> armed_header_item_ = std::nullopt;
   std::optional<TranscriptSelectionEndpoint> armed_press_endpoint_ = std::nullopt;
+  std::optional<ItemSourceAuthority> armed_source_authority_ = std::nullopt;
   bool armed_tool_header_ = false;
   bool armed_thinking_header_ = false;
   std::size_t authority_generation_ = 0;

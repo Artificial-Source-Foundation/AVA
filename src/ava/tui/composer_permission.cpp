@@ -1028,6 +1028,7 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
+    case Key::MousePointerCancel:
     case Key::ShiftTab:
     case Key::ShiftL:
     case Key::ShiftT:
@@ -1548,6 +1549,7 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
+    case Key::MousePointerCancel:
     case Key::ShiftTab:
     case Key::ShiftL:
     case Key::ShiftT:

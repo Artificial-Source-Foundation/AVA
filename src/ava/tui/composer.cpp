@@ -1337,9 +1337,19 @@ PendingAttachmentRender render_pending_attachment_lines(ComposerSnapshot const& 
 
 bool status_is_alert(std::string_view status)
 {
-  constexpr std::array kErrorPrefixes = {
-      "invalid_argument:",   "io:",           "not_found:", "permission_denied:", "provider:", "session:", "tool:", "unknown:", "command disabled:",
-      "reference disabled:", "path disabled:", "selection too large to copy", "clipboard unavailable"};
+  constexpr std::array kErrorPrefixes = {"invalid_argument:",
+                                         "io:",
+                                         "not_found:",
+                                         "permission_denied:",
+                                         "provider:",
+                                         "session:",
+                                         "tool:",
+                                         "unknown:",
+                                         "command disabled:",
+                                         "reference disabled:",
+                                         "path disabled:",
+                                         "selection too large to copy",
+                                         "clipboard copy failed"};
   return std::ranges::any_of(kErrorPrefixes, [status](std::string_view prefix) { return status.starts_with(prefix); });
 }
 

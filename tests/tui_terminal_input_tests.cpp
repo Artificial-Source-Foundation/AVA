@@ -432,14 +432,15 @@ void run_tui_terminal_input_tests_part_1()
   expect(sgr_hover.key == ava::tui::Key::Unknown && sgr_press.key == ava::tui::Key::MouseLeftPress && sgr_press.mouse_column == 12 &&
              sgr_press.mouse_row == 9 && sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 14 && sgr_drag.mouse_row == 10 &&
              sgr_release.key == ava::tui::Key::MouseLeftRelease && sgr_release.mouse_column == 14 && sgr_release.mouse_row == 10 &&
-             sgr_post_release_hover.key == ava::tui::Key::Unknown && sgr_shift_press.key == ava::tui::Key::Unknown &&
-             sgr_shift_motion.key == ava::tui::Key::Unknown && sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 &&
-             sgr_wheel.mouse_row == 7 && sgr_shift_wheel.key == ava::tui::Key::MouseWheelDown && sgr_shift_wheel.mouse_column == 22 &&
-             sgr_shift_wheel.mouse_row == 8 && legacy_hover.key == ava::tui::Key::Unknown && legacy_press.key == ava::tui::Key::MouseLeftPress &&
+             sgr_post_release_hover.key == ava::tui::Key::Unknown && sgr_shift_press.key == ava::tui::Key::MousePointerCancel &&
+             sgr_shift_press.mouse_column == 12 && sgr_shift_press.mouse_row == 9 && sgr_shift_motion.key == ava::tui::Key::MousePointerCancel &&
+             sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 && sgr_wheel.mouse_row == 7 &&
+             sgr_shift_wheel.key == ava::tui::Key::MouseWheelDown && sgr_shift_wheel.mouse_column == 22 && sgr_shift_wheel.mouse_row == 8 &&
+             legacy_hover.key == ava::tui::Key::Unknown && legacy_press.key == ava::tui::Key::MouseLeftPress &&
              legacy_drag.key == ava::tui::Key::MouseLeftDrag && legacy_release.key == ava::tui::Key::MouseLeftRelease &&
              legacy_post_release_hover.key == ava::tui::Key::Unknown && legacy_wheel.key == ava::tui::Key::MouseWheelUp && legacy_wheel.mouse_column == 21 &&
              legacy_wheel.mouse_row == 7,
-         "terminal mouse protocols preserve real press-drag-release lifecycles, ignore hover and Shift, and preserve wheels");
+         "terminal mouse protocols preserve real press-drag-release lifecycles, ignore hover, cancel on Shift, and preserve wheels");
 #ifdef NCURSES_MOUSE_VERSION
   ava::tui::terminal_reset_mouse_tracking();
   auto const ncurses_hover = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 3, 4);
@@ -450,14 +451,14 @@ void run_tui_terminal_input_tests_part_1()
   auto const ncurses_click = ava::tui::terminal_ncurses_mouse_event(BUTTON1_CLICKED, 9, 10);
 #ifdef BUTTON_SHIFT
   auto const ncurses_shift_press = ava::tui::terminal_ncurses_mouse_event(BUTTON1_PRESSED | BUTTON_SHIFT, 3, 4);
-  auto const ncurses_shift_ignored = ncurses_shift_press.key == ava::tui::Key::Unknown;
+  auto const ncurses_shift_ok = ncurses_shift_press.key == ava::tui::Key::MousePointerCancel;
 #else
-  auto const ncurses_shift_ignored = true;
+  auto const ncurses_shift_ok = true;
 #endif
   expect(ncurses_hover.key == ava::tui::Key::Unknown && ncurses_press.key == ava::tui::Key::MouseLeftPress &&
              ncurses_drag.key == ava::tui::Key::MouseLeftDrag && ncurses_release.key == ava::tui::Key::MouseLeftRelease &&
-             ncurses_after_release.key == ava::tui::Key::Unknown && ncurses_click.key == ava::tui::Key::MouseLeftClick && ncurses_shift_ignored,
-         "ncurses mouse reports preserve owned left-button lifecycle and click fallback without hover selection");
+             ncurses_after_release.key == ava::tui::Key::Unknown && ncurses_click.key == ava::tui::Key::MouseLeftClick && ncurses_shift_ok,
+         "ncurses mouse reports preserve owned left-button lifecycle, click fallback, and Shift pointer cancel");
 #endif
   expect(ava::tui::terminal_escape_sequence_complete("[13;2u") && ava::tui::terminal_escape_sequence_complete("[?25l") &&
              ava::tui::terminal_escape_sequence_complete("[45;5u") && ava::tui::terminal_escape_sequence_complete("[3;3~") &&

@@ -147,6 +147,38 @@ void apply_session_start(ava::tui::TuiEventState& state, ava::core::Mode mode, s
   return existing == state.activity.end() ? nullptr : &*existing;
 }
 
+[[nodiscard]] ava::tui::SidebarActivityItem const* find_retry_activity_by_id(ava::tui::TuiEventState const& state, std::string_view id)
+{
+  auto existing = std::ranges::find_if(state.activity, [&](ava::tui::SidebarActivityItem const& activity) { return activity.id == id; });
+  return existing == state.activity.end() ? nullptr : &*existing;
+}
+
+[[nodiscard]] std::size_t count_running_retry_activities(ava::tui::TuiEventState const& state)
+{
+  return static_cast<std::size_t>(std::ranges::count_if(state.activity, [](ava::tui::SidebarActivityItem const& activity) {
+    return activity.label == "retry" && activity.status == ava::tui::ToolTimelineStatus::Running;
+  }));
+}
+
+[[nodiscard]] std::size_t count_retry_activities(ava::tui::TuiEventState const& state)
+{
+  return static_cast<std::size_t>(
+      std::ranges::count_if(state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.label == "retry"; }));
+}
+
+[[nodiscard]] ava::event::RetryPayload retry_payload_with_reason(std::string reason, std::string trigger, std::size_t attempt, std::size_t delay_ms,
+                                                                 std::size_t remaining_ms = 0)
+{
+  auto payload = ava::event::RetryPayload{};
+  payload.reason = std::move(reason);
+  payload.trigger = std::move(trigger);
+  payload.attempt = attempt;
+  payload.max_attempts = 5;
+  payload.delay_ms = delay_ms;
+  payload.remaining_ms = remaining_ms;
+  return payload;
+}
+
 [[nodiscard]] ava::event::RuntimeEvent cancellation_event(ava::event::CancellationPayload payload)
 {
   return {{}, ava::event::CancellationEvent{.payload = std::move(payload)}};
@@ -1812,8 +1844,8 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
   ava::tui::apply_runtime_event(running_state, retry_event(sample_retry_payload()));
   auto const* running_retry = find_retry_activity(running_state);
   expect(running_retry && running_retry->status == ava::tui::ToolTimelineStatus::Running &&
-             running_retry->detail.find("retrying after rate_limit") != std::string::npos && running_state.transcript.size() == 1 &&
-             running_state.transcript[0].label == "audit",
+             running_retry->detail.find("retrying after rate_limit") != std::string::npos && count_running_retry_activities(running_state) == 1 &&
+             running_state.transcript.size() == 1 && running_state.transcript[0].label == "audit",
          "tui event state keeps running retry activity visible after RetryEvent");
   assert_retry_chrome(running_state, "Esc stop · retry attempt 2/5", "tui event-state-to-render surfaces running retry chrome from typed RetryEvent activity");
 
@@ -1821,8 +1853,8 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
   ava::tui::apply_runtime_event(countdown_state, retry_tick_event(sample_retry_payload(1500)));
   auto const* countdown_retry = find_retry_activity(countdown_state);
   expect(countdown_retry && countdown_retry->status == ava::tui::ToolTimelineStatus::Running &&
-             countdown_retry->detail.find("remaining=1500ms") != std::string::npos && countdown_state.transcript.size() == 2 &&
-             countdown_state.transcript[1].text.find("remaining=1500ms") != std::string::npos,
+             countdown_retry->detail.find("remaining=1500ms") != std::string::npos && count_running_retry_activities(countdown_state) == 1 &&
+             countdown_state.transcript.size() == 2 && countdown_state.transcript[1].text.find("remaining=1500ms") != std::string::npos,
          "tui event state updates running retry countdown activity and preserves audit transcript text");
   assert_retry_chrome(countdown_state, "Esc stop · retry 1500ms",
                       "tui event-state-to-render surfaces running retry countdown chrome from typed RetryTick activity");
@@ -1830,7 +1862,8 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
   ava::tui::apply_runtime_event(countdown_state, retry_tick_event(sample_retry_payload(0)));
   auto const* zero_retry = find_retry_activity(countdown_state);
   expect(zero_retry && zero_retry->status == ava::tui::ToolTimelineStatus::Success && zero_retry->detail == "retry completed" &&
-             countdown_state.transcript.size() == 2 && countdown_state.transcript[1].text.find("remaining=0ms") != std::string::npos &&
+             count_running_retry_activities(countdown_state) == 0 && countdown_state.transcript.size() == 2 &&
+             countdown_state.transcript[1].text.find("remaining=0ms") != std::string::npos &&
              countdown_state.transcript[0].text.find("retrying after rate_limit") != std::string::npos,
          "tui event state settles retry activity on remaining_ms==0 while preserving retry transcript audits");
   assert_normal_hint(countdown_state, "tui event-state-to-render drops retry chrome after remaining_ms==0 and restores the normal contextual hint");
@@ -1846,8 +1879,9 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
     apply_progress(state);
     auto const* retry = find_retry_activity(state);
     auto const unrelated = std::ranges::find_if(state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.id == "unrelated:read"; });
-    expect(retry && retry->status == ava::tui::ToolTimelineStatus::Success && retry->detail == "retry completed" && unrelated != state.activity.end() &&
-               unrelated->label == "read_file" && unrelated->detail == "already done" && unrelated->status == ava::tui::ToolTimelineStatus::Success,
+    expect(retry && retry->status == ava::tui::ToolTimelineStatus::Success && retry->detail == "retry completed" &&
+               count_running_retry_activities(state) == 0 && unrelated != state.activity.end() && unrelated->label == "read_file" &&
+               unrelated->detail == "already done" && unrelated->status == ava::tui::ToolTimelineStatus::Success,
            std::string("tui event state settles running retry on ") + std::string(progress_name) + " without changing unrelated activity");
     assert_normal_hint(state, std::string("tui event-state-to-render restores normal contextual hint after ") + std::string(progress_name));
   };
@@ -1915,17 +1949,99 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
   ava::tui::apply_runtime_event(reactivate_state, retry_event(sample_retry_payload()));
   ava::tui::apply_runtime_event(reactivate_state, retry_tick_event(sample_retry_payload(0)));
   auto const* settled = find_retry_activity(reactivate_state);
-  expect(settled && settled->status == ava::tui::ToolTimelineStatus::Success, "precondition: zero remaining settles retry before later reactivation");
+  expect(settled && settled->status == ava::tui::ToolTimelineStatus::Success && count_running_retry_activities(reactivate_state) == 0,
+         "precondition: zero remaining settles retry before later reactivation");
   auto second_retry = sample_retry_payload();
   second_retry.attempt = 3;
   ava::tui::apply_runtime_event(reactivate_state, retry_event(std::move(second_retry)));
   auto const* reactivated = find_retry_activity(reactivate_state);
   expect(reactivated && reactivated->status == ava::tui::ToolTimelineStatus::Running && reactivated->detail.find("attempt 3/5") != std::string::npos &&
-             reactivate_state.transcript.size() >= 2 &&
+             count_running_retry_activities(reactivate_state) == 1 && reactivate_state.transcript.size() >= 2 &&
              std::ranges::count_if(reactivate_state.transcript, [](ava::tui::TranscriptItem const& item) { return item.label == "audit"; }) >= 2,
          "tui event state lets a later RetryEvent reactivate settled retry activity while preserving prior transcript audits");
   assert_retry_chrome(reactivate_state, "Esc stop · retry attempt 3/5",
                       "tui event-state-to-render restores retry chrome after a later typed RetryEvent reactivation");
+
+  // Reason/trigger identity changes must settle the prior Running row before the new retry owns chrome.
+  ava::tui::TuiEventState reason_change_state;
+  reason_change_state.activity.push_back(
+      ava::tui::SidebarActivityItem{.id = "unrelated:write", .label = "write_file", .detail = "kept", .status = ava::tui::ToolTimelineStatus::Success});
+  ava::tui::apply_runtime_event(reason_change_state, retry_event(retry_payload_with_reason("rate_limit", "rate_limit", 1, 1000, 1000)));
+  expect(count_running_retry_activities(reason_change_state) == 1 && count_retry_activities(reason_change_state) == 1,
+         "precondition: first reason/trigger retry is the sole Running retry row");
+  ava::tui::apply_runtime_event(reason_change_state, retry_event(retry_payload_with_reason("server_error", "provider_transport", 2, 2000, 2000)));
+  auto const* superseded_rate_limit = find_retry_activity_by_id(reason_change_state, "retry:rate_limit");
+  auto const* active_server_error = find_retry_activity_by_id(reason_change_state, "retry:server_error");
+  auto const unrelated_write =
+      std::ranges::find_if(reason_change_state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.id == "unrelated:write"; });
+  expect(superseded_rate_limit && superseded_rate_limit->status == ava::tui::ToolTimelineStatus::Success &&
+             superseded_rate_limit->detail == "retry superseded" && active_server_error &&
+             active_server_error->status == ava::tui::ToolTimelineStatus::Running && active_server_error->detail.find("server_error") != std::string::npos &&
+             count_running_retry_activities(reason_change_state) == 1 && count_retry_activities(reason_change_state) == 2 &&
+             reason_change_state.transcript.size() == 2 && reason_change_state.transcript[0].text.find("rate_limit") != std::string::npos &&
+             reason_change_state.transcript[1].text.find("server_error") != std::string::npos && unrelated_write != reason_change_state.activity.end() &&
+             unrelated_write->detail == "kept" && unrelated_write->status == ava::tui::ToolTimelineStatus::Success,
+         "tui event state settles prior reason/trigger retry as superseded and keeps exactly one Running retry plus audit history");
+  assert_retry_chrome(reason_change_state, "Esc stop · retry attempt 2/5",
+                      "tui event-state-to-render surfaces only the current reason/trigger retry chrome after identity change");
+
+  // A/B then tick0(B) must not leave A Running even if ids differ.
+  ava::tui::TuiEventState ab_tick0_state;
+  ava::tui::apply_runtime_event(ab_tick0_state, retry_event(retry_payload_with_reason("rate_limit", "rate_limit", 1, 1000, 1000)));
+  ava::tui::apply_runtime_event(ab_tick0_state, retry_event(retry_payload_with_reason("timeout", "provider_transport", 2, 500, 500)));
+  ava::tui::apply_runtime_event(ab_tick0_state, retry_tick_event(retry_payload_with_reason("timeout", "provider_transport", 2, 500, 250)));
+  expect(count_running_retry_activities(ab_tick0_state) == 1 && find_retry_activity_by_id(ab_tick0_state, "retry:timeout") &&
+             find_retry_activity_by_id(ab_tick0_state, "retry:timeout")->status == ava::tui::ToolTimelineStatus::Running,
+         "precondition: positive remaining tick keeps only the current retry Running");
+  assert_retry_chrome(ab_tick0_state, "Esc stop · retry 250ms",
+                      "tui event-state-to-render keeps positive remaining countdown chrome on the active retry identity");
+  ava::tui::apply_runtime_event(ab_tick0_state, retry_tick_event(retry_payload_with_reason("timeout", "provider_transport", 2, 500, 0)));
+  auto const* settled_a = find_retry_activity_by_id(ab_tick0_state, "retry:rate_limit");
+  auto const* settled_b = find_retry_activity_by_id(ab_tick0_state, "retry:timeout");
+  expect(count_running_retry_activities(ab_tick0_state) == 0 && settled_a && settled_a->status == ava::tui::ToolTimelineStatus::Success &&
+             settled_a->detail == "retry superseded" && settled_b && settled_b->status == ava::tui::ToolTimelineStatus::Success &&
+             settled_b->detail == "retry completed" && ab_tick0_state.transcript.size() == 3 && ab_tick0_state.transcript[0].label == "audit" &&
+             ab_tick0_state.transcript[0].text.find("rate_limit") != std::string::npos && ab_tick0_state.transcript[1].label == "audit" &&
+             ab_tick0_state.transcript[1].text.find("timeout") != std::string::npos && ab_tick0_state.transcript[2].label == "audit" &&
+             ab_tick0_state.transcript[2].text.find("remaining=0ms") != std::string::npos,
+         "tui event state settles every Running retry on remaining_ms==0 so RetryEvent(A)/RetryEvent(B)/RetryTick(B,0) leaves no stale Running chrome");
+  assert_normal_hint(ab_tick0_state, "tui event-state-to-render drops retry chrome after A/B/tick0 ownership settlement");
+
+  // Zero-delay RetryEvent announces an immediate attempt (no ticks). Keep current chrome visible, then settle on progress.
+  ava::tui::TuiEventState zero_delay_state;
+  zero_delay_state.activity.push_back(
+      ava::tui::SidebarActivityItem{.id = "unrelated:search", .label = "search", .detail = "idle", .status = ava::tui::ToolTimelineStatus::Success});
+  auto zero_delay = retry_payload_with_reason("rate_limit", "provider_transport", 2, 0, 0);
+  ava::tui::apply_runtime_event(zero_delay_state, retry_event(zero_delay));
+  auto const* zero_delay_retry = find_retry_activity(zero_delay_state);
+  expect(zero_delay_retry && zero_delay_retry->status == ava::tui::ToolTimelineStatus::Running && count_running_retry_activities(zero_delay_state) == 1 &&
+             zero_delay_state.transcript.size() == 1 && zero_delay_state.transcript[0].label == "audit",
+         "tui event state keeps zero-delay RetryEvent as the sole Running retry so immediate-attempt chrome can still surface");
+  assert_retry_chrome(zero_delay_state, "Esc stop · retry attempt 2/5",
+                      "tui event-state-to-render surfaces zero-delay RetryEvent chrome without requiring countdown ticks");
+  auto zero_progress = ava::event::MessagePayload{};
+  zero_progress.text = "recovered";
+  ava::tui::apply_runtime_event(zero_delay_state, message_update_event(std::move(zero_progress)));
+  auto const* zero_settled = find_retry_activity(zero_delay_state);
+  auto const unrelated_search =
+      std::ranges::find_if(zero_delay_state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.id == "unrelated:search"; });
+  expect(zero_settled && zero_settled->status == ava::tui::ToolTimelineStatus::Success && zero_settled->detail == "retry completed" &&
+             count_running_retry_activities(zero_delay_state) == 0 && unrelated_search != zero_delay_state.activity.end() &&
+             unrelated_search->detail == "idle" && zero_delay_state.transcript[0].label == "audit",
+         "tui event state settles zero-delay retry on later progress without dropping audit or unrelated activity");
+  assert_normal_hint(zero_delay_state, "tui event-state-to-render restores normal contextual hint after zero-delay retry progress settlement");
+
+  // Later reactivation after multi-identity settlement must restore exactly one Running retry.
+  ava::tui::TuiEventState multi_reactivate_state = ab_tick0_state;
+  expect(count_running_retry_activities(multi_reactivate_state) == 0, "precondition: multi-identity A/B/tick0 state has no Running retry before reactivation");
+  ava::tui::apply_runtime_event(multi_reactivate_state, retry_event(retry_payload_with_reason("rate_limit", "rate_limit", 4, 750, 750)));
+  auto const* multi_reactivated = find_retry_activity_by_id(multi_reactivate_state, "retry:rate_limit");
+  expect(multi_reactivated && multi_reactivated->status == ava::tui::ToolTimelineStatus::Running &&
+             multi_reactivated->detail.find("attempt 4/5") != std::string::npos && count_running_retry_activities(multi_reactivate_state) == 1 &&
+             std::ranges::count_if(multi_reactivate_state.transcript, [](ava::tui::TranscriptItem const& item) { return item.label == "audit"; }) >= 3,
+         "tui event state reactivates a later retry cleanly after multi-identity settlement with exactly one Running retry row");
+  assert_retry_chrome(multi_reactivate_state, "Esc stop · retry attempt 4/5",
+                      "tui event-state-to-render restores retry chrome after later reactivation following A/B/tick0 settlement");
 }
 
 void run_tui_runtime_event_state_tests()

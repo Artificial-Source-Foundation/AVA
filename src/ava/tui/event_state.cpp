@@ -1288,6 +1288,10 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
         }
         else if constexpr (std::same_as<Event, ava::event::RetryEvent>)
         {
+          // A new retry owns the live chrome row. Prior Running retries (including
+          // different reason/trigger ids) are settled first so stale identities cannot
+          // resurface after the current attempt progresses or finishes.
+          settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry superseded");
           auto detail = std::string("retrying");
           if (!payload.reason.empty())
             detail += " after " + payload.reason;
@@ -1313,7 +1317,10 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
             detail += " summary=" + std::to_string(typed_event.diagnostics.summary_bytes) + " bytes";
           if (!payload.text.empty())
             detail += " - " + payload.text;
+          // Audit transcript keeps every RetryEvent; sidebar ownership is the live row only.
           state.transcript.push_back(transcript_text_item("audit", detail));
+          // Zero-delay RetryEvent announces an immediate attempt (transport emits no ticks).
+          // Keep the current row Running so chrome can show briefly until progress/cancel/error.
           upsert_sidebar_activity(
               state,
               SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
@@ -1340,6 +1347,8 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
           upsert_retry_countdown_transcript(state, detail);
           if (payload.remaining_ms == 0)
           {
+            // Countdown completion closes every Running retry identity, not only the tick's id.
+            settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry completed");
             upsert_sidebar_activity(
                 state,
                 SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = "retry completed", .status = ToolTimelineStatus::Success});

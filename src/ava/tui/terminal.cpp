@@ -110,7 +110,13 @@ void reset_ncurses_left_mouse_button_state() noexcept
 #ifdef NCURSES_MOUSE_VERSION
   // Only touch ncurses mouse state when a screen is active. Pure sequence tests
   // still track ownership without requiring newterm.
-  if (stdscr == nullptr || !has_mouse())
+  //
+  // Do not gate on has_mouse(): ncurses reports has_mouse() only after a nonzero
+  // mousemask() initializes the mouse driver. AVA still emits portable
+  // 1000/1002/1006 enables. On direct xterm/Ghostty terminfo (kmous=ESC[<),
+  // ncurses consumes ESC[< as KEY_MOUSE; without mousemask, getmouse() fails and
+  // SGR payloads such as "65;68;12M" leak into the composer as ordinary text.
+  if (stdscr == nullptr)
     return;
   if (g_mouse_enabled)
   {
@@ -139,9 +145,9 @@ void apply_mouse_enabled(bool enabled) noexcept
   // Publish the target enablement before resetting ncurses so re-arm uses the new mask.
   g_mouse_enabled = enabled;
   reset_ncurses_left_mouse_button_state();
-  // ncurses mouse activation is conditional on its runtime driver probe. Own
-  // the portable xterm protocol boundary explicitly as well so SGR reports work
-  // through multiplexers where has_mouse() remains false.
+  // Keep the portable xterm SGR enable/disable boundary even when ncurses owns
+  // KEY_MOUSE decoding. Multiplexers (tmux kmous=ESC[M) still deliver full SGR
+  // reports to AVA's raw escape parser; direct terminfo needs mousemask above.
   write_terminal_sequence(enabled ? kMouseEnableSequence : kMouseDisableSequence);
 }
 

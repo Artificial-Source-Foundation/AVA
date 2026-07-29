@@ -26,6 +26,8 @@
 #include <utility>
 #include <vector>
 #include <curses.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -2524,6 +2526,245 @@ void test_external_editor_and_suspend_share_handoff_sequence()
   reset_lifecycle_test_seams();
 }
 
+bool write_all_fd(int fd, std::string_view bytes)
+{
+  auto const* cursor = bytes.data();
+  auto remaining = bytes.size();
+  while (remaining != 0)
+  {
+    auto const written = ::write(fd, cursor, remaining);
+    if (written < 0)
+      return false;
+    cursor += written;
+    remaining -= static_cast<std::size_t>(written);
+  }
+  return true;
+}
+
+bool looks_like_leaked_sgr_mouse_payload(ava::tui::runtime_input::RuntimeInput const& input)
+{
+  if (input.event.key != ava::tui::Key::Character && input.event.key != ava::tui::Key::Space)
+    return false;
+  auto const& text = input.text.empty() ? input.event.text : input.text;
+  if (text.empty())
+    return false;
+  // Residual SGR bodies after a bare KEY_MOUSE (ESC[<) look like "0;10;5M" / "65;20;8M".
+  return text.find_first_of("0123456789;Mm") != std::string::npos;
+}
+
+std::optional<ava::tui::runtime_input::RuntimeInput> read_direct_mouse_event(std::string_view label)
+{
+  auto input = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(100));
+  expect(input.has_value(), std::string("direct-terminal mouse PTY produced an event for ") + std::string(label));
+  return input;
+}
+
+void expect_no_residual_mouse_payload(std::string_view label)
+{
+  auto residual = ava::tui::runtime_input::poll_curses_input();
+  while (residual)
+  {
+    expect(!looks_like_leaked_sgr_mouse_payload(*residual), std::string("direct-terminal mouse path must not leak SGR payload characters after ") +
+                                                                std::string(label) + " (got text '" +
+                                                                (residual->text.empty() ? residual->event.text : residual->text) + "')");
+    // Unknown/empty after KEY_MOUSE getmouse failure is also a leak symptom; allow only true absence.
+    expect(false, std::string("direct-terminal mouse path left unexpected residual input after ") + std::string(label));
+    residual = ava::tui::runtime_input::poll_curses_input();
+  }
+}
+
+// Deterministic openpty/newterm regression for direct terminfo where kmous=ESC[<.
+// Virtual unget_wch tests cannot reproduce ncurses KEY_MOUSE matching + getmouse.
+void test_direct_terminal_ncurses_mouse_sgr_no_composer_leak()
+{
+#ifdef NCURSES_MOUSE_VERSION
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  // Prefer Ghostty terminfo when present; otherwise the confirmed xterm-256color kmous=ESC[< path.
+  char const* term_name = "xterm-256color";
+  if (::access("/usr/share/terminfo/x/xterm-ghostty", R_OK) == 0)
+    term_name = "xterm-ghostty";
+
+  ScopedEnvVar term_guard("TERM", term_name);
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "");
+
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+  ava::tui::terminal_reset_mouse_tracking();
+  ava::tui::runtime_input::clear_startup_input_queue();
+
+  int master_fd = ::posix_openpt(O_RDWR | O_NOCTTY);
+  expect(master_fd >= 0, "direct-terminal mouse PTY can open a master");
+  if (master_fd < 0)
+  {
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  if (::grantpt(master_fd) != 0 || ::unlockpt(master_fd) != 0)
+  {
+    expect(false, "direct-terminal mouse PTY can grant/unlock the slave");
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  char* slave_name = ::ptsname(master_fd);
+  expect(slave_name != nullptr, "direct-terminal mouse PTY exposes a slave name");
+  if (slave_name == nullptr)
+  {
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  int slave_fd = ::open(slave_name, O_RDWR | O_NOCTTY);
+  expect(slave_fd >= 0, "direct-terminal mouse PTY can open the slave");
+  if (slave_fd < 0)
+  {
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  winsize size{};
+  size.ws_row = 24;
+  size.ws_col = 80;
+  static_cast<void>(::ioctl(slave_fd, TIOCSWINSZ, &size));
+
+  int output_fd = ::dup(slave_fd);
+  FILE* input = ::fdopen(slave_fd, "r+");
+  FILE* output = output_fd >= 0 ? ::fdopen(output_fd, "w") : nullptr;
+  expect(input != nullptr && output != nullptr, "direct-terminal mouse PTY can fdopen slave streams");
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    else
+      static_cast<void>(::close(slave_fd));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    else if (output_fd >= 0)
+      static_cast<void>(::close(output_fd));
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, std::string("direct-terminal mouse PTY creates an ncurses screen under TERM=") + term_name);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  static_cast<void>(set_term(screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  static_cast<void>(meta(stdscr, TRUE));
+  static_cast<void>(wtimeout(stdscr, 100));
+
+  char const* kmous = tigetstr("kmous");
+  bool const kmous_is_sgr_prefix = kmous != nullptr && kmous != reinterpret_cast<char*>(-1) && std::string_view(kmous) == "\x1b[<";
+  expect(kmous_is_sgr_prefix, std::string("direct-terminal mouse regression requires kmous=ESC[< under TERM=") + term_name);
+
+  // Production enter path must initialize ncurses mouse ownership via mousemask
+  // even though has_mouse() is still false before the first nonzero mask.
+  expect(!has_mouse(), "direct terminfo starts with has_mouse() false before production mouse arm");
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  expect(ava::tui::terminal_protocol_ownership().mouse_enabled, "production enter arms mouse ownership");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 1,
+         "production enter still emits portable SGR mouse enable sequences");
+  expect(has_mouse(), "production mouse arm initializes the ncurses mouse driver (has_mouse becomes true)");
+
+  auto feed = [&](std::string_view label, std::string_view sequence) {
+    expect(write_all_fd(master_fd, sequence), std::string("direct-terminal mouse PTY can write ") + std::string(label));
+  };
+
+  auto expect_mouse = [&](std::string_view label, ava::tui::Key key, std::size_t column, std::size_t row) {
+    auto input_event = read_direct_mouse_event(label);
+    if (!input_event)
+      return;
+    expect(input_event->event.key == key && input_event->event.mouse_column == column && input_event->event.mouse_row == row && input_event->text.empty() &&
+               input_event->event.text.empty() && !input_event->bracketed_paste,
+           std::string("direct-terminal mouse delivers ") + std::string(label) + " without residual text");
+    expect_no_residual_mouse_payload(label);
+  };
+
+  // Feed serially: ncurses mouse FIFO is shallow; batching drops intermediate reports.
+  feed("press", "\x1b[<0;10;5M");
+  expect_mouse("left press", ava::tui::Key::MouseLeftPress, 10, 5);
+
+  feed("drag", "\x1b[<32;12;6M");
+  expect_mouse("left drag", ava::tui::Key::MouseLeftDrag, 12, 6);
+
+  feed("release", "\x1b[<0;12;6m");
+  expect_mouse("left release", ava::tui::Key::MouseLeftRelease, 12, 6);
+
+  feed("wheel up", "\x1b[<64;20;8M");
+  expect_mouse("wheel up", ava::tui::Key::MouseWheelUp, 20, 8);
+
+  feed("wheel down", "\x1b[<65;20;8M");
+  expect_mouse("wheel down", ava::tui::Key::MouseWheelDown, 20, 8);
+
+  feed("shift press", "\x1b[<4;15;9M");
+  expect_mouse("shift press cancel", ava::tui::Key::MousePointerCancel, 15, 9);
+
+  // Ordinary text must still reach the composer path after mouse traffic.
+  feed("plain z", "z");
+  auto plain = read_direct_mouse_event("plain z");
+  if (plain)
+  {
+    expect(plain->event.key == ava::tui::Key::Character && plain->text == "z",
+           "direct-terminal mouse arm preserves ordinary character input after SGR traffic");
+  }
+  expect_no_residual_mouse_payload("plain z");
+
+  // Raw SGR parser (tmux/multiplexer path) remains authoritative for full sequences.
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const raw_press = ava::tui::terminal_escape_sequence_event("[<0;11;7M");
+  auto const raw_drag = ava::tui::terminal_escape_sequence_event("[<32;13;8M");
+  auto const raw_release = ava::tui::terminal_escape_sequence_event("[<0;13;8m");
+  auto const raw_wheel_up = ava::tui::terminal_escape_sequence_event("[<64;21;9M");
+  auto const raw_wheel_down = ava::tui::terminal_escape_sequence_event("[<65;21;9M");
+  auto const raw_shift = ava::tui::terminal_escape_sequence_event("[<4;11;7M");
+  expect(raw_press.key == ava::tui::Key::MouseLeftPress && raw_drag.key == ava::tui::Key::MouseLeftDrag && raw_release.key == ava::tui::Key::MouseLeftRelease &&
+             raw_wheel_up.key == ava::tui::Key::MouseWheelUp && raw_wheel_down.key == ava::tui::Key::MouseWheelDown &&
+             raw_shift.key == ava::tui::Key::MousePointerCancel,
+         "raw SGR mouse parser (tmux/multiplexer path) still classifies press/drag/release/wheel/shift");
+
+  ava::tui::restore_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) ==
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()),
+         "direct-terminal mouse regression keeps enable/disable protocol balance");
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(::close(master_fd));
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::terminal_reset_mouse_tracking();
+  reset_lifecycle_test_seams();
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+#else
+  expect(true, "ncurses mouse support unavailable; direct-terminal mouse PTY regression skipped");
+#endif
+}
+
 }  // namespace
 
 void run_tui_terminal_osc11_theme_tests()
@@ -2546,4 +2787,5 @@ void run_tui_terminal_lifecycle_protocol_tests()
   test_terminal_protocol_lifecycle_kitty_supported_path();
   test_terminal_input_flush_ordering_seam();
   test_external_editor_and_suspend_share_handoff_sequence();
+  test_direct_terminal_ncurses_mouse_sgr_no_composer_leak();
 }

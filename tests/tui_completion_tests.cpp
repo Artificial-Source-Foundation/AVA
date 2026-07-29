@@ -230,18 +230,18 @@ void run_tui_completion_tests()
              !ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 141),
          "F3 centered slash palette accepts both canvas edges and rejects the exact left and right gutters");
 
-  auto active_hint_snapshot =
-      ava::tui::ComposerSnapshot{.mode = "build",
-                                 .provider = "openai",
-                                 .model = "gpt-5.5",
-                                 .session_id = "session_test",
-                                 .input = "follow up",
-                                 .status = "invalid_argument: admitted",
-                                 .processing = true,
-                                 .active_run_hint = ava::tui::ActiveRunHint{.submit_or_queue = "Ctrl+Q", .follow_up = "Alt+F", .dequeue = "Alt+D"},
-                                 .transcript = {},
-                                 .width = 80,
-                                 .height = 12};
+  auto active_hint_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "follow up",
+      .status = "invalid_argument: admitted",
+      .processing = true,
+      .active_run_hint = ava::tui::ActiveRunHint{.submit_or_queue = "Ctrl+Q", .follow_up = "Alt+F", .dequeue = "Alt+D", .interrupt = "Esc"},
+      .transcript = {},
+      .width = 80,
+      .height = 12};
   auto const active_hint_lines = ava::tui::render_composer(active_hint_snapshot);
   active_hint_snapshot.processing = false;
   auto const idle_hint_lines = ava::tui::render_composer(active_hint_snapshot);

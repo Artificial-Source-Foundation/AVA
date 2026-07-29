@@ -439,6 +439,10 @@ struct ActiveRunHint
   std::string submit_or_queue = {};
   std::string follow_up = {};
   std::string dequeue = {};
+  // First configured Cancel binding; active-run stop uses Cancel, not Interrupt.
+  std::string interrupt = {};
+  // First configured JumpToBottom binding; may be empty when unbound.
+  std::string jump_to_bottom = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

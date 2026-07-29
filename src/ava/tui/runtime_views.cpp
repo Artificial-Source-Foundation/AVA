@@ -154,7 +154,9 @@ ActiveRunHint active_run_hint_for(TuiKeyBindings const& bindings)
 {
   return ActiveRunHint{.submit_or_queue = first_key_display(bindings, TuiAction::Submit),
                        .follow_up = first_key_display(bindings, TuiAction::MessageFollowUp),
-                       .dequeue = first_key_display(bindings, TuiAction::MessageDequeue)};
+                       .dequeue = first_key_display(bindings, TuiAction::MessageDequeue),
+                       .interrupt = first_key_display(bindings, TuiAction::Cancel),
+                       .jump_to_bottom = first_key_display(bindings, TuiAction::JumpToBottom)};
 }
 
 std::string compact_path_leaf(std::string path)

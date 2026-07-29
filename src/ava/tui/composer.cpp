@@ -1052,30 +1052,151 @@ std::vector<std::string> overlay_select_list_modal(std::vector<std::string> line
   return lines;
 }
 
+std::string strip_provider_body_suffix(std::string_view detail)
+{
+  auto const separator = detail.find(" - ");
+  if (separator == std::string_view::npos)
+    return std::string(detail);
+  return std::string(detail.substr(0, separator));
+}
+
+std::optional<std::string> extract_detail_token(std::string_view detail, std::string_view key)
+{
+  auto const pos = detail.find(key);
+  if (pos == std::string_view::npos)
+    return std::nullopt;
+  auto value_begin = pos + key.size();
+  auto value_end = value_begin;
+  while (value_end < detail.size())
+  {
+    auto const ch = static_cast<unsigned char>(detail[value_end]);
+    if (std::isspace(ch) != 0)
+      break;
+    ++value_end;
+  }
+  if (value_end == value_begin)
+    return std::nullopt;
+  return std::string(detail.substr(value_begin, value_end - value_begin));
+}
+
+// Allowlisted RUNNING retry/compaction lifecycle only. Scans once and keeps the newest match.
+std::optional<std::string> compact_retry_compaction_status(ComposerSnapshot const& snapshot)
+{
+  if (!snapshot.sidebar)
+    return std::nullopt;
+
+  SidebarActivityItem const* chosen = nullptr;
+  for (auto const& activity : snapshot.sidebar->activity)
+  {
+    if (activity.status != ToolTimelineStatus::Running)
+      continue;
+    if (activity.label != "retry" && activity.label != "compaction")
+      continue;
+    chosen = &activity;
+  }
+  if (chosen == nullptr)
+    return std::nullopt;
+
+  if (chosen->label == "compaction")
+    return std::string("compaction");
+
+  auto const safe_detail = sanitize_terminal_text(strip_provider_body_suffix(chosen->detail));
+  if (safe_detail.starts_with("retry countdown"))
+  {
+    if (auto remaining = extract_detail_token(safe_detail, "remaining="))
+      return std::string("retry ") + sanitize_terminal_text(*remaining);
+    return std::string("retry countdown");
+  }
+
+  std::string text = "retry";
+  if (auto attempt = extract_detail_token(safe_detail, "attempt "))
+    text += " attempt " + sanitize_terminal_text(*attempt);
+  return text;
+}
+
+void append_hint_segment(std::string& text, std::string segment)
+{
+  if (segment.empty())
+    return;
+  if (!text.empty())
+    text += " · ";
+  text += std::move(segment);
+}
+
+std::string configured_interrupt_hint(ActiveRunHint const& hint)
+{
+  if (hint.interrupt.empty())
+    return "stop unbound";
+  return sanitize_terminal_text(hint.interrupt) + " stop";
+}
+
+std::string detached_new_output_hint(ComposerSnapshot const& snapshot)
+{
+  if (snapshot.transcript_scroll_offset == 0 || snapshot.transcript_new_output_count == 0)
+    return {};
+  auto text = std::to_string(snapshot.transcript_new_output_count) + " new";
+  if (!snapshot.active_run_hint.jump_to_bottom.empty())
+    text += " · " + sanitize_terminal_text(snapshot.active_run_hint.jump_to_bottom);
+  else
+    text += " · jump unbound";
+  return text;
+}
+
 std::vector<std::string> render_active_run_hint_lines(ComposerSnapshot const& snapshot, detail::CompletionMatchCache const& completion_cache, std::size_t width,
                                                       std::size_t max_lines)
 {
   auto const completion_visible = completion_cache.model && completion_cache.model->palette_visible;
-  if (max_lines == 0 || !snapshot.processing || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list ||
-      snapshot.sidebar_drawer_visible || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible)
+  auto const detached_hint = detached_new_output_hint(snapshot);
+  auto const suppress_chrome = snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible ||
+                               slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible;
+  if (max_lines == 0 || suppress_chrome || (!snapshot.processing && detached_hint.empty()))
+    return {};
+
+  std::string text;
+  if (snapshot.processing)
+  {
+    append_hint_segment(text, configured_interrupt_hint(snapshot.active_run_hint));
+    // Compute lifecycle once per render; prefer it over generic queue/follow-up copy.
+    auto status = compact_retry_compaction_status(snapshot);
+    if (status)
+    {
+      append_hint_segment(text, std::move(*status));
+    }
+    else if (snapshot.input.empty())
+    {
+      append_hint_segment(text, "type a follow-up");
+    }
+    else
+    {
+      if (!snapshot.active_run_hint.submit_or_queue.empty())
+        append_hint_segment(text, sanitize_terminal_text(snapshot.active_run_hint.submit_or_queue) + " queue");
+      if (!snapshot.active_run_hint.follow_up.empty())
+        append_hint_segment(text, sanitize_terminal_text(snapshot.active_run_hint.follow_up) + " follow-up");
+      if (!snapshot.active_run_hint.dequeue.empty())
+        append_hint_segment(text, sanitize_terminal_text(snapshot.active_run_hint.dequeue) + " /restore");
+    }
+  }
+  append_hint_segment(text, detached_hint);
+  if (text.empty())
+    return {};
+  return {detail::composer_surface_line(detail::composer_gutter() + std::string(kSgrDim) + text + std::string(kSgrReset), width)};
+}
+
+std::vector<std::string> render_empty_transcript_discovery_lines(ComposerSnapshot const& snapshot, detail::CompletionMatchCache const& completion_cache,
+                                                                 std::size_t width, std::size_t transcript_height)
+{
+  auto const completion_visible = completion_cache.model && completion_cache.model->palette_visible;
+  if (transcript_height < 2 || snapshot.width < 80 || snapshot.height < 24 || snapshot.processing || !snapshot.transcript.empty() || !snapshot.input.empty() ||
+      snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible ||
+      !snapshot.pending_attachments.empty() || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible)
   {
     return {};
   }
-  std::string text = "Esc stop";
-  if (snapshot.input.empty())
-  {
-    text += " · type a follow-up";
-  }
-  else
-  {
-    if (!snapshot.active_run_hint.submit_or_queue.empty())
-      text += " · " + sanitize_terminal_text(snapshot.active_run_hint.submit_or_queue) + " queue";
-    if (!snapshot.active_run_hint.follow_up.empty())
-      text += " · " + sanitize_terminal_text(snapshot.active_run_hint.follow_up) + " follow-up";
-    if (!snapshot.active_run_hint.dequeue.empty())
-      text += " · " + sanitize_terminal_text(snapshot.active_run_hint.dequeue) + " /restore";
-  }
-  return {detail::composer_surface_line(detail::composer_gutter() + std::string(kSgrDim) + text + std::string(kSgrReset), width)};
+
+  std::vector<std::string> lines;
+  lines.push_back(detail::screen_surface_line(std::string(kSgrDim) + "/ commands · @ files" + std::string(kSgrReset), width));
+  lines.push_back(detail::screen_surface_line(std::string(kSgrDim) + "/help · /hotkeys" + std::string(kSgrReset), width));
+  return lines;
 }
 
 std::vector<std::string> render_queued_message_lines(ComposerSnapshot const& snapshot, std::size_t width, std::size_t max_lines)
@@ -1535,6 +1656,16 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height, 0);
   }
   frame.lines.insert(frame.lines.end(), visible_transcript.begin(), visible_transcript.end());
+  if (frame.lines.size() < transcript_height && snapshot.transcript.empty())
+  {
+    auto const discovery = render_empty_transcript_discovery_lines(snapshot, completion_cache, width, transcript_height);
+    for (auto const& line : discovery)
+    {
+      if (frame.lines.size() >= transcript_height)
+        break;
+      frame.lines.push_back(line);
+    }
+  }
   while (frame.lines.size() < transcript_height)
   {
     frame.lines.push_back("");

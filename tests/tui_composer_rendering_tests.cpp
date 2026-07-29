@@ -3,6 +3,7 @@
 #include "tests/support/tui_test_support.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/keybindings.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_internal.h"
@@ -11,6 +12,7 @@
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
+#include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 
@@ -844,6 +846,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                                      .input = "",
                                                                                      .status = "thinking...",
                                                                                      .processing = true,
+                                                                                     .active_run_hint = ava::tui::ActiveRunHint{.interrupt = "Esc"},
                                                                                      .spinner_frame = 1,
                                                                                      .token_status = "1.3k (0.7%)",
                                                                                      .transcript = {},
@@ -2318,4 +2321,194 @@ void run_tui_composer_rendering_tests_part_4()
              runtime_success_is_presentation_only && !runtime_reasoning_snapshot.reasoning_feedback,
          "tui reasoning-cycle feedback is one-action presentation state: visible without a rail, suppressed without rail geometry drift, and cleared by user "
          "input");
+
+  auto wave_a_base = ava::tui::ComposerSnapshot{.mode = "build",
+                                                .provider = "openai",
+                                                .model = "gpt-5.5",
+                                                .session_id = "session_test",
+                                                .input = "",
+                                                .status = "ready",
+                                                .active_run_hint = ava::tui::ActiveRunHint{.interrupt = "Esc", .jump_to_bottom = "Ctrl+End"},
+                                                .active_context_status = "3.2%",
+                                                .transcript = {},
+                                                .width = 80,
+                                                .height = 24};
+  auto find_visible = [](std::vector<std::string> const& lines, std::string_view needle) {
+    return std::ranges::any_of(lines, [&](std::string const& line) { return strip_sgr(line).find(needle) != std::string::npos; });
+  };
+  auto count_visible = [](std::vector<std::string> const& lines, std::string_view needle) {
+    return std::ranges::count_if(lines, [&](std::string const& line) { return strip_sgr(line).find(needle) != std::string::npos; });
+  };
+  auto const idle_discovery_80x24 = ava::tui::render_composer(wave_a_base);
+  auto typed_discovery = wave_a_base;
+  typed_discovery.input = "hello";
+  auto const typed_discovery_lines = ava::tui::render_composer(typed_discovery);
+  auto transcript_discovery = wave_a_base;
+  transcript_discovery.transcript = {ava::tui::TranscriptItem{.label = "you", .text = "hi"}};
+  auto const transcript_discovery_lines = ava::tui::render_composer(transcript_discovery);
+  auto processing_discovery = wave_a_base;
+  processing_discovery.processing = true;
+  auto const processing_discovery_lines = ava::tui::render_composer(processing_discovery);
+  auto prompt_discovery = wave_a_base;
+  prompt_discovery.permission_prompt =
+      ava::tui::PermissionPromptView{.tool_name = "bash", .operation = "execute", .target = "tests", .command = "echo hi", .reason = "test"};
+  auto const prompt_discovery_lines = ava::tui::render_composer(prompt_discovery);
+  auto question_discovery = wave_a_base;
+  question_discovery.question_prompt = ava::tui::QuestionPromptView{};
+  question_discovery.question_prompt->header = "Q";
+  question_discovery.question_prompt->question = "Choose?";
+  auto const question_discovery_lines = ava::tui::render_composer(question_discovery);
+  auto select_discovery = wave_a_base;
+  select_discovery.select_list = ava::tui::SelectListView{};
+  select_discovery.select_list->title = "Models";
+  auto const select_discovery_lines = ava::tui::render_composer(select_discovery);
+  auto attachment_discovery = wave_a_base;
+  attachment_discovery.pending_attachments = {ava::tui::PendingAttachmentItem{.label = "shot.png"}};
+  auto const attachment_discovery_lines = ava::tui::render_composer(attachment_discovery);
+  auto narrow_discovery = wave_a_base;
+  narrow_discovery.width = 40;
+  narrow_discovery.height = 10;
+  auto const discovery_40x10 = ava::tui::render_composer(narrow_discovery);
+  {
+    ScopedEnvVar no_color_guard("NO_COLOR", "1");
+    auto const no_color_discovery = ava::tui::render_composer(wave_a_base);
+    expect(count_visible(idle_discovery_80x24, "/ commands · @ files") == 1 && count_visible(idle_discovery_80x24, "/help · /hotkeys") == 1 &&
+               !find_visible(discovery_40x10, "/ commands") && !find_visible(discovery_40x10, "/help · /hotkeys") &&
+               !find_visible(typed_discovery_lines, "/ commands") && !find_visible(typed_discovery_lines, "/help · /hotkeys") &&
+               !find_visible(transcript_discovery_lines, "/ commands") && !find_visible(processing_discovery_lines, "/ commands") &&
+               !find_visible(prompt_discovery_lines, "/ commands") && !find_visible(question_discovery_lines, "/ commands") &&
+               !find_visible(select_discovery_lines, "/ commands") && !find_visible(attachment_discovery_lines, "/ commands") &&
+               strip_sgr(idle_discovery_80x24.back()).find("GPT-5.5 · ctx 3.2%") != std::string::npos &&
+               strip_sgr(idle_discovery_80x24.back()).find("build") == std::string::npos &&
+               strip_sgr(idle_discovery_80x24.back()).find("session") == std::string::npos &&
+               std::ranges::none_of(idle_discovery_80x24, [](std::string const& line) { return strip_sgr(line).find("AVA") != std::string::npos; }) &&
+               find_visible(no_color_discovery, "/ commands · @ files") && find_visible(no_color_discovery, "/help · /hotkeys") &&
+               std::ranges::all_of(no_color_discovery, [](std::string const& line) { return line.find('\x1b') == std::string::npos; }) &&
+               std::ranges::none_of(no_color_discovery, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }),
+           "Wave A idle empty-transcript discovery shows exactly two muted lines at 80x24, none at 40x10, reclaims on typing/transcript/processing/prompt/"
+           "select/attachment, keeps the minimal footer contract, and preserves NO_COLOR default surfaces");
+  }
+
+  auto retry_snapshot = wave_a_base;
+  retry_snapshot.processing = true;
+  retry_snapshot.status = "thinking...";
+  retry_snapshot.sidebar = ava::tui::SidebarSnapshot{
+      .activity = {ava::tui::SidebarActivityItem{.id = "responding",
+                                                 .label = "responding",
+                                                 .detail = "assistant is writing - PROVIDER_BODY_SECRET",
+                                                 .status = ava::tui::ToolTimelineStatus::Running},
+                   ava::tui::SidebarActivityItem{.id = "retry:rate",
+                                                 .label = "retry",
+                                                 .detail = "retrying after rate_limit attempt 2/5 delay=1000ms - PROVIDER_BODY_SECRET leaked text",
+                                                 .status = ava::tui::ToolTimelineStatus::Running}}};
+  auto const retry_lines = ava::tui::render_composer(retry_snapshot);
+  auto countdown_snapshot = retry_snapshot;
+  countdown_snapshot.sidebar->activity.back().detail =
+      "retry countdown after rate_limit attempt 2/5 delay=1000ms remaining=1500ms - PROVIDER_BODY_SECRET leaked text";
+  auto const countdown_lines = ava::tui::render_composer(countdown_snapshot);
+  auto compaction_only = retry_snapshot;
+  compaction_only.sidebar->activity = {ava::tui::SidebarActivityItem{.id = "compaction",
+                                                                     .label = "compaction",
+                                                                     .detail = "compaction started (auto) - PROVIDER_BODY_SECRET",
+                                                                     .status = ava::tui::ToolTimelineStatus::Running}};
+  auto const compaction_lines = ava::tui::render_composer(compaction_only);
+  auto completed_lifecycle = retry_snapshot;
+  completed_lifecycle.sidebar->activity = {
+      ava::tui::SidebarActivityItem{
+          .id = "retry:done", .label = "retry", .detail = "retrying after rate_limit attempt 2/5", .status = ava::tui::ToolTimelineStatus::Success},
+      ava::tui::SidebarActivityItem{
+          .id = "compaction", .label = "compaction", .detail = "compaction completed", .status = ava::tui::ToolTimelineStatus::Success}};
+  auto const completed_lifecycle_lines = ava::tui::render_composer(completed_lifecycle);
+  auto custom_interrupt = retry_snapshot;
+  custom_interrupt.sidebar.reset();
+  custom_interrupt.active_run_hint.interrupt = "F9";
+  auto const custom_interrupt_lines = ava::tui::render_composer(custom_interrupt);
+  auto unbound_interrupt = custom_interrupt;
+  unbound_interrupt.active_run_hint.interrupt.clear();
+  auto const unbound_interrupt_lines = ava::tui::render_composer(unbound_interrupt);
+  expect(find_visible(retry_lines, "Esc stop · retry attempt 2/5") && !find_visible(retry_lines, "PROVIDER_BODY_SECRET") &&
+             !find_visible(retry_lines, "assistant is writing") && !find_visible(retry_lines, "type a follow-up") &&
+             find_visible(countdown_lines, "Esc stop · retry 1500ms") && !find_visible(countdown_lines, "PROVIDER_BODY_SECRET") &&
+             find_visible(compaction_lines, "Esc stop · compaction") && !find_visible(compaction_lines, "PROVIDER_BODY_SECRET") &&
+             find_visible(completed_lifecycle_lines, "Esc stop · type a follow-up") && !find_visible(completed_lifecycle_lines, "retry attempt") &&
+             !find_visible(completed_lifecycle_lines, "compaction") && find_visible(custom_interrupt_lines, "F9 stop · type a follow-up") &&
+             find_visible(unbound_interrupt_lines, "stop unbound") && !find_visible(unbound_interrupt_lines, "Esc stop") &&
+             strip_sgr(retry_lines.back()).find("GPT-5.5") != std::string::npos && strip_sgr(retry_lines.back()).find("ctx 3.2%") != std::string::npos &&
+             !find_visible(retry_lines, "1.3k (0.7%)"),
+         "Wave A active-run contextual row prioritizes newest allowlisted RUNNING retry/compaction status, keeps configured Cancel stop (or stop unbound), "
+         "ignores completed/generic activity, and never leaks provider body text into chrome or footer");
+
+  auto detached_active = wave_a_base;
+  detached_active.processing = true;
+  detached_active.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "streamed"}};
+  detached_active.transcript_scroll_offset = 3;
+  detached_active.transcript_new_output_count = 4;
+  auto const detached_active_lines = ava::tui::render_composer(detached_active);
+  auto detached_idle = detached_active;
+  detached_idle.processing = false;
+  auto const detached_idle_lines = ava::tui::render_composer(detached_idle);
+  auto following = detached_idle;
+  following.transcript_scroll_offset = 0;
+  following.transcript_new_output_count = 0;
+  auto const following_lines = ava::tui::render_composer(following);
+  auto zero_count = detached_idle;
+  zero_count.transcript_new_output_count = 0;
+  auto const zero_count_lines = ava::tui::render_composer(zero_count);
+  auto unbound_jump = detached_idle;
+  unbound_jump.active_run_hint.jump_to_bottom.clear();
+  auto const unbound_jump_lines = ava::tui::render_composer(unbound_jump);
+  auto custom_jump = detached_idle;
+  custom_jump.active_run_hint.jump_to_bottom = "End";
+  auto const custom_jump_lines = ava::tui::render_composer(custom_jump);
+  expect(find_visible(detached_active_lines, "Esc stop") && find_visible(detached_active_lines, "4 new · Ctrl+End") &&
+             find_visible(detached_idle_lines, "4 new · Ctrl+End") && !find_visible(detached_idle_lines, "Esc stop") &&
+             !find_visible(following_lines, " new") && !find_visible(zero_count_lines, " new") && find_visible(unbound_jump_lines, "4 new · jump unbound") &&
+             find_visible(custom_jump_lines, "4 new · End") &&
+             std::ranges::none_of(detached_idle_lines,
+                                  [](std::string const& line) {
+                                    auto const visible = strip_sgr(line);
+                                    return visible.find("detached") != std::string::npos || visible.find("banner") != std::string::npos;
+                                  }),
+         "Wave A detached new-output hint appends compact N new plus configured JumpToBottom key (or jump unbound), appears only while detached with count>0, "
+         "and never becomes a permanent banner");
+
+  auto combined = detached_active;
+  combined.sidebar = ava::tui::SidebarSnapshot{
+      .activity = {ava::tui::SidebarActivityItem{
+          .id = "retry:rate", .label = "retry", .detail = "retry countdown remaining=900ms", .status = ava::tui::ToolTimelineStatus::Running}}};
+  combined.width = 48;
+  auto const combined_lines = ava::tui::render_composer(combined);
+  auto const combined_hint = std::ranges::find_if(combined_lines, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("stop") != std::string::npos || visible.find("new") != std::string::npos;
+  });
+  expect(combined_hint != combined_lines.end() && find_visible(combined_lines, "Esc stop") && find_visible(combined_lines, "retry 900ms") &&
+             find_visible(combined_lines, "4 new") && find_visible(combined_lines, "Ctrl+End") &&
+             std::ranges::count_if(combined_lines,
+                                   [](std::string const& line) {
+                                     auto const visible = strip_sgr(line);
+                                     return visible.find("stop") != std::string::npos || visible.find(" new") != std::string::npos;
+                                   }) == 1 &&
+             visible_columns(*combined_hint) <= 48,
+         "Wave A combined lifecycle and detached hints stay on one width-safe contextual row while preserving stop and jump");
+
+  auto bindings = ava::tui::default_key_bindings();
+  auto const default_hint = ava::tui::runtime_views::active_run_hint_for(bindings);
+  for (auto& binding : bindings.bindings)
+  {
+    if (binding.first == ava::tui::TuiAction::Cancel)
+      binding.second = {ava::tui::Key::F9};
+    if (binding.first == ava::tui::TuiAction::JumpToBottom)
+      binding.second = {ava::tui::Key::End};
+  }
+  auto const custom_hint = ava::tui::runtime_views::active_run_hint_for(bindings);
+  for (auto& binding : bindings.bindings)
+  {
+    if (binding.first == ava::tui::TuiAction::Cancel || binding.first == ava::tui::TuiAction::JumpToBottom)
+      binding.second = {};
+  }
+  auto const unbound_hint = ava::tui::runtime_views::active_run_hint_for(bindings);
+  expect(default_hint.interrupt == "Esc" && default_hint.jump_to_bottom == "Ctrl+End" && custom_hint.interrupt == "F9" && custom_hint.jump_to_bottom == "End" &&
+             unbound_hint.interrupt.empty() && unbound_hint.jump_to_bottom.empty(),
+         "Wave A active_run_hint_for derives Cancel stop and JumpToBottom labels through first_key_display so custom and unbound bindings stay truthful");
 }

@@ -5,13 +5,13 @@
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
+#include "ava/core/AnchorOpen.h"
+#include "ava/core/AnchorSet.h"
+#include "ava/core/open_beneath.h"
 #include "ava/session/export.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission.h"
-#include "ava/core/AnchorOpen.h"
-#include "ava/core/AnchorSet.h"
 #include "ava/core/json.h"
-#include "ava/core/open_beneath.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 #include "debug.h"
 
 namespace {
@@ -722,8 +723,11 @@ void test_permission_audit_persistence()
 
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "audit"});
   auto sink = [&store](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult { return append_permission_audit_for_test(store, event); };
-  ava::tools::ToolContext const context{
-      .workspace_dir = workspace, .spill_dir = spill, .mode = ava::agent::Mode::Build, .permission_audit_sink = sink, .anchor_set = *anchors};
+  ava::tools::ToolContext const context{.workspace_dir = workspace,
+                                        .spill_dir = spill,
+                                        .mode = ava::agent::Mode::Build,
+                                        .permission_audit_sink = sink,
+                                        .anchor_set = *anchors};
 
   auto allowed = ava::tools::read_file(context, allowed_path);
   expect(allowed && allowed->content == "allowed", "permission audit allows normal read");
@@ -1032,18 +1036,15 @@ void test_injected_exact_file_access()
   auto adapter = std::make_shared<MemoryExactFileAccess>();
   auto const remote_path = ava::core::normalized_absolute_path(workspace) / "remote.txt";
   adapter->files[remote_path] = "one\ntwo\nthree\n";
-  ava::tools::ToolContext context{.workspace_dir = ava::core::normalized_absolute_path(workspace),
-                                  .mode = ava::agent::Mode::Build,
-                                  .secure_workspace = *secure,
-                                  .exact_file_access = adapter};
+  ava::tools::ToolContext context{
+      .workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure, .exact_file_access = adapter};
 
   auto read = ava::tools::read_file(context, remote_path, ava::tools::ReadOptions{.max_bytes = 1024, .offset_line = 2, .max_lines = 1});
   auto write = ava::tools::write_file(context, workspace / "created.txt", "created remotely");
   auto edit = ava::tools::edit_file(context, remote_path, "two", "changed");
   expect(read && read->content == "two\n" && read->line_limited && !read->totals_known && read->total_bytes == 0 && read->total_lines == 0 && write && edit &&
              adapter->files[remote_path] == "one\nchanged\nthree\n" &&
-             adapter->files[ava::core::normalized_absolute_path(workspace) / "created.txt"] == "created remotely" &&
-             !std::filesystem::exists(workspace / "created.txt"),
+             adapter->files[ava::core::normalized_absolute_path(workspace) / "created.txt"] == "created remotely" && !std::filesystem::exists(workspace / "created.txt"),
          "injected exact access keeps bounded window totals unknown while coherently handling writes and edits without local I/O");
 
   auto const local_only = workspace / "local-only.txt";
@@ -1096,8 +1097,7 @@ void test_secure_workspace_file_tools()
   expect(secure.has_value(), "secure workspace anchors a canonical root descriptor");
   if (!secure)
     return;
-  ava::tools::ToolContext secure_context{
-      .workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
+  ava::tools::ToolContext secure_context{.workspace_dir = ava::core::normalized_absolute_path(workspace), .mode = ava::agent::Mode::Build, .secure_workspace = *secure};
 
   auto nested_write = ava::tools::write_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "alpha beta");
   auto nested_edit = ava::tools::edit_file(secure_context, workspace / "nested" / "deeper" / "note.txt", "beta", "gamma");
@@ -1242,7 +1242,8 @@ void test_secure_workspace_symlink_containment()
   if (!link_error)
   {
     auto read = ava::tools::read_file(context, ws / "linked_dir" / "file.txt");
-    expect(read.has_value() && read->content == "real content", "read through non-escaping intermediate directory symlink is accepted");
+    expect(read.has_value() && read->content == "real content",
+           "read through non-escaping intermediate directory symlink is accepted");
   }
 
   // linked_file.txt is a relative symlink to real_file.txt (both inside ws).
@@ -1253,7 +1254,8 @@ void test_secure_workspace_symlink_containment()
   if (!link_error)
   {
     auto read = ava::tools::read_file(context, ws / "linked_file.txt");
-    expect(read.has_value() && read->content == "real file content", "read through non-escaping final-component symlink is accepted");
+    expect(read.has_value() && read->content == "real file content",
+           "read through non-escaping final-component symlink is accepted");
   }
 
   // escape_dir is a relative symlink to ../outside (the ".." leaves ws).
@@ -1294,7 +1296,8 @@ void test_secure_workspace_symlink_containment()
   // Anchor: ws. Symlink: ws/linked_dir -> real_dir (intermediate, non-escaping).
   // The file does not exist yet, but the parent path is contained, so this must be ACCEPTED.
   auto resolved = (*secure)->resolve(ws / "linked_dir" / "nonexistent.txt", ava::tools::SecureWorkspaceResolveMode::AllowMissing);
-  expect(resolved.has_value() && !resolved->exists, "resolve AllowMissing through non-escaping symlinked parent is accepted");
+  expect(resolved.has_value() && !resolved->exists,
+         "resolve AllowMissing through non-escaping symlinked parent is accepted");
 
   // resolve(AllowMissing) through an escaping symlinked parent directory.
   // Anchor: ws. Symlink: ws/escape_dir -> ../outside (intermediate, escaping).
@@ -1531,8 +1534,8 @@ struct Info
 #ifdef CWDEBUG
 void Info::print_on(std::ostream& os) const
 {
-  os << std::boolalpha << "{path:" << path << ", writable_root:" << writable_root << ", target_path:" << target_path << ", is_link:" << is_link
-     << ", crosses_boundary:" << crosses_boundary << ", content:\"" << content << "\"}";
+  os << std::boolalpha << "{path:" << path << ", writable_root:" << writable_root << ", target_path:" << target_path <<
+    ", is_link:" << is_link << ", crosses_boundary:" << crosses_boundary << ", content:\"" << content << "\"}";
 }
 #endif
 
@@ -1554,6 +1557,7 @@ void test_anchor_open()
   namespace fs = std::filesystem;
 
   auto const root = create_empty_root("anchor-open");
+
 
   auto const workspace = root / "workspace";
   fs::create_directories(root);
@@ -1578,8 +1582,7 @@ void test_anchor_open()
   std::vector<Info> dirlinks;
 
   // Helper to create symbolic link -> target.
-  auto create_link = [&files, &dirlinks](fs::path const& link, fs::path const& target, ava::core::AnchorSet::Anchor const* writable_anchor,
-                                         bool crosses_boundary) {
+  auto create_link = [&files, &dirlinks](fs::path const& link, fs::path const& target, ava::core::AnchorSet::Anchor const* writable_anchor, bool crosses_boundary) {
     std::error_code link_error;
     fs::create_symlink(target.lexically_relative(link.parent_path()), link, link_error);
     expect(!link_error, "anchor-open test creates a symlink");
@@ -1676,14 +1679,14 @@ void test_anchor_open()
       fs::path const absolute = writable->absolute();
       expect(absolute == absolute.lexically_normal(), "open_writable (existing): returned absolute path is normalized");
       expect(writable->root() == info.writable_root && absolute == info.path && writable->fd() >= 0,
-             "open_writable (existing): opens an in-anchor file using the correct anchor");
+          "open_writable (existing): opens an in-anchor file using the correct anchor");
       expect(read_all_from_fd(writable->fd()) == info.content, "open_writable returns fd to the correct file");
       expect(writable->relative() == absolute.lexically_relative(writable->root()), "open_writable (existing): returned relative path is normalized");
     }
     else
     {
       expect(writable.error().category() == ava::core::ErrorCategory::PermissionDenied,
-             "open_writable (existing): rejects a path outside all anchors with PermissionDenied");
+         "open_writable (existing): rejects a path outside all anchors with PermissionDenied");
       expect(info.writable_root.empty(), "open_writable (existing): refuses to open files that escape their anchor");
       external = true;
     }
@@ -1704,9 +1707,10 @@ void test_anchor_open()
       expect(absolute == info.path, "open_readable (existing): returns the expected absolute path");
       expect(readable->fd() >= 0, "open_readable (existing): returns a readable fd");
       expect(read_all_from_fd(readable->fd()) == info.content, "open_readable (existing): returns fd to the correct file");
-      expect(!external || (readable->root().empty() && readable->relative().empty()), "open_readable (existing): returns an empty root for external file");
+      expect(!external || (readable->root().empty() && readable->relative().empty()),
+          "open_readable (existing): returns an empty root for external file");
       expect(external || (readable->root() == writable->root() && readable->relative() == absolute.lexically_relative(readable->root())),
-             "open_readable (existing): returns writable root if in-anchor and relative path is normalized");
+          "open_readable (existing): returns writable root if in-anchor and relative path is normalized");
     }
 
     // AnchorOpen owns its descriptor: move transfers it, the source becomes empty.
@@ -1738,18 +1742,17 @@ void test_anchor_open()
         fs::path const absolute = writable->absolute();
         expect(absolute == absolute.lexically_normal(), "returned dirlink/filelink absolute path is normalized");
         expect(writable->root() == info.writable_root && absolute == fp && writable->fd() >= 0,
-               "open_writable opens an in-anchor dirlink/filelink using the correct anchor");
+            "open_writable opens an in-anchor dirlink/filelink using the correct anchor");
         expect(read_all_from_fd(writable->fd()) == directories[file_n].string(), "open_writable dirlink/filelink returns fd to the correct file");
         expect(writable->relative() == absolute.lexically_relative(writable->root()), "returned dirlink/filelink relative path is normalized");
       }
       else
       {
         expect(writable.error().category() == ava::core::ErrorCategory::PermissionDenied,
-               "open_writable rejects an escaping dirlink/filelink path with PermissionDenied");
+           "open_writable rejects an escaping dirlink/filelink path with PermissionDenied");
         if (writable.error().category() != ava::core::ErrorCategory::PermissionDenied)
-          Dout(dc::warning, "open_writable denied writing with "
-                                << writable.error() << "; expected was "
-                                << (crosses_boundary ? "that it would be denied with PermissionDenied!" : "that we would be able to open it!"));
+          Dout(dc::warning, "open_writable denied writing with " << writable.error() << "; expected was " <<
+              (crosses_boundary ? "that it would be denied with PermissionDenied!" : "that we would be able to open it!"));
       }
 
       auto readable = ava::core::open_readable(anchor_set, fp, O_RDONLY | O_CLOEXEC);
@@ -1770,9 +1773,10 @@ void test_anchor_open()
         expect(absolute == fp, "open_readable (dirlink): returns the expected absolute path");
         expect(readable->fd() >= 0, "open_readable (dirlink): returns a readable fd");
         expect(read_all_from_fd(readable->fd()) == directories[file_n].string(), "open_readable (dirlink): returns fd to the correct file");
-        expect(!external || (readable->root().empty() && readable->relative().empty()), "open_readable (dirlink): returns an empty root for external file");
+        expect(!external || (readable->root().empty() && readable->relative().empty()),
+            "open_readable (dirlink): returns an empty root for external file");
         expect(external || (readable->root() == info.writable_root && readable->relative() == absolute.lexically_relative(readable->root())),
-               "open_readable (dirlink): returns writable root if in-anchor and relative path is normalized");
+            "open_readable (dirlink): returns writable root if in-anchor and relative path is normalized");
       }
     }
   }
@@ -1809,7 +1813,7 @@ void test_anchor_open()
       fs::path const absolute = created->absolute();
       expect(absolute == absolute.lexically_normal(), "open_writable (create): returned absolute path is normalized");
       expect(created->root() == info.writable_root && absolute == info.path && created->fd() >= 0,
-             "open_writable (create): opens an in-anchor file using the correct anchor");
+          "open_writable (create): opens an in-anchor file using the correct anchor");
       expect(created->relative() == absolute.lexically_relative(created->root()), "open_writable (create): returned relative path is normalized");
       expect(::write(created->fd(), "created", 7) == 7, "open_writable created descriptor is writable");
       std::ifstream target(info.target_path);
@@ -1822,7 +1826,7 @@ void test_anchor_open()
     else
     {
       expect(created.error().category() == ava::core::ErrorCategory::PermissionDenied,
-             "open_writable (create): rejects a path outside all anchors with PermissionDenied");
+         "open_writable (create): rejects a path outside all anchors with PermissionDenied");
       if (created.error().category() != ava::core::ErrorCategory::PermissionDenied)
         Dout(dc::warning, "The error is " << created.error());
       expect(info.writable_root.empty(), "open_writable (create): refuses to open files that escape their anchor");
@@ -1892,11 +1896,12 @@ void test_permission_user_guidance_propagation()
   ava::tools::ToolContext guided_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
-        denied.user_guidance = "stay inside the workspace";
-        return denied;
-      },
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "stay inside the workspace";
+            return denied;
+          },
       .permission_audit_sink = audit_sink,
       .permission_denial_guidance_capture = guided_capture};
   auto guided_denied = ava::tools::read_file(guided_context, outside_path);
@@ -1921,27 +1926,29 @@ void test_permission_user_guidance_propagation()
   ava::tools::ToolContext no_capture_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
-        denied.user_guidance = "discard me";
-        return denied;
-      },
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "discard me";
+            return denied;
+          },
       .permission_audit_sink = audit_sink};
   auto discarded = ava::tools::read_file(no_capture_context, outside_path);
-  expect(
-      !discarded && discarded.error().format().find("discard me") == std::string::npos && discarded.error().format().find("user_guidance") == std::string::npos,
-      "direct command contexts without a capture discard denial guidance");
+  expect(!discarded && discarded.error().format().find("discard me") == std::string::npos &&
+             discarded.error().format().find("user_guidance") == std::string::npos,
+         "direct command contexts without a capture discard denial guidance");
 
   audits.clear();
   auto forged_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
   ava::tools::ToolContext forged_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "forged"};
-        denied.user_guidance = "evil\nguidance\x01";
-        return denied;
-      },
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "forged"};
+            denied.user_guidance = "evil\nguidance\x01";
+            return denied;
+          },
       .permission_audit_sink = audit_sink,
       .permission_denial_guidance_capture = forged_capture};
   auto forged_denied = ava::tools::read_file(forged_context, outside_path);
@@ -1954,11 +1961,12 @@ void test_permission_user_guidance_propagation()
   ava::tools::ToolContext overcap_context{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
-        denied.user_guidance = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes + 8, 'z');
-        return denied;
-      },
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+            denied.user_guidance = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes + 8, 'z');
+            return denied;
+          },
       .permission_audit_sink = audit_sink,
       .permission_denial_guidance_capture = overcap_capture};
   auto overcap_denied = ava::tools::read_file(overcap_context, outside_path);

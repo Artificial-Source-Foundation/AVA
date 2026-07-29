@@ -1676,39 +1676,41 @@ void test_permission_denial_guidance_provider_only_channel()
          "reconstructed provider-facing tool-result content includes validated guidance");
   expect(ava::permissions::with_provider_user_guidance(stored_result, "") == stored_result, "empty guidance leaves unguided provider content bytes unchanged");
 
+  // Minimal valid paired ToolCall/ToolResult sequence exercises the real provider
+  // message builder path (not only the with_provider_user_guidance helper).
   auto messages = ava::agent::build_provider_messages_from_entries(
-      {ava::session::SessionEntry{.id = "user_entry",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::UserMessage,
-                                  .timestamp = "2026-07-29T00:00:00Z",
-                                  .data_json = R"({"text":"read outside"})"},
-       ava::session::SessionEntry{.id = "asst_entry",
-                                  .parent_id = "",
-                                  .type = ava::session::EntryType::AssistantMessage,
-                                  .timestamp = "2026-07-29T00:00:01Z",
-                                  .data_json = R"({"text":"checking","tool_calls":1})"},
-       ava::session::SessionEntry{.id = "call_entry",
+      {ava::session::SessionEntry{.id = "call_entry",
                                   .parent_id = "",
                                   .type = ava::session::EntryType::ToolCall,
                                   .timestamp = "2026-07-29T00:00:02Z",
                                   .data_json = R"({"call_id":"call_guided_read","name":"read_file","arguments":"{}"})"},
-       *persisted});
-  bool provider_saw_guidance = false;
+       *persisted},
+      ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                .model_id = "gpt-test",
+                                                                                .api_family = "openai_responses",
+                                                                                .reasoning_format = "openai_responses",
+                                                                                .supports_tools = true,
+                                                                                .supports_images = false}});
+  expect(static_cast<bool>(messages),
+         messages ? "provider message reconstruction succeeds for paired guided tool result"
+                  : "provider message reconstruction succeeds for paired guided tool result: " + messages.error().format());
+  bool provider_message_content_has_guidance = false;
+  bool provider_content_part_has_guidance = false;
   if (messages)
   {
     for (auto const& message : *messages)
     {
       if (message.content.find(kGuidance) != std::string::npos)
-        provider_saw_guidance = true;
+        provider_message_content_has_guidance = true;
       for (auto const& part : message.content_parts)
       {
-        if (part.text.find(kGuidance) != std::string::npos)
-          provider_saw_guidance = true;
+        if (part.type == ava::provider::ContentPartType::ToolResult && part.text.find(kGuidance) != std::string::npos)
+          provider_content_part_has_guidance = true;
       }
     }
   }
-  expect(provider_saw_guidance || reconstructed.find(kGuidance) != std::string::npos,
-         "provider message reconstruction or controlled injection surfaces validated guidance");
+  expect(provider_message_content_has_guidance && provider_content_part_has_guidance,
+         "rebuilt provider messages and ToolResult content parts contain validated guidance");
 
   ava::agent::ToolTimelineEntry timeline{.status = ava::agent::ToolTimelineStatus::Error,
                                          .call_id = denied->call_id,

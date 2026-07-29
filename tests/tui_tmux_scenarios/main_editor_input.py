@@ -326,6 +326,10 @@ def scenario_main_editor_input(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "alpha beta gamma")
     send_keys(tmux_exe, session, "C-w")
+    # Cursor motion deliberately breaks backward-kill accumulation so this
+    # terminal case exercises yank-pop between two ring entries. Consecutive
+    # kill accumulation has deterministic composer coverage.
+    send_keys(tmux_exe, session, "Left")
     send_keys(tmux_exe, session, "C-w")
     send_keys(tmux_exe, session, "C-y")
     yanked_text = wait_for(tmux_exe, session, r"alpha beta", "ctrl-y kill-ring yank")

@@ -83,6 +83,12 @@ If a key inserts stray text or does nothing:
 3. Use `/hotkeys` or `/keybindings` to see the effective semantic action names.
 4. Prefer a custom keybinding in `$XDG_CONFIG_HOME/ava/keybinds.json` when your terminal cannot report the desired chord reliably.
 
+## Suspend, External Editor, And Exit Cleanup
+
+Ctrl+Z (suspend) and Ctrl+G (external editor) temporarily return the TTY to shell mode. After `def_prog_mode`/`endwin`, AVA balances and disables the protocols it owns—Kitty keyboard stack entry, negotiated `modifyOtherKeys`, bracketed paste, and mouse—so the shell or `$VISUAL`/`$EDITOR` does not inherit a leaked Kitty stack or sticky paste/mouse modes. After `reset_prog_mode`, AVA refreshes geometry from `TIOCGWINSZ` (including resizes that happened while SIGTSTP-stopped), then re-arms paste, mouse, and the already-negotiated keyboard mode exactly once. Resume never re-probes OSC 11 and never grows the Kitty keyboard stack.
+
+On final TUI exit (normal quit, SIGTERM teardown, or partial enter failure), AVA again balances owned protocols, discards pending curses then kernel input nonblockingly (`flushinp` then `tcflush(TCIFLUSH)`), restores termios, shows the cursor, and leaves the alternate screen. Input flush does not sleep, drain output, or throw.
+
 ## Inline Images
 
 Use `/attach <path>` or Ctrl+V clipboard image import to queue PNG, JPEG, WebP, or GIF attachments. AVA displays a pending attachment row with MIME type, byte count, and preview mode. The next normal prompt sends the image to image-capable providers.
@@ -140,7 +146,7 @@ Reference: [xterm control sequences](https://invisible-island.net/xterm/ctlseqs/
 
 ## Bracketed Paste
 
-AVA enables bracketed paste while the TUI is active and disables it on exit. This prevents pasted multi-line text from being interpreted as a sequence of submitted commands.
+AVA enables bracketed paste while the TUI is active, disables it for shell/editor handoff, re-enables it on resume, and disables it on exit. This prevents pasted multi-line text from being interpreted as a sequence of submitted commands.
 
 Expected behavior:
 

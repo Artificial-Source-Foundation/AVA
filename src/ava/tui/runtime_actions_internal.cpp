@@ -181,8 +181,13 @@ bool RuntimeActionController::open_external_editor()
 
   def_prog_mode();
   endwin();
+  // Balance AVA-owned protocols after leaving curses/alt-screen so the shell
+  // and $VISUAL/$EDITOR inherit a clean Kitty stack, paste, and mouse state.
+  release_owned_terminal_protocols();
   auto edited = options_.on_external_editor(draft_state_.draft.text);
   reset_prog_mode();
+  refresh_terminal_geometry_from_kernel();
+  rearm_owned_terminal_protocols();
   clearok(stdscr, TRUE);
   refresh();
 
@@ -219,17 +224,26 @@ bool RuntimeActionController::suspend_to_background()
     SignalBlockGuard block_signals;
     def_prog_mode();
     endwin();
+    // Disable AVA-owned protocols after leaving curses so the stopped process's
+    // shell inherits balanced keyboard/paste/mouse state. Negotiation preferences
+    // are retained so resume can re-arm without re-probing OSC 11.
+    release_owned_terminal_protocols();
     if (kill(0, SIGTSTP) != 0)
     {
       auto const saved_errno = errno;
       reset_prog_mode();
+      refresh_terminal_geometry_from_kernel();
+      rearm_owned_terminal_protocols();
       clearok(stdscr, TRUE);
       refresh();
       snapshot.status = std::string("failed to suspend: ") + std::strerror(saved_errno);
       static_cast<void>(beep());
       return renderer_.render();
     }
+    // Continues after fg/SIGCONT. Geometry may have changed while stopped.
     reset_prog_mode();
+    refresh_terminal_geometry_from_kernel();
+    rearm_owned_terminal_protocols();
     clearok(stdscr, TRUE);
     refresh();
   }

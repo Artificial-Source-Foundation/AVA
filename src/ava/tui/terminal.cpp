@@ -2,6 +2,9 @@
 #include "ava/tui/terminal.h"
 
 #include <curses.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 #if !defined(NCURSES_WIDECHAR) || NCURSES_WIDECHAR != 1
@@ -34,8 +37,16 @@ constexpr std::string_view kTerminalBackgroundQuerySequence = "\x1b]11;?\x1b\\";
 
 sig_atomic_t volatile g_terminal_signal = 0;
 bool g_keyboard_protocol_kitty_response_seen = false;
+bool g_keyboard_protocol_kitty_supported = false;
+bool g_kitty_keyboard_pushed = false;
 bool g_modify_other_keys_enabled = false;
+bool g_modify_other_keys_desired = false;
+bool g_bracketed_paste_enabled = false;
+bool g_mouse_enabled = false;
 bool g_terminal_background_response_handler_armed = false;
+detail::TerminalSequenceWriter g_terminal_sequence_writer = nullptr;
+detail::TerminalFlushinpHook g_terminal_flushinp_hook = nullptr;
+detail::TerminalTcflushHook g_terminal_tcflush_hook = nullptr;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
 
@@ -75,42 +86,79 @@ void configure_curses_colors()
   static_cast<void>(use_default_colors());
 }
 
-void configure_curses_mouse()
-{
-#ifdef NCURSES_MOUSE_VERSION
-  if (!has_mouse())
-    return;
-  mmask_t previous_mask = 0;
-  mmask_t mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
-  static_cast<void>(mousemask(mask, &previous_mask));
-#endif
-}
-
-void set_bracketed_paste(bool enabled)
-{
-  static_cast<void>(std::fputs(enabled ? "\x1b[?2004h" : "\x1b[?2004l", stdout));
-  static_cast<void>(std::fflush(stdout));
-}
+constexpr std::string_view kBracketedPasteEnableSequence = "\x1b[?2004h";
+constexpr std::string_view kBracketedPasteDisableSequence = "\x1b[?2004l";
 
 void write_terminal_sequence(std::string_view sequence)
 {
+  if (sequence.empty())
+    return;
+  if (g_terminal_sequence_writer != nullptr)
+  {
+    g_terminal_sequence_writer(sequence);
+    return;
+  }
   static_cast<void>(std::fwrite(sequence.data(), 1, sequence.size(), stdout));
   static_cast<void>(std::fflush(stdout));
 }
 
-void push_kitty_keyboard_protocol()
+void apply_mouse_enabled(bool enabled) noexcept
 {
-  write_terminal_sequence(kKittyKeyboardQuerySequence);
+  if (g_mouse_enabled == enabled)
+    return;
+#ifdef NCURSES_MOUSE_VERSION
+  // Only touch ncurses mouse state when a screen is active. Pure sequence tests
+  // still track ownership without requiring newterm.
+  if (stdscr != nullptr)
+  {
+    if (enabled)
+    {
+      if (has_mouse())
+      {
+        mmask_t previous_mask = 0;
+        mmask_t const mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
+        static_cast<void>(mousemask(mask, &previous_mask));
+      }
+    }
+    else
+    {
+      static_cast<void>(mousemask(0, nullptr));
+    }
+  }
+#endif
+  g_mouse_enabled = enabled;
+}
+
+void set_bracketed_paste(bool enabled)
+{
+  if (g_bracketed_paste_enabled == enabled)
+    return;
+  write_terminal_sequence(enabled ? kBracketedPasteEnableSequence : kBracketedPasteDisableSequence);
+  g_bracketed_paste_enabled = enabled;
+}
+
+void push_kitty_keyboard_protocol(bool include_query)
+{
+  // Never grow the Kitty keyboard stack: one AVA-owned push at a time.
+  if (g_kitty_keyboard_pushed)
+    return;
+  write_terminal_sequence(include_query ? kKittyKeyboardQuerySequence : kKittyKeyboardPushSequence);
+  g_kitty_keyboard_pushed = true;
 }
 
 void pop_kitty_keyboard_protocol()
 {
+  if (!g_kitty_keyboard_pushed)
+    return;
   write_terminal_sequence(kKittyKeyboardPopSequence);
+  g_kitty_keyboard_pushed = false;
 }
 
 void reset_keyboard_protocol_negotiation()
 {
   g_keyboard_protocol_kitty_response_seen = false;
+  g_keyboard_protocol_kitty_supported = false;
+  g_modify_other_keys_desired = false;
   g_modify_other_keys_enabled = false;
 }
 
@@ -120,6 +168,7 @@ void enable_modify_other_keys_fallback()
     return;
   write_terminal_sequence(kModifyOtherKeysEnableSequence);
   g_modify_other_keys_enabled = true;
+  g_modify_other_keys_desired = true;
 }
 
 void disable_modify_other_keys_fallback()
@@ -139,6 +188,8 @@ void apply_keyboard_protocol_response_action(KeyboardProtocolResponseAction acti
       break;
     case KeyboardProtocolResponseAction::DisableModifyOtherKeys:
       disable_modify_other_keys_fallback();
+      // Kitty won negotiation: do not re-enable modifyOtherKeys on handoff resume.
+      g_modify_other_keys_desired = false;
       break;
     case KeyboardProtocolResponseAction::None:
       break;
@@ -1398,10 +1449,7 @@ ava::core::Result<CursesSession> CursesSession::enter()
   static_cast<void>(set_escdelay(terminal_escape_delay_ms()));
 #endif
   configure_curses_colors();
-  configure_curses_mouse();
-  set_bracketed_paste(true);
-  reset_keyboard_protocol_negotiation();
-  push_kitty_keyboard_protocol();
+  arm_owned_terminal_protocols_on_enter();
   restore_signal_mask();
   return session;
 }
@@ -1412,14 +1460,49 @@ bool detail::force_terminal_cursor_visible() noexcept
   return curs_set(1) != ERR;
 }
 
+void detail::set_terminal_sequence_writer_for_test(TerminalSequenceWriter writer) noexcept
+{
+  g_terminal_sequence_writer = writer;
+}
+
+void detail::reset_terminal_sequence_writer_for_test() noexcept
+{
+  g_terminal_sequence_writer = nullptr;
+}
+
+void detail::set_terminal_input_flush_hooks_for_test(TerminalFlushinpHook flushinp_hook, TerminalTcflushHook tcflush_hook) noexcept
+{
+  g_terminal_flushinp_hook = flushinp_hook;
+  g_terminal_tcflush_hook = tcflush_hook;
+}
+
+void detail::reset_terminal_input_flush_hooks_for_test() noexcept
+{
+  g_terminal_flushinp_hook = nullptr;
+  g_terminal_tcflush_hook = nullptr;
+}
+
+void detail::reset_terminal_protocol_ownership_for_test() noexcept
+{
+  g_keyboard_protocol_kitty_response_seen = false;
+  g_keyboard_protocol_kitty_supported = false;
+  g_kitty_keyboard_pushed = false;
+  g_modify_other_keys_enabled = false;
+  g_modify_other_keys_desired = false;
+  g_bracketed_paste_enabled = false;
+  g_mouse_enabled = false;
+}
+
 void CursesSession::restore() noexcept
 {
   if (!active_)
     return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
-  disable_modify_other_keys_fallback();
-  pop_kitty_keyboard_protocol();
-  set_bracketed_paste(false);
+  // Balance AVA-owned protocols before returning the terminal. Idempotent when
+  // enter failed before arming or when handoff already released them.
+  restore_owned_terminal_protocols();
+  // Discard pending curses then kernel input nonblockingly. No sleep/read loop.
+  discard_pending_terminal_input();
   if (restore_terminal_attrs_)
   {
     static_cast<void>(tcsetattr(STDIN_FILENO, TCSANOW, &previous_terminal_attrs_));
@@ -1504,6 +1587,92 @@ std::string_view terminal_modify_other_keys_disable_sequence()
   return kModifyOtherKeysDisableSequence;
 }
 
+std::string_view terminal_bracketed_paste_enable_sequence()
+{
+  return kBracketedPasteEnableSequence;
+}
+
+std::string_view terminal_bracketed_paste_disable_sequence()
+{
+  return kBracketedPasteDisableSequence;
+}
+
+TerminalProtocolOwnership terminal_protocol_ownership() noexcept
+{
+  return TerminalProtocolOwnership{
+      .kitty_keyboard_pushed = g_kitty_keyboard_pushed,
+      .kitty_keyboard_supported = g_keyboard_protocol_kitty_supported,
+      .keyboard_protocol_kitty_response_seen = g_keyboard_protocol_kitty_response_seen,
+      .modify_other_keys_enabled = g_modify_other_keys_enabled,
+      .modify_other_keys_desired = g_modify_other_keys_desired,
+      .bracketed_paste_enabled = g_bracketed_paste_enabled,
+      .mouse_enabled = g_mouse_enabled,
+  };
+}
+
+void arm_owned_terminal_protocols_on_enter() noexcept
+{
+  // Fresh session: clear prior negotiation memory, then enable paste/mouse and
+  // push Kitty with query/DA exactly once.
+  reset_keyboard_protocol_negotiation();
+  apply_mouse_enabled(true);
+  set_bracketed_paste(true);
+  push_kitty_keyboard_protocol(/*include_query=*/true);
+}
+
+void release_owned_terminal_protocols() noexcept
+{
+  // Handoff path: disable what AVA currently owns without forgetting negotiated
+  // keyboard preferences (modifyOtherKeys desired / kitty supported).
+  disable_modify_other_keys_fallback();
+  pop_kitty_keyboard_protocol();
+  set_bracketed_paste(false);
+  apply_mouse_enabled(false);
+}
+
+void rearm_owned_terminal_protocols() noexcept
+{
+  // Resume path after reset_prog_mode. Never re-probes OSC 11. Re-pushes Kitty
+  // without query/DA so the stack cannot grow and negotiation is not restarted.
+  apply_mouse_enabled(true);
+  set_bracketed_paste(true);
+  push_kitty_keyboard_protocol(/*include_query=*/false);
+  if (g_modify_other_keys_desired)
+    enable_modify_other_keys_fallback();
+}
+
+void restore_owned_terminal_protocols() noexcept
+{
+  release_owned_terminal_protocols();
+  reset_keyboard_protocol_negotiation();
+}
+
+void refresh_terminal_geometry_from_kernel() noexcept
+{
+  winsize size{};
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0)
+    return;
+  if (size.ws_row <= 0 || size.ws_col <= 0)
+    return;
+  static_cast<void>(resizeterm(size.ws_row, size.ws_col));
+}
+
+void discard_pending_terminal_input() noexcept
+{
+  // Ordering: drain the curses input queue first while the screen is still the
+  // active consumer, then discard any remaining kernel-side unread bytes. Both
+  // steps are nonblocking, fail-soft, and free of sleeps or read loops.
+  if (g_terminal_flushinp_hook != nullptr)
+    g_terminal_flushinp_hook();
+  else
+    flushinp();
+
+  if (g_terminal_tcflush_hook != nullptr)
+    static_cast<void>(g_terminal_tcflush_hook(STDIN_FILENO, TCIFLUSH));
+  else
+    static_cast<void>(tcflush(STDIN_FILENO, TCIFLUSH));
+}
+
 std::optional<int> terminal_kitty_keyboard_flags_response(std::string_view sequence)
 {
   if (!sequence.starts_with("[?") || sequence.size() < 4 || sequence.back() != 'u')
@@ -1554,10 +1723,11 @@ KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::s
 
 bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
 {
-  if (terminal_kitty_keyboard_flags_response(sequence))
+  if (auto const flags = terminal_kitty_keyboard_flags_response(sequence))
   {
     auto const action = terminal_keyboard_protocol_response_action(sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);
     g_keyboard_protocol_kitty_response_seen = true;
+    g_keyboard_protocol_kitty_supported = *flags > 0;
     apply_keyboard_protocol_response_action(action);
     return true;
   }

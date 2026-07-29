@@ -50,14 +50,30 @@ def scenario_suspend_resume(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, suspend_session, r"suspend draft", "suspend draft before Ctrl+Z")
     send_keys(tmux_exe, suspend_session, "C-z")
     wait_for_pane_command(tmux_exe, suspend_session, r"(?:zsh|bash|sh|fish)$", "shell after Ctrl+Z suspend")
+    # Resize while AVA is SIGTSTP-stopped so resume must refresh geometry from the kernel.
+    tmux(tmux_exe, "resize-window", "-t", suspend_session, "-x", "120", "-y", "32")
     send_literal(tmux_exe, suspend_session, "fg")
     send_keys(tmux_exe, suspend_session, "Enter")
     wait_for_pane_command(tmux_exe, suspend_session, r"ava$", "AVA foreground command after fg resume")
-    resumed_suspend = wait_for(tmux_exe, suspend_session, r"suspend draft", "TUI redraw after fg resume")
+    resumed_suspend = wait_for(
+        tmux_exe,
+        suspend_session,
+        r"suspend draft",
+        "TUI redraw after fg resume with draft preserved",
+    )
     if "suspend draft" not in resumed_suspend:
         raise RuntimeError(f"suspend/resume did not preserve the draft\nscreen:\n{resumed_suspend}")
-    send_keys(tmux_exe, suspend_session, "C-u")
-    wait_for_absent(tmux_exe, suspend_session, r"suspend draft", "suspend draft cleared before exit")
+    # Post-resume bracketed paste must be re-armed: markers stay out of the draft and
+    # the existing draft text remains intact beside the pasted payload.
+    send_literal(tmux_exe, suspend_session, "\x1b[200~ post-resume paste\x1b[201~")
+    pasted_resume = wait_for(tmux_exe, suspend_session, r"post-resume paste", "bracketed paste after suspend resume")
+    if "suspend draft" not in pasted_resume:
+        raise RuntimeError(f"post-resume paste lost the preserved draft\nscreen:\n{pasted_resume}")
+    if "[200~" in pasted_resume or "[201~" in pasted_resume:
+        raise RuntimeError(f"post-resume paste leaked bracket markers (paste not re-armed)\nscreen:\n{pasted_resume}")
+    # Ctrl+C clears a non-empty draft without quitting; avoid Ctrl+U which is line-start kill.
+    send_keys(tmux_exe, suspend_session, "C-c")
+    wait_for_absent(tmux_exe, suspend_session, r"suspend draft|post-resume paste", "suspend draft cleared before exit")
     send_keys(tmux_exe, suspend_session, "C-d")
     wait_for_pane_command(tmux_exe, suspend_session, r"(?:zsh|bash|sh|fish)$", "interactive shell after resumed AVA exits")
     send_literal(tmux_exe, suspend_session, "exit")

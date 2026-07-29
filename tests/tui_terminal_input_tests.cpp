@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include <curses.h>
+#include <termios.h>
 #include <unistd.h>
 
 namespace {
@@ -2245,6 +2246,246 @@ void test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_s
   }
 }
 
+struct SequenceCapture
+{
+  std::vector<std::string> sequences;
+};
+
+SequenceCapture* g_sequence_capture = nullptr;
+
+void capture_terminal_sequence(std::string_view sequence)
+{
+  if (g_sequence_capture != nullptr)
+    g_sequence_capture->sequences.emplace_back(sequence);
+}
+
+int g_flushinp_calls = 0;
+int g_tcflush_calls = 0;
+int g_tcflush_last_fd = -1;
+int g_tcflush_last_selector = -1;
+std::vector<char> g_flush_order;
+
+void capture_flushinp() noexcept
+{
+  ++g_flushinp_calls;
+  g_flush_order.push_back('i');
+}
+
+int capture_tcflush(int fd, int queue_selector) noexcept
+{
+  ++g_tcflush_calls;
+  g_tcflush_last_fd = fd;
+  g_tcflush_last_selector = queue_selector;
+  g_flush_order.push_back('t');
+  return 0;
+}
+
+void reset_lifecycle_test_seams()
+{
+  ava::tui::detail::reset_terminal_sequence_writer_for_test();
+  ava::tui::detail::reset_terminal_input_flush_hooks_for_test();
+  ava::tui::detail::reset_terminal_protocol_ownership_for_test();
+  g_sequence_capture = nullptr;
+  g_flushinp_calls = 0;
+  g_tcflush_calls = 0;
+  g_tcflush_last_fd = -1;
+  g_tcflush_last_selector = -1;
+  g_flush_order.clear();
+}
+
+std::size_t count_sequence(std::vector<std::string> const& sequences, std::string_view needle)
+{
+  return static_cast<std::size_t>(std::count(sequences.begin(), sequences.end(), std::string(needle)));
+}
+
+bool sequences_contain(std::vector<std::string> const& sequences, std::string_view needle)
+{
+  return std::find(sequences.begin(), sequences.end(), std::string(needle)) != sequences.end();
+}
+
+void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
+{
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  expect(ava::tui::terminal_bracketed_paste_enable_sequence() == std::string_view("\x1b[?2004h") &&
+             ava::tui::terminal_bracketed_paste_disable_sequence() == std::string_view("\x1b[?2004l"),
+         "terminal lifecycle exposes bracketed paste enable/disable sequences");
+
+  // enter -> arm
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             !ownership.modify_other_keys_desired && !ownership.kitty_keyboard_supported && !ownership.keyboard_protocol_kitty_response_seen,
+         "enter arms paste/mouse/Kitty push+query without enabling modifyOtherKeys yet");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 1 &&
+             !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
+         "enter emits one Kitty query push and paste enable and never OSC 11");
+
+  // Negotiate modifyOtherKeys fallback (Kitty flags 0).
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?0u"), "lifecycle test injects a Kitty flags=0 negotiation reply");
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.keyboard_protocol_kitty_response_seen && !ownership.kitty_keyboard_supported && ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired && count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 1,
+         "flags=0 negotiation enables modifyOtherKeys and remembers it as desired");
+
+  auto const after_enter = capture.sequences.size();
+
+  // handoff release (shared by suspend and external editor)
+  ava::tui::release_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(!ownership.kitty_keyboard_pushed && !ownership.bracketed_paste_enabled && !ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired && ownership.keyboard_protocol_kitty_response_seen,
+         "handoff disables live protocols while retaining negotiated modifyOtherKeys desire");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_disable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_disable_sequence()) == 1 &&
+             !sequences_contain(std::vector<std::string>(capture.sequences.begin() + static_cast<std::ptrdiff_t>(after_enter), capture.sequences.end()),
+                                ava::tui::terminal_background_query_sequence()),
+         "handoff emits balanced pop/disable sequences without OSC 11");
+
+  // idempotent second release
+  auto const after_release = capture.sequences.size();
+  ava::tui::release_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_release, "second handoff release is a no-op");
+
+  // resume re-arm
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && ownership.mouse_enabled && ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired,
+         "resume re-arms paste/mouse/Kitty push and negotiated modifyOtherKeys");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 2 &&
+             !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
+         "resume uses push-only Kitty re-arm, re-enables paste/modifyOtherKeys, and never re-queries or probes OSC 11");
+
+  // repeated re-arm must not grow Kitty stack or re-emit
+  auto const after_rearm = capture.sequences.size();
+  ava::tui::rearm_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_rearm && ava::tui::terminal_protocol_ownership().kitty_keyboard_pushed,
+         "idempotent resume does not push Kitty again");
+
+  // second handoff + resume cycle
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::rearm_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1,
+         "repeated handoff/resume keeps Kitty push/pop balanced without extra query pushes");
+
+  // final restore clears negotiation memory
+  ava::tui::restore_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(!ownership.kitty_keyboard_pushed && !ownership.bracketed_paste_enabled && !ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             !ownership.modify_other_keys_desired && !ownership.keyboard_protocol_kitty_response_seen && !ownership.kitty_keyboard_supported,
+         "final restore releases protocols and clears negotiation memory");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 3 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) +
+                     count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) ==
+                 count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()),
+         "final restore keeps total Kitty pushes equal to pops (no stack growth)");
+
+  // partial/idempotent restore when already released
+  auto const after_restore = capture.sequences.size();
+  ava::tui::restore_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_restore, "restore is idempotent after protocols are already down");
+
+  reset_lifecycle_test_seams();
+}
+
+void test_terminal_protocol_lifecycle_kitty_supported_path()
+{
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?5u"), "lifecycle test injects Kitty flags>0 reply");
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_supported && ownership.keyboard_protocol_kitty_response_seen && !ownership.modify_other_keys_desired &&
+             !ownership.modify_other_keys_enabled,
+         "Kitty-supported negotiation leaves modifyOtherKeys off");
+
+  // Force-enable then ensure a later positive Kitty reply disables and forgets desire.
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?0u") && ava::tui::terminal_protocol_ownership().modify_other_keys_desired,
+         "flags=0 can enable modifyOtherKeys mid-session");
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?5u") && !ava::tui::terminal_protocol_ownership().modify_other_keys_desired &&
+             !ava::tui::terminal_protocol_ownership().modify_other_keys_enabled,
+         "later Kitty support disables modifyOtherKeys and clears desire");
+
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && !ownership.modify_other_keys_enabled &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 1,
+         "Kitty-supported resume re-pushes keyboard protocol without re-enabling modifyOtherKeys");
+  expect(!sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()), "Kitty-supported handoff/resume never emits OSC 11");
+
+  ava::tui::restore_owned_terminal_protocols();
+  reset_lifecycle_test_seams();
+}
+
+void test_terminal_input_flush_ordering_seam()
+{
+  reset_lifecycle_test_seams();
+  ava::tui::detail::set_terminal_input_flush_hooks_for_test(&capture_flushinp, &capture_tcflush);
+
+  ava::tui::discard_pending_terminal_input();
+  expect(g_flushinp_calls == 1 && g_tcflush_calls == 1 && g_tcflush_last_fd == STDIN_FILENO && g_tcflush_last_selector == TCIFLUSH &&
+             g_flush_order.size() == 2 && g_flush_order[0] == 'i' && g_flush_order[1] == 't',
+         "final input flush calls flushinp then tcflush(TCIFLUSH) exactly once each");
+
+  ava::tui::discard_pending_terminal_input();
+  expect(g_flushinp_calls == 2 && g_tcflush_calls == 2 && g_flush_order == std::vector<char>({'i', 't', 'i', 't'}),
+         "input flush remains ordered and fail-soft across repeated restore-safe calls");
+
+  reset_lifecycle_test_seams();
+}
+
+void test_external_editor_and_suspend_share_handoff_sequence()
+{
+  // Deterministic stand-in for both RuntimeActionController handoff paths: the
+  // production suspend/editor code calls release before endwin and rearm after
+  // reset_prog_mode + geometry refresh. Prove the shared sequence contract here.
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  static_cast<void>(ava::tui::terminal_keyboard_protocol_handle_response("[?0u"));
+
+  // external-editor style handoff
+  ava::tui::release_owned_terminal_protocols();
+  // editor runs here
+  ava::tui::rearm_owned_terminal_protocols();
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.bracketed_paste_enabled && ownership.modify_other_keys_enabled && ownership.kitty_keyboard_pushed,
+         "external-editor handoff resume restores paste and negotiated keyboard modes");
+
+  // suspend style handoff with resize-while-stopped represented by geometry refresh no-op seam
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::refresh_terminal_geometry_from_kernel();  // fail-soft without a TTY
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.bracketed_paste_enabled && ownership.modify_other_keys_enabled &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 2,
+         "suspend-style second handoff stays balanced and does not re-issue Kitty query");
+  expect(!sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()), "shared handoff helper never re-probes OSC 11");
+
+  ava::tui::restore_owned_terminal_protocols();
+  reset_lifecycle_test_seams();
+}
+
 }  // namespace
 
 void run_tui_terminal_osc11_theme_tests()
@@ -2259,4 +2500,12 @@ void run_tui_terminal_osc11_theme_tests()
   test_osc11_reply_inside_startup_bracketed_paste(true);
   test_non_owned_escape_inside_startup_bracketed_paste_is_preserved();
   test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_semantics();
+}
+
+void run_tui_terminal_lifecycle_protocol_tests()
+{
+  test_terminal_protocol_lifecycle_enter_handoff_resume_restore();
+  test_terminal_protocol_lifecycle_kitty_supported_path();
+  test_terminal_input_flush_ordering_seam();
+  test_external_editor_and_suspend_share_handoff_sequence();
 }

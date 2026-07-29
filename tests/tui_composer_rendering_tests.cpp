@@ -6,8 +6,11 @@
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
+#include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 
@@ -30,6 +33,78 @@
 #include <curses.h>
 
 namespace {
+
+bool test_transcript_search_controller_tail_refresh_avoids_full_layout()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(12, 80));
+
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "search_tail_direct_refresh";
+  options.initial_transcript.reserve(ava::tui::kMaxTranscriptItems);
+  for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems; ++index)
+  {
+    options.initial_transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "retained item [" + std::to_string(index) + "]"});
+  }
+  ava::tui::RuntimePresentationState presentation(options);
+  ava::tui::RuntimeDraftState draft_state;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+  auto active_select_list = ava::tui::ActiveSelectList::None;
+  ava::tui::TranscriptSearchController controller(presentation, renderer, navigation, active_select_list);
+
+  auto const opened = controller.open("retained item");
+  auto const before = controller.diagnostics();
+  auto const full_layout_builds = renderer.transcript_layout_cache.layout_build_count;
+  renderer.transcript_scroll_offset = 1;
+  renderer.defer_detached_transcript_update({}, 0);
+  presentation.snapshot.transcript.back().text = "retained item tail replacement";
+  ++presentation.snapshot.transcript_generation;
+  controller.refresh_after_transcript_mutation(0, ava::tui::kMaxTranscriptItems - 1);
+  auto const after = controller.diagnostics();
+
+  auto const passed =
+      opened && presentation.snapshot.select_list && presentation.snapshot.select_list->items.size() == ava::tui::kMaxTranscriptItems &&
+      full_layout_builds == 1 && before.authoritative_mutation_item_render_count == 0 && before.projection_build_count == ava::tui::kMaxTranscriptItems &&
+      before.layout_position_visit_count == ava::tui::kMaxTranscriptItems && before.match_projection_evaluation_count == ava::tui::kMaxTranscriptItems &&
+      before.match_entry_realign_count == 0 && before.match_entry_splice_count == 0 && before.modal_row_build_count == ava::tui::kMaxTranscriptItems &&
+      after.authoritative_mutation_item_render_count == before.authoritative_mutation_item_render_count + 1 &&
+      after.projection_build_count == before.projection_build_count + 1 && after.layout_position_visit_count == before.layout_position_visit_count + 1 &&
+      after.match_projection_evaluation_count == before.match_projection_evaluation_count + 1 &&
+      after.match_entry_realign_count == before.match_entry_realign_count && after.match_entry_splice_count == before.match_entry_splice_count + 1 &&
+      after.modal_row_build_count == before.modal_row_build_count + 1 && renderer.transcript_layout_cache.layout_build_count == full_layout_builds &&
+      renderer.has_deferred_detached_transcript_update();
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return passed;
+}
 
 bool test_atomic_search_input_prompt_precedence()
 {
@@ -172,6 +247,9 @@ bool test_atomic_search_input_prompt_precedence()
 
 void run_tui_prompt_search_race_tests()
 {
+  expect(test_transcript_search_controller_tail_refresh_avoids_full_layout(),
+         "an open 1,000-item transcript search shift-zero tail refresh directly renders and updates exactly one authoritative item/projection/match/modal row "
+         "without rebuilding the renderer layout or synchronizing its deferred viewport");
   expect(test_atomic_search_input_prompt_precedence(),
          "actual prompt-coordinator locking linearizes retained search input before provider enqueue, then lets the queued prompt discard stale input and run "
          "before-prompt ahead of nested resolution across 50 synchronized repetitions");

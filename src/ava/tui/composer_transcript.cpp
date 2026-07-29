@@ -2310,16 +2310,28 @@ std::size_t restore_transcript_viewport_anchor(TranscriptViewportAnchor anchor, 
   return max_scroll_offset - std::min(desired_start, max_scroll_offset);
 }
 
+std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+{
+  if (item_index >= transcript.size() || suppress_adjacent_tool_result(transcript, item_index))
+    return {};
+  auto block = render_transcript_item_lines(transcript[item_index], width, tool_presentation, thinking_visible, false, compact_spacing);
+  if (block.empty())
+    return block;
+
+  auto const context_run_size = context_tool_run_size(transcript, item_index);
+  if (context_run_size >= 2 && (item_index == 0 || !is_context_gathering_tool(transcript[item_index - 1])))
+    block.insert(block.begin(), render_context_tool_group_heading(context_run_size, width));
+  return block;
+}
+
 TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
                                           bool thinking_visible, bool compact_spacing)
 {
   TranscriptLayout layout;
   for (std::size_t index = 0; index < transcript.size(); ++index)
   {
-    if (suppress_adjacent_tool_result(transcript, index))
-      continue;
-    auto const& item = transcript[index];
-    auto block = render_transcript_item_lines(item, width, tool_presentation, thinking_visible, false, compact_spacing);
+    auto block = render_transcript_search_item_lines(transcript, index, width, tool_presentation, thinking_visible, compact_spacing);
     if (block.empty())
       continue;
 
@@ -2330,8 +2342,6 @@ TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& tra
     auto const context_run_size = context_tool_run_size(transcript, index);
     auto const context_heading = context_run_size >= 2 && (index == 0 || !is_context_gathering_tool(transcript[index - 1]));
     layout.content_starts.push_back(layout.lines.size() + (context_heading ? 1 : 0));
-    if (context_heading)
-      block.insert(block.begin(), render_context_tool_group_heading(context_run_size, width));
     layout.lines.insert(layout.lines.end(), block.begin(), block.end());
   }
   return layout;

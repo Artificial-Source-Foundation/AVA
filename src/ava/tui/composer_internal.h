@@ -314,6 +314,9 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                         ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                         bool compact_spacing = false);
+[[nodiscard]] std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index,
+                                                                           std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                                           bool compact_spacing);
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,

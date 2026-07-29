@@ -171,11 +171,9 @@ std::optional<std::size_t> projection_match_offset(TranscriptSearchProjection co
   return *unspaced_offset + static_cast<std::size_t>(boundaries_before_match - projection.row_boundary_offsets.begin());
 }
 
-TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::size_t position)
+TranscriptSearchProjection build_projection_from_lines(ComposerSnapshot const& snapshot, std::size_t item_index, std::vector<std::string> const& lines,
+                                                       std::size_t start = 0, std::size_t end = std::numeric_limits<std::size_t>::max())
 {
-  auto const item_index = layout.message_item_indices[position];
-  auto const start = std::min(layout.message_starts[position], layout.lines.size());
-  auto const end = position + 1 < layout.message_starts.size() ? std::min(layout.message_starts[position + 1], layout.lines.size()) : layout.lines.size();
   TranscriptSearchProjection projection{.available = true,
                                         .context_gathering = context_gathering_item(snapshot.transcript[item_index]),
                                         .identity = match_identity(snapshot.transcript[item_index]),
@@ -183,10 +181,12 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
                                         .unspaced_searchable_text = {},
                                         .row_boundary_offsets = {},
                                         .default_detail = {}};
+  start = std::min(start, lines.size());
+  end = std::min(end, lines.size());
   bool first_row = true;
   for (auto line_index = start; line_index < end; ++line_index)
   {
-    auto line = trim_horizontal_space(strip_terminal_sequences(layout.lines[line_index]));
+    auto line = trim_horizontal_space(strip_terminal_sequences(lines[line_index]));
     if (snapshot.transcript[item_index].tool && line.starts_with("│"))
       line = trim_horizontal_space(line.substr(std::string_view("│").size()));
     if (projection.default_detail.empty() && !blank(line))
@@ -202,6 +202,14 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
   }
   projection.default_detail = bound_utf8_detail(std::move(projection.default_detail));
   return projection;
+}
+
+TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::size_t position)
+{
+  auto const item_index = layout.message_item_indices[position];
+  auto const start = std::min(layout.message_starts[position], layout.lines.size());
+  auto const end = position + 1 < layout.message_starts.size() ? std::min(layout.message_starts[position + 1], layout.lines.size()) : layout.lines.size();
+  return build_projection_from_lines(snapshot, item_index, layout.lines, start, end);
 }
 
 std::string relevant_detail(TranscriptSearchProjection const& projection, std::string_view query, std::size_t match_offset)
@@ -268,7 +276,7 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::rebuild_all(ComposerSnap
   projections_.reserve(kMaxTranscriptItems);
   projections_.resize(snapshot.transcript.size());
   std::vector<TranscriptSearchItemInterval> const affected = {TranscriptSearchItemInterval{.first = 0, .past_last = projections_.size()}};
-  rebuild_affected(snapshot, layout, affected);
+  rebuild_affected_from_layout(snapshot, layout, affected);
   return replace_all_matches();
 }
 
@@ -287,8 +295,7 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::update_query(std::string
   return replace_all_matches();
 }
 
-void TranscriptSearchProjectionCache::rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
-                                                       std::vector<TranscriptSearchItemInterval> const& affected)
+void TranscriptSearchProjectionCache::reset_affected_metadata(ComposerSnapshot const& snapshot, std::vector<TranscriptSearchItemInterval> const& affected)
 {
   for (auto const& interval : affected)
   {
@@ -306,7 +313,37 @@ void TranscriptSearchProjectionCache::rebuild_affected(ComposerSnapshot const& s
       projections_[item_index].context_gathering = is_context;
       projections_[item_index].context_run_offset = context_run_offset;
     }
-    rebuild_range(snapshot, layout, first, past_last);
+  }
+}
+
+void TranscriptSearchProjectionCache::rebuild_affected_from_layout(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
+                                                                   std::vector<TranscriptSearchItemInterval> const& affected)
+{
+  reset_affected_metadata(snapshot, affected);
+  for (auto const& interval : affected)
+    rebuild_range(snapshot, layout, std::min(interval.first, projections_.size()), std::min(interval.past_last, projections_.size()));
+}
+
+void TranscriptSearchProjectionCache::rebuild_affected_direct(ComposerSnapshot const& snapshot, std::size_t width, ToolPresentation tool_presentation,
+                                                              bool thinking_visible, bool compact_spacing,
+                                                              std::vector<TranscriptSearchItemInterval> const& affected)
+{
+  reset_affected_metadata(snapshot, affected);
+  for (auto const& interval : affected)
+  {
+    auto const past_last = std::min(interval.past_last, projections_.size());
+    for (auto item_index = std::min(interval.first, past_last); item_index < past_last; ++item_index)
+    {
+      auto const context_run_offset = projections_[item_index].context_run_offset;
+      auto const lines = render_transcript_search_item_lines(snapshot.transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing);
+      ++authoritative_mutation_item_render_count_;
+      if (lines.empty())
+        continue;
+      ++layout_position_visit_count_;
+      projections_[item_index] = build_projection_from_lines(snapshot, item_index, lines);
+      projections_[item_index].context_run_offset = context_run_offset;
+      ++projection_build_count_;
+    }
   }
 }
 
@@ -370,8 +407,10 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::replace_affected_matches
   return TranscriptSearchUpdate{.first_changed_match_row = first_changed_match_row};
 }
 
-TranscriptSearchUpdate TranscriptSearchProjectionCache::refresh_after_transcript_mutation(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
-                                                                                          std::ptrdiff_t item_index_shift, std::size_t changed_from_item_index)
+TranscriptSearchUpdate TranscriptSearchProjectionCache::refresh_after_transcript_mutation(ComposerSnapshot const& snapshot, std::size_t width,
+                                                                                          ToolPresentation tool_presentation, bool thinking_visible,
+                                                                                          bool compact_spacing, std::ptrdiff_t item_index_shift,
+                                                                                          std::size_t changed_from_item_index)
 {
   auto const old_projection_size = projections_.size();
   auto const new_projection_size = snapshot.transcript.size();
@@ -504,7 +543,7 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::refresh_after_transcript
   if (shortened_context_owner && *shortened_context_owner < projections_.size())
     add_affected(*shortened_context_owner, *shortened_context_owner + 1);
 
-  rebuild_affected(snapshot, layout, affected);
+  rebuild_affected_direct(snapshot, width, tool_presentation, thinking_visible, compact_spacing, affected);
   return replace_affected_matches(affected, first_changed_match_row);
 }
 
@@ -516,6 +555,11 @@ std::vector<TranscriptSearchMatch> const& TranscriptSearchProjectionCache::match
 std::string const& TranscriptSearchProjectionCache::query() const noexcept
 {
   return query_;
+}
+
+std::size_t TranscriptSearchProjectionCache::authoritative_mutation_item_render_count() const noexcept
+{
+  return authoritative_mutation_item_render_count_;
 }
 
 std::size_t TranscriptSearchProjectionCache::projection_build_count() const noexcept
@@ -606,6 +650,19 @@ void TranscriptSearchController::refresh_authoritative_layout()
                                                                          snapshot.transcript_generation));
 }
 
+void TranscriptSearchController::capture_authoritative_layout_settings()
+{
+  auto const& snapshot = presentation_state_.snapshot;
+  auto const& cache = renderer_.transcript_layout_cache;
+  authoritative_terminal_width_ = snapshot.width;
+  authoritative_terminal_height_ = snapshot.height;
+  authoritative_layout_width_ = cache.width;
+  authoritative_tool_presentation_ = cache.tool_presentation;
+  authoritative_thinking_visible_ = cache.thinking_visible;
+  authoritative_compact_spacing_ = cache.compact_spacing;
+  authoritative_settings_valid_ = cache.valid;
+}
+
 bool TranscriptSearchController::open(std::string query)
 {
   auto& snapshot = presentation_state_.snapshot;
@@ -617,6 +674,7 @@ bool TranscriptSearchController::open(std::string query)
   }
 
   refresh_authoritative_layout();
+  capture_authoritative_layout_settings();
   auto const max_scroll = detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, renderer_.completion_cache,
                                                                                snapshot.file_references_generation, renderer_.transcript_layout_cache,
                                                                                snapshot.transcript_generation);
@@ -688,9 +746,28 @@ void TranscriptSearchController::refresh_after_transcript_mutation(std::ptrdiff_
       selected_item_index = detail::shift_transcript_search_item_index(matches[fallback_selection].item_index, item_index_shift);
   }
   accumulated_item_index_shift_ += item_index_shift;
-  refresh_authoritative_layout();
-  auto const update = projection_cache_.refresh_after_transcript_mutation(presentation_state_.snapshot, renderer_.transcript_layout_cache.layout,
-                                                                          item_index_shift, changed_from_item_index);
+
+  auto& snapshot = presentation_state_.snapshot;
+  auto const [terminal_width, terminal_height] = terminal_size();
+  snapshot.width = terminal_width;
+  snapshot.height = terminal_height;
+  auto const compact_spacing = detail::composer_layout_policy(snapshot, terminal_height).compact_transcript_spacing;
+  auto const settings_compatible =
+      authoritative_settings_valid_ && terminal_width == authoritative_terminal_width_ && terminal_height == authoritative_terminal_height_ &&
+      composer_canvas_layout(snapshot).content_width == authoritative_layout_width_ && snapshot.tool_presentation == authoritative_tool_presentation_ &&
+      snapshot.thinking_visible == authoritative_thinking_visible_ && compact_spacing == authoritative_compact_spacing_;
+  if (!settings_compatible)
+  {
+    refresh_authoritative_layout();
+    capture_authoritative_layout_settings();
+    auto const update = projection_cache_.rebuild_all(snapshot, renderer_.transcript_layout_cache.layout);
+    rebuild(selected_item_index, fallback_selection, update.first_changed_match_row);
+    return;
+  }
+
+  auto const update = projection_cache_.refresh_after_transcript_mutation(snapshot, authoritative_layout_width_, authoritative_tool_presentation_,
+                                                                          authoritative_thinking_visible_, authoritative_compact_spacing_, item_index_shift,
+                                                                          changed_from_item_index);
   rebuild(selected_item_index, fallback_selection, update.first_changed_match_row);
 }
 
@@ -708,6 +785,7 @@ void TranscriptSearchController::refresh_after_resize()
       selected_item_index = matches[fallback_selection].item_index;
   }
   refresh_authoritative_layout();
+  capture_authoritative_layout_settings();
   auto const update = projection_cache_.rebuild_all(presentation_state_.snapshot, renderer_.transcript_layout_cache.layout);
   rebuild(selected_item_index, fallback_selection, update.first_changed_match_row);
 }
@@ -743,6 +821,7 @@ void TranscriptSearchController::restore_saved_viewport(std::string status)
   snapshot.status = std::move(status);
   projection_cache_.clear();
   query_.clear();
+  authoritative_settings_valid_ = false;
 }
 
 std::optional<bool> TranscriptSearchController::handle_input(InputEvent const& event)
@@ -827,7 +906,8 @@ void TranscriptSearchController::close_before_prompt()
 
 detail::TranscriptSearchDiagnostics TranscriptSearchController::diagnostics() const noexcept
 {
-  return detail::TranscriptSearchDiagnostics{.projection_build_count = projection_cache_.projection_build_count(),
+  return detail::TranscriptSearchDiagnostics{.authoritative_mutation_item_render_count = projection_cache_.authoritative_mutation_item_render_count(),
+                                             .projection_build_count = projection_cache_.projection_build_count(),
                                              .layout_position_visit_count = projection_cache_.layout_position_visit_count(),
                                              .match_projection_evaluation_count = projection_cache_.match_projection_evaluation_count(),
                                              .match_entry_realign_count = projection_cache_.match_entry_realign_count(),

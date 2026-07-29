@@ -4,12 +4,14 @@
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdio>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -245,22 +247,29 @@ void TranscriptSearchProjectionCache::rebuild_range(ComposerSnapshot const& snap
 {
   if (layout.message_starts.size() != layout.message_item_indices.size())
     return;
-  for (std::size_t position = 0; position < layout.message_starts.size(); ++position)
+  auto position_it = std::ranges::lower_bound(layout.message_item_indices, first_item_index);
+  for (; position_it != layout.message_item_indices.end() && *position_it < past_last_item_index; ++position_it)
   {
-    auto const item_index = layout.message_item_indices[position];
-    if (item_index < first_item_index || item_index >= past_last_item_index || item_index >= snapshot.transcript.size())
+    ++layout_position_visit_count_;
+    auto const position = static_cast<std::size_t>(position_it - layout.message_item_indices.begin());
+    auto const item_index = *position_it;
+    if (item_index >= snapshot.transcript.size())
       continue;
+    auto const context_run_offset = projections_[item_index].context_run_offset;
     projections_[item_index] = build_projection(snapshot, layout, position);
+    projections_[item_index].context_run_offset = context_run_offset;
     ++projection_build_count_;
   }
 }
 
 TranscriptSearchUpdate TranscriptSearchProjectionCache::rebuild_all(ComposerSnapshot const& snapshot, TranscriptLayout const& layout)
 {
-  auto previous_matches = matches_;
-  projections_.assign(snapshot.transcript.size(), TranscriptSearchProjection{});
-  rebuild_range(snapshot, layout, 0, projections_.size());
-  return replace_matches(std::move(previous_matches));
+  projections_.clear();
+  projections_.reserve(kMaxTranscriptItems);
+  projections_.resize(snapshot.transcript.size());
+  std::vector<TranscriptSearchItemInterval> const affected = {TranscriptSearchItemInterval{.first = 0, .past_last = projections_.size()}};
+  rebuild_affected(snapshot, layout, affected);
+  return replace_all_matches();
 }
 
 void TranscriptSearchProjectionCache::clear()
@@ -274,130 +283,215 @@ TranscriptSearchUpdate TranscriptSearchProjectionCache::update_query(std::string
 {
   if (!transcript_search_query_valid(query) || query == query_)
     return TranscriptSearchUpdate{.first_changed_match_row = matches_.size()};
-  auto previous_matches = matches_;
   query_ = std::move(query);
-  auto update = replace_matches(std::move(previous_matches));
-  update.first_changed_match_row = 0;
-  return update;
+  return replace_all_matches();
 }
 
-void TranscriptSearchProjectionCache::rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::vector<bool> const& affected)
+void TranscriptSearchProjectionCache::rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
+                                                       std::vector<TranscriptSearchItemInterval> const& affected)
 {
-  auto first = std::size_t{0};
-  while (first < affected.size())
+  for (auto const& interval : affected)
   {
-    first = static_cast<std::size_t>(std::find(affected.begin() + static_cast<std::ptrdiff_t>(first), affected.end(), true) - affected.begin());
-    if (first == affected.size())
-      return;
-    auto past_last = first + 1;
-    while (past_last < affected.size() && affected[past_last]) ++past_last;
+    auto const past_last = std::min(interval.past_last, projections_.size());
+    auto const first = std::min(interval.first, past_last);
+    for (auto item_index = first; item_index < past_last; ++item_index)
+    {
+      auto context_run_offset = std::size_t{0};
+      auto const is_context = context_gathering_item(snapshot.transcript[item_index]);
+      if (is_context && item_index > 0 && context_gathering_item(snapshot.transcript[item_index - 1]) && projections_[item_index - 1].context_gathering)
+      {
+        context_run_offset = projections_[item_index - 1].context_run_offset + 1;
+      }
+      projections_[item_index] = TranscriptSearchProjection{};
+      projections_[item_index].context_gathering = is_context;
+      projections_[item_index].context_run_offset = context_run_offset;
+    }
     rebuild_range(snapshot, layout, first, past_last);
-    first = past_last;
   }
 }
 
-TranscriptSearchUpdate TranscriptSearchProjectionCache::replace_matches(std::vector<TranscriptSearchMatch> previous_matches, std::vector<bool> const* affected)
+TranscriptSearchUpdate TranscriptSearchProjectionCache::replace_all_matches()
 {
+  matches_.clear();
+  matches_.reserve(projections_.size());
   FoldedLiteralMatcher matcher(query_);
-  if (affected)
-  {
-    std::erase_if(matches_, [&](TranscriptSearchMatch const& match) { return match.item_index >= affected->size() || (*affected)[match.item_index]; });
-  }
-  else
-  {
-    matches_.clear();
-    matches_.reserve(projections_.size());
-  }
-
   for (std::size_t item_index = 0; item_index < projections_.size(); ++item_index)
   {
-    if (affected && !(*affected)[item_index])
-      continue;
-    ++match_scan_count_;
+    ++match_projection_evaluation_count_;
     auto const& projection = projections_[item_index];
     if (!projection.available)
       continue;
     auto const offset = projection_match_offset(projection, matcher);
     if (!offset)
       continue;
-    auto match = TranscriptSearchMatch{.item_index = item_index, .identity = projection.identity, .detail = relevant_detail(projection, query_, *offset)};
-    if (!affected || matches_.empty() || matches_.back().item_index < item_index)
-    {
-      matches_.push_back(std::move(match));
-    }
-    else
-    {
-      auto const insertion = std::ranges::lower_bound(matches_, item_index, {}, &TranscriptSearchMatch::item_index);
-      matches_.insert(insertion, std::move(match));
-    }
+    matches_.push_back(
+        TranscriptSearchMatch{.item_index = item_index, .identity = projection.identity, .detail = relevant_detail(projection, query_, *offset)});
   }
+  return TranscriptSearchUpdate{.first_changed_match_row = 0};
+}
 
-  auto first_changed = std::size_t{0};
-  while (first_changed < previous_matches.size() && first_changed < matches_.size() &&
-         previous_matches[first_changed].identity == matches_[first_changed].identity &&
-         previous_matches[first_changed].detail == matches_[first_changed].detail)
-    ++first_changed;
-  return TranscriptSearchUpdate{.first_changed_match_row = first_changed};
+TranscriptSearchUpdate TranscriptSearchProjectionCache::replace_affected_matches(std::vector<TranscriptSearchItemInterval> const& affected,
+                                                                                 std::size_t first_changed_match_row)
+{
+  FoldedLiteralMatcher matcher(query_);
+  for (auto const& interval : affected)
+  {
+    auto old_first = std::ranges::lower_bound(matches_, interval.first, {}, &TranscriptSearchMatch::item_index);
+    auto old_past_last = std::ranges::lower_bound(matches_, interval.past_last, {}, &TranscriptSearchMatch::item_index);
+    auto const splice_row = static_cast<std::size_t>(old_first - matches_.begin());
+
+    std::vector<TranscriptSearchMatch> replacements;
+    auto const projection_past_last = std::min(interval.past_last, projections_.size());
+    for (auto item_index = std::min(interval.first, projection_past_last); item_index < projection_past_last; ++item_index)
+    {
+      ++match_projection_evaluation_count_;
+      auto const& projection = projections_[item_index];
+      if (!projection.available)
+        continue;
+      auto const offset = projection_match_offset(projection, matcher);
+      if (!offset)
+        continue;
+      replacements.push_back(
+          TranscriptSearchMatch{.item_index = item_index, .identity = projection.identity, .detail = relevant_detail(projection, query_, *offset)});
+    }
+
+    auto const old_count = static_cast<std::size_t>(old_past_last - old_first);
+    if (old_count != 0 || !replacements.empty())
+      first_changed_match_row = std::min(first_changed_match_row, splice_row);
+    match_entry_splice_count_ += std::max(old_count, replacements.size());
+    if (old_count == replacements.size())
+    {
+      std::move(replacements.begin(), replacements.end(), old_first);
+      continue;
+    }
+    old_first = matches_.erase(old_first, old_past_last);
+    matches_.insert(old_first, std::make_move_iterator(replacements.begin()), std::make_move_iterator(replacements.end()));
+  }
+  return TranscriptSearchUpdate{.first_changed_match_row = first_changed_match_row};
 }
 
 TranscriptSearchUpdate TranscriptSearchProjectionCache::refresh_after_transcript_mutation(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
                                                                                           std::ptrdiff_t item_index_shift, std::size_t changed_from_item_index)
 {
-  auto previous_matches = matches_;
+  auto const old_projection_size = projections_.size();
+  auto const new_projection_size = snapshot.transcript.size();
+  std::vector<TranscriptSearchItemInterval> affected;
+  auto add_affected = [&](std::size_t first, std::size_t past_last) {
+    if (first >= past_last)
+      return;
+    auto insertion = std::ranges::lower_bound(affected, first, {}, &TranscriptSearchItemInterval::first);
+    if (insertion != affected.begin() && (insertion - 1)->past_last >= first)
+      --insertion;
+    auto merged_first = std::min(first, insertion != affected.end() ? insertion->first : first);
+    auto merged_past_last = past_last;
+    auto erase_past_last = insertion;
+    while (erase_past_last != affected.end() && erase_past_last->first <= merged_past_last)
+    {
+      merged_past_last = std::max(merged_past_last, erase_past_last->past_last);
+      ++erase_past_last;
+    }
+    affected.erase(insertion, erase_past_last);
+    affected.insert(std::ranges::lower_bound(affected, merged_first, {}, &TranscriptSearchItemInterval::first),
+                    TranscriptSearchItemInterval{.first = merged_first, .past_last = merged_past_last});
+  };
+
+  auto const shift_magnitude = item_index_shift < 0 ? static_cast<std::size_t>(-(item_index_shift + 1)) + 1 : static_cast<std::size_t>(item_index_shift);
+  auto const old_retained_first = item_index_shift < 0 ? std::min(shift_magnitude, old_projection_size) : std::size_t{0};
+  auto old_retained_past_last = old_projection_size;
+  if (item_index_shift >= 0)
+  {
+    auto const retained_capacity = shift_magnitude < new_projection_size ? new_projection_size - shift_magnitude : std::size_t{0};
+    old_retained_past_last = std::min(old_projection_size, retained_capacity);
+  }
+  else
+  {
+    auto const retained_capacity = new_projection_size > std::numeric_limits<std::size_t>::max() - old_retained_first
+                                       ? std::numeric_limits<std::size_t>::max()
+                                       : old_retained_first + new_projection_size;
+    old_retained_past_last = std::min(old_projection_size, retained_capacity);
+  }
+  std::optional<std::size_t> shortened_context_owner;
+  if (old_retained_first < old_retained_past_last && old_retained_past_last < old_projection_size &&
+      projections_[old_retained_past_last - 1].context_gathering && projections_[old_retained_past_last].context_gathering)
+  {
+    auto const old_owner = old_retained_past_last - 1 - projections_[old_retained_past_last - 1].context_run_offset;
+    if (old_owner >= old_retained_first)
+      shortened_context_owner = shift_transcript_search_item_index(old_owner, item_index_shift);
+  }
+
+  auto first_changed_match_row = matches_.size();
+  if (item_index_shift != 0)
+  {
+    auto const valid_old_first = item_index_shift < 0 ? shift_magnitude : std::size_t{0};
+    auto const valid_old_past_last =
+        item_index_shift > 0 ? (shift_magnitude < new_projection_size ? new_projection_size - shift_magnitude : std::size_t{0})
+                             : (new_projection_size > std::numeric_limits<std::size_t>::max() - shift_magnitude ? std::numeric_limits<std::size_t>::max()
+                                                                                                                : new_projection_size + shift_magnitude);
+    auto const valid_first = std::ranges::lower_bound(matches_, valid_old_first, {}, &TranscriptSearchMatch::item_index);
+    auto const valid_past_last = std::ranges::lower_bound(matches_, valid_old_past_last, {}, &TranscriptSearchMatch::item_index);
+    auto const valid_first_row = static_cast<std::size_t>(valid_first - matches_.begin());
+    auto const valid_past_last_row = static_cast<std::size_t>(valid_past_last - matches_.begin());
+    if (valid_past_last_row < matches_.size())
+    {
+      first_changed_match_row = std::min(first_changed_match_row, valid_past_last_row);
+      match_entry_splice_count_ += matches_.size() - valid_past_last_row;
+      matches_.erase(matches_.begin() + static_cast<std::ptrdiff_t>(valid_past_last_row), matches_.end());
+    }
+    if (valid_first_row != 0)
+    {
+      match_entry_splice_count_ += valid_first_row;
+      matches_.erase(matches_.begin(), matches_.begin() + static_cast<std::ptrdiff_t>(valid_first_row));
+      first_changed_match_row = 0;
+    }
+    for (auto& match : matches_)
+    {
+      match.item_index = *shift_transcript_search_item_index(match.item_index, item_index_shift);
+      ++match_entry_realign_count_;
+    }
+  }
+
   if (item_index_shift < 0)
   {
-    auto const evicted = std::min(static_cast<std::size_t>(-item_index_shift), projections_.size());
-    projections_.erase(projections_.begin(), projections_.begin() + static_cast<std::ptrdiff_t>(evicted));
+    projections_.erase(projections_.begin(), projections_.begin() + static_cast<std::ptrdiff_t>(old_retained_first));
   }
   else if (item_index_shift > 0)
   {
-    projections_.insert(projections_.begin(), static_cast<std::size_t>(item_index_shift), TranscriptSearchProjection{});
+    auto const restored_prefix_items = std::min(shift_magnitude, new_projection_size);
+    projections_.insert(projections_.begin(), restored_prefix_items, TranscriptSearchProjection{});
   }
-  projections_.resize(snapshot.transcript.size());
+  projections_.resize(new_projection_size);
 
-  std::vector<TranscriptSearchMatch> realigned_matches;
-  realigned_matches.reserve(matches_.size());
-  for (auto& match : matches_)
-  {
-    auto shifted = shift_transcript_search_item_index(match.item_index, item_index_shift);
-    if (!shifted || *shifted >= projections_.size())
-      continue;
-    match.item_index = *shifted;
-    realigned_matches.push_back(std::move(match));
-  }
-  matches_ = std::move(realigned_matches);
-
-  std::vector<bool> affected(projections_.size(), false);
-  changed_from_item_index = std::min(changed_from_item_index, projections_.size());
-  std::fill(affected.begin() + static_cast<std::ptrdiff_t>(changed_from_item_index), affected.end(), true);
-  auto mark_context_run_start = [&](std::size_t item_index, auto const& is_context_item) {
-    while (item_index > 0 && is_context_item(item_index - 1)) --item_index;
-    affected[item_index] = true;
-  };
+  changed_from_item_index = std::min(changed_from_item_index, new_projection_size);
+  add_affected(changed_from_item_index, item_index_shift == 0 ? std::max(old_projection_size, new_projection_size) : new_projection_size);
   if (changed_from_item_index > 0 && changed_from_item_index < projections_.size() && projections_[changed_from_item_index - 1].context_gathering &&
       projections_[changed_from_item_index].context_gathering)
   {
-    mark_context_run_start(changed_from_item_index - 1, [&](std::size_t item_index) { return projections_[item_index].context_gathering; });
+    auto const owner = changed_from_item_index - 1 - projections_[changed_from_item_index - 1].context_run_offset;
+    add_affected(owner, owner + 1);
   }
   if (changed_from_item_index > 0 && changed_from_item_index < snapshot.transcript.size() &&
-      context_gathering_item(snapshot.transcript[changed_from_item_index - 1]) && context_gathering_item(snapshot.transcript[changed_from_item_index]))
+      context_gathering_item(snapshot.transcript[changed_from_item_index - 1]) && context_gathering_item(snapshot.transcript[changed_from_item_index]) &&
+      projections_[changed_from_item_index - 1].context_gathering)
   {
-    mark_context_run_start(changed_from_item_index - 1, [&](std::size_t item_index) { return context_gathering_item(snapshot.transcript[item_index]); });
+    auto const owner = changed_from_item_index - 1 - projections_[changed_from_item_index - 1].context_run_offset;
+    add_affected(owner, owner + 1);
   }
-  if (item_index_shift < 0 && !affected.empty())
-    affected[0] = true;
+  if (item_index_shift < 0 && !projections_.empty())
+  {
+    add_affected(0, 1);
+  }
   else if (item_index_shift > 0)
   {
-    auto const join_end = std::min(projections_.size(), static_cast<std::size_t>(item_index_shift) + 1);
-    std::fill(affected.begin(), affected.begin() + static_cast<std::ptrdiff_t>(join_end), true);
+    auto join_past_last = std::min(projections_.size(), shift_magnitude);
+    if (join_past_last < projections_.size())
+      ++join_past_last;
+    add_affected(0, join_past_last);
   }
-  for (std::size_t item_index = 0; item_index < affected.size(); ++item_index)
-  {
-    if (affected[item_index])
-      projections_[item_index] = TranscriptSearchProjection{};
-  }
+  if (shortened_context_owner && *shortened_context_owner < projections_.size())
+    add_affected(*shortened_context_owner, *shortened_context_owner + 1);
+
   rebuild_affected(snapshot, layout, affected);
-  return replace_matches(std::move(previous_matches), &affected);
+  return replace_affected_matches(affected, first_changed_match_row);
 }
 
 std::vector<TranscriptSearchMatch> const& TranscriptSearchProjectionCache::matches() const noexcept
@@ -415,9 +509,24 @@ std::size_t TranscriptSearchProjectionCache::projection_build_count() const noex
   return projection_build_count_;
 }
 
-std::size_t TranscriptSearchProjectionCache::match_scan_count() const noexcept
+std::size_t TranscriptSearchProjectionCache::layout_position_visit_count() const noexcept
 {
-  return match_scan_count_;
+  return layout_position_visit_count_;
+}
+
+std::size_t TranscriptSearchProjectionCache::match_projection_evaluation_count() const noexcept
+{
+  return match_projection_evaluation_count_;
+}
+
+std::size_t TranscriptSearchProjectionCache::match_entry_realign_count() const noexcept
+{
+  return match_entry_realign_count_;
+}
+
+std::size_t TranscriptSearchProjectionCache::match_entry_splice_count() const noexcept
+{
+  return match_entry_splice_count_;
 }
 
 std::vector<TranscriptSearchMatch> build_transcript_search_matches(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::string_view query)
@@ -537,7 +646,11 @@ void TranscriptSearchController::rebuild(std::optional<std::size_t> selected_ite
   {
     auto selected = matches.end();
     if (selected_item_index)
-      selected = std::ranges::find_if(matches, [&](auto const& match) { return match.item_index == *selected_item_index; });
+    {
+      selected = std::ranges::lower_bound(matches, *selected_item_index, {}, &detail::TranscriptSearchMatch::item_index);
+      if (selected != matches.end() && selected->item_index != *selected_item_index)
+        selected = matches.end();
+    }
     if (selected != matches.end())
       view.selected_item_index = static_cast<std::size_t>(selected - matches.begin());
     else if (fallback_selection == std::numeric_limits<std::size_t>::max())
@@ -701,7 +814,10 @@ void TranscriptSearchController::close_before_prompt()
 detail::TranscriptSearchDiagnostics TranscriptSearchController::diagnostics() const noexcept
 {
   return detail::TranscriptSearchDiagnostics{.projection_build_count = projection_cache_.projection_build_count(),
-                                             .match_scan_count = projection_cache_.match_scan_count(),
+                                             .layout_position_visit_count = projection_cache_.layout_position_visit_count(),
+                                             .match_projection_evaluation_count = projection_cache_.match_projection_evaluation_count(),
+                                             .match_entry_realign_count = projection_cache_.match_entry_realign_count(),
+                                             .match_entry_splice_count = projection_cache_.match_entry_splice_count(),
                                              .modal_row_build_count = modal_row_build_count_};
 }
 

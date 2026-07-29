@@ -36,6 +36,7 @@ struct TranscriptSearchProjection
 {
   bool available = false;
   bool context_gathering = false;
+  std::size_t context_run_offset = 0;
   std::string identity;
   std::string searchable_text;
   std::string unspaced_searchable_text;
@@ -52,10 +53,21 @@ struct TranscriptSearchUpdate
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TranscriptSearchItemInterval
+{
+  std::size_t first = 0;
+  std::size_t past_last = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TranscriptSearchDiagnostics
 {
   std::size_t projection_build_count = 0;
-  std::size_t match_scan_count = 0;
+  std::size_t layout_position_visit_count = 0;
+  std::size_t match_projection_evaluation_count = 0;
+  std::size_t match_entry_realign_count = 0;
+  std::size_t match_entry_splice_count = 0;
   std::size_t modal_row_build_count = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -72,20 +84,27 @@ class TranscriptSearchProjectionCache final
   [[nodiscard]] std::vector<TranscriptSearchMatch> const& matches() const noexcept;
   [[nodiscard]] std::string const& query() const noexcept;
   [[nodiscard]] std::size_t projection_build_count() const noexcept;
-  [[nodiscard]] std::size_t match_scan_count() const noexcept;
+  [[nodiscard]] std::size_t layout_position_visit_count() const noexcept;
+  [[nodiscard]] std::size_t match_projection_evaluation_count() const noexcept;
+  [[nodiscard]] std::size_t match_entry_realign_count() const noexcept;
+  [[nodiscard]] std::size_t match_entry_splice_count() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   void rebuild_range(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::size_t first_item_index, std::size_t past_last_item_index);
-  void rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::vector<bool> const& affected);
-  [[nodiscard]] TranscriptSearchUpdate replace_matches(std::vector<TranscriptSearchMatch> previous_matches, std::vector<bool> const* affected = nullptr);
+  void rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::vector<TranscriptSearchItemInterval> const& affected);
+  [[nodiscard]] TranscriptSearchUpdate replace_all_matches();
+  [[nodiscard]] TranscriptSearchUpdate replace_affected_matches(std::vector<TranscriptSearchItemInterval> const& affected, std::size_t first_changed_match_row);
 
   std::vector<TranscriptSearchProjection> projections_;
   std::string query_;
   std::vector<TranscriptSearchMatch> matches_;
   std::size_t projection_build_count_ = 0;
-  std::size_t match_scan_count_ = 0;
+  std::size_t layout_position_visit_count_ = 0;
+  std::size_t match_projection_evaluation_count_ = 0;
+  std::size_t match_entry_realign_count_ = 0;
+  std::size_t match_entry_splice_count_ = 0;
 };
 
 [[nodiscard]] bool transcript_search_query_valid(std::string_view query) noexcept;

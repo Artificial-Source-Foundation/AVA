@@ -94,29 +94,27 @@ class TerminalBackgroundDetectionGuard
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-bool terminal_background_probe_environment_allowed()
+std::optional<std::string_view> optional_environment_view(char const* name)
 {
-  auto const* tmux = std::getenv("TMUX");
-  if (tmux != nullptr && tmux[0] != '\0')
-    return false;
-
-  auto const* term = std::getenv("TERM");
-  if (term == nullptr || term[0] == '\0')
-    return true;
-
-  std::string_view const term_value(term);
-  return !term_value.starts_with("tmux");
+  auto const* value = std::getenv(name);
+  if (value == nullptr)
+    return std::nullopt;
+  return std::string_view(value);
 }
 
 void maybe_probe_terminal_background_appearance()
 {
-  if (!tui_theme_needs_terminal_background_probe() || !terminal_background_probe_environment_allowed())
+  if (!tui_theme_needs_terminal_background_probe())
+    return;
+
+  auto const tmux = optional_environment_view("TMUX");
+  auto const term = optional_environment_view("TERM");
+  if (!terminal_background_probe_environment_allows_query(tmux, term))
     return;
 
   arm_terminal_background_response_handler();
-  static_cast<void>(std::fwrite(terminal_background_query_sequence().data(), 1, terminal_background_query_sequence().size(), stdout));
-  static_cast<void>(std::fflush(stdout));
-  runtime_input::drain_startup_probe_input(kTerminalBackgroundProbeDeadline);
+  if (write_terminal_background_query(stdout))
+    runtime_input::drain_startup_probe_input(kTerminalBackgroundProbeDeadline);
   disarm_terminal_background_response_handler();
 }
 

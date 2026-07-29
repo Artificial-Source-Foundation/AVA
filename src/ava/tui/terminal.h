@@ -4,6 +4,7 @@
 #include "ava/core/result.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -199,6 +200,17 @@ void erase_last_utf8_codepoint(std::string& text);
                                                                                         bool modify_other_keys_enabled);
 [[nodiscard]] bool terminal_keyboard_protocol_handle_response(std::string_view sequence);
 [[nodiscard]] std::string_view terminal_background_query_sequence();
+// Pure environment gate for the startup OSC 11 query. nullopt means the variable
+// is absent; empty means present-but-empty. Non-empty TMUX or TERM starting with
+// "tmux" suppresses the query; absent/empty TMUX with direct TERM (or absent/empty
+// TERM) allows it.
+[[nodiscard]] bool terminal_background_probe_environment_allows_query(std::optional<std::string_view> tmux, std::optional<std::string_view> term);
+// Write the exact OSC 11 query bytes and flush. Returns false on null out, short
+// write, or flush failure.
+[[nodiscard]] bool write_terminal_background_query(FILE* out);
+// Gate then write: returns true only when the environment allows the query and the
+// write succeeds. Writes nothing when the gate suppresses.
+[[nodiscard]] bool emit_terminal_background_query_if_environment_allows(std::optional<std::string_view> tmux, std::optional<std::string_view> term, FILE* out);
 [[nodiscard]] std::optional<TerminalBackgroundColor> terminal_osc11_background_response(std::string_view sequence);
 void arm_terminal_background_response_handler();
 void disarm_terminal_background_response_handler();

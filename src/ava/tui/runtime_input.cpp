@@ -102,62 +102,11 @@ std::optional<wchar_t> read_plain_wide_character()
   return static_cast<wchar_t>(value);
 }
 
-std::pair<bool, std::string> read_ascii_sequence(std::string_view expected)
+// Read the body of an escape/control sequence after ESC was already consumed.
+// Bounded by kMaxEscapeSequenceBytes; stops on complete sequence, timeout, or
+// non-backspace KEY_CODE. Caller owns the surrounding wtimeout budget.
+std::string read_escape_sequence_body()
 {
-  std::string consumed;
-  consumed.reserve(expected.size());
-  for (auto const expected_char : expected)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      return {false, consumed};
-    auto encoded = encode_wide_character(*character);
-    if (encoded)
-      consumed += *encoded;
-    if (*character != static_cast<unsigned char>(expected_char))
-      return {false, consumed};
-  }
-  return {true, consumed};
-}
-
-RuntimeInput read_bracketed_paste()
-{
-  std::string pasted;
-  static_cast<void>(wtimeout(stdscr, 1000));
-  while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      break;
-    if (*character == L'\x1b')
-    {
-      auto [matched_end, consumed] = read_ascii_sequence("[201~");
-      if (matched_end)
-        break;
-      pasted.push_back('\x1b');
-      if (pasted.size() + consumed.size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += consumed;
-      continue;
-    }
-    if (auto encoded = encode_wide_character(*character))
-    {
-      if (pasted.size() + encoded->size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += *encoded;
-    }
-  }
-  static_cast<void>(wtimeout(stdscr, -1));
-  return character_input(normalize_composer_paste_text(pasted), true);
-}
-
-std::optional<RuntimeInput> read_escape_sequence_input()
-{
-  static_cast<void>(wtimeout(stdscr, 50));
   std::string consumed;
   consumed.reserve(32);
   while (consumed.size() < kMaxEscapeSequenceBytes)
@@ -184,6 +133,52 @@ std::optional<RuntimeInput> read_escape_sequence_input()
     if (terminal_escape_sequence_complete(consumed))
       break;
   }
+  return consumed;
+}
+
+RuntimeInput read_bracketed_paste()
+{
+  std::string pasted;
+  static_cast<void>(wtimeout(stdscr, 1000));
+  while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes)
+  {
+    auto const character = read_plain_wide_character();
+    if (!character)
+      break;
+    if (*character == L'\x1b')
+    {
+      // Protocol ownership: assemble a complete bounded escape/control sequence
+      // after ESC. Paste-end ends the paste; an armed OSC 11 reply is handled and
+      // discarded without joining the paste payload; all other escape content is
+      // preserved under ordinary paste normalization and the byte cap.
+      auto const consumed = read_escape_sequence_body();
+      if (consumed == "[201~")
+        break;
+      if (terminal_background_response_handle(consumed))
+        continue;
+      pasted.push_back('\x1b');
+      if (pasted.size() + consumed.size() > kMaxBracketedPasteBytes)
+        break;
+      pasted += consumed;
+      continue;
+    }
+    if (auto encoded = encode_wide_character(*character))
+    {
+      if (pasted.size() + encoded->size() > kMaxBracketedPasteBytes)
+      {
+        break;
+      }
+      pasted += *encoded;
+    }
+  }
+  static_cast<void>(wtimeout(stdscr, -1));
+  return character_input(normalize_composer_paste_text(pasted), true);
+}
+
+std::optional<RuntimeInput> read_escape_sequence_input()
+{
+  static_cast<void>(wtimeout(stdscr, 50));
+  auto const consumed = read_escape_sequence_body();
   static_cast<void>(wtimeout(stdscr, -1));
 
   if (consumed.empty())

@@ -1889,10 +1889,23 @@ void test_osc11_tmux_skip_semantics()
 
   expect(ava::tui::tui_theme_needs_terminal_background_probe(), "probe remains desired when theme selection is automatic");
 
+  // Pure environment gate: TMUX / TERM=tmux* suppress; direct xterm and absent/empty allow.
+  expect(!ava::tui::terminal_background_probe_environment_allows_query("/tmp/tmux-1000/default,1,0", "xterm-256color"),
+         "non-empty TMUX suppresses the OSC 11 query");
+  expect(!ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, "tmux-256color"), "TERM=tmux* suppresses the OSC 11 query");
+  expect(!ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, "tmux"),
+         "empty TMUX with TERM=tmux still suppresses via TERM prefix");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, "xterm-256color"), "direct xterm TERM allows the OSC 11 query");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, "xterm-256color"),
+         "empty TMUX is intentional allow with direct TERM");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, std::nullopt), "absent TMUX and TERM intentionally allow the OSC 11 query");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, std::string_view{}),
+         "empty TMUX and TERM intentionally allow the OSC 11 query");
+
   {
     ScopedEnvVar tmux_guard("TMUX", "/tmp/tmux-1000/default,1,0");
     ScopedEnvVar term_guard("TERM", "xterm-256color");
-    // Environment skip is enforced by runtime startup; the probe-need predicate stays
+    // Environment skip is enforced by the pure gate; the probe-need predicate stays
     // about theme automation only. Document the split here so tmux smoke stays aligned.
     expect(ava::tui::tui_theme_needs_terminal_background_probe(), "TMUX does not change automatic theme selection; runtime skips the query separately");
   }
@@ -1911,6 +1924,327 @@ void test_osc11_tmux_skip_semantics()
   expect(active.badge == "built-in", "session reset clears OSC 11 detection so the next session cannot inherit it");
 }
 
+std::string read_tmpfile_bytes(FILE* file)
+{
+  expect(file != nullptr && std::fseek(file, 0, SEEK_SET) == 0, "query writer tests can rewind the temporary stream");
+  std::string bytes;
+  char buffer[64];
+  while (true)
+  {
+    auto const n = std::fread(buffer, 1, sizeof(buffer), file);
+    if (n == 0)
+      break;
+    bytes.append(buffer, n);
+  }
+  return bytes;
+}
+
+void test_osc11_query_writer_and_environment_gate_seam()
+{
+  auto const expected_query = std::string(ava::tui::terminal_background_query_sequence());
+  expect(expected_query == "\x1b]11;?\x1b\\", "query writer seam uses the ST-terminated OSC 11 probe bytes");
+
+  FILE* allowed = std::tmpfile();
+  expect(allowed != nullptr, "query writer tests can create an allowed temporary stream");
+  if (!allowed)
+    return;
+
+  expect(ava::tui::write_terminal_background_query(allowed), "query writer reports success after writing the OSC 11 probe");
+  expect(read_tmpfile_bytes(allowed) == expected_query, "query writer emits exact OSC 11 query bytes");
+  expect(!ava::tui::write_terminal_background_query(nullptr), "query writer fails closed on a null stream");
+
+  FILE* skipped_tmux = std::tmpfile();
+  FILE* skipped_term = std::tmpfile();
+  FILE* allowed_emit = std::tmpfile();
+  expect(skipped_tmux != nullptr && skipped_term != nullptr && allowed_emit != nullptr, "query gate seam tests can create temporary streams");
+  if (!skipped_tmux || !skipped_term || !allowed_emit)
+  {
+    static_cast<void>(std::fclose(allowed));
+    if (skipped_tmux)
+      static_cast<void>(std::fclose(skipped_tmux));
+    if (skipped_term)
+      static_cast<void>(std::fclose(skipped_term));
+    if (allowed_emit)
+      static_cast<void>(std::fclose(allowed_emit));
+    return;
+  }
+
+  expect(!ava::tui::emit_terminal_background_query_if_environment_allows("/tmp/tmux-1000/default,1,0", "xterm-256color", skipped_tmux) &&
+             read_tmpfile_bytes(skipped_tmux).empty(),
+         "emit seam writes nothing when TMUX suppresses the query");
+  expect(
+      !ava::tui::emit_terminal_background_query_if_environment_allows(std::nullopt, "tmux-256color", skipped_term) && read_tmpfile_bytes(skipped_term).empty(),
+      "emit seam writes nothing when TERM=tmux* suppresses the query");
+  expect(ava::tui::emit_terminal_background_query_if_environment_allows(std::nullopt, "xterm-256color", allowed_emit) &&
+             read_tmpfile_bytes(allowed_emit) == expected_query,
+         "emit seam writes exact OSC 11 bytes for a direct xterm environment");
+
+  static_cast<void>(std::fclose(allowed));
+  static_cast<void>(std::fclose(skipped_tmux));
+  static_cast<void>(std::fclose(skipped_term));
+  static_cast<void>(std::fclose(allowed_emit));
+}
+
+struct VirtualOsc11Screen
+{
+  SCREEN* screen = nullptr;
+  FILE* input = nullptr;
+  FILE* output = nullptr;
+  std::string previous_locale;
+
+  explicit operator bool() const { return screen != nullptr; }
+};
+
+VirtualOsc11Screen enter_virtual_osc11_screen(char const* purpose)
+{
+  VirtualOsc11Screen state;
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  state.previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  state.input = std::tmpfile();
+  state.output = std::tmpfile();
+  expect(state.input != nullptr && state.output != nullptr, std::string(purpose) + " can create temporary streams");
+  if (!state.input || !state.output)
+  {
+    if (state.input)
+      static_cast<void>(std::fclose(state.input));
+    if (state.output)
+      static_cast<void>(std::fclose(state.output));
+    state.input = nullptr;
+    state.output = nullptr;
+    static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+    return state;
+  }
+
+  state.screen = newterm(nullptr, state.output, state.input);
+  expect(state.screen != nullptr, std::string(purpose) + " creates an ncurses screen");
+  if (!state.screen)
+  {
+    static_cast<void>(std::fclose(state.input));
+    static_cast<void>(std::fclose(state.output));
+    state.input = nullptr;
+    state.output = nullptr;
+    static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+    return state;
+  }
+
+  static_cast<void>(set_term(state.screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  return state;
+}
+
+void leave_virtual_osc11_screen(VirtualOsc11Screen& state)
+{
+  if (state.screen)
+  {
+    static_cast<void>(endwin());
+    delscreen(state.screen);
+    state.screen = nullptr;
+  }
+  if (state.input)
+  {
+    static_cast<void>(std::fclose(state.input));
+    state.input = nullptr;
+  }
+  if (state.output)
+  {
+    static_cast<void>(std::fclose(state.output));
+    state.output = nullptr;
+  }
+  static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+}
+
+void test_osc11_reply_inside_startup_bracketed_paste(bool use_st)
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto screen = enter_virtual_osc11_screen(use_st ? "OSC 11 ST paste interleave" : "OSC 11 BEL paste interleave");
+  if (!screen)
+    return;
+
+  auto const light_reply = osc11_response("rgb:ffff/ffff/ffff", use_st);
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += "[200~";
+  feed += "hello";
+  feed.push_back('\x1b');
+  feed += light_reply;
+  feed += "world";
+  feed.push_back('\x1b');
+  feed += "[201~";
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  expect(ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light,
+         use_st ? "ST OSC 11 reply inside startup paste sets light appearance" : "BEL OSC 11 reply inside startup paste sets light appearance");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  expect(queued && queued->bracketed_paste && queued->text == "helloworld" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         use_st ? "ST OSC 11 reply is stripped from one complete startup paste with contiguous user text"
+                : "BEL OSC 11 reply is stripped from one complete startup paste with contiguous user text");
+  expect(queued && !queued->text.contains("]11") && !queued->text.contains("rgb:") && !queued->text.contains("ffff"),
+         "startup paste never surfaces raw OSC 11 reply contents");
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  leave_virtual_osc11_screen(screen);
+}
+
+void test_non_owned_escape_inside_startup_bracketed_paste_is_preserved()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto screen = enter_virtual_osc11_screen("non-owned paste escape");
+  if (!screen)
+    return;
+
+  // Armed handler must not silently eat non-OSC-11 escape content inside paste.
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += "[200~";
+  feed += "ab";
+  feed.push_back('\x1b');
+  feed += "]12;rgb:ff/ff/ff";
+  feed.push_back('\a');
+  feed += "cd";
+  feed.push_back('\x1b');
+  feed += "[201~";
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  expect(!ava::tui::detected_terminal_background_appearance(), "non-OSC-11 escape inside startup paste does not mutate appearance");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  // ESC/BEL are stripped by paste normalization; printable OSC body remains so the
+  // sequence is not silently discarded under protocol ownership.
+  expect(queued && queued->bracketed_paste && queued->text == "ab]12;rgb:ff/ff/ffcd" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         "malformed/non-owned escape content inside startup paste is preserved under ordinary normalization");
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  leave_virtual_osc11_screen(screen);
+}
+
+void test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_semantics()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+
+  {
+    ava::tui::reset_detected_terminal_background_appearance();
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::disarm_terminal_background_response_handler();
+
+    auto screen = enter_virtual_osc11_screen("disarmed OSC 11 paste");
+    if (!screen)
+      return;
+
+    // Valid OSC 11 while disarmed is not protocol-owned: paste keeps ordinary semantics.
+    auto const light_reply = osc11_response("rgb:ffff/ffff/ffff");
+    std::string feed;
+    feed.push_back('\x1b');
+    feed += "[200~";
+    feed += "pre";
+    feed.push_back('\x1b');
+    feed += light_reply;
+    feed += "post";
+    feed.push_back('\x1b');
+    feed += "[201~";
+    push_bytes_to_curses(feed);
+
+    ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+
+    expect(!ava::tui::detected_terminal_background_appearance(), "disarmed OSC 11 reply inside startup paste does not mutate appearance");
+    auto const queued = ava::tui::runtime_input::poll_curses_input();
+    expect(queued && queued->bracketed_paste && queued->text == "pre]11;rgb:ffff/ffff/ffffpost" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+           "disarmed valid OSC 11 inside paste is preserved under ordinary normalization");
+
+    ava::tui::runtime_input::clear_startup_input_queue();
+    leave_virtual_osc11_screen(screen);
+  }
+
+  {
+    ava::tui::reset_detected_terminal_background_appearance();
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::disarm_terminal_background_response_handler();
+
+    auto screen = enter_virtual_osc11_screen("malformed OSC 11 paste");
+    if (!screen)
+      return;
+
+    // Armed handler still must not claim malformed OSC 11 payloads.
+    std::string feed;
+    feed.push_back('\x1b');
+    feed += "[200~";
+    feed += "x";
+    feed.push_back('\x1b');
+    feed += "]11;rgb:ff/ff";
+    feed.push_back('\a');
+    feed += "y";
+    feed.push_back('\x1b');
+    feed += "[201~";
+    push_bytes_to_curses(feed);
+
+    ava::tui::arm_terminal_background_response_handler();
+    ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+    ava::tui::disarm_terminal_background_response_handler();
+
+    expect(!ava::tui::detected_terminal_background_appearance(), "malformed OSC 11 inside startup paste does not mutate appearance");
+    auto const queued = ava::tui::runtime_input::poll_curses_input();
+    expect(queued && queued->bracketed_paste && queued->text == "x]11;rgb:ff/ffy" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+           "malformed OSC 11 inside paste is preserved under ordinary normalization");
+
+    // A second complete paste after the probe drain still works: bracketed paste stays enabled.
+    std::string second;
+    second.push_back('\x1b');
+    second += "[200~";
+    second += "again";
+    second.push_back('\x1b');
+    second += "[201~";
+    push_bytes_to_curses(second);
+    auto const follow_up = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(50));
+    expect(follow_up && follow_up->bracketed_paste && follow_up->text == "again", "bracketed paste remains enabled after OSC 11 paste interleave handling");
+
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::reset_detected_terminal_background_appearance();
+    leave_virtual_osc11_screen(screen);
+  }
+}
+
 }  // namespace
 
 void run_tui_terminal_osc11_theme_tests()
@@ -1920,4 +2254,9 @@ void run_tui_terminal_osc11_theme_tests()
   test_startup_input_fifo_order_and_cap();
   test_osc11_handler_arming_and_virtual_probe();
   test_osc11_tmux_skip_semantics();
+  test_osc11_query_writer_and_environment_gate_seam();
+  test_osc11_reply_inside_startup_bracketed_paste(false);
+  test_osc11_reply_inside_startup_bracketed_paste(true);
+  test_non_owned_escape_inside_startup_bracketed_paste_is_preserved();
+  test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_semantics();
 }

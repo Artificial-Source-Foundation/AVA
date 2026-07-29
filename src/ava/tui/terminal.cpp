@@ -1577,6 +1577,33 @@ std::string_view terminal_background_query_sequence()
   return kTerminalBackgroundQuerySequence;
 }
 
+bool terminal_background_probe_environment_allows_query(std::optional<std::string_view> tmux, std::optional<std::string_view> term)
+{
+  if (tmux && !tmux->empty())
+    return false;
+  if (term && term->starts_with("tmux"))
+    return false;
+  return true;
+}
+
+bool write_terminal_background_query(FILE* out)
+{
+  if (out == nullptr)
+    return false;
+
+  auto const query = terminal_background_query_sequence();
+  if (std::fwrite(query.data(), 1, query.size(), out) != query.size())
+    return false;
+  return std::fflush(out) == 0;
+}
+
+bool emit_terminal_background_query_if_environment_allows(std::optional<std::string_view> tmux, std::optional<std::string_view> term, FILE* out)
+{
+  if (!terminal_background_probe_environment_allows_query(tmux, term))
+    return false;
+  return write_terminal_background_query(out);
+}
+
 std::optional<TerminalBackgroundColor> terminal_osc11_background_response(std::string_view sequence)
 {
   auto const payload = osc11_payload(sequence);

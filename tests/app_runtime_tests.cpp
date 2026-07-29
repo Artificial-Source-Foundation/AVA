@@ -45,6 +45,7 @@ void run_app_runtime_tests()
   test_app_session_jsonl_import_export_portable_attachments();
   test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
   test_app_session_branch_commands();
+  test_app_session_fork_from_entry_and_user_turns();
   test_app_session_new_resume_commands();
   test_app_session_metadata_commands();
   test_application_catalog_cache_reuses_workspace_and_session_indexes();

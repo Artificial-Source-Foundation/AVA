@@ -9,6 +9,7 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/session_user_turns.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/attachments.h"
@@ -258,6 +259,120 @@ void test_app_session_branch_commands()
   expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Full copy") != std::string::npos &&
              sessions->output[0].find("origin=clone") != std::string::npos,
          "slash /tree alias exposes newly cloned branch in the session tree");
+}
+
+void test_app_session_fork_from_entry_and_user_turns()
+{
+  auto const root = create_empty_root("app-session-fork-from-entry-user-turns");
+
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "fork-from-entry test opens a persistent runtime session");
+  if (!session)
+    return;
+
+  auto seed = [&](std::string id, ava::session::EntryType type, std::string timestamp, std::string data_json) {
+    return session->append_owned(
+        ava::session::SessionEntry{.id = std::move(id), .parent_id = "", .type = type, .timestamp = std::move(timestamp), .data_json = std::move(data_json)});
+  };
+  expect(
+      seed("entry_user_a", ava::session::EntryType::UserMessage, "2026-05-08T00:00:01Z", "{\"text\":\"alpha first\\nline\"}") &&
+          seed("entry_assistant_a", ava::session::EntryType::AssistantMessage, "2026-05-08T00:00:02Z", "{\"text\":\"assistant alpha\"}") &&
+          seed("entry_user_b", ava::session::EntryType::UserMessage, "2026-05-08T00:00:03Z", "{\"text\":\"beta second\"}") &&
+          seed("entry_assistant_b", ava::session::EntryType::AssistantMessage, "2026-05-08T00:00:04Z", "{\"text\":\"assistant beta\"}") &&
+          seed("entry_user_internal", ava::session::EntryType::UserMessage, "2026-05-08T00:00:05Z", "{\"text\":\"hidden replay\",\"internal_replay\":true}") &&
+          seed("entry_user_c", ava::session::EntryType::UserMessage, "2026-05-08T00:00:06Z", "{\"text\":\"gamma third\"}") &&
+          seed("entry_assistant_c", ava::session::EntryType::AssistantMessage, "2026-05-08T00:00:07Z", "{\"text\":\"assistant gamma\"}"),
+      "fork-from-entry test seeds user/assistant/internal-replay history");
+
+  auto listed = ava::app::list_session_user_turns(*session);
+  expect(listed && listed->turns.size() == 3 && !listed->truncated_before && listed->turns[0].entry_id == "entry_user_a" &&
+             listed->turns[0].timestamp == "2026-05-08T00:00:01Z" && listed->turns[0].preview == "alpha first line" &&
+             listed->turns[1].entry_id == "entry_user_b" && listed->turns[1].preview == "beta second" && listed->turns[2].entry_id == "entry_user_c" &&
+             listed->turns[2].preview == "gamma third",
+         "user-turn listing returns stable public user entry ids and terminal-neutral previews while excluding assistant/internal replay");
+
+  auto capped = ava::app::list_session_user_turns(*session, 2);
+  expect(capped && capped->truncated_before && capped->turns.size() == 2 && capped->turns[0].entry_id == "entry_user_b" &&
+             capped->turns[1].entry_id == "entry_user_c",
+         "user-turn listing reports truncation and keeps only the newest items when capped");
+
+  auto exact_text = ava::app::read_session_user_turn_text(*session, "entry_user_a");
+  auto assistant_text = ava::app::read_session_user_turn_text(*session, "entry_assistant_a");
+  auto missing_text = ava::app::read_session_user_turn_text(*session, "entry_missing");
+  auto internal_text = ava::app::read_session_user_turn_text(*session, "entry_user_internal");
+  expect(exact_text && *exact_text == "alpha first\nline" && !assistant_text && assistant_text.error().category() == ava::core::ErrorCategory::NotFound &&
+             !missing_text && missing_text.error().category() == ava::core::ErrorCategory::NotFound && !internal_text &&
+             internal_text.error().category() == ava::core::ErrorCategory::NotFound,
+         "full-text user-turn reads are exact and reject assistant/missing/internal-replay ids");
+
+  auto const source_session_id = session->store.session_id();
+  auto listed_before = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
+  auto invalid = ava::app::run_fork_command(*session, "Bad cut", "entry_does_not_exist");
+  auto listed_after_invalid = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
+  expect(!invalid && invalid.error().category() == ava::core::ErrorCategory::NotFound &&
+             invalid.error().message().find("branch source entry not found") != std::string::npos && session->store.session_id() == source_session_id &&
+             listed_before && listed_after_invalid && listed_after_invalid->size() == listed_before->size(),
+         "invalid branch_from_entry_id fails closed without replacing the current session or leaking a created session");
+
+  auto tip_fork = ava::app::run_fork_command(*session, "Tip fork", {});
+  auto const tip_session_id = session->store.session_id();
+  auto tip_metadata = ava::session::load_session_metadata(session->store);
+  auto tip_entries = session->store.load();
+  expect(tip_fork && tip_fork->handled && tip_session_id != source_session_id && tip_metadata && tip_metadata->branch_from_entry_id == "entry_assistant_c" &&
+             tip_metadata->branch_origin == "fork" && tip_entries &&
+             std::ranges::any_of(*tip_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_c"; }) &&
+             std::ranges::any_of(*tip_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_assistant_c"; }),
+         "empty-ID fork preserves tip semantics and copies through the current tip entry");
+
+  auto resumed_source = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  expect(resumed_source && resumed_source->handled && session->store.session_id() == source_session_id,
+         "fork-from-entry test resumes the original source before the explicit cut");
+
+  auto cut_fork = ava::app::run_fork_command(*session, "Cut fork", "entry_user_a");
+  auto const cut_session_id = session->store.session_id();
+  auto cut_metadata = ava::session::load_session_metadata(session->store);
+  auto cut_entries = session->store.load();
+  expect(cut_fork && cut_fork->handled && cut_session_id != source_session_id && cut_session_id != tip_session_id && cut_metadata &&
+             cut_metadata->branch_from_entry_id == "entry_user_a" && cut_metadata->branch_origin == "fork" && cut_entries &&
+             std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_a"; }) &&
+             !std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_b"; }) &&
+             !std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_assistant_a"; }) &&
+             cut_fork->output[0].find("at entry_user_a") != std::string::npos,
+         "explicit user-entry fork cuts history at that exact entry id");
+
+  ava::app::runtime::OpenOptions ephemeral_options = open_options;
+  ephemeral_options.sessionless = true;
+  auto ephemeral = ava::app::open_runtime_session(ephemeral_options);
+  expect(ephemeral && ephemeral->sessionless() && ephemeral->store.is_ephemeral(), "user-turn test opens an ephemeral runtime session");
+  if (!ephemeral)
+    return;
+  expect(ephemeral->append_owned(ava::session::SessionEntry{.id = "ephemeral_user",
+                                                            .parent_id = "",
+                                                            .type = ava::session::EntryType::UserMessage,
+                                                            .timestamp = "2026-05-08T01:00:00Z",
+                                                            .data_json = "{\"text\":\"ephemeral body\"}"}) &&
+             ephemeral->append_owned(ava::session::SessionEntry{.id = "ephemeral_assistant",
+                                                                .parent_id = "",
+                                                                .type = ava::session::EntryType::AssistantMessage,
+                                                                .timestamp = "2026-05-08T01:00:01Z",
+                                                                .data_json = "{\"text\":\"ephemeral assistant\"}"}),
+         "user-turn test seeds ephemeral history through the runtime owner");
+  auto ephemeral_listed = ava::app::list_session_user_turns(*ephemeral);
+  auto ephemeral_text = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_user");
+  auto ephemeral_assistant = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_assistant");
+  expect(ephemeral_listed && ephemeral_listed->turns.size() == 1 && ephemeral_listed->turns[0].entry_id == "ephemeral_user" &&
+             ephemeral_listed->turns[0].preview == "ephemeral body" && ephemeral_text && *ephemeral_text == "ephemeral body" && !ephemeral_assistant &&
+             ephemeral_assistant.error().category() == ava::core::ErrorCategory::NotFound,
+         "ephemeral read authority supports the same public user-turn list and exact-text helpers");
 }
 
 void test_app_session_new_resume_commands()

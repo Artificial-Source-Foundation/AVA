@@ -42,6 +42,7 @@ void test_app_command_dispatcher();
 void test_app_session_jsonl_import_export_portable_attachments();
 void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
 void test_app_session_branch_commands();
+void test_app_session_fork_from_entry_and_user_turns();
 void test_app_session_new_resume_commands();
 void test_app_session_metadata_commands();
 void test_request_projection_validates_committed_v4_history();

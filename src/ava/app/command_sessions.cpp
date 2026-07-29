@@ -38,7 +38,8 @@ ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const&
   return open_runtime_session(options);
 }
 
-ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, std::string_view name, ava::session::SessionBranchMode mode)
+ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, std::string_view name, ava::session::SessionBranchMode mode,
+                                                    std::string_view branch_from_entry_id = {})
 {
   CommandResult result;
   result.handled = true;
@@ -60,7 +61,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
       ava::session::SessionBranchOptions{.workspace_dir = session.workspace_dir(),
                                          .root_dir = session.paths().sessions_dir,
                                          .source_session_id = source_session_id,
-                                         .branch_from_entry_id = {},
+                                         .branch_from_entry_id = std::string(branch_from_entry_id),
                                          .name = trimmed_name.empty() ? std::nullopt : std::optional<std::string>(trimmed_name),
                                          .labels = std::nullopt,
                                          .read_limits = session.session_read_limits(),
@@ -71,7 +72,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
     return std::unexpected(std::move(branched.error()));
 
   auto const created_session_id = branched->store.session_id();
-  auto const branch_from_entry_id = branched->branch_from_entry_id;
+  auto const resolved_branch_from_entry_id = branched->branch_from_entry_id;
   auto owned_options = owned_replacement_options(session);
   auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
   if (!opened)
@@ -87,8 +88,8 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   result.session_tree_changed = true;
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
   std::string output = mode_text + " session " + created_session_id + " from " + source_session_id;
-  if (!branch_from_entry_id.empty())
-    output += " at " + branch_from_entry_id;
+  if (!resolved_branch_from_entry_id.empty())
+    output += " at " + resolved_branch_from_entry_id;
   if (!trimmed_name.empty())
     output += " name=\"" + sanitize_inline_text(trimmed_name) + "\"";
   output += "\nswitched to " + session.store.session_id();
@@ -98,9 +99,9 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_fork_command(runtime::Session& session, std::string_view name)
+ava::core::Result<CommandResult> run_fork_command(runtime::Session& session, std::string_view name, std::string_view branch_from_entry_id)
 {
-  return run_branch_command(session, name, ava::session::SessionBranchMode::Fork);
+  return run_branch_command(session, name, ava::session::SessionBranchMode::Fork, branch_from_entry_id);
 }
 
 ava::core::Result<CommandResult> run_clone_command(runtime::Session& session, std::string_view name)

@@ -82,6 +82,7 @@ target_sources(ava_app
     "runtime_sessions.cpp"
     "session_run_controller.cpp"
     "session_title_coordinator.cpp"
+    "session_user_turns.cpp"
     "subagent_delivery_manager.cpp"
     "runtime_session.cpp"
     "runtime/Session.cpp"

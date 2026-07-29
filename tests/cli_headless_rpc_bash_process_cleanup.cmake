@@ -72,7 +72,9 @@ file(WRITE "${DRIVER_FILE}"
 "done\n"
 "port=$(cat \"${PORT_FILE}\")\n"
 "mkfifo \"${RPC_IN}\"\n"
-"HOME=\"${HOME_DIR}\" XDG_CONFIG_HOME=\"${CONFIG_DIR}\" XDG_STATE_HOME=\"${STATE_DIR}\" XDG_DATA_HOME=\"${DATA_DIR}\" NO_COLOR=1 MOONSHOT_API_KEY=test-key MOONSHOT_BASE_URL=\"http://127.0.0.1:$port\" \"${AVA_EXE}\" --rpc < \"${RPC_IN}\" > \"${RPC_OUT}\" 2> \"${RPC_ERR}\" &\n"
+# Keep command-freshness inputs deterministic: this fixture validates process
+# cleanup, not unrelated mutations in the invoking user's PATH directories.
+"PATH=/usr/bin:/bin HOME=\"${HOME_DIR}\" XDG_CONFIG_HOME=\"${CONFIG_DIR}\" XDG_STATE_HOME=\"${STATE_DIR}\" XDG_DATA_HOME=\"${DATA_DIR}\" NO_COLOR=1 MOONSHOT_API_KEY=test-key MOONSHOT_BASE_URL=\"http://127.0.0.1:$port\" \"${AVA_EXE}\" --rpc < \"${RPC_IN}\" > \"${RPC_OUT}\" 2> \"${RPC_ERR}\" &\n"
 "ava_pid=$!\n"
 "exec 3>\"${RPC_IN}\"\n"
 "printf '%s\\n' '{\"id\":\"prompt\",\"type\":\"prompt\",\"protocol_version\":1,\"message\":\"run timed shell tree\"}' >&3\n"

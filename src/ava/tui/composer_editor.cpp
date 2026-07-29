@@ -88,43 +88,6 @@ WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor
   return WordSegmentClass::Word;
 }
 
-std::size_t previous_codepoint_cursor(std::string_view text, std::size_t cursor)
-{
-  cursor = clamp_composer_draft_cursor(text, cursor);
-  if (cursor == 0)
-    return 0;
-  if (!detail::is_utf8_continuation(static_cast<unsigned char>(text[cursor - 1])))
-    return cursor - 1;
-
-  auto start = cursor;
-  while (start > 0 && detail::is_utf8_continuation(static_cast<unsigned char>(text[start - 1])))
-  {
-    --start;
-  }
-  if (start == 0)
-    return cursor - 1;
-
-  auto const starter = start - 1;
-  auto const expected_length = detail::utf8_sequence_length(static_cast<unsigned char>(text[starter]));
-  auto const actual_length = cursor - starter;
-  if (expected_length > 1 && expected_length == actual_length)
-    return starter;
-  return cursor - 1;
-}
-
-std::size_t next_codepoint_cursor(std::string_view text, std::size_t cursor)
-{
-  cursor = clamp_composer_draft_cursor(text, cursor);
-  if (cursor >= text.size())
-    return text.size();
-
-  auto const length = detail::utf8_sequence_length(static_cast<unsigned char>(text[cursor]));
-  char32_t codepoint = 0;
-  if (length > 1 && detail::decode_utf8_codepoint(text, cursor, length, codepoint))
-    return cursor + length;
-  return cursor + 1;
-}
-
 // Shared with rendering via detail::terminal_text_cluster_bytes (compact rules, not full UAX #29).
 std::size_t next_cluster_cursor(std::string_view text, std::size_t cursor)
 {
@@ -164,17 +127,6 @@ std::size_t previous_cluster_cursor(std::string_view text, std::size_t cursor)
     index += step;
   }
   return previous;
-}
-
-// Compatibility aliases used by word/jump helpers that still classify by codepoint.
-std::size_t previous_input_cursor(std::string_view text, std::size_t cursor)
-{
-  return previous_codepoint_cursor(text, cursor);
-}
-
-std::size_t next_input_cursor(std::string_view text, std::size_t cursor)
-{
-  return next_codepoint_cursor(text, cursor);
 }
 
 std::size_t line_start_cursor(std::string_view text, std::size_t cursor)
@@ -265,20 +217,35 @@ bool insert_text_is_coalesceable_typing(std::string_view text)
 {
   if (text.empty())
     return false;
-  for (unsigned char const byte : text)
+  for (std::size_t index = 0; index < text.size();)
   {
-    if (byte == static_cast<unsigned char>('\n') || byte == static_cast<unsigned char>('\r') || byte == static_cast<unsigned char>('\t') ||
-        std::isspace(byte) != 0)
+    auto const byte = static_cast<unsigned char>(text[index]);
+    if ((byte & 0x80U) == 0)
     {
-      return false;
+      if (byte == '\n' || byte == '\r' || byte == '\t' || std::isspace(byte) != 0)
+        return false;
+      ++index;
+      continue;
     }
+
+    auto const length = detail::utf8_sequence_length(byte);
+    char32_t codepoint = 0;
+    if (!detail::decode_utf8_codepoint(text, index, length, codepoint))
+    {
+      // Malformed bytes remain ordinary typing; they do not force an undo boundary by themselves.
+      ++index;
+      continue;
+    }
+    if (is_unicode_space_codepoint(codepoint))
+      return false;
+    index += length;
   }
   return true;
 }
 
 ComposerDraftSnapshot current_snapshot(ComposerDraftState const& draft)
 {
-  auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto const cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   return ComposerDraftSnapshot{.text = draft.text, .cursor = cursor, .paste_entries = draft.paste_entries, .next_paste_id = draft.next_paste_id};
 }
 
@@ -481,27 +448,41 @@ void shift_paste_markers_for_replace(ComposerDraftState& draft, std::size_t star
   std::erase_if(draft.paste_entries, [](ComposerPasteEntry const& entry) { return entry.start == std::string::npos; });
 }
 
-std::size_t previous_atomic_input_cursor(ComposerDraftState const& draft)
+std::size_t previous_atomic_cursor_at(ComposerDraftState const& draft, std::size_t cursor)
 {
-  if (auto marker = paste_marker_touching_left(draft, draft.cursor))
+  cursor = clamp_composer_draft_cursor(draft.text, cursor);
+  if (auto marker = paste_marker_touching_left(draft, cursor))
     return marker->start;
-  return previous_cluster_cursor(draft.text, draft.cursor);
+  return previous_cluster_cursor(draft.text, cursor);
 }
 
-std::size_t next_atomic_input_cursor(ComposerDraftState const& draft)
+std::size_t next_atomic_cursor_at(ComposerDraftState const& draft, std::size_t cursor)
 {
-  auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  cursor = clamp_composer_draft_cursor(draft.text, cursor);
   if (auto marker = paste_marker_starting_at(draft, cursor))
+    return marker->end;
+  if (auto marker = paste_marker_touching_left(draft, cursor); marker && cursor < marker->end)
     return marker->end;
   return next_cluster_cursor(draft.text, cursor);
 }
 
+std::size_t previous_atomic_input_cursor(ComposerDraftState const& draft)
+{
+  return previous_atomic_cursor_at(draft, draft.cursor);
+}
+
+std::size_t next_atomic_input_cursor(ComposerDraftState const& draft)
+{
+  return next_atomic_cursor_at(draft, draft.cursor);
+}
+
+// Word movement classifies only compact cluster starts (and paste markers), never ZWJ/mark interiors.
 std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
 {
-  auto cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   while (cursor > 0)
   {
-    auto const previous = previous_input_cursor(draft.text, cursor);
+    auto const previous = previous_atomic_cursor_at(draft, cursor);
     if (word_segment_class_at(draft.text, previous) != WordSegmentClass::Space)
       break;
     cursor = previous;
@@ -510,12 +491,12 @@ std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
     return 0;
   if (auto marker = paste_marker_touching_left(draft, cursor))
     return marker->start;
-  auto const target_class = word_segment_class_at(draft.text, previous_input_cursor(draft.text, cursor));
+  auto const target_class = word_segment_class_at(draft.text, previous_atomic_cursor_at(draft, cursor));
   while (cursor > 0)
   {
     if (auto marker = paste_marker_touching_left(draft, cursor))
       return marker->start;
-    auto const previous = previous_input_cursor(draft.text, cursor);
+    auto const previous = previous_atomic_cursor_at(draft, cursor);
     if (word_segment_class_at(draft.text, previous) != target_class)
       break;
     cursor = previous;
@@ -525,14 +506,14 @@ std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
 
 std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
 {
-  auto cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   if (auto marker = paste_marker_starting_at(draft, cursor))
     return marker->end;
   if (auto marker = paste_marker_touching_left(draft, cursor); marker && cursor < marker->end)
     return marker->end;
   while (cursor < draft.text.size() && word_segment_class_at(draft.text, cursor) == WordSegmentClass::Space)
   {
-    cursor = next_input_cursor(draft.text, cursor);
+    cursor = next_atomic_cursor_at(draft, cursor);
   }
   if (auto marker = paste_marker_starting_at(draft, cursor))
     return marker->end;
@@ -545,15 +526,15 @@ std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
       return marker->end;
     if (auto marker = paste_marker_touching_left(draft, cursor); marker && cursor < marker->end)
       return marker->end;
-    cursor = next_input_cursor(draft.text, cursor);
+    cursor = next_atomic_cursor_at(draft, cursor);
   }
   return cursor;
 }
 
 bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end, ComposerKillSequence kill_direction)
 {
-  start = clamp_composer_draft_cursor(draft.text, start);
-  end = clamp_composer_draft_cursor(draft.text, end);
+  start = clamp_composer_draft_cursor_to_atomic_boundary(draft, start);
+  end = clamp_composer_draft_cursor_to_atomic_boundary(draft, end);
   if (end < start)
     std::swap(start, end);
   if (start == end)
@@ -650,11 +631,11 @@ std::size_t clamp_composer_draft_cursor_to_atomic_boundary(ComposerDraftState co
 void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
 {
   draft.text = std::move(text);
-  draft.cursor = cursor == std::string::npos ? draft.text.size() : clamp_composer_draft_cursor(draft.text, cursor);
-  draft.undo_stack.clear();
-  draft.redo_stack.clear();
   draft.paste_entries.clear();
   draft.next_paste_id = 1;
+  draft.cursor = cursor == std::string::npos ? draft.text.size() : clamp_composer_draft_cursor_to_atomic_boundary(draft, cursor);
+  draft.undo_stack.clear();
+  draft.redo_stack.clear();
   clear_nonvertical_tracking(draft);
   draft.coalesce_typing_undo = false;
   draft.kill_sequence = ComposerKillSequence::None;
@@ -662,21 +643,23 @@ void reset_composer_draft(ComposerDraftState& draft, std::string text, std::size
 
 bool replace_composer_draft(ComposerDraftState& draft, std::string text, std::size_t cursor)
 {
-  auto const next_cursor = cursor == std::string::npos ? text.size() : clamp_composer_draft_cursor(text, cursor);
-  if (draft.text == text && clamp_composer_draft_cursor(draft.text, draft.cursor) == next_cursor)
+  ComposerDraftState probe;
+  probe.text = text;
+  auto const next_cursor = cursor == std::string::npos ? text.size() : clamp_composer_draft_cursor_to_atomic_boundary(probe, cursor);
+  if (draft.text == text && clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor) == next_cursor)
     return false;
   record_undo(draft);
   draft.text = std::move(text);
-  draft.cursor = next_cursor;
   draft.paste_entries.clear();
   draft.next_paste_id = 1;
+  draft.cursor = next_cursor;
   return true;
 }
 
 bool replace_composer_draft_range(ComposerDraftState& draft, std::size_t start, std::size_t end, std::string_view replacement)
 {
-  start = clamp_composer_draft_cursor(draft.text, start);
-  end = clamp_composer_draft_cursor(draft.text, end);
+  start = clamp_composer_draft_cursor_to_atomic_boundary(draft, start);
+  end = clamp_composer_draft_cursor_to_atomic_boundary(draft, end);
   if (end < start)
     std::swap(start, end);
   if (start == end && replacement.empty())
@@ -693,7 +676,7 @@ bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text
   if (text.empty())
     return false;
 
-  draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   auto const coalesce = draft.coalesce_typing_undo && insert_text_is_coalesceable_typing(text) && draft.kill_sequence == ComposerKillSequence::None;
   if (!coalesce)
     record_undo(draft);
@@ -715,7 +698,7 @@ bool insert_composer_draft_text(ComposerDraftState& draft, std::string_view text
 
 bool replace_composer_backslash_before_cursor_with_newline(ComposerDraftState& draft)
 {
-  auto const cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  auto const cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   if (cursor == 0 || draft.text[cursor - 1] != '\\')
     return false;
   return replace_composer_draft_range(draft, cursor - 1, cursor, "\n");
@@ -738,7 +721,7 @@ bool insert_composer_paste_text(ComposerDraftState& draft, std::string_view text
   auto const id = draft.next_paste_id++;
   auto marker = paste_marker(id, text);
   auto marker_text = marker;
-  draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   auto const marker_start = draft.cursor;
   shift_paste_markers_for_insert(draft, marker_start, marker_text.size());
   draft.text.insert(draft.cursor, marker_text);
@@ -755,31 +738,32 @@ bool jump_composer_draft_to_character(ComposerDraftState& draft, std::string_vie
 
   clear_yank_tracking(draft);
   clear_nonvertical_tracking(draft);
-  draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
 
   if (forward)
   {
-    auto const search_from = draft.cursor >= draft.text.size() ? draft.text.size() : next_input_cursor(draft.text, draft.cursor);
+    auto const search_from = draft.cursor >= draft.text.size() ? draft.text.size() : next_atomic_cursor_at(draft, draft.cursor);
     auto const found = draft.text.find(character, search_from);
     if (found == std::string::npos)
       return false;
-    draft.cursor = clamp_composer_draft_cursor(draft.text, found);
+    draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, found);
     return true;
   }
 
   if (draft.cursor == 0)
     return false;
-  auto const search_before = previous_input_cursor(draft.text, draft.cursor);
+  auto const search_before = previous_atomic_cursor_at(draft, draft.cursor);
   auto const found = draft.text.rfind(character, search_before);
   if (found == std::string::npos)
     return false;
-  draft.cursor = clamp_composer_draft_cursor(draft.text, found);
+  draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, found);
   return true;
 }
 
 bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
 {
-  draft.cursor = clamp_composer_draft_cursor(draft.text, draft.cursor);
+  // Every action starts on a compact cluster / paste-marker boundary. Malformed orphan bytes remain addressable.
+  draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
   switch (action)
   {
     case TuiAction::ClearInput:
@@ -820,7 +804,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::CursorUp: {
       if (draft.vertical_column == std::string::npos)
         draft.vertical_column = line_column(draft.text, draft.cursor);
-      auto const next = previous_line_cursor(draft.text, draft.cursor, draft.vertical_column);
+      // Keep logical-line byte-column targeting, then snap off codepoint/cluster interiors.
+      auto const next = clamp_composer_draft_cursor_to_atomic_boundary(draft, previous_line_cursor(draft.text, draft.cursor, draft.vertical_column));
       if (next == draft.cursor)
         return false;
       clear_yank_tracking(draft);
@@ -830,7 +815,7 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::CursorDown: {
       if (draft.vertical_column == std::string::npos)
         draft.vertical_column = line_column(draft.text, draft.cursor);
-      auto const next = next_line_cursor(draft.text, draft.cursor, draft.vertical_column);
+      auto const next = clamp_composer_draft_cursor_to_atomic_boundary(draft, next_line_cursor(draft.text, draft.cursor, draft.vertical_column));
       if (next == draft.cursor)
         return false;
       clear_yank_tracking(draft);
@@ -863,9 +848,9 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
       auto previous = std::move(draft.undo_stack.back());
       draft.undo_stack.pop_back();
       draft.text = std::move(previous.text);
-      draft.cursor = clamp_composer_draft_cursor(draft.text, previous.cursor);
       draft.paste_entries = std::move(previous.paste_entries);
       draft.next_paste_id = previous.next_paste_id;
+      draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, previous.cursor);
       clear_nonvertical_tracking(draft);
       return true;
     }
@@ -876,9 +861,9 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
       auto next = std::move(draft.redo_stack.back());
       draft.redo_stack.pop_back();
       draft.text = std::move(next.text);
-      draft.cursor = clamp_composer_draft_cursor(draft.text, next.cursor);
       draft.paste_entries = std::move(next.paste_entries);
       draft.next_paste_id = next.next_paste_id;
+      draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, next.cursor);
       clear_nonvertical_tracking(draft);
       return true;
     }

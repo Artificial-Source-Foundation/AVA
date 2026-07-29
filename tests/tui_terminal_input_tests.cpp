@@ -988,6 +988,147 @@ void run_tui_terminal_input_tests_part_2()
   expect(kill_cap_ring.kill_ring.size() == 16 && kill_cap_ring.kill_ring.front() == "w19" && kill_cap_ring.kill_ring.back() == "w4",
          "tui draft editor caps the kill ring at 16 entries");
 
+  // Cluster-invariant word movement/deletion and vertical snap regressions.
+  auto const nbsp = std::string("\xC2\xA0");
+  auto const ideographic_space = std::string("\xE3\x80\x80");
+  ava::tui::ComposerDraftState word_cluster_draft;
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("pre ").size() + family_zwj.size() + 1 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("pre ").size() &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(word_cluster_draft, word_cluster_draft.cursor) == word_cluster_draft.cursor,
+         "tui draft editor word-left treats a ZWJ family cluster as one word unit");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_cluster_draft.cursor == std::string("pre ").size() + family_zwj.size() &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(word_cluster_draft, word_cluster_draft.cursor) == word_cluster_draft.cursor,
+         "tui draft editor word-right advances over a whole ZWJ family cluster");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             word_cluster_draft.text == std::string("pre ") + family_zwj + " " && word_cluster_draft.kill_buffer == "post" &&
+             word_cluster_draft.text.find(family_zwj) != std::string::npos,
+         "tui draft editor word-backspace deletes the trailing word without splitting a preceding ZWJ family");
+  // Break the kill sequence so the next word-delete is observed independently.
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorLineStart) &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorLineEnd),
+         "tui draft editor can reposition after the first word-delete");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordBackward) && word_cluster_draft.text == "pre " &&
+             word_cluster_draft.kill_buffer == family_zwj + " " && word_cluster_draft.text.find(zwj) == std::string::npos &&
+             word_cluster_draft.kill_buffer.find(man) != std::string::npos && word_cluster_draft.kill_buffer.find(woman) != std::string::npos &&
+             word_cluster_draft.kill_buffer.find(girl) != std::string::npos,
+         "tui draft editor word-backspace removes a ZWJ family cluster intact with no orphan joiners");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post", std::string("pre ").size());
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordForward) && word_cluster_draft.text == "pre  post" &&
+             word_cluster_draft.kill_buffer == family_zwj && word_cluster_draft.kill_buffer.find(zwj) != std::string::npos &&
+             word_cluster_draft.text.find(zwj) == std::string::npos,
+         "tui draft editor forward word-delete removes a ZWJ family cluster as one unit");
+
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("aa") + e_combining + "bb");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) && word_cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_cluster_draft.cursor == word_cluster_draft.text.size(),
+         "tui draft editor word movement keeps base+combining clusters inside one word run");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("x ") + e_combining + " y");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("x ").size() + e_combining.size() + 1 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("x ").size() &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordForward) && word_cluster_draft.text == "x  y" &&
+             word_cluster_draft.kill_buffer == e_combining && word_cluster_draft.kill_buffer.find(combining_acute) != std::string::npos,
+         "tui draft editor word-delete removes base+combining as one unit with no orphan mark");
+
+  // Uneven logical lines: sticky byte column intersects a multibyte codepoint and a cluster.
+  auto const cjk = std::string("\xE7\x95\x8C");
+  auto const vertical_text = std::string("abcdef") + "\n" + cjk + e_combining + family_zwj;
+  ava::tui::ComposerDraftState vertical_draft;
+  ava::tui::reset_composer_draft(vertical_draft, vertical_text, 4);  // column 4 on "abcdef"
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorDown), "tui draft editor can move down onto an uneven unicode line");
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor,
+         "tui draft editor vertical movement never leaves the cursor inside a compact cluster");
+  auto const down_cursor = vertical_draft.cursor;
+  // Target byte column 4 lands inside/after the leading CJK cell on the second line; snap must be a cluster edge.
+  expect(down_cursor == 0 + std::string("abcdef\n").size() || down_cursor == std::string("abcdef\n").size() + cjk.size() ||
+             down_cursor == std::string("abcdef\n").size() + cjk.size() + e_combining.size() || down_cursor == vertical_text.size(),
+         "tui draft editor snaps vertical targets to whole CJK/combining/ZWJ cluster boundaries");
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorUp) && vertical_draft.cursor == 4,
+         "tui draft editor preserves sticky byte-column policy when returning to the previous logical line");
+
+  // Shift-selection simulation: anchor + CursorDown must yield whole-cluster bounds (no partial substrings).
+  ava::tui::reset_composer_draft(vertical_draft, vertical_text, 1);
+  auto const selection_anchor = vertical_draft.cursor;
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorDown),
+         "tui draft editor extends vertically for selection simulation");
+  auto const selection_start = std::min(selection_anchor, vertical_draft.cursor);
+  auto const selection_end = std::max(selection_anchor, vertical_draft.cursor);
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, selection_start) == selection_start &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, selection_end) == selection_end,
+         "tui draft editor vertical selection bounds stay on compact cluster boundaries");
+  {
+    std::size_t walk = selection_start;
+    bool selection_cluster_aligned = selection_start < selection_end;
+    while (walk < selection_end)
+    {
+      auto const step = std::max<std::size_t>(ava::tui::detail::terminal_text_cluster_bytes(vertical_draft.text, walk), 1);
+      if (walk + step > selection_end)
+      {
+        selection_cluster_aligned = false;
+        break;
+      }
+      walk += step;
+    }
+    expect(selection_cluster_aligned && walk == selection_end, "tui draft editor vertical selection spans whole compact clusters only");
+    auto const selected = vertical_draft.text.substr(selection_start, selection_end - selection_start);
+    expect(selected.find(zwj) == std::string::npos || selected.find(family_zwj) != std::string::npos,
+           "tui draft editor vertical selection never keeps a ZWJ without its full family cluster");
+  }
+
+  // reset/replace with an interior cluster offset must snap before any edit observes the cursor.
+  ava::tui::reset_composer_draft(vertical_draft, std::string("x") + family_zwj + "y", 1 + 3);
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor &&
+             (vertical_draft.cursor == 1 || vertical_draft.cursor == 1 + family_zwj.size()),
+         "tui draft editor reset snaps arbitrary offsets out of ZWJ cluster interiors");
+  expect(ava::tui::replace_composer_draft(vertical_draft, std::string("x") + e_combining + "y", 2) &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor &&
+             (vertical_draft.cursor == 1 || vertical_draft.cursor == 1 + e_combining.size()),
+         "tui draft editor replace snaps arbitrary offsets out of base+combining interiors");
+
+  // Range replace / selection-style deletion must snap stale interior bounds and never emit partial clusters.
+  ava::tui::ComposerDraftState range_draft;
+  ava::tui::reset_composer_draft(range_draft, std::string("a") + family_zwj + "b");
+  expect(ava::tui::replace_composer_draft_range(range_draft, 1 + 2, 1 + family_zwj.size(), "") && range_draft.text == "ab" &&
+             range_draft.text.find(zwj) == std::string::npos && range_draft.cursor == 1,
+         "tui draft editor range replace snaps an interior start through the ZWJ cluster end without splitting");
+  ava::tui::reset_composer_draft(range_draft, std::string("a") + e_combining + "b");
+  expect(ava::tui::replace_composer_draft_range(range_draft, 2, 1 + e_combining.size(), "X") && range_draft.text == "aXb" &&
+             range_draft.text.find(combining_acute) == std::string::npos,
+         "tui draft editor range replace snaps a mark-interior start so selection deletion keeps base+combining atomic");
+
+  // Unicode space codepoints break typing undo coalescing like ASCII whitespace.
+  ava::tui::ComposerDraftState unicode_space_undo;
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, "ab") && unicode_space_undo.undo_stack.size() == 1,
+         "tui draft editor records one undo group before a unicode space boundary");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, nbsp) && unicode_space_undo.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups on NBSP");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, "cd") && unicode_space_undo.undo_stack.size() == 3,
+         "tui draft editor starts a new typing undo group after NBSP");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, ideographic_space) && unicode_space_undo.undo_stack.size() == 4 &&
+             ava::tui::insert_composer_draft_text(unicode_space_undo, "ef") && unicode_space_undo.undo_stack.size() == 5,
+         "tui draft editor breaks typing undo groups on ideographic space");
+  expect(ava::tui::apply_composer_draft_action(unicode_space_undo, ava::tui::TuiAction::Undo) &&
+             unicode_space_undo.text == std::string("ab") + nbsp + "cd" + ideographic_space &&
+             ava::tui::apply_composer_draft_action(unicode_space_undo, ava::tui::TuiAction::Redo) &&
+             unicode_space_undo.text == std::string("ab") + nbsp + "cd" + ideographic_space + "ef",
+         "tui draft editor undo/redo across unicode space boundaries remains exact");
+
+  // Mid-action stale interior cursor is corrected before word deletion.
+  ava::tui::ComposerDraftState stale_cursor_draft;
+  ava::tui::reset_composer_draft(stale_cursor_draft, std::string("a") + family_zwj + "b");
+  stale_cursor_draft.cursor = 1 + 4;  // deliberately inside the family cluster
+  expect(ava::tui::apply_composer_draft_action(stale_cursor_draft, ava::tui::TuiAction::DeleteWordForward) && stale_cursor_draft.text == "a" &&
+             stale_cursor_draft.text.find(zwj) == std::string::npos && stale_cursor_draft.kill_buffer.find(zwj) != std::string::npos &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(stale_cursor_draft, stale_cursor_draft.cursor) == stale_cursor_draft.cursor,
+         "tui draft editor corrects interior cluster cursors before word deletion and leaves no orphan ZWJ");
+
   auto const split_empty = ava::tui::split_lines("");
   expect(split_empty.size() == 1 && split_empty.front().empty(), "tui split keeps empty input as one line");
   auto const split_trailing = ava::tui::split_lines("a\n");

@@ -519,7 +519,7 @@ ava::core::Result<std::shared_ptr<SessionTitleCoordinator>> title_coordinator_fo
 } // namespace
 
 //static
-ava::core::Result<Session> Session::construct_runtime_session(
+ava::core::Result<Session> Session::construct(
     RuntimeOpenContext const& context, runtime::SessionLifecycleRequest const& request,
     ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
     bool load_existing_entries, bool should_append_session_start, bool append_initial_session_name,
@@ -698,7 +698,7 @@ ava::core::Result<Session> Session::construct_runtime_session(
   // directory is read from HOME (passwd fallback) here, at startup, so that
   // later command planning reuses the cached value (ava::core::cached_trusted_account)
   // instead of re-reading the sensitive HOME environment variable after the AI
-  // or user shell commands may have run. open_runtime_session is invoked for
+  // or user shell commands may have run. open is invoked for
   // every session (interactive, print, rpc, ACP, and forked/subagent sessions),
   // so the cache check keeps the actual HOME read to the very first call and
   // lets later sessions reuse the frozen result without tripping the freeze
@@ -776,7 +776,7 @@ ava::core::Result<Session> Session::construct_runtime_session(
 }
 
 //static
-ava::core::Result<Session> Session::open_runtime_session(runtime::RuntimeOpenContext const& context, runtime::SessionLifecycleRequest const& request)
+ava::core::Result<Session> Session::open(runtime::RuntimeOpenContext const& context, runtime::SessionLifecycleRequest const& request)
 {
   if (request.requested_session_id && request.continue_last_session)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
@@ -906,7 +906,7 @@ ava::core::Result<Session> Session::open_runtime_session(runtime::RuntimeOpenCon
       return std::unexpected(std::move(staged_recovery.error()));
   }
 
-  auto session = construct_runtime_session(context, request, *store, lease, created, load_existing_entries, created && should_append_session_start,
+  auto session = construct(context, request, *store, lease, created, load_existing_entries, created && should_append_session_start,
                                            request.initial_session_name.has_value() && !request.fork_session_id, context.subagent_delivery_manager,
                                            context.session_title_coordinator);
   if (!session && created_from_fork)
@@ -919,7 +919,7 @@ ava::core::Result<Session> Session::open_runtime_session(runtime::RuntimeOpenCon
 }
 
 //static
-ava::core::Result<Session> Session::open_owned_runtime_session(
+ava::core::Result<Session> Session::open_owned(
     RuntimeOpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
 {
   if (store.is_ephemeral())
@@ -934,11 +934,11 @@ ava::core::Result<Session> Session::open_owned_runtime_session(
   auto staged_recovery = store.recover_incomplete_assistant_output_suffix(lease, session_read_limits);
   if (!staged_recovery)
     return std::unexpected(std::move(staged_recovery.error()));
-  return construct_runtime_session(context, {}, store, lease, created, true, false, false, context.subagent_delivery_manager,
+  return construct(context, {}, store, lease, created, true, false, false, context.subagent_delivery_manager,
                                    context.session_title_coordinator);
 }
 
-Session Session::create_detached_session(
+Session Session::create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const
 {
   SessionResources session_resources{.lease = std::move(lease),

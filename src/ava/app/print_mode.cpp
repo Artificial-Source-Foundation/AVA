@@ -232,7 +232,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     return 2;
   }
 
-  auto session = runtime::Session::open_runtime_session(options.open_context, options.lifecycle_request);
+  auto session = runtime::Session::open(options.open_context, options.lifecycle_request);
   if (!session)
   {
     err << terminal_output_text(session.error().format(), sanitize_stderr) << '\n';

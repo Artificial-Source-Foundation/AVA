@@ -126,7 +126,7 @@ void test_app_runtime_project_trust_malformed_diagnostics()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "runtime opens with malformed project trust file fail-closed");
   if (!session)
     return;
@@ -191,7 +191,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "runtime opens with enabled plugin static resources");
   if (!session)
     return;
@@ -323,7 +323,7 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "runtime opens with untrusted project plugin resources skipped");
   if (!session)
     return;
@@ -390,7 +390,7 @@ void test_app_runtime_enabled_plugin_resource_failures_are_context_visible()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "runtime opens with failed enabled plugin static resources tracked");
   if (!session)
     return;
@@ -440,7 +440,7 @@ void test_app_runtime_plugin_install_remove_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "plugin install/remove command test opens runtime session");
   if (!session)
     return;
@@ -585,7 +585,7 @@ void test_app_context_reports_lsp_config_load_errors()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "runtime opens even when configured LSP provider would fail to load");
   if (!session)
     return;

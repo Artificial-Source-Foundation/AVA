@@ -273,7 +273,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = session.create_detached_session(std::move(lease), *authority, nullptr);
+  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
   auto safe_options = detached_run_options(options);
   auto const id = session.store.session_id();
   CapsuleGeneration published_generation = 0;
@@ -335,7 +335,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = session.create_detached_session(std::move(lease), *authority, nullptr);
+  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
   auto retained_options = retained->run_options;
   {
     std::lock_guard lock(mutex_);
@@ -461,7 +461,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
         return std::unexpected(std::move(duplicated.error()));
       lease = std::move(*duplicated);
     }
-    return session_r->create_detached_session(std::move(lease), *authority, shared_from_this());
+    return session_r->create_detached(std::move(lease), *authority, shared_from_this());
   }();
   if (!attached_result)
     return std::unexpected(std::move(attached_result.error()));

@@ -54,7 +54,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC prompt test opens runtime session");
   if (!session)
     return;
@@ -105,7 +105,7 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
   open_context.offline = true;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC offline test opens runtime session");
   if (!session)
     return;
@@ -154,7 +154,7 @@ void test_app_rpc_prompt_imports_image_attachments()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC image prompt test opens runtime session");
   if (!session)
     return;
@@ -211,7 +211,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC inline image upload prompt test opens runtime session");
   if (!session)
     return;
@@ -269,7 +269,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC inline image MIME mismatch test opens runtime session");
   if (!session)
     return;
@@ -305,7 +305,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC streaming prompt test opens runtime session");
   if (!session)
     return;
@@ -351,7 +351,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC retry-cancel prompt test opens runtime session");
   if (!session)
     return;
@@ -403,7 +403,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC idle-cancel prompt test opens runtime session");
   if (!session)
     return;
@@ -460,7 +460,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC OAuth refresh test opens runtime session");
   if (!session)
     return;

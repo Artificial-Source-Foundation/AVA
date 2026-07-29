@@ -126,7 +126,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC cancel test opens runtime session");
   if (!session)
     return;
@@ -183,7 +183,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC active cancel test opens runtime session");
   if (!session)
     return;
@@ -236,7 +236,7 @@ void test_app_rpc_steer_applies_before_next_provider_request()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC steer test opens runtime session");
   if (!session)
     return;
@@ -293,7 +293,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC follow_up test opens runtime session");
   if (!session)
     return;
@@ -355,7 +355,7 @@ void test_app_rpc_prompt_start_failure_cleans_queued_messages()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC prompt start failure test opens runtime session");
   if (!session)
     return;
@@ -409,7 +409,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC follow-up steer test opens runtime session");
   if (!session)
     return;
@@ -475,7 +475,7 @@ void test_app_rpc_queue_limit_rejects_new_items()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC queue limit test opens runtime session");
   if (!session)
     return;
@@ -531,7 +531,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC EOF queue cleanup test opens runtime session");
   if (!session)
     return;
@@ -585,7 +585,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC queued cancel test opens runtime session");
   if (!session)
     return;
@@ -651,7 +651,7 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct queue rejection test opens runtime session");
   if (!session)
     return;
@@ -702,7 +702,7 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC duplicate id test opens runtime session");
   if (!session)
     return;
@@ -759,8 +759,8 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
-  auto other = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
+  auto other = ava::app::runtime::Session::open(open_context);
   expect(session.has_value() && other.has_value(), "RPC active reject test opens runtime sessions");
   if (!session || !other)
     return;

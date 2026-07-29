@@ -56,7 +56,7 @@ ava::core::Result<runtime::Session> create_runtime_session_at(runtime::RuntimeOp
 {
   context.workspace_dir = workspace_root;
   context.current_dir = current_dir;
-  return runtime::Session::open_runtime_session(context);
+  return runtime::Session::open(context);
 }
 
 ava::core::Result<runtime::Session> open_runtime_session_at(runtime::RuntimeOpenContext context, std::filesystem::path const& workspace_root,
@@ -64,7 +64,7 @@ ava::core::Result<runtime::Session> open_runtime_session_at(runtime::RuntimeOpen
 {
   context.workspace_dir = workspace_root;
   context.current_dir = current_dir;
-  return runtime::Session::open_runtime_session(context, request);
+  return runtime::Session::open(context, request);
 }
 
 ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context)

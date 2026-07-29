@@ -42,7 +42,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command test opens runtime session");
   if (!session)
     return;
@@ -107,7 +107,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command denial test opens runtime session");
   if (!session)
     return;
@@ -173,7 +173,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command cancellation test opens runtime session");
   if (!session)
     return;
@@ -231,7 +231,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC compact failure test opens runtime session");
   if (!session)
     return;
@@ -276,7 +276,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC compact cancellation test opens runtime session");
   if (!session)
     return;

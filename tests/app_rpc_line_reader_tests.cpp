@@ -233,7 +233,7 @@ void test_app_rpc_unterminated_final_command_executes()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC unterminated final command test opens runtime session");
   if (!session)
     return;
@@ -262,7 +262,7 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC oversized-line recovery test opens runtime session");
   if (!session)
     return;

@@ -513,7 +513,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
   }
 
   auto owned_options = session.replacement_open_context({});
-  auto opened = runtime::Session::open_owned_runtime_session(owned_options, *imported_store, *imported_lease, true);
+  auto opened = runtime::Session::open_owned(owned_options, *imported_store, *imported_lease, true);
   if (!opened)
   {
     auto error = std::move(opened.error());

@@ -140,7 +140,7 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC resolver write failure test opens runtime session");
   if (!session)
     return;
@@ -313,7 +313,7 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC resolver exact-identity test opens runtime session");
   if (!session)
     return;
@@ -386,7 +386,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC permission policy auto-allow test opens runtime session");
   if (!session)
     return;
@@ -443,7 +443,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     open_context.workspace_dir = workspace;
     open_context.current_dir = workspace;
     open_context.paths = paths;
-    auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+    auto session = ava::app::runtime::Session::open(open_context);
     expect(session.has_value(), "RPC permission reply test opens runtime session");
     if (!session)
       return;
@@ -511,7 +511,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC permission session grant test opens runtime session");
   if (!session)
     return;
@@ -572,7 +572,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC session grant bounds test opens runtime session");
   if (!session)
     return;
@@ -700,7 +700,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC command one-shot test opens runtime session");
   if (!session)
     return;
@@ -790,7 +790,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC permission diff test opens runtime session");
   if (!session)
     return;
@@ -851,7 +851,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC persistent permission rule test opens runtime session");
   if (!session)
     return;
@@ -932,7 +932,7 @@ void test_app_rpc_question_reply_flow()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC question reply test opens runtime session");
   if (!session)
     return;
@@ -981,7 +981,7 @@ void test_app_rpc_question_reply_selected_option_flow()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC selected question reply test opens runtime session");
   if (!session)
     return;
@@ -1035,7 +1035,7 @@ void test_app_rpc_question_reply_selected_options_flow()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC multi question reply test opens runtime session");
   if (!session)
     return;

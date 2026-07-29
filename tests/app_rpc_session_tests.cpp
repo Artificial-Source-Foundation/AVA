@@ -51,7 +51,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC recovery test opens runtime session");
   if (!session)
     return;
@@ -86,8 +86,8 @@ void test_app_rpc_state_list_sessions_and_open_session()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto first = ava::app::runtime::Session::open_runtime_session(open_context);
-  auto second = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto first = ava::app::runtime::Session::open(open_context);
+  auto second = ava::app::runtime::Session::open(open_context);
   expect(first.has_value() && second.has_value(), "RPC state test opens multiple sessions");
   if (!first || !second)
     return;
@@ -127,7 +127,7 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC job fixture opens runtime session");
   if (!session || !session->subagent_coordinator())
     return;
@@ -252,7 +252,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "replacement-safe current-session RPC test opens runtime session");
   if (!session)
     return;
@@ -314,7 +314,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC session metadata test opens runtime session");
   if (!session)
     return;
@@ -358,8 +358,8 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto parent = ava::app::runtime::Session::open_runtime_session(open_context);
-  auto child = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto parent = ava::app::runtime::Session::open(open_context);
+  auto child = ava::app::runtime::Session::open(open_context);
   expect(parent.has_value() && child.has_value(), "RPC session_tree test opens parent and child sessions");
   if (!parent || !child)
     return;
@@ -425,7 +425,7 @@ void test_app_rpc_session_fork_and_clone_commands()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC session branch test opens runtime session");
   if (!session)
     return;
@@ -495,7 +495,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto source = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto source = ava::app::runtime::Session::open(open_context);
   expect(source.has_value(), "RPC rollback test opens an active source session");
   if (!source)
     return;
@@ -570,7 +570,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto source = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto source = ava::app::runtime::Session::open(open_context);
   expect(source.has_value(), "RPC noncurrent torn branch test opens source runtime");
   if (!source)
     return;
@@ -579,7 +579,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   auto const valid_source_bytes = app_read_binary_file(source_path);
   source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before RPC branch"));
 
-  auto current = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto current = ava::app::runtime::Session::open(open_context);
   expect(current.has_value(), "RPC noncurrent torn branch test opens a different current runtime");
   if (!current)
     return;
@@ -616,7 +616,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(open_context);
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC summarize_branch test opens runtime session");
   if (!session)
     return;

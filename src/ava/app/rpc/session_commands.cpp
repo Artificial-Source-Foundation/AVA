@@ -515,7 +515,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, branched.error()));
 
     auto owned_options = session_w->replacement_open_context(context.open_context);
-    auto opened = ava::app::runtime::Session::open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
+    auto opened = ava::app::runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
     if (!opened)
     {
       auto error = std::move(opened.error());

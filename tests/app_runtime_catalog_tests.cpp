@@ -47,7 +47,7 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open(options);
   expect(session.has_value(), "application catalog cache test opens a runtime session");
   if (!session)
     return;
@@ -135,7 +135,7 @@ void test_application_catalog_coordinator_serializes_refresh_and_snapshot()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open(options);
   expect(session.has_value(), "application catalog coordinator test opens a runtime session");
   if (!session)
     return;
@@ -240,7 +240,7 @@ void test_application_catalog_current_session_incremental_refresh()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(options);
+  auto session = ava::app::runtime::Session::open(options);
   auto other = ava::session::SessionStore::create(workspace, paths.sessions_dir);
   expect(session.has_value() && other.has_value(), "incremental catalog refresh creates current and comparison sessions");
   if (!session || !other)

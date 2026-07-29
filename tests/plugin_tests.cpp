@@ -269,7 +269,7 @@ ava::app::runtime::Session plugin_command_test_session(ava::config::XdgPaths con
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;
-  auto session = ava::app::runtime::Session::open_runtime_session(context, {.sessionless = true,
+  auto session = ava::app::runtime::Session::open(context, {.sessionless = true,
                                                                             .requested_session_id = std::nullopt,
                                                                             .fork_session_id = std::nullopt,
                                                                             .initial_session_name = std::nullopt,

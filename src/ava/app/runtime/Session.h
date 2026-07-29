@@ -195,7 +195,7 @@ class Session : protected Session_aggregate_base
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
 
-  static ava::core::Result<Session> construct_runtime_session(
+  static ava::core::Result<Session> construct(
       RuntimeOpenContext const& context, SessionLifecycleRequest const& request,
       ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
       bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
@@ -207,14 +207,14 @@ class Session : protected Session_aggregate_base
   //
   // An empty request creates a persistent session. Returns failure when selectors
   // conflict or the selected session cannot be created, recovered, or opened.
-  static ava::core::Result<Session> open_runtime_session(RuntimeOpenContext const& context, SessionLifecycleRequest const& request = {});
+  static ava::core::Result<Session> open(RuntimeOpenContext const& context, SessionLifecycleRequest const& request = {});
 
   // Consume an already-owned persistent store and its lease without reopening by path.
   // Inputs remain intact on failure so callers can roll back by stable identity.
-  static ava::core::Result<Session> open_owned_runtime_session(
+  static ava::core::Result<Session> open_owned(
       RuntimeOpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
 
-  Session create_detached_session(
+  Session create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
 
   // Accessors.

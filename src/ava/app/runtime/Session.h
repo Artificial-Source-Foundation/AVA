@@ -3,9 +3,10 @@
 #include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
 #include "FreshnessSourceMetadata.h"
+#include "OpenContext.h"
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
-#include "OpenContext.h"
+#include "SessionLifecycleRequest.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
@@ -229,10 +230,17 @@ class Session : protected Session_aggregate_base
 
   // Open a session using `request`, inheriting active state from `current` and
   // frontend-only policy from `base_context`.
-  ava::core::Result<Session> open_similar(runtime::OpenContext const& base_context, runtime::SessionLifecycleRequest request) const;
+  ava::core::Result<Session> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
 
   Session create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
+
+  ava::core::Result<Session> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
+  {
+    SessionLifecycleRequest request;
+    request.requested_session_id = std::string(requested_session_id);
+    return open_similar(base_context, std::move(request));
+  }
 
   // Return the AVA-owned filesystem roots that command planning and model
   // ToolContexts are pre-authorized to access.
@@ -385,7 +393,7 @@ class Session : protected Session_aggregate_base
   // `base_context`, including model pinning and exact-ID behavior, is retained.
   // An ephemeral session's AnchorSet is not inherited because its temporary
   // spill root cannot authorize a new persistent or ephemeral store.
-  [[nodiscard]] OpenContext replacement_open_context(runtime::OpenContext const& base_context) const;
+  [[nodiscard]] OpenContext replacement_open_context(OpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_metadata(ava::session::SessionMetadataUpdate update);

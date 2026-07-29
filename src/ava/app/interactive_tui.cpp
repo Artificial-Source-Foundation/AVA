@@ -138,7 +138,7 @@ int run_tui(ShellState state)
       application_catalog.retarget_session(state.session.store.session_id());
       return state_snapshot(status_prefix + target_session_id + " (already open)");
     }
-    auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_context(), target_session_id);
+    auto opened = state.session.open_requested(runtime_open_context(), target_session_id);
     if (!opened)
       return std::unexpected(std::move(opened.error()));
     if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
@@ -550,7 +550,7 @@ int run_tui(ShellState state)
           application_catalog.retarget_session(state.session.store.session_id());
           return state_snapshot("session already open");
         }
-        auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_context(), value);
+        auto opened = state.session.open_requested(runtime_open_context(), value);
         if (!opened)
           return std::unexpected(std::move(opened.error()));
         if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)

@@ -611,8 +611,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return active_rejected;
 
     session_ts::wat session_w(session);
-    // FIXME: create_new_session should become a member function of Session.
-    auto created = create_new_session(*session_w, context.open_context);
+
+    auto created = session_w->create_similar(context.open_context);
     if (!created)
       return handled(write_error(context.output, command.id, created.error()));
     if (auto replaced = session_w->replace_with(std::move(*created)); !replaced)
@@ -632,8 +632,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return active_rejected;
 
     session_ts::wat session_w(session);
-    // FIXME: open_requested_session should become a member function of Session.
-    auto opened = open_requested_session(*session_w, context.open_context, *command.session_id);
+    auto opened = session_w->open_requested(context.open_context, *command.session_id);
     if (!opened)
       return handled(write_error(context.output, command.id, opened.error()));
     if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)

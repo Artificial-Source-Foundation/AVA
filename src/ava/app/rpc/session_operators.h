@@ -26,7 +26,6 @@ struct ProviderHandle
                                                                                    runtime::RunOptions options, ava::http::Transport& auth_transport,
                                                                                    std::string_view purpose);
 
-[[nodiscard]] ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenContext const& base_context);
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
                                                                            ava::provider::Provider const& injected_provider);

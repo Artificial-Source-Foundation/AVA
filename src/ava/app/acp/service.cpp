@@ -55,11 +55,11 @@ RequestResult core_error(ava::core::Error const& error, int code = -32603)
 AcpSessionOptions session_options(AgentServiceOptions const& options, std::weak_ptr<SessionUpdateGateway> updates,
                                   std::weak_ptr<ClientRequestGateway> client_requests)
 {
-  auto open_options = options.open_options;
-  open_options.paths = options.paths;
+  auto open_context = options.open_context;
+  open_context.paths = options.paths;
   return AcpSessionOptions{.launch_root = options.launch_root,
                            .paths = options.paths,
-                           .open_options = std::move(open_options),
+                           .open_context = std::move(open_context),
                            .run_options = options.run_options,
                            .provider_bundle_factory = options.provider_bundle_factory,
                            .client_capabilities = nullptr,
@@ -264,9 +264,9 @@ AgentServiceOptions default_options(std::string agent_version)
 
 ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptions options)
 {
-  if (options.open_options.default_model_override)
+  if (options.open_context.default_model_override)
   {
-    auto const& model = *options.open_options.default_model_override;
+    auto const& model = *options.open_context.default_model_override;
     if (model.provider_id.empty() || model.model_id.empty())
     {
       auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ACP startup model override is incomplete");
@@ -275,7 +275,7 @@ ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptio
     }
     if (auto available = validate_pinned_provider(options, model); !available)
       return std::unexpected(std::move(available.error()));
-    options.open_options.pin_model_override = true;
+    options.open_context.pin_model_override = true;
     return options;
   }
 
@@ -299,8 +299,8 @@ ava::core::Result<AgentServiceOptions> pin_agent_service_model(AgentServiceOptio
   }
   if (auto available = validate_pinned_provider(options, *model); !available)
     return std::unexpected(std::move(available.error()));
-  options.open_options.default_model_override = std::move(*model);
-  options.open_options.pin_model_override = true;
+  options.open_context.default_model_override = std::move(*model);
+  options.open_context.pin_model_override = true;
   return options;
 }
 
@@ -328,8 +328,8 @@ AgentService::AgentService(AgentServiceOptions options) : AgentService(pin_optio
 
 AgentService::AgentService(PinnedOptions pinned)
     : agent_version_(pinned.options.agent_version),
-      image_prompt_capability_(!pinned.error && pinned.options.open_options.default_model_override &&
-                               model_accepts_images(*pinned.options.open_options.default_model_override)),
+      image_prompt_capability_(!pinned.error && pinned.options.open_context.default_model_override &&
+                               model_accepts_images(*pinned.options.open_context.default_model_override)),
       startup_error_(std::move(pinned.error)),
       updates_(std::make_shared<SessionUpdateGateway>()),
       client_requests_(std::make_shared<ClientRequestGateway>()),

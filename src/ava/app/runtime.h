@@ -1,7 +1,8 @@
 #pragma once
-#include "runtime/OpenOptions.h"
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
+#include "runtime/RuntimeOpenContext.h"
+#include "runtime/SessionLifecycleRequest.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"
 #include "ava/app/session_run_controller.h"
@@ -42,17 +43,23 @@ struct PreparedCompactionContext
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions const& options);
+// Open a runtime session using stable `context` and the one-shot lifecycle
+// `request`.
+//
+// An empty request creates a persistent session. Returns failure when selectors
+// conflict or the selected session cannot be created, recovered, or opened.
+[[nodiscard]] ava::core::Result<runtime::Session> open_runtime_session(runtime::RuntimeOpenContext const& context,
+                                                                       runtime::SessionLifecycleRequest const& request = {});
 
 // Consume an already-owned persistent store and its lease without reopening by path.
 // Inputs remain intact on failure so callers can roll back by stable identity.
-[[nodiscard]] ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
+[[nodiscard]] ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::RuntimeOpenContext const& context, ava::session::SessionStore& store,
                                                                              ava::session::SessionLease& lease, bool created);
 
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                               std::string_view model_id);
+                                                                              std::string_view model_id);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::http::Transport& transport,

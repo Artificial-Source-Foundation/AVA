@@ -186,11 +186,11 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC prompt publication gate test opens runtime session");
   if (!session)
     return;
@@ -206,7 +206,7 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
   input_buffer.push("{\"id\":\"same\",\"type\":\"prompt\",\"message\":\"first\"}\n");
@@ -233,11 +233,11 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   auto const outside_path = root / "outside.txt";
   std::filesystem::create_directories(workspace);
   write_app_test_file(outside_path, "parent follow-up publication");
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC parent/follow-up publication test opens runtime session");
   if (!session)
     return;
@@ -254,7 +254,7 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
@@ -287,11 +287,11 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC blocked-publication EOF test opens runtime session");
   if (!session)
     return;
@@ -308,7 +308,7 @@ void test_app_rpc_eof_during_blocked_parent_publication_skips_follow_up()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread(
-      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, input, out); });
+      [&] { result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, transport, runtime_options, input, out); });
 
   input_buffer.push("{\"id\":\"parent\",\"type\":\"prompt\",\"message\":\"parent\"}\n");
   bool const parent_requested = transport.wait_for_request(std::chrono::seconds(2));
@@ -346,11 +346,11 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
-    ava::app::runtime::OpenOptions open_options;
-    open_options.workspace_dir = workspace;
-    open_options.current_dir = workspace;
-    open_options.paths = paths;
-    auto session = ava::app::open_runtime_session(open_options);
+    ava::app::runtime::RuntimeOpenContext open_context;
+    open_context.workspace_dir = workspace;
+    open_context.current_dir = workspace;
+    open_context.paths = paths;
+    auto session = ava::app::open_runtime_session(open_context);
     expect(session.has_value(), "RPC direct publication gate test opens runtime session");
     if (session)
     {
@@ -368,7 +368,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       ava::core::VoidResult result;
       ava::app::runtime::session_ts unlocked_session(std::move(*session));
       std::jthread rpc_thread([&] {
-        result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+        result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
       });
       input_buffer.push("{\"id\":\"direct\",\"type\":\"run_bash\",\"command\":\"printf direct\"}\n");
       bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
@@ -389,11 +389,11 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
     auto const workspace = root / "workspace";
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
-    ava::app::runtime::OpenOptions open_options;
-    open_options.workspace_dir = workspace;
-    open_options.current_dir = workspace;
-    open_options.paths = paths;
-    auto session = ava::app::open_runtime_session(open_options);
+    ava::app::runtime::RuntimeOpenContext open_context;
+    open_context.workspace_dir = workspace;
+    open_context.current_dir = workspace;
+    open_context.paths = paths;
+    auto session = ava::app::open_runtime_session(open_context);
     expect(session.has_value(), "RPC compaction publication gate test opens runtime session");
     if (session)
     {
@@ -409,7 +409,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       ava::core::VoidResult result;
       ava::app::runtime::session_ts unlocked_session(std::move(*session));
       std::jthread rpc_thread([&] {
-        result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+        result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
       });
       input_buffer.push("{\"id\":\"compact\",\"type\":\"compact\"}\n");
       bool const terminal_observable = output_buffer.wait_until_terminal(std::chrono::seconds(2));
@@ -433,11 +433,11 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC output-failure wake test opens runtime session");
   if (!session)
     return;
@@ -453,7 +453,7 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, transport, runtime_options, in, out,
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, transport, runtime_options, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"fail output\"}\n");
@@ -476,10 +476,10 @@ void test_app_rpc_mode_forwards_nonstdin_wake()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::app::RpcModeOptions options;
-  options.open_options.workspace_dir = workspace;
-  options.open_options.current_dir = workspace;
-  options.open_options.paths = app_test_paths(root);
-  options.open_options.offline = true;
+  options.open_context.workspace_dir = workspace;
+  options.open_context.current_dir = workspace;
+  options.open_context.paths = app_test_paths(root);
+  options.open_context.offline = true;
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   std::ostringstream out;

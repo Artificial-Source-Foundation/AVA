@@ -8,8 +8,8 @@
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/OpenOptions.h"
 #include "ava/app/runtime/RunOptions.h"
+#include "ava/app/runtime/RuntimeOpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_model.h"
 #include "ava/agent/message_builder.h"
@@ -162,7 +162,7 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -316,11 +316,11 @@ void test_app_runtime_model_switch_persists_and_reopens()
     })JSON";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "runtime model switch test opens runtime session");
   if (!session)
     return;
@@ -360,17 +360,28 @@ void test_app_runtime_model_switch_persists_and_reopens()
           R"JSON({"previous_provider":"anthropic","previous_model":"claude-test","provider":"anthropic","model":"claude-test","display_name":"Claude Test","family":"claude-test","api_family":"anthropic_messages","input_modalities":["text"],"output_modalities":["text"],"reasoning_levels":[],"compatibility_quirks":["test_quirk","\uD83D\uDE00"],"context_window_tokens":999,"max_output_tokens":123,"supports_tools":false,"supports_streaming":true,"supports_reasoning":false,"reports_usage":true})JSON"});
   expect(appended_escaped_model_change.has_value(), "runtime model switch test seeds escaped unicode metadata");
 
-  ava::app::runtime::OpenOptions reopen_options = open_options;
-  reopen_options.requested_session_id = session_id;
+  ava::app::runtime::RuntimeOpenContext reopen_context = open_context;
   std::error_code remove_error;
   std::filesystem::remove(paths.models_file, remove_error);
-  auto same_process_contested = ava::app::open_runtime_session(reopen_options);
+  auto same_process_contested = ava::app::open_runtime_session(reopen_context, {.sessionless = false,
+                                                                                .requested_session_id = session_id,
+                                                                                .fork_session_id = std::nullopt,
+                                                                                .initial_session_name = std::nullopt,
+                                                                                .continue_last_session = false,
+                                                                                .initial_reasoning_level = std::nullopt,
+                                                                                .expected_original_cwd = std::nullopt});
   expect(!same_process_contested && same_process_contested.error().message().find("already owned") != std::string::npos,
          "protocol-neutral runtime ownership excludes a second same-process mode");
   pid_t const contender = fork();
   if (contender == 0)
   {
-    auto contested = ava::app::open_runtime_session(reopen_options);
+    auto contested = ava::app::open_runtime_session(reopen_context, {.sessionless = false,
+                                                                     .requested_session_id = session_id,
+                                                                     .fork_session_id = std::nullopt,
+                                                                     .initial_session_name = std::nullopt,
+                                                                     .continue_last_session = false,
+                                                                     .initial_reasoning_level = std::nullopt,
+                                                                     .expected_original_cwd = std::nullopt});
     _exit(!contested && contested.error().message().find("already owned") != std::string::npos ? 0 : 1);
   }
   int contender_status = 0;
@@ -379,7 +390,13 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(contender > 0 && WIFEXITED(contender_status) && WEXITSTATUS(contender_status) == 0,
          "TUI/print/RPC-style runtime owners contend on the same cross-process session lease");
   session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "runtime owner released for reopen test"));
-  auto reopened = ava::app::open_runtime_session(reopen_options);
+  auto reopened = ava::app::open_runtime_session(reopen_context, {.sessionless = false,
+                                                                  .requested_session_id = session_id,
+                                                                  .fork_session_id = std::nullopt,
+                                                                  .initial_session_name = std::nullopt,
+                                                                  .continue_last_session = false,
+                                                                  .initial_reasoning_level = std::nullopt,
+                                                                  .expected_original_cwd = std::nullopt});
   expect(reopened.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   expect(reopened && reopened->model().provider_id == "anthropic" && reopened->model().model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
@@ -398,7 +415,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
     std::ostringstream out;
     auto result =
-        ava::app::run_rpc_loop(unlocked_reopened, reopen_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+        ava::app::run_rpc_loop(unlocked_reopened, reopen_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
     auto const jsonl = out.str();
     auto const restored_position = jsonl.find("\"model\":\"claude-test\"");
     expect(result.has_value() && restored_position != std::string::npos, "RPC list_models includes restored removed current model");
@@ -459,11 +476,11 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     })JSON";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "runtime model switch compatibility test opens runtime session");
   if (!session)
     return;
@@ -473,13 +490,13 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     bool const supports_images = std::ranges::find(session->model().input_modalities, "image") != session->model().input_modalities.end();
     return physical
                ? ava::agent::build_provider_messages_from_entries(
-                     *physical,
-                     ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = session->model().provider_id,
-                                                                                               .model_id = session->model().model_id,
-                                                                                               .api_family = session->model().api_family,
-                                                                                               .reasoning_format = session->model().reasoning_format,
-                                                                                               .supports_tools = session->model().supports_tools.value_or(false),
-                                                                                               .supports_images = supports_images}})
+                     *physical, ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = session->model().provider_id,
+                                                                                                          .model_id = session->model().model_id,
+                                                                                                          .api_family = session->model().api_family,
+                                                                                                          .reasoning_format = session->model().reasoning_format,
+                                                                                                          .supports_tools =
+                                                                                                              session->model().supports_tools.value_or(false),
+                                                                                                          .supports_images = supports_images}})
                : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(std::move(physical.error())));
   };
 
@@ -698,27 +715,24 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     })JSON";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "runtime reasoning test opens runtime session");
   if (!session)
     return;
   auto const session_id = session->store.session_id();
 
-  auto selected =
-      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
+  auto selected = session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
   expect(selected.has_value() && *selected && session->reasoning() && session->reasoning()->level == "low",
          "runtime reasoning selection validates, normalizes, and updates state");
 
-  auto duplicate =
-      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+  auto duplicate = session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
   expect(duplicate.has_value() && !*duplicate, "runtime reasoning selection is idempotent when unchanged");
 
-  auto invalid =
-      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
+  auto invalid = session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
   expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -749,17 +763,21 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     expect(reasoning_changes == 1, "runtime reasoning selection appends one durable reasoning_change entry");
   }
 
-  ava::app::runtime::OpenOptions reopen_options = open_options;
-  reopen_options.requested_session_id = session_id;
-  auto reopened = ava::app::open_runtime_session(reopen_options);
+  ava::app::runtime::RuntimeOpenContext reopen_context = open_context;
+  auto reopened = ava::app::open_runtime_session(reopen_context, {.sessionless = false,
+                                                                  .requested_session_id = session_id,
+                                                                  .fork_session_id = std::nullopt,
+                                                                  .initial_session_name = std::nullopt,
+                                                                  .continue_last_session = false,
+                                                                  .initial_reasoning_level = std::nullopt,
+                                                                  .expected_original_cwd = std::nullopt});
   expect(!reopened && reopened.error().message().find("already owned") != std::string::npos,
          "a second runtime cannot inspect reasoning by bypassing the active owner's lease");
 
   auto cleared = session->set_runtime_reasoning(std::nullopt);
   expect(cleared.has_value() && *cleared && !session->reasoning(), "runtime reasoning selection can be cleared");
 
-  auto reselected =
-      session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
+  auto reselected = session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "low", .budget_tokens = std::nullopt, .display = ""});
   expect(reselected.has_value() && *reselected, "runtime reasoning test re-enables reasoning before switch boundary");
   auto kimi_model = ava::app::resolve_runtime_model(paths, "kimi", "kimi-k2-thinking");
   auto openai_model = ava::app::resolve_runtime_model(paths, "openai", "gpt-5.5");
@@ -774,7 +792,13 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
            "runtime reasoning selection rejects unsupported OpenAI-compatible budget/display controls");
     auto switched_back = session->switch_runtime_model(*openai_model);
     expect(switched_back.has_value() && *switched_back && !session->reasoning(), "runtime model switches clear active reasoning selection");
-    auto reopened_after_switch = ava::app::open_runtime_session(reopen_options);
+    auto reopened_after_switch = ava::app::open_runtime_session(reopen_context, {.sessionless = false,
+                                                                                 .requested_session_id = session_id,
+                                                                                 .fork_session_id = std::nullopt,
+                                                                                 .initial_session_name = std::nullopt,
+                                                                                 .continue_last_session = false,
+                                                                                 .initial_reasoning_level = std::nullopt,
+                                                                                 .expected_original_cwd = std::nullopt});
     expect(!reopened_after_switch && reopened_after_switch.error().message().find("already owned") != std::string::npos,
            "runtime model-change persistence remains exclusively owned until the active runtime ends");
   }
@@ -819,8 +843,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
         session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = std::nullopt, .display = ""});
     expect(!missing_budget.has_value() && missing_budget.error().format().find("Anthropic-proxy enabled reasoning requires budget_tokens") != std::string::npos,
            "runtime reasoning validation labels missing-budget errors with the custom provider id");
-    auto too_large_budget =
-        session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 8192, .display = ""});
+    auto too_large_budget = session->set_runtime_reasoning(ava::app::runtime::ReasoningSelection{.level = "enabled", .budget_tokens = 8192, .display = ""});
     expect(!too_large_budget.has_value() && too_large_budget.error().format().find("reasoning budget must be below max output tokens") != std::string::npos,
            "runtime reasoning validation applies fallback budget limits to custom providers");
   }
@@ -856,7 +879,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
 
-    ava::app::runtime::OpenOptions options;
+    ava::app::runtime::RuntimeOpenContext options;
     options.workspace_dir = workspace;
     options.current_dir = workspace;
     options.paths = paths;
@@ -896,7 +919,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     auto const paths = app_test_paths(root);
     std::filesystem::create_directories(workspace);
 
-    ava::app::runtime::OpenOptions seed_options;
+    ava::app::runtime::RuntimeOpenContext seed_options;
     seed_options.workspace_dir = workspace;
     seed_options.current_dir = workspace;
     seed_options.paths = paths;
@@ -909,10 +932,14 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     auto const source_bytes = app_read_binary_file(source_path);
     source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release startup fork rollback source"));
 
-    auto fork_options = seed_options;
-    fork_options.fork_session_id = source_id;
-    fork_options.initial_reasoning_level = "minimal";
-    auto forked = ava::app::open_runtime_session(fork_options);
+    auto fork_context = seed_options;
+    auto forked = ava::app::open_runtime_session(fork_context, {.sessionless = false,
+                                                                .requested_session_id = std::nullopt,
+                                                                .fork_session_id = source_id,
+                                                                .initial_session_name = std::nullopt,
+                                                                .continue_last_session = false,
+                                                                .initial_reasoning_level = "minimal",
+                                                                .expected_original_cwd = std::nullopt});
     auto const created_id = forked ? std::optional<std::string>{} : app_error_context(forked.error(), "created_session_id");
     bool destination_jsonl_removed = false;
     bool destination_attachment_retained = false;
@@ -941,13 +968,17 @@ void test_app_runtime_initial_reasoning_level_option()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  open_options.initial_reasoning_level = " high ";
-
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context, {.sessionless = false,
+                                                               .requested_session_id = std::nullopt,
+                                                               .fork_session_id = std::nullopt,
+                                                               .initial_session_name = std::nullopt,
+                                                               .continue_last_session = false,
+                                                               .initial_reasoning_level = " high ",
+                                                               .expected_original_cwd = std::nullopt});
   expect(session.has_value() && session->reasoning() && session->reasoning()->level == "high", "runtime startup applies initial reasoning level");
   if (!session)
     return;
@@ -962,10 +993,14 @@ void test_app_runtime_initial_reasoning_level_option()
   }
 
   session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before startup reasoning reopen"));
-  ava::app::runtime::OpenOptions clear_options = open_options;
-  clear_options.requested_session_id = session_id;
-  clear_options.initial_reasoning_level = "off";
-  auto cleared = ava::app::open_runtime_session(clear_options);
+  auto clear_context = open_context;
+  auto cleared = ava::app::open_runtime_session(clear_context, {.sessionless = false,
+                                                                .requested_session_id = session_id,
+                                                                .fork_session_id = std::nullopt,
+                                                                .initial_session_name = std::nullopt,
+                                                                .continue_last_session = false,
+                                                                .initial_reasoning_level = "off",
+                                                                .expected_original_cwd = std::nullopt});
   expect(cleared.has_value() && !cleared->reasoning(), "runtime startup reasoning accepts off as clear_reasoning alias");
   if (cleared)
   {
@@ -979,9 +1014,14 @@ void test_app_runtime_initial_reasoning_level_option()
     }
   }
 
-  ava::app::runtime::OpenOptions invalid_options = open_options;
-  invalid_options.initial_reasoning_level = "minimal";
-  auto invalid = ava::app::open_runtime_session(invalid_options);
+  auto invalid_context = open_context;
+  auto invalid = ava::app::open_runtime_session(invalid_context, {.sessionless = false,
+                                                                  .requested_session_id = std::nullopt,
+                                                                  .fork_session_id = std::nullopt,
+                                                                  .initial_session_name = std::nullopt,
+                                                                  .continue_last_session = false,
+                                                                  .initial_reasoning_level = "minimal",
+                                                                  .expected_original_cwd = std::nullopt});
   expect(!invalid.has_value() && invalid.error().format().find("option: --thinking") != std::string::npos &&
              invalid.error().format().find("supported_levels: off, low, medium, high, xhigh") != std::string::npos,
          "runtime startup reasoning reports clear --thinking validation errors");

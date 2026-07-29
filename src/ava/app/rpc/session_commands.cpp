@@ -5,8 +5,6 @@
 #include "serialization_json.h"
 #include "session_commands.h"
 #include "session_operators.h"
-
-#include "ava/app/runtime_sessions.h"
 #include "ava/event/events.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_sessions.h"
@@ -53,7 +51,7 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenOptions const& open_options,
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::RuntimeOpenContext const& open_context,
                                                                 RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())
@@ -67,7 +65,7 @@ ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session
   std::vector<std::string> matches;
   for (auto const& session : *sessions)
   {
-    if (session.session_id == *command.session_id || (!open_options.exact_session_id && session.session_id.starts_with(*command.session_id)))
+    if (session.session_id == *command.session_id || (!open_context.exact_session_id && session.session_id.starts_with(*command.session_id)))
       matches.push_back(session.session_id);
   }
   if (matches.empty())
@@ -493,7 +491,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     session_ts::wat session_w(session);
     // FIXME: resolve_branch_source_session_id should accept a rat.
-    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_options, command);
+    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
 
@@ -509,14 +507,14 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         .branch_from_entry_id = command.branch_from_entry_id.value_or(""),
         .name = command.session_name,
         .labels = command.labels,
-        .read_limits = context.open_options.session_read_limits,
+        .read_limits = session_w->session_read_limits(),
         .source_lease = source_lease,
         .mode = command.type == "clone_session" ? ava::session::SessionBranchMode::Clone : ava::session::SessionBranchMode::Fork,
         .actor = "rpc"});
     if (!branched)
       return handled(write_error(context.output, command.id, branched.error()));
 
-    auto owned_options = session_w->owned_replacement_options(context.open_options);
+    auto owned_options = session_w->replacement_open_context(context.open_context);
     auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
     if (!opened)
     {
@@ -563,7 +561,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     session_ts::wat session_w(session);
     // FIXME: resolve_branch_source_session_id should accept a rat.
-    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_options, command);
+    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
     bool const current_source = *source_session_id == session_w->store.session_id();
@@ -615,7 +613,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     session_ts::wat session_w(session);
     // FIXME: create_new_session should become a member function of Session.
-    auto created = create_new_session(*session_w, context.open_options);
+    auto created = create_new_session(*session_w, context.open_context);
     if (!created)
       return handled(write_error(context.output, command.id, created.error()));
     if (auto replaced = session_w->replace_with(std::move(*created)); !replaced)
@@ -636,7 +634,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     session_ts::wat session_w(session);
     // FIXME: open_requested_session should become a member function of Session.
-    auto opened = open_requested_session(*session_w, context.open_options, *command.session_id);
+    auto opened = open_requested_session(*session_w, context.open_context, *command.session_id);
     if (!opened)
       return handled(write_error(context.output, command.id, opened.error()));
     if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)

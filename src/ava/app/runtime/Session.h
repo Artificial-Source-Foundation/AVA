@@ -3,9 +3,9 @@
 #include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
 #include "FreshnessSourceMetadata.h"
-#include "OpenOptions.h"
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
+#include "RuntimeOpenContext.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
@@ -39,9 +39,9 @@ namespace ava::app::runtime {
 
 // Invocation inputs.
 //
-// Mirrors of OpenOptions describing how this session was opened. None of
+// Mirrors of RuntimeOpenContext describing how this session was opened. None of
 // these are restored from the store on resume; each is sourced from the
-// OpenOptions of the current process invocation.
+// RuntimeOpenContext of the current process invocation.
 //
 struct InvocationInputs
 {
@@ -305,8 +305,8 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::core::VoidResult refresh_parent_configuration() const;
 
   // Stop background work and replace this session's contents with `replacement`,
-  // rebinding the application-scoped subagent coordinator/delivery and title
-  // coordinator shared services that cannot round-trip through disk.
+  // rebinding the application-scoped subagent coordinator/delivery, title
+  // coordinator, and diagnostics services that cannot round-trip through disk.
   //
   // This is the visible-session detach boundary: when `replacement` targets a
   // different session the previously visible parent is released so another AVA
@@ -327,16 +327,14 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::core::VoidResult recover_source_session_for_mutation(std::string const& source_session_id,
                                                                           std::optional<ava::session::SessionLease>& temporary_source_lease);
 
-  // Build replacement OpenOptions for a mutation (fork/clone) rooted at this
-  // session, starting from `base_options`.
+  // Build replacement RuntimeOpenContext from this session and `base_context`.
   //
-  // Every session-derived field (workspace/current directory, mode, tool
-  // visibility, paths, prompt overrides, offline flag, and the application-
-  // scoped subagent/delivery/title coordinators) is overwritten from this
-  // session, while the request-specific selectors (requested/fork session id,
-  // initial session name, continue-last, sessionless, and initial reasoning
-  // level) are cleared so the replacement opens a fresh owned session.
-  [[nodiscard]] runtime::OpenOptions owned_replacement_options(runtime::OpenOptions const& base_options) const;
+  // Runtime context, filesystem policy, resolved read limits, and shared
+  // application services are inherited from this session. Frontend policy in
+  // `base_context`, including model pinning and exact-ID behavior, is retained.
+  // An ephemeral session's AnchorSet is not inherited because its temporary
+  // spill root cannot authorize a new persistent or ephemeral store.
+  [[nodiscard]] runtime::RuntimeOpenContext replacement_open_context(runtime::RuntimeOpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
@@ -350,7 +348,7 @@ class Session : protected Session_aggregate_base
 
   // Apply a CLI-supplied initial reasoning level to a freshly opened session.
   //
-  // Accepts the raw --thinking level token from OpenOptions; an empty or
+  // Accepts the raw --thinking level token from SessionLifecycleRequest; an empty or
   // whitespace-only value is rejected. "off" clears the active selection;
   // any other token must resolve to a level the active model supports.
   // Returns failure when the level is empty, unsupported, or the underlying

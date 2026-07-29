@@ -47,11 +47,11 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC recovery test opens runtime session");
   if (!session)
     return;
@@ -64,7 +64,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC loop continues after malformed and unknown commands");
   expect(std::count(jsonl.begin(), jsonl.end(), '\n') == 3 && jsonl.find("\"id\":\"\"") != std::string::npos &&
@@ -82,12 +82,12 @@ void test_app_rpc_state_list_sessions_and_open_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto first = ava::app::open_runtime_session(open_options);
-  auto second = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto first = ava::app::open_runtime_session(open_context);
+  auto second = ava::app::open_runtime_session(open_context);
   expect(first.has_value() && second.has_value(), "RPC state test opens multiple sessions");
   if (!first || !second)
     return;
@@ -105,7 +105,7 @@ void test_app_rpc_state_list_sessions_and_open_session()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_second(std::move(*second));
   auto result =
-      ava::app::run_rpc_loop(unlocked_second, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_second, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
@@ -123,11 +123,11 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC job fixture opens runtime session");
   if (!session || !session->subagent_coordinator())
     return;
@@ -209,7 +209,7 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   ava::core::VoidResult rpc_result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    rpc_result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    rpc_result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"keep active\"}\n");
   expect(transport.wait_for_request(std::chrono::seconds(2)), "RPC job fixture has an active parent prompt");
@@ -248,11 +248,11 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "replacement-safe current-session RPC test opens runtime session");
   if (!session)
     return;
@@ -294,7 +294,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto pathname_entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
   expect(result && replaced && jsonl.find("replaced") != std::string::npos && jsonl.find("RPC_REPLACEMENT_CANARY") == std::string::npos && pathname_entries &&
@@ -310,11 +310,11 @@ void test_app_rpc_session_metadata_name_and_labels()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC session metadata test opens runtime session");
   if (!session)
     return;
@@ -330,7 +330,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto metadata = ava::session::load_session_metadata(ava::app::runtime::session_ts::rat(unlocked_session)->store);
   auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
@@ -354,12 +354,12 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto parent = ava::app::open_runtime_session(open_options);
-  auto child = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto parent = ava::app::open_runtime_session(open_context);
+  auto child = ava::app::open_runtime_session(open_context);
   expect(parent.has_value() && child.has_value(), "RPC session_tree test opens parent and child sessions");
   if (!parent || !child)
     return;
@@ -398,7 +398,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_child(std::move(*child));
   auto result =
-      ava::app::run_rpc_loop(unlocked_child, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_child, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC session_tree loop completes successfully");
   expect(jsonl.find("\"id\":\"tree\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + child_id + "\"") != std::string::npos &&
@@ -421,11 +421,11 @@ void test_app_rpc_session_fork_and_clone_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC session branch test opens runtime session");
   if (!session)
     return;
@@ -458,7 +458,7 @@ void test_app_rpc_session_fork_and_clone_commands()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_unchanged = false;
@@ -491,11 +491,11 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto source = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto source = ava::app::open_runtime_session(open_context);
   expect(source.has_value(), "RPC rollback test opens an active source session");
   if (!source)
     return;
@@ -528,7 +528,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_source(std::move(*source));
   auto result =
-      ava::app::run_rpc_loop(unlocked_source, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_source, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const marker = std::string("created_session_id: ");
   auto const marker_offset = jsonl.find(marker);
@@ -566,11 +566,11 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto source = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto source = ava::app::open_runtime_session(open_context);
   expect(source.has_value(), "RPC noncurrent torn branch test opens source runtime");
   if (!source)
     return;
@@ -579,7 +579,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   auto const valid_source_bytes = app_read_binary_file(source_path);
   source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before RPC branch"));
 
-  auto current = ava::app::open_runtime_session(open_options);
+  auto current = ava::app::open_runtime_session(open_context);
   expect(current.has_value(), "RPC noncurrent torn branch test opens a different current runtime");
   if (!current)
     return;
@@ -594,7 +594,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_current(std::move(*current));
   auto result =
-      ava::app::run_rpc_loop(unlocked_current, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_current, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat current_r(unlocked_current);
   auto cloned_entries = current_r->store.load();
   auto cloned_metadata = ava::session::load_session_metadata(current_r->store);
@@ -612,11 +612,11 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "RPC summarize_branch test opens runtime session");
   if (!session)
     return;
@@ -645,7 +645,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   {
     auto result =
-        ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+        ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
     ava::app::runtime::session_ts::rat session_r(unlocked_session);
     auto const jsonl = out.str();
     auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
@@ -673,7 +673,7 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
                                 "\",\"branch_tip_entry_id\":\"" + tip_entry_id +
                                 "\",\"summary\":\"must not bypass latch\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n");
   std::ostringstream blocked_out;
-  auto blocked_loop = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, blocked_in, blocked_out,
+  auto blocked_loop = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, blocked_in, blocked_out,
                                              ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto blocked_entries = session_r->store.load();

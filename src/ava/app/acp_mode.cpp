@@ -1,10 +1,10 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/peer.h"
 #include "ava/app/acp/service.h"
 #include "ava/app/acp/transport.h"
 #include "ava/app/acp_mode.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/core/json.h"
 #include "ava/core/version.h"
 
@@ -74,7 +74,7 @@ int run_acp_mode(std::ostream& error_output, std::shared_ptr<ava::diagnostics::R
   acp::AgentServiceOptions service_options;
   service_options.agent_version = std::string(ava::core::version::kFullVersion);
   service_options.launch_root = *launch_root;
-  service_options.open_options.diagnostics = std::move(diagnostics);
+  service_options.open_context.diagnostics = std::move(diagnostics);
   auto pinned_options = acp::pin_agent_service_model(std::move(service_options));
   if (!pinned_options)
   {

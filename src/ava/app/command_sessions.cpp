@@ -16,7 +16,6 @@
 
 namespace ava::app {
 using session_command_support::labels_text;
-using session_command_support::owned_replacement_options;
 using session_command_support::reopen_session;
 using session_command_support::trim_ascii;
 
@@ -24,18 +23,10 @@ namespace {
 
 ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const& current)
 {
-  runtime::OpenOptions options;
-  options.workspace_dir = current.workspace_dir();
-  options.current_dir = current.current_dir();
-  options.continue_last_session = false;
-  options.sessionless = current.sessionless();
-  options.mode = current.mode();
-  options.tool_visibility = current.tool_visibility();
-  options.paths = current.paths();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  return open_runtime_session(options);
+  auto context = current.replacement_open_context({});
+  runtime::SessionLifecycleRequest request;
+  request.sessionless = current.sessionless();
+  return open_runtime_session(context, request);
 }
 
 ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, std::string_view name, ava::session::SessionBranchMode mode)
@@ -72,7 +63,7 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
 
   auto const created_session_id = branched->store.session_id();
   auto const branch_from_entry_id = branched->branch_from_entry_id;
-  auto owned_options = owned_replacement_options(session);
+  auto owned_options = session.replacement_open_context({});
   auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
   if (!opened)
   {

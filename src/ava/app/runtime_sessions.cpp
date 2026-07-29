@@ -32,18 +32,6 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
     roots.push_back(std::move(root));
 }
 
-runtime::OpenOptions lifecycle_options(runtime::OpenOptions options, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
-{
-  options.workspace_dir = workspace_root;
-  options.current_dir = current_dir;
-  options.requested_session_id = std::nullopt;
-  options.fork_session_id = std::nullopt;
-  options.continue_last_session = false;
-  options.sessionless = false;
-  options.initial_reasoning_level = std::nullopt;
-  return options;
-}
-
 }  // namespace
 
 std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::Session const& session)
@@ -63,45 +51,33 @@ std::vector<std::filesystem::path> command_authority_roots_for_session(runtime::
   return roots;
 }
 
-ava::core::Result<runtime::Session> create_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
+ava::core::Result<runtime::Session> create_runtime_session_at(runtime::RuntimeOpenContext context, std::filesystem::path const& workspace_root,
                                                               std::filesystem::path const& current_dir)
 {
-  return open_runtime_session(lifecycle_options(std::move(base_options), workspace_root, current_dir));
+  context.workspace_dir = workspace_root;
+  context.current_dir = current_dir;
+  return open_runtime_session(context);
 }
 
-ava::core::Result<runtime::Session> open_runtime_session_at(runtime::OpenOptions base_options, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir, std::string_view requested_session_id)
+ava::core::Result<runtime::Session> open_runtime_session_at(runtime::RuntimeOpenContext context, std::filesystem::path const& workspace_root,
+                                                            std::filesystem::path const& current_dir, runtime::SessionLifecycleRequest request)
 {
-  auto options = lifecycle_options(std::move(base_options), workspace_root, current_dir);
-  options.requested_session_id = std::string(requested_session_id);
-  return open_runtime_session(options);
+  context.workspace_dir = workspace_root;
+  context.current_dir = current_dir;
+  return open_runtime_session(context, request);
 }
 
-ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options)
+ava::core::Result<runtime::Session> create_runtime_session_like(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context)
 {
-  auto options = base_options;
-  options.mode = current.mode();
-  options.paths = current.paths();
-  options.anchor_set = current.anchor_set();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  options.diagnostics = current.diagnostics();
-  return create_runtime_session_at(std::move(options), current.workspace_dir(), current.current_dir());
+  auto context = current.replacement_open_context(base_context);
+  return create_runtime_session_at(std::move(context), current.workspace_dir(), current.current_dir());
 }
 
-ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::OpenOptions const& base_options,
-                                                              std::string_view requested_session_id)
+ava::core::Result<runtime::Session> open_runtime_session_like(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context,
+                                                              runtime::SessionLifecycleRequest request)
 {
-  auto options = base_options;
-  options.mode = current.mode();
-  options.paths = current.paths();
-  options.anchor_set = current.anchor_set();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  options.diagnostics = current.diagnostics();
-  return open_runtime_session_at(std::move(options), current.workspace_dir(), current.current_dir(), requested_session_id);
+  auto context = current.replacement_open_context(base_context);
+  return open_runtime_session_at(std::move(context), current.workspace_dir(), current.current_dir(), std::move(request));
 }
 
 }  // namespace ava::app

@@ -14,28 +14,29 @@ namespace ava::app {
 
 struct RpcModeOptions
 {
-  runtime::OpenOptions open_options;
+  runtime::RuntimeOpenContext open_context;
+  runtime::SessionLifecycleRequest lifecycle_request;
   HeadlessPermissionPolicyOptions permission_policy;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options,
+[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context,
                                                  ava::provider::Provider const& provider, ava::http::Transport& transport, runtime::RunOptions runtime_options,
                                                  std::istream& in, std::ostream& out, rpc::RpcInputWake wake);
-[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options,
+[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context,
                                                  ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
                                                  runtime::RunOptions runtime_options, std::istream& in, std::ostream& out, rpc::RpcInputWake wake);
 
 // Finite streams only. Supply an explicit wake callback for any stream that can block.
 [[deprecated("finite streams only; pass an explicit rpc::RpcInputWake for blocking input")]] [[nodiscard]] ava::core::VoidResult run_rpc_loop(
-    runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider, ava::http::Transport& transport,
+    runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider, ava::http::Transport& transport,
     runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
 // Finite streams only. Supply an explicit wake callback for any stream that can block.
 [[deprecated("finite streams only; pass an explicit rpc::RpcInputWake for blocking input")]] [[nodiscard]] ava::core::VoidResult run_rpc_loop(
-    runtime::session_ts& session, runtime::OpenOptions const& open_options, ava::provider::Provider const& provider, ava::http::Transport& transport,
+    runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context, ava::provider::Provider const& provider, ava::http::Transport& transport,
     ava::http::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out);
-[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenOptions const& open_options,
+[[nodiscard]] ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::RuntimeOpenContext const& open_context,
                                                  ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
                                                  runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out);
 

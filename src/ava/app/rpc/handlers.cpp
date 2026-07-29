@@ -23,15 +23,17 @@ ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config
   return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
 }
 
-ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenOptions const& base_options)
+ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context)
 {
-  return create_runtime_session_like(current, base_options);
+  return create_runtime_session_like(current, base_context);
 }
 
-ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::OpenOptions const& base_options,
-                                                         std::string_view requested_session_id)
+ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::RuntimeOpenContext const& base_context,
+                                                           std::string_view requested_session_id)
 {
-  return open_runtime_session_like(current, base_options, requested_session_id);
+  runtime::SessionLifecycleRequest request;
+  request.requested_session_id = std::string(requested_session_id);
+  return open_runtime_session_like(current, base_context, std::move(request));
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command)

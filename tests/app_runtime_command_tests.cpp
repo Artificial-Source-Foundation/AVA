@@ -6,7 +6,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/OpenOptions.h"
+#include "ava/app/runtime/RuntimeOpenContext.h"
 #include "ava/agent/mode.h"
 
 #include <filesystem>
@@ -107,12 +107,12 @@ void test_app_command_dispatcher()
   expect(trusted.has_value(),
          trusted ? "command dispatcher test trusts project resources" : "command dispatcher test trusts project resources: " + trusted.error().format());
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "command dispatcher test opens runtime session");
   if (!session)
     return;

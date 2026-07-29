@@ -32,7 +32,6 @@
 namespace ava::app {
 using session_command_support::load_runtime_entries;
 using session_command_support::lower_ascii;
-using session_command_support::owned_replacement_options;
 
 namespace {
 
@@ -513,7 +512,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
     return result;
   }
 
-  auto owned_options = owned_replacement_options(session);
+  auto owned_options = session.replacement_open_context({});
   auto opened = open_owned_runtime_session(owned_options, *imported_store, *imported_lease, true);
   if (!opened)
   {

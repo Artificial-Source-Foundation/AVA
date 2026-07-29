@@ -19,7 +19,7 @@ struct AgentServiceOptions
   std::string agent_version;
   std::filesystem::path launch_root;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
-  runtime::OpenOptions open_options;
+  runtime::RuntimeOpenContext open_context;
   runtime::RunOptions run_options;
   RuntimeProviderRunBundleFactory provider_bundle_factory;
   std::chrono::milliseconds permission_timeout = kDefaultCallTimeout;

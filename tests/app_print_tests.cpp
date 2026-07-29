@@ -342,12 +342,12 @@ void test_app_print_text_mode_outputs_final_text_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print text test opens runtime session");
   if (!session)
     return;
@@ -379,12 +379,12 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print terminal sanitize test opens runtime session");
   if (!session)
     return;
@@ -410,7 +410,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   expect(out.str() == "safe ?]52;c;QUJD? text\nnext  line" && out.str().find('\x1b') == std::string::npos && err.str().empty(),
          "print text mode strips terminal controls from tty-bound final output while preserving line breaks");
 
-  auto error_session = ava::app::open_runtime_session(open_options);
+  auto error_session = ava::app::open_runtime_session(open_context);
   expect(error_session.has_value(), "print terminal sanitize error test opens runtime session");
   if (!error_session)
     return;
@@ -437,12 +437,12 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print text streaming test opens runtime session");
   if (!session)
     return;
@@ -468,12 +468,12 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print text stdout failure test opens runtime session");
   if (!session)
     return;
@@ -509,12 +509,12 @@ void test_app_print_mode_uses_headless_permission_policy()
     file << "outside print policy";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print policy test opens runtime session");
   if (!session)
     return;
@@ -569,12 +569,12 @@ void test_app_print_mode_default_permission_denial_is_actionable()
     file << "outside print deny";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print permission denial test opens runtime session");
   if (!session)
     return;
@@ -624,11 +624,11 @@ void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "runtime authority-root test opens a session");
   if (!session)
     return;
@@ -656,40 +656,40 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "print model-command persistent Deny fixture keeps sealed planning roots owner-only");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print model-command persistent Deny test opens runtime session");
   if (!session)
     return;
 
-  auto added = ava::permissions::add_persistent_permission_rule(
-      session->permission_rule_store(),
-      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                            .action = ava::permissions::PermissionAction::Deny,
-                                            .operation = ava::permissions::Operation::RunCommand,
-                                            .mode = ava::permissions::PermissionRuleMode::Build,
-                                            .tool_name = "bash",
-                                            .target_path = {},
-                                            .command = "ls",
-                                            .command_recipe_key = {},
-                                            .recipe_display = {},
-                                            .critical_acknowledged = false,
-                                            .reason = "external exact model-command deny",
-                                            .actor = "test"});
+  auto added = ava::permissions::add_persistent_permission_rule(session->permission_rule_store(),
+                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Deny,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = "ls",
+                                                                                                      .command_recipe_key = {},
+                                                                                                      .recipe_display = {},
+                                                                                                      .critical_acknowledged = false,
+                                                                                                      .reason = "external exact model-command deny",
+                                                                                                      .actor = "test"});
   expect(added.has_value(), "print model-command persistent Deny test stores an external exact Deny");
   if (!added)
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
-                                                    "data: [DONE]\n\n"),
-                                       sse_response(final_text_sse("persistent model deny handled"))});
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
+                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
+                    "data: [DONE]\n\n"),
+       sse_response(final_text_sse("persistent model deny handled"))});
   int interactive_prompts = 0;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -709,11 +709,10 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   {
     for (auto const& entry : *entries)
     {
-      saw_preflight_deny = saw_preflight_deny ||
-                            (entry.type == ava::session::EntryType::PermissionDecision &&
-                             ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
-                             ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
-                             ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
+      saw_preflight_deny = saw_preflight_deny || (entry.type == ava::session::EntryType::PermissionDecision &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
+                                                  ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
     }
   }
   expect(result && result->final_text == "persistent model deny handled" && result->tool_calls == 1 && interactive_prompts == 0 &&
@@ -731,11 +730,11 @@ void test_app_print_mode_uses_persistent_permission_rules()
   auto const outside_path = root / "outside-print-rule.txt";
   write_app_test_file(outside_path, "outside print persistent rule note");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print persistent permission rule test opens runtime session");
   if (!session)
     return;
@@ -813,10 +812,10 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
                                        }});
 
   ava::app::PrintModeOptions options;
-  options.open_options.workspace_dir = workspace;
-  options.open_options.current_dir = workspace;
-  options.open_options.mode = ava::agent::Mode::Build;
-  options.open_options.paths = paths;
+  options.open_context.workspace_dir = workspace;
+  options.open_context.current_dir = workspace;
+  options.open_context.mode = ava::agent::Mode::Build;
+  options.open_context.paths = paths;
   options.explicit_prompt = "hello refreshed print";
   options.provider_override = std::cref(provider);
   options.transport_override = std::ref(transport);
@@ -856,11 +855,11 @@ void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
   ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"}});
 
   ava::app::PrintModeOptions options;
-  options.open_options.workspace_dir = workspace;
-  options.open_options.current_dir = workspace;
-  options.open_options.mode = ava::agent::Mode::Build;
-  options.open_options.paths = paths;
-  options.open_options.offline = true;
+  options.open_context.workspace_dir = workspace;
+  options.open_context.current_dir = workspace;
+  options.open_context.mode = ava::agent::Mode::Build;
+  options.open_context.paths = paths;
+  options.open_context.offline = true;
   options.explicit_prompt = "hello offline print";
   options.provider_override = std::cref(provider);
   options.transport_override = std::ref(transport);
@@ -1044,12 +1043,12 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print json test opens runtime session");
   if (!session)
     return;
@@ -1078,7 +1077,7 @@ void test_app_print_json_mode_outputs_runtime_events()
              jsonl.find("\"payload\":{\"text\":\"json answer\"}") != std::string::npos && last_line.find("\"name\":\"done\"") != std::string::npos,
          "print json mode writes JSONL event envelopes ending in done");
 
-  auto error_session = ava::app::open_runtime_session(open_options);
+  auto error_session = ava::app::open_runtime_session(open_context);
   expect(error_session.has_value(), "print json error test opens runtime session");
   if (!error_session)
     return;
@@ -1113,12 +1112,12 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::RuntimeOpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto session = ava::app::open_runtime_session(open_context);
   expect(session.has_value(), "print json streaming test opens runtime session");
   if (!session)
     return;

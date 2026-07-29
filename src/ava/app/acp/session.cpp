@@ -673,7 +673,7 @@ ava::core::VoidResult AcpSessionHost::close()
 
 AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std::move(options))
 {
-  auto service_anchor = options_.open_options.anchor_set;
+  auto service_anchor = options_.open_context.anchor_set;
   if (!service_anchor)
   {
     std::error_code directory_error;
@@ -698,35 +698,35 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
     }
     service_anchor = std::move(*opened);
   }
-  options_.open_options.anchor_set = service_anchor;
-  if (options_.open_options.diagnostics)
+  options_.open_context.anchor_set = service_anchor;
+  if (options_.open_context.diagnostics)
   {
-    if (auto bound = options_.open_options.diagnostics->bind_anchor_set(service_anchor); !bound)
+    if (auto bound = options_.open_context.diagnostics->bind_anchor_set(service_anchor); !bound)
     {
       coordinator_startup_error_ = std::move(bound.error());
       return;
     }
   }
 
-  if (options_.open_options.subagent_delivery_manager)
+  if (options_.open_context.subagent_delivery_manager)
   {
-    options_.open_options.subagent_coordinator = options_.open_options.subagent_delivery_manager->coordinator();
+    options_.open_context.subagent_coordinator = options_.open_context.subagent_delivery_manager->coordinator();
   }
   else
   {
-    auto coordinator = options_.open_options.subagent_coordinator
-                           ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_options.subagent_coordinator)
+    auto coordinator = options_.open_context.subagent_coordinator
+                           ? ava::core::Result<std::shared_ptr<ava::agent::SubagentCoordinator>>(options_.open_context.subagent_coordinator)
                            : ava::agent::SubagentCoordinator::create();
     if (!coordinator)
     {
       coordinator_startup_error_ = std::move(coordinator.error());
       return;
     }
-    options_.open_options.subagent_coordinator = std::move(*coordinator);
+    options_.open_context.subagent_coordinator = std::move(*coordinator);
     auto manager = SubagentDeliveryManager::create(
-        {.coordinator = options_.open_options.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
+        {.coordinator = options_.open_context.subagent_coordinator, .provider_bundle_factory = options_.provider_bundle_factory});
     if (manager)
-      options_.open_options.subagent_delivery_manager = std::move(*manager);
+      options_.open_context.subagent_delivery_manager = std::move(*manager);
     else
     {
       coordinator_startup_error_ = std::move(manager.error());
@@ -734,7 +734,7 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
     }
   }
 
-  if (!options_.open_options.session_title_coordinator)
+  if (!options_.open_context.session_title_coordinator)
   {
     auto config = ava::config::load_session_title_config(options_.paths, *service_anchor);
     if (!config)
@@ -748,7 +748,7 @@ AcpSessionRegistry::AcpSessionRegistry(AcpSessionOptions options) : options_(std
       coordinator_startup_error_ = std::move(titles.error());
       return;
     }
-    options_.open_options.session_title_coordinator = std::move(*titles);
+    options_.open_context.session_title_coordinator = std::move(*titles);
   }
 }
 
@@ -762,10 +762,10 @@ ava::core::Result<std::filesystem::path> AcpSessionRegistry::resolve_cwd(std::st
   auto cwd = resolve_session_cwd_lexically(options_.launch_root, requested);
   if (!cwd)
     return std::unexpected(std::move(cwd.error()));
-  if (coordinator_startup_error_ || !options_.open_options.anchor_set || options_.open_options.anchor_set->anchors().empty())
+  if (coordinator_startup_error_ || !options_.open_context.anchor_set || options_.open_context.anchor_set->anchors().empty())
     return std::unexpected(coordinator_startup_error_.value_or(protocol_error("ACP launch workspace authority is unavailable")));
 
-  auto const& launch_anchor = options_.open_options.anchor_set->anchors().front();
+  auto const& launch_anchor = options_.open_context.anchor_set->anchors().front();
   if (launch_anchor.root != options_.launch_root.lexically_normal())
     return std::unexpected(protocol_error("ACP launch workspace authority does not match its logical root"));
   auto relative = cwd->lexically_relative(launch_anchor.root);
@@ -836,7 +836,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
       release_insertion();
   });
 
-  auto options = options_.open_options;
+  auto options = options_.open_context;
   options.paths = options_.paths;
   options.tool_visibility.mode = ava::agent::ToolVisibilityMode::Default;
   auto session = create_runtime_session_at(std::move(options), options_.launch_root, cwd);
@@ -861,13 +861,15 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
       release_insertion();
   });
 
-  auto options = options_.open_options;
+  auto options = options_.open_context;
   options.paths = options_.paths;
   options.tool_visibility.mode = ava::agent::ToolVisibilityMode::Default;
   options.exact_session_id = true;
   options.session_read_limits = kAcpSessionReadLimits;
-  options.expected_original_cwd = cwd;
-  auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, session_id);
+  runtime::SessionLifecycleRequest request;
+  request.requested_session_id = std::string(session_id);
+  request.expected_original_cwd = cwd;
+  auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, std::move(request));
   if (!session)
     return std::unexpected(std::move(session.error()));
   session->resources().mcp_config = std::move(mcp_config);
@@ -1028,12 +1030,12 @@ void AcpSessionRegistry::shutdown() noexcept
   }
   for (auto const& host : hosts) host->cancel();
   for (auto const& host : hosts) static_cast<void>(host->close());
-  if (options_.open_options.session_title_coordinator)
-    options_.open_options.session_title_coordinator->shutdown();
-  if (options_.open_options.subagent_delivery_manager)
-    options_.open_options.subagent_delivery_manager->shutdown();
-  else if (options_.open_options.subagent_coordinator)
-    options_.open_options.subagent_coordinator->shutdown();
+  if (options_.open_context.session_title_coordinator)
+    options_.open_context.session_title_coordinator->shutdown();
+  if (options_.open_context.subagent_delivery_manager)
+    options_.open_context.subagent_delivery_manager->shutdown();
+  else if (options_.open_context.subagent_coordinator)
+    options_.open_context.subagent_coordinator->shutdown();
 }
 
 std::filesystem::path const& AcpSessionRegistry::launch_root() const noexcept

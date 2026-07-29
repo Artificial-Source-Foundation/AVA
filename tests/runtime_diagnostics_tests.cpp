@@ -365,13 +365,18 @@ ava::core::Result<ava::app::runtime::Session> open_diagnostic_session(std::files
   auto const paths = app_test_paths(root);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  options.sessionless = true;
   options.diagnostics = std::move(diagnostics);
-  return ava::app::open_runtime_session(options);
+  return ava::app::open_runtime_session(options, {.sessionless = true,
+                                                  .requested_session_id = std::nullopt,
+                                                  .fork_session_id = std::nullopt,
+                                                  .initial_session_name = std::nullopt,
+                                                  .continue_last_session = false,
+                                                  .initial_reasoning_level = std::nullopt,
+                                                  .expected_original_cwd = std::nullopt});
 }
 
 void test_runtime_failure_boundaries_and_observation_precedence()
@@ -391,8 +396,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   auto canceled = canceled_session ? ava::app::run_prompt(*canceled_session, "cancel", provider, canceled_transport, canceled_options)
                                    : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(canceled_session.error()));
   expect(!canceled && canceled_session &&
-             ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session->anchor_set()).state ==
-                 ava::diagnostics::StoredRecordState::Absent,
+             ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session->anchor_set()).state == ava::diagnostics::StoredRecordState::Absent,
          "runtime cancellation does not create a last-failure artifact");
 
   auto const provider_root = diagnostics_root("runtime-diagnostics-provider-failure");

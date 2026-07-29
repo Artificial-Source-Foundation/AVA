@@ -80,21 +80,11 @@ int run_tui(ShellState state)
     }
     return themes;
   };
-  auto runtime_open_options = [&state]() {
-    ava::app::runtime::OpenOptions options;
-    options.workspace_dir = state.session.workspace_dir();
-    options.current_dir = state.session.current_dir();
-    options.mode = state.session.mode();
-    options.tool_visibility = state.session.tool_visibility();
-    options.paths = state.session.paths();
-    options.sessionless = state.session.sessionless();
-    options.offline = state.session.is_offline();
-    return options;
-  };
+  auto runtime_open_context = [&state]() { return state.session.replacement_open_context({}); };
   auto capture_title_catalog_changes = [&state, &application_catalog]() {
     auto const cursor = application_catalog.title_catalog_cursor();
     return state.session.session_title_coordinator() ? state.session.session_title_coordinator()->catalog_changes_since(cursor)
-                                                   : ava::app::SessionTitleCatalogChanges{.cursor = cursor};
+                                                     : ava::app::SessionTitleCatalogChanges{.cursor = cursor};
   };
   auto refresh_title_catalog = [&state, &application_catalog, &hotkeys, &capture_title_catalog_changes]() -> ava::core::Result<bool> {
     if (!state.session.session_title_coordinator())
@@ -138,7 +128,7 @@ int run_tui(ShellState state)
                                             session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
                                             session_selector_show_label_time);
   };
-  auto open_session_selector_target = [&state, &runtime_open_options, &state_snapshot, &application_catalog, &hotkeys](
+  auto open_session_selector_target = [&state, &runtime_open_context, &state_snapshot, &application_catalog, &hotkeys](
                                           std::string target_session_id, std::string status_prefix) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
     if (target_session_id.empty())
     {
@@ -149,7 +139,7 @@ int run_tui(ShellState state)
       application_catalog.retarget_session(state.session.store.session_id());
       return state_snapshot(status_prefix + target_session_id + " (already open)");
     }
-    auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), target_session_id);
+    auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_context(), target_session_id);
     if (!opened)
       return std::unexpected(std::move(opened.error()));
     if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
@@ -550,7 +540,7 @@ int run_tui(ShellState state)
       .on_scoped_model_reorder = [&state](ava::tui::SelectListView const& previous, std::string_view value, bool up)
           -> ava::core::Result<ava::tui::SelectListView> { return reorder_scoped_model(state.session, previous, value, up); },
       .on_scoped_model_save = [&state]() -> ava::core::Result<std::string> { return save_scoped_model_cycle(state.session); },
-      .on_session_selected = [&state, &runtime_open_options, &state_snapshot, &application_catalog,
+      .on_session_selected = [&state, &runtime_open_context, &state_snapshot, &application_catalog,
                               &hotkeys](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value.empty())
         {
@@ -561,7 +551,7 @@ int run_tui(ShellState state)
           application_catalog.retarget_session(state.session.store.session_id());
           return state_snapshot("session already open");
         }
-        auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
+        auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_context(), value);
         if (!opened)
           return std::unexpected(std::move(opened.error()));
         if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)

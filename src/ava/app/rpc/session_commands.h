@@ -12,7 +12,7 @@ struct RpcSessionCommandContext
 {
   RpcCommand const& command;
   runtime::session_ts& unlocked_session;
-  runtime::OpenOptions const& open_options;
+  runtime::RuntimeOpenContext const& open_context;
   output_ts& output;                            // Reference to threadsafe output stream.
   RpcRunState& run_state;
 

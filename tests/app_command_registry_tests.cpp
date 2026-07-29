@@ -7,8 +7,8 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/permissions/permission.h"
 #include "ava/session/session_store.h"
+#include "ava/permissions/permission.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -30,7 +30,7 @@ using namespace ava::tests;
 ava::app::runtime::Session open_test_session(std::filesystem::path const& root, std::filesystem::path const& workspace)
 {
   auto paths = app_test_paths(root);
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -173,8 +173,8 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
 
   auto session = open_test_session(root, workspace);
   std::vector<ava::permissions::Operation> operations;
-  auto registry = session.load_command_registry(
-      ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
+  auto registry =
+      session.load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
   auto const* entry = find_entry(registry, "/mcp:demo:release-notes");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::McpPrompt && entry->mcp_server_id == "demo" &&
              entry->mcp_prompt_name == "release-notes" && !entry->mcp_arguments.empty() && entry->mcp_arguments[0].name == "topic",
@@ -290,10 +290,8 @@ void test_project_trust_gates_project_resource_commands()
   expect(session.project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session.project_trust()),
          "runtime session defaults project resources to skipped without a trust decision");
   expect(system_prompt.find("Project AGENTS context still loads") != std::string::npos &&
-         system_prompt.find("Global append instruction") != std::string::npos &&
-         system_prompt.find("Project system replacement") == std::string::npos &&
-         system_prompt.find("Project append instruction") == std::string::npos &&
-         system_prompt.find("local-skill") == std::string::npos,
+             system_prompt.find("Global append instruction") != std::string::npos && system_prompt.find("Project system replacement") == std::string::npos &&
+             system_prompt.find("Project append instruction") == std::string::npos && system_prompt.find("local-skill") == std::string::npos,
          "project AGENTS context loads while project system prompt files and skills remain gated");
 
   auto registry = session.load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
@@ -319,11 +317,9 @@ void test_project_trust_gates_project_resource_commands()
              trust->output[0].find("project_resources=enabled") != std::string::npos &&
              session.project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
          "/trust project persists trust outside the workspace and reloads the runtime prompt state");
-  expect(system_prompt.find("Project system replacement") != std::string::npos &&
-         system_prompt.find("Project append instruction") != std::string::npos &&
-         system_prompt.find("Global append instruction") == std::string::npos &&
-         system_prompt.find("Implement changes directly") == std::string::npos &&
-         system_prompt.find("local-skill") != std::string::npos,
+  expect(system_prompt.find("Project system replacement") != std::string::npos && system_prompt.find("Project append instruction") != std::string::npos &&
+             system_prompt.find("Global append instruction") == std::string::npos && system_prompt.find("Implement changes directly") == std::string::npos &&
+             system_prompt.find("local-skill") != std::string::npos,
          "trusted project resources replace/append the active system prompt after reload");
 
   registry = session.load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
@@ -363,8 +359,7 @@ void test_project_trust_gates_project_resource_commands()
                failed_reload->output[0].find("freshness source is not a regular file") != std::string::npos &&
                session.project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
            "/reload trust keeps the old trust state if dependent prompt reload fails");
-    expect(system_prompt.find("Project system replacement") != std::string::npos &&
-           system_prompt.find("Project append instruction") != std::string::npos,
+    expect(system_prompt.find("Project system replacement") != std::string::npos && system_prompt.find("Project append instruction") != std::string::npos,
            "/reload trust keeps the old prompt state if dependent prompt reload fails");
     std::error_code restore_error;
     std::filesystem::remove(global_append, restore_error);
@@ -384,9 +379,8 @@ void test_project_trust_gates_project_resource_commands()
              reload_trust->output[0].find("project_resources: skipped") != std::string::npos &&
              session.project_trust().decision == ava::app::ProjectTrustDecision::Denied,
          "/reload trust applies external deny decisions and disables project resources");
-  expect(system_prompt.find("Project system replacement") == std::string::npos &&
-         system_prompt.find("Project append instruction") == std::string::npos &&
-         system_prompt.find("local-skill") == std::string::npos,
+  expect(system_prompt.find("Project system replacement") == std::string::npos && system_prompt.find("Project append instruction") == std::string::npos &&
+             system_prompt.find("local-skill") == std::string::npos,
          "/reload trust removes trusted project prompt content after denial");
   registry = session.load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,

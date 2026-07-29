@@ -446,11 +446,12 @@ ava::core::VoidResult Session::refresh_parent_configuration() const
 
 ava::core::VoidResult Session::replace_with(runtime::Session&& replacement)
 {
-  // Background ownership is application-scoped. Retire only the visible
-  // session controller and preserve the exact coordinator across navigation.
+  // Background ownership and diagnostics are application-scoped. Retire only
+  // the visible session controller and preserve the exact services across navigation.
   auto coordinator = resources().subagent_coordinator;
   auto delivery_manager = resources().subagent_delivery_manager;
   auto title_coordinator = resources().session_title_coordinator;
+  auto diagnostics = resources().diagnostics;
   auto const detached_parent_id = sessionless() ? std::string{} : store.session_id();
   bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
   resources().run_controller.reset();
@@ -464,6 +465,8 @@ ava::core::VoidResult Session::replace_with(runtime::Session&& replacement)
     resources().subagent_coordinator = coordinator;
   if (title_coordinator)
     resources().session_title_coordinator = std::move(title_coordinator);
+  if (diagnostics)
+    resources().diagnostics = std::move(diagnostics);
 
   // This is an explicit visible-session detach boundary. The delivery manager
   // keeps the exact parent capsule while process-local work still needs it.
@@ -502,26 +505,24 @@ ava::core::VoidResult Session::recover_source_session_for_mutation(std::string c
   return {};
 }
 
-runtime::OpenOptions Session::owned_replacement_options(runtime::OpenOptions const& base_options) const
+runtime::RuntimeOpenContext Session::replacement_open_context(runtime::RuntimeOpenContext const& base_context) const
 {
-  auto options = base_options;
-  options.workspace_dir = workspace_dir();
-  options.current_dir = current_dir();
-  options.requested_session_id = std::nullopt;
-  options.fork_session_id = std::nullopt;
-  options.initial_session_name = std::nullopt;
-  options.continue_last_session = false;
-  options.sessionless = false;
-  options.mode = mode();
-  options.tool_visibility = tool_visibility();
-  options.paths = paths();
-  options.prompt_overrides = prompt_overrides();
-  options.initial_reasoning_level = std::nullopt;
-  options.offline = is_offline();
-  options.subagent_coordinator = subagent_coordinator();
-  options.subagent_delivery_manager = subagent_delivery_manager();
-  options.session_title_coordinator = session_title_coordinator();
-  return options;
+  auto context = base_context;
+  context.workspace_dir = workspace_dir();
+  context.current_dir = current_dir();
+  context.mode = mode();
+  context.tool_visibility = tool_visibility();
+  context.paths = paths();
+  context.offline = is_offline();
+  context.additional_writable_dirs = additional_writable_dirs();
+  context.anchor_set = sessionless() ? nullptr : anchor_set();
+  context.prompt_overrides = prompt_overrides();
+  context.session_read_limits = session_read_limits();
+  context.subagent_coordinator = subagent_coordinator();
+  context.subagent_delivery_manager = subagent_delivery_manager();
+  context.session_title_coordinator = session_title_coordinator();
+  context.diagnostics = diagnostics();
+  return context;
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::append_runtime_session_metadata(ava::session::SessionMetadataUpdate update)
@@ -585,13 +586,12 @@ ava::core::VoidResult Session::apply_initial_reasoning_level(std::string_view re
 
 ava::core::VoidResult Session::apply_runtime_prompt_state(runtime::PromptState prompt_state)
 {
-  resolve_prompt_state() =
-      runtime::ResolvedPromptState{.mode = prompt_state.mode,
-                                   .base_prompt = std::move(prompt_state.base_prompt),
-                                   .context_sources = std::move(prompt_state.context_sources),
-                                   .freshness_sources = std::move(prompt_state.freshness_sources),
-                                   .system_prompt = std::move(prompt_state.system_prompt),
-                                   .ambient_extension_free_system_prompt = std::move(prompt_state.ambient_extension_free_system_prompt)};
+  resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state.mode,
+                                                        .base_prompt = std::move(prompt_state.base_prompt),
+                                                        .context_sources = std::move(prompt_state.context_sources),
+                                                        .freshness_sources = std::move(prompt_state.freshness_sources),
+                                                        .system_prompt = std::move(prompt_state.system_prompt),
+                                                        .ambient_extension_free_system_prompt = std::move(prompt_state.ambient_extension_free_system_prompt)};
   return refresh_parent_configuration();
 }
 
@@ -600,8 +600,8 @@ ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo mod
   if (this->model().provider_id == model.provider_id && this->model().model_id == model.model_id)
     return false;
 
-  auto prompt_state = load_runtime_prompt_state(paths(), model, mode(), workspace_dir(), current_dir(),
-                                                project_resources_trusted(project_trust()), prompt_overrides());
+  auto prompt_state =
+      load_runtime_prompt_state(paths(), model, mode(), workspace_dir(), current_dir(), project_resources_trusted(project_trust()), prompt_overrides());
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
 
@@ -611,13 +611,12 @@ ava::core::Result<bool> Session::switch_runtime_model(ava::config::ModelInfo mod
     return std::unexpected(std::move(appended.error()));
 
   model_selection().model = std::move(model);
-  resolve_prompt_state() =
-      runtime::ResolvedPromptState{.mode = prompt_state->mode,
-                                   .base_prompt = std::move(prompt_state->base_prompt),
-                                   .context_sources = std::move(prompt_state->context_sources),
-                                   .freshness_sources = std::move(prompt_state->freshness_sources),
-                                   .system_prompt = std::move(prompt_state->system_prompt),
-                                   .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
+  resolve_prompt_state() = runtime::ResolvedPromptState{.mode = prompt_state->mode,
+                                                        .base_prompt = std::move(prompt_state->base_prompt),
+                                                        .context_sources = std::move(prompt_state->context_sources),
+                                                        .freshness_sources = std::move(prompt_state->freshness_sources),
+                                                        .system_prompt = std::move(prompt_state->system_prompt),
+                                                        .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   model_selection().reasoning = std::nullopt;
   if (auto refreshed = refresh_parent_configuration(); !refreshed)
     return std::unexpected(std::move(refreshed.error()));

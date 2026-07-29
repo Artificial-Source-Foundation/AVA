@@ -232,7 +232,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     return 2;
   }
 
-  auto session = open_runtime_session(options.open_options);
+  auto session = open_runtime_session(options.open_context, options.lifecycle_request);
   if (!session)
   {
     err << terminal_output_text(session.error().format(), sanitize_stderr) << '\n';
@@ -252,7 +252,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Provider const& provider =
       options.provider_override ? options.provider_override->get() : static_cast<ava::provider::Provider const&>(**default_provider);
   runtime::RunOptions runtime_options;
-  runtime_options.offline = session->is_offline() || options.open_options.offline;
+  runtime_options.offline = session->is_offline() || options.open_context.offline;
   if (!runtime_options.offline)
   {
     auto request_credential = ava::config::provider_credential_for_request(session->paths(), session->model().provider_id, auth_transport);

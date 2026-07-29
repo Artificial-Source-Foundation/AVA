@@ -6,7 +6,7 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/command_sessions.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/OpenOptions.h"
+#include "ava/app/runtime/RuntimeOpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/session/session_metadata.h"
@@ -43,7 +43,7 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -131,7 +131,7 @@ void test_application_catalog_coordinator_serializes_refresh_and_snapshot()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -236,7 +236,7 @@ void test_application_catalog_current_session_incremental_refresh()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;

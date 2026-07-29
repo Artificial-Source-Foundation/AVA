@@ -17,6 +17,5 @@ namespace ava::app::session_command_support {
 [[nodiscard]] std::string labels_text(std::vector<std::string> const& labels);
 [[nodiscard]] std::string shorten_middle(std::string text, std::size_t max_columns);
 [[nodiscard]] ava::core::Result<runtime::Session> reopen_session(runtime::Session const& current, std::string_view session_id);
-[[nodiscard]] runtime::OpenOptions owned_replacement_options(runtime::Session const& current);
 
 }  // namespace ava::app::session_command_support

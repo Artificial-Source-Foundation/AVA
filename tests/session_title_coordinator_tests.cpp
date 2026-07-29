@@ -171,13 +171,18 @@ ava::core::Result<ava::app::runtime::Session> open_title_session(std::filesystem
   auto const workspace = root / "workspace";
   auto paths = ava::tests::app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = std::move(paths);
-  options.sessionless = sessionless;
   options.session_title_coordinator = std::move(coordinator);
-  return ava::app::open_runtime_session(options);
+  return ava::app::open_runtime_session(options, {.sessionless = sessionless,
+                                                  .requested_session_id = std::nullopt,
+                                                  .fork_session_id = std::nullopt,
+                                                  .initial_session_name = std::nullopt,
+                                                  .continue_last_session = false,
+                                                  .initial_reasoning_level = std::nullopt,
+                                                  .expected_original_cwd = std::nullopt});
 }
 
 void test_session_title_config_is_strict()
@@ -209,7 +214,7 @@ void test_title_config_uses_logical_runtime_anchors()
 
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::RuntimeOpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
@@ -408,7 +413,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
   coordinator->schedule(*session, "Design <skill>hidden scaffold</skill> durable navigation titles", *seeded, options);
   expect(state->wait_started(), "title navigation generator starts");
 
-  auto replacement = ava::app::create_runtime_session_like(*session, ava::app::runtime::OpenOptions{});
+  auto replacement = ava::app::create_runtime_session_like(*session, ava::app::runtime::RuntimeOpenContext{});
   expect(replacement.has_value(), replacement ? "replacement session opens" : replacement.error().format());
   if (replacement)
     expect(session->replace_with(std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");

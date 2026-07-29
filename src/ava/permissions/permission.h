@@ -142,9 +142,10 @@ struct PermissionResolutionDecision
 {
   PermissionResolution resolution = PermissionResolution::Deny;
   std::string reason;
-  // Optional one-shot user-authored denial guidance for the model-facing tool
-  // error only. Never a remembered-rule reason and never part of permission
-  // audit/event serialization.
+  // Optional one-shot user-authored denial guidance. Carried only until the
+  // per-dispatch ToolContext capture revalidates and stores it for the
+  // model/provider replay channel. Never a remembered-rule reason and never
+  // part of permission audit/event/Error serialization.
   std::string user_guidance;
   std::string resolution_source;
   std::string rule_id;
@@ -154,16 +155,22 @@ struct PermissionResolutionDecision
   PermissionResolutionDecision(PermissionResolution resolution_in);
   PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in);
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // user_guidance must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Bound for optional one-shot denial guidance carried on PermissionResolutionDecision
-// and emitted (after revalidation) on model-facing permission-denied tool errors.
+// and, after revalidation, on the dedicated model/provider-only replay channel.
 inline constexpr std::size_t kMaxPermissionUserGuidanceBytes = 2048;
 
 // Trust-boundary validation for user_guidance: non-empty, <=2048 bytes, valid
 // UTF-8, and free of control bytes/newlines. Invalid values are dropped.
 [[nodiscard]] std::optional<std::string> validated_permission_user_guidance(std::string_view value);
+
+// Inject validated provider-only denial guidance into provider-facing tool-result
+// content. JSON objects receive a top-level provider_user_guidance field; other
+// content receives a controlled suffix. Invalid/empty guidance leaves bytes unchanged.
+[[nodiscard]] std::string with_provider_user_guidance(std::string content, std::string_view guidance);
 
 struct PermissionPrompt
 {

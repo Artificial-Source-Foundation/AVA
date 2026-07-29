@@ -7,6 +7,7 @@
 #include "ava/tools/lsp_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
+#include "ava/permissions/permission.h"
 
 #include <memory>
 #include <string>
@@ -131,6 +132,9 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
     return result;
   }
   context.permission_request_ids = std::make_shared<std::vector<std::string>>();
+  // Each dispatch owns an independent guidance capture. Parallel workers call
+  // dispatch_with_context with their own ToolContext copy, so captures never share.
+  context.permission_denial_guidance_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
   if (context.announce_execution_after_permission)
     context.execution_started = std::make_shared<std::atomic_bool>(false);
   if (context.lsp_diagnostics_provider)
@@ -141,6 +145,15 @@ ava::core::Result<ToolDispatchResult> ToolDispatcher::dispatch_with_context(ava:
     result.payload.permission_request_ids = *context.permission_request_ids;
   }
   result = with_tool_result_payload(std::move(result));
+  // Attach validated capture guidance only onto denial/error dispatch results.
+  // Ordinary result_text and ToolResultPayload stay guidance-free for timeline,
+  // events, RPC, ACP, and diagnostics.
+  result.provider_user_guidance.clear();
+  if (!result.success && context.permission_denial_guidance_capture)
+  {
+    if (auto validated = ava::permissions::validated_permission_user_guidance(context.permission_denial_guidance_capture->provider_user_guidance))
+      result.provider_user_guidance = std::move(*validated);
+  }
   emit_result(result);
   return result;
 }

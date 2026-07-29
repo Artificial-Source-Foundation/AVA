@@ -74,8 +74,7 @@ bool wait_for_process_group_exit(pid_t pgid)
   return true;
 }
 
-ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolContext context, std::string_view command,
-                                                            ava::tools::BashOptions options = {})
+ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolContext context, std::string_view command, ava::tools::BashOptions options = {})
 {
   if (!context.anchor_set)
   {
@@ -701,11 +700,10 @@ void test_sealed_local_bash_contract()
   std::error_code replacement_copy_error;
   std::filesystem::copy_file("/bin/false", replacement_interpreter, std::filesystem::copy_options::overwrite_existing, replacement_copy_error);
   bool interpreter_swapped_after_binding = false;
-  bool const interpreter_fixture_written = !interpreter_copy_error && !replacement_copy_error &&
-                                           ::chmod(bound_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
-                                           ::chmod(replacement_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
-                                           write_executable(interpreter_script,
-                                                            "#!" + bound_interpreter.string() + "\nprintf approved-interpreter-descriptor\n");
+  bool const interpreter_fixture_written =
+      !interpreter_copy_error && !replacement_copy_error && ::chmod(bound_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
+      ::chmod(replacement_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
+      write_executable(interpreter_script, "#!" + bound_interpreter.string() + "\nprintf approved-interpreter-descriptor\n");
   ava::tools::ToolContext interpreter_context = context;
   interpreter_context.announce_execution_after_permission = true;
   interpreter_context.execution_started = std::make_shared<std::atomic_bool>(false);
@@ -737,12 +735,12 @@ void test_sealed_local_bash_contract()
       run_bash_for_test(failure_context, "descriptor-exec-failure", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
 
   expect(!copy_error && binary && binary->exit_code == 0, "a regular binary executes from its approved descriptor");
-  expect(race_script_written && swapped_after_binding && bound_script_result && bound_script_result->exit_code == 0 &&
-             bound_script_result->output == "approved-descriptor",
-         bound_script_result ? "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: output=" +
-                                   bound_script_result->output
-                             : "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: " +
-                                   bound_script_result.error().format());
+  expect(
+      race_script_written && swapped_after_binding && bound_script_result && bound_script_result->exit_code == 0 &&
+          bound_script_result->output == "approved-descriptor",
+      bound_script_result
+          ? "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: output=" + bound_script_result->output
+          : "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: " + bound_script_result.error().format());
   expect(interpreter_fixture_written && interpreter_swapped_after_binding && bound_interpreter_result && bound_interpreter_result->exit_code == 0 &&
              bound_interpreter_result->output == "approved-interpreter-descriptor",
          bound_interpreter_result ? "a shebang interpreter executes from its approved descriptor after a post-binding pathname replacement: output=" +
@@ -761,7 +759,7 @@ void test_sealed_local_bash_contract()
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto normal_group = run_bash_for_test(group_context, "sleep 30 & printf $$ > " + normal_group_file.string(),
-                                           ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+                                        ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   auto const normal_pgid = read_pid_file_for_test(normal_group_file);
   expect(normal_group && normal_group->exit_code == 0 && normal_pgid && wait_for_process_group_exit(*normal_pgid),
          "normal leader completion cleans verified background children before returning");
@@ -1273,45 +1271,50 @@ void test_command_permission_user_guidance_propagation()
     return {};
   };
 
+  auto guided_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
   ava::tools::ToolContext guided_context{
       .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
-            denied.user_guidance = "use the sealed workspace recipe instead";
-            return denied;
-          },
-      .permission_audit_sink = audit_sink};
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+        denied.user_guidance = "use the sealed workspace recipe instead";
+        return denied;
+      },
+      .permission_audit_sink = audit_sink,
+      .permission_denial_guidance_capture = guided_capture};
   auto guided = ava::tools::ensure_permission(guided_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");
-  expect(!guided && guided.error().format().find("user_guidance: use the sealed workspace recipe instead") != std::string::npos &&
+  expect(!guided && guided_capture->provider_user_guidance == "use the sealed workspace recipe instead" &&
+             guided.error().format().find("user_guidance") == std::string::npos &&
+             guided.error().format().find("use the sealed workspace recipe instead") == std::string::npos &&
              guided.error().format().find("resolution: deny") != std::string::npos,
-         "RunCommand permission denial propagates validated user_guidance into model-facing error context");
+         "RunCommand permission denial captures validated guidance without entering Error context/format");
 
   bool audits_free_of_guidance = !audits.empty();
   for (auto const& event : audits)
   {
     auto const json = ava::tools::permission_audit_data_json(event);
-    audits_free_of_guidance = audits_free_of_guidance && json.find("user_guidance") == std::string::npos &&
-                              json.find("use the sealed workspace recipe instead") == std::string::npos &&
-                              event.reason.find("sealed workspace recipe") == std::string::npos &&
-                              event.resolution_reason.find("sealed workspace recipe") == std::string::npos;
+    audits_free_of_guidance =
+        audits_free_of_guidance && json.find("user_guidance") == std::string::npos && json.find("provider_user_guidance") == std::string::npos &&
+        json.find("use the sealed workspace recipe instead") == std::string::npos && event.reason.find("sealed workspace recipe") == std::string::npos &&
+        event.resolution_reason.find("sealed workspace recipe") == std::string::npos;
   }
   expect(audits_free_of_guidance, "RunCommand permission audits never serialize one-shot user_guidance");
 
   audits.clear();
+  auto forged_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
   ava::tools::ToolContext forged_context{
       .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
-            denied.user_guidance = "no\nwire\x7fleak";
-            return denied;
-          },
-      .permission_audit_sink = audit_sink};
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+        denied.user_guidance = "no\nwire\x7fleak";
+        return denied;
+      },
+      .permission_audit_sink = audit_sink,
+      .permission_denial_guidance_capture = forged_capture};
   auto forged = ava::tools::ensure_permission(forged_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");
-  expect(!forged && forged.error().format().find("user_guidance") == std::string::npos && forged.error().format().find("wire") == std::string::npos,
+  expect(!forged && forged_capture->provider_user_guidance.empty() && forged.error().format().find("user_guidance") == std::string::npos &&
+             forged.error().format().find("wire") == std::string::npos,
          "malformed forged RunCommand user_guidance is dropped and never leaks");
 }
 

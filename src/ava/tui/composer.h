@@ -292,7 +292,8 @@ struct PermissionPromptInputResult
   bool guidance_mode = false;
   std::string guidance_text = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // guidance_text must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct PermissionPromptRememberAvailability
@@ -324,7 +325,8 @@ struct PermissionPromptView
   std::string guidance_text = {};
   std::string request_id = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // guidance_text must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct QuestionPromptOptionView

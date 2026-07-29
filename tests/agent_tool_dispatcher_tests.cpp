@@ -2,18 +2,24 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/event/events.h"
+#include "ava/app/acp/session_update.h"
 #include "ava/app/commands.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime_event_adapters.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/agent_loop_session.h"
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatch_services.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_summaries.h"
+#include "ava/agent/tool_timeline.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
@@ -1603,6 +1609,166 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
   expect(!std::filesystem::exists(workspace / "main.cpp"), "denied plan mode write does not create source file");
 }
 
+void test_permission_denial_guidance_provider_only_channel()
+{
+  auto const root = create_empty_root("dispatcher-guidance-channel");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const outside = root / "outside-note.txt";
+  {
+    std::ofstream out(outside, std::ios::binary | std::ios::trunc);
+    out << "outside";
+  }
+
+  constexpr char const* kGuidance = "stay on the sealed workspace path";
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::agent::ToolDispatcher const dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+        denied.user_guidance = kGuidance;
+        return denied;
+      },
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      }});
+
+  auto const path_args = std::string("{\"path\":\"") + ava::core::json::escape(outside.string()) + "\"}";
+  auto denied = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_guided_read", .name = "read_file", .arguments_json = path_args});
+  expect(denied && !denied->success, "guided provider-tool denial returns a failed ToolDispatchResult");
+
+  expect(denied->provider_user_guidance == kGuidance, "ToolDispatchResult dedicated provider field carries validated guidance");
+  expect(denied->result_text.find(kGuidance) == std::string::npos && denied->result_text.find("user_guidance") == std::string::npos &&
+             denied->result_text.find("provider_user_guidance") == std::string::npos && denied->payload.error_details.find(kGuidance) == std::string::npos &&
+             denied->payload.error_message.find(kGuidance) == std::string::npos && denied->payload.summary.find(kGuidance) == std::string::npos,
+         "guided denial keeps ordinary result_text and ToolResultPayload guidance-free");
+  auto const structured = ava::agent::serialize_tool_result_payload_json(*denied);
+  expect(structured.find(kGuidance) == std::string::npos && structured.find("provider_user_guidance") == std::string::npos,
+         "structured_result serialization never includes provider_user_guidance");
+
+  bool audits_clean = !audits.empty();
+  for (auto const& event : audits)
+  {
+    auto const json = ava::tools::permission_audit_data_json(event);
+    audits_clean = audits_clean && json.find(kGuidance) == std::string::npos && json.find("user_guidance") == std::string::npos &&
+                   json.find("provider_user_guidance") == std::string::npos;
+  }
+  expect(audits_clean, "permission audits remain free of one-shot denial guidance");
+
+  std::optional<ava::session::SessionEntry> persisted;
+  auto append_sink = [&](ava::session::SessionEntry entry) -> ava::core::VoidResult {
+    persisted = std::move(entry);
+    return {};
+  };
+  expect(static_cast<bool>(ava::agent::append_tool_result(append_sink, *denied)), "guided denial persists as a session tool_result");
+  expect(persisted && ava::core::json::string_field(persisted->data_json, "provider_user_guidance") == std::string(kGuidance),
+         "session ToolResult dedicated provider_user_guidance field contains validated guidance");
+  auto const stored_result = ava::core::json::string_field(persisted->data_json, "result").value_or("");
+  auto const stored_structured = ava::core::json::object_field(persisted->data_json, "structured_result").value_or("");
+  expect(stored_result.find(kGuidance) == std::string::npos && stored_structured.find(kGuidance) == std::string::npos,
+         "session ordinary result and structured_result stay guidance-free");
+
+  auto const session_guidance = ava::core::json::string_field(persisted->data_json, "provider_user_guidance").value_or("");
+  auto const reconstructed = ava::permissions::with_provider_user_guidance(stored_result, session_guidance);
+  expect(reconstructed.find(kGuidance) != std::string::npos && reconstructed != stored_result,
+         "reconstructed provider-facing tool-result content includes validated guidance");
+  expect(ava::permissions::with_provider_user_guidance(stored_result, "") == stored_result, "empty guidance leaves unguided provider content bytes unchanged");
+
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      {ava::session::SessionEntry{.id = "user_entry",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::UserMessage,
+                                  .timestamp = "2026-07-29T00:00:00Z",
+                                  .data_json = R"({"text":"read outside"})"},
+       ava::session::SessionEntry{.id = "asst_entry",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::AssistantMessage,
+                                  .timestamp = "2026-07-29T00:00:01Z",
+                                  .data_json = R"({"text":"checking","tool_calls":1})"},
+       ava::session::SessionEntry{.id = "call_entry",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-07-29T00:00:02Z",
+                                  .data_json = R"({"call_id":"call_guided_read","name":"read_file","arguments":"{}"})"},
+       *persisted});
+  bool provider_saw_guidance = false;
+  if (messages)
+  {
+    for (auto const& message : *messages)
+    {
+      if (message.content.find(kGuidance) != std::string::npos)
+        provider_saw_guidance = true;
+      for (auto const& part : message.content_parts)
+      {
+        if (part.text.find(kGuidance) != std::string::npos)
+          provider_saw_guidance = true;
+      }
+    }
+  }
+  expect(provider_saw_guidance || reconstructed.find(kGuidance) != std::string::npos,
+         "provider message reconstruction or controlled injection surfaces validated guidance");
+
+  ava::agent::ToolTimelineEntry timeline{.status = ava::agent::ToolTimelineStatus::Error,
+                                         .call_id = denied->call_id,
+                                         .name = denied->name,
+                                         .argument_summary = "read",
+                                         .result_summary = denied->payload.summary,
+                                         .arguments_json = "{}"};
+  ava::agent::populate_tool_timeline_metadata(timeline, *denied);
+  expect(timeline.result_json.find(kGuidance) == std::string::npos && timeline.structured_result_json.find(kGuidance) == std::string::npos &&
+             timeline.error_details.find(kGuidance) == std::string::npos,
+         "tool timeline metadata built from dispatch result stays guidance-free");
+
+  auto const runtime_event = ava::app::runtime_event_from_tool_timeline_entry({}, timeline);
+  auto const envelope = ava::event::to_event_envelope(runtime_event);
+  expect(envelope.payload_json.find(kGuidance) == std::string::npos && envelope.payload_json.find("provider_user_guidance") == std::string::npos,
+         "typed RuntimeEvent / RPC-equivalent envelope JSON stays guidance-free");
+
+  ava::app::acp::RuntimeSessionUpdateMapper mapper(ava::app::acp::RuntimeSessionUpdateMapperOptions{.workspace_root = workspace, .message_id = "msg"});
+  auto encoded = mapper.map_and_encode(runtime_event);
+  expect(encoded.has_value(), "ACP mapper encodes tool result events");
+  if (encoded && *encoded)
+  {
+    expect((*encoded)->find(kGuidance) == std::string::npos && (*encoded)->find("provider_user_guidance") == std::string::npos,
+           "ACP session update content built from the timeline stays guidance-free");
+  }
+
+  ava::agent::ToolDispatcher const forged_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied_decision{ava::permissions::PermissionResolution::Deny};
+        denied_decision.user_guidance = "evil\nforged\x01";
+        return denied_decision;
+      }});
+  auto forged = forged_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_forged", .name = "read_file", .arguments_json = path_args});
+  expect(forged && !forged->success && forged->provider_user_guidance.empty() && forged->result_text.find("evil") == std::string::npos,
+         "invalid forged capture guidance is omitted fail-closed");
+
+  ava::agent::ToolDispatchResult forged_session_result = *denied;
+  forged_session_result.provider_user_guidance = "session\nforged\x7f";
+  std::optional<ava::session::SessionEntry> forged_persisted;
+  auto forged_sink = [&](ava::session::SessionEntry entry) -> ava::core::VoidResult {
+    forged_persisted = std::move(entry);
+    return {};
+  };
+  expect(static_cast<bool>(ava::agent::append_tool_result(forged_sink, forged_session_result)), "forged session guidance still appends the tool_result");
+  expect(forged_persisted && !ava::core::json::string_field(forged_persisted->data_json, "provider_user_guidance"),
+         "invalid forged session guidance is omitted fail-closed on append");
+
+  expect(ava::permissions::with_provider_user_guidance(stored_result, "evil\nforged") == stored_result,
+         "invalid forged session-file guidance is omitted fail-closed on replay");
+
+  auto const injected = ava::permissions::with_provider_user_guidance(R"({"tool":"read_file","ok":false})", kGuidance);
+  expect(injected.find("\"provider_user_guidance\":\"stay on the sealed workspace path\"") != std::string::npos,
+         "controlled JSON field injection places validated guidance for provider replay");
+  auto const unguided_bytes = std::string(R"({"tool":"read_file","ok":false})");
+  expect(ava::permissions::with_provider_user_guidance(unguided_bytes, "bad\nguidance") == unguided_bytes,
+         "invalid guidance leaves unguided provider content bytes unchanged");
+}
+
 }  // namespace
 
 void run_agent_tool_dispatcher_tests()
@@ -1613,4 +1779,5 @@ void run_agent_tool_dispatcher_tests()
   test_task_mode_and_job_tool_controls();
   test_empty_worker_services_disable_interactive_tools();
   test_tool_dispatcher_plan_mode_denies_mutation();
+  test_permission_denial_guidance_provider_only_channel();
 }

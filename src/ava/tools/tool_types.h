@@ -66,8 +66,12 @@ struct ToolDispatchResult
   bool success = false;
   std::string result_text;
   ToolResultPayload payload = {};
+  // Model/provider-only one-shot denial guidance. Never enters result_text,
+  // ToolResultPayload, timeline, events, audits, RPC, ACP, or Error::format.
+  std::string provider_user_guidance = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // provider_user_guidance must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::tools

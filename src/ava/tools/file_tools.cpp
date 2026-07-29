@@ -88,11 +88,23 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
       .command_metadata = std::move(command_metadata)};
 }
 
+void capture_permission_denial_guidance(ToolContext const& context, std::string_view user_guidance)
+{
+  if (!context.permission_denial_guidance_capture)
+    return;
+  // Revalidate at the backend trust boundary. Direct app command contexts leave
+  // the capture null and discard guidance because no model continuation exists.
+  if (auto validated = ava::permissions::validated_permission_user_guidance(user_guidance))
+    context.permission_denial_guidance_capture->provider_user_guidance = std::move(*validated);
+  else
+    context.permission_denial_guidance_capture->provider_user_guidance.clear();
+}
+
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::Operation operation,
                                          ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path,
                                          std::string_view command, std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata,
                                          std::string_view resolution_context, std::string_view resolution_reason = {},
-                                         std::string_view permission_request_id = {}, std::string_view user_guidance = {})
+                                         std::string_view permission_request_id = {})
 {
   bool const run_command = operation == ava::permissions::Operation::RunCommand;
   auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
@@ -115,10 +127,8 @@ ava::core::Error permission_denied_error(std::string_view error_message, ava::pe
   {
     error.with_context("path", target_path.string());
   }
-  // Revalidate at the backend trust boundary. Guidance is model-facing only and
-  // must never enter audit/event payloads. Invalid forged values are dropped.
-  if (auto validated = ava::permissions::validated_permission_user_guidance(user_guidance))
-    error.with_context("user_guidance", std::move(*validated));
+  // Guidance never enters Error context/format: public tool-result details,
+  // diagnostics, audits, and events consume this sanitized Error only.
   if (decision.action == ava::permissions::PermissionAction::Ask)
   {
     error.with_context("resolution", std::string(resolution_context));
@@ -451,9 +461,9 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
 
   auto const resolution_context = resolution ? ava::permissions::to_string(*resolution) : std::string("resolver_failed");
   auto const resolution_reason = resolution ? resolution->reason : resolution.error().format();
-  auto const user_guidance = resolution ? std::string_view(resolution->user_guidance) : std::string_view{};
+  capture_permission_denial_guidance(context, resolution ? std::string_view(resolution->user_guidance) : std::string_view{});
   return std::unexpected(permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, resolution_context,
-                                                 resolution_reason, permission_request_id, user_guidance));
+                                                 resolution_reason, permission_request_id));
 }
 
 ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,

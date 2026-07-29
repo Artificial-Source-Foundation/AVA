@@ -35,6 +35,7 @@ struct TranscriptSearchMatch
 struct TranscriptSearchProjection
 {
   bool available = false;
+  bool context_gathering = false;
   std::string identity;
   std::string searchable_text;
   std::string unspaced_searchable_text;
@@ -44,23 +45,47 @@ struct TranscriptSearchProjection
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TranscriptSearchUpdate
+{
+  std::size_t first_changed_match_row = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct TranscriptSearchDiagnostics
+{
+  std::size_t projection_build_count = 0;
+  std::size_t match_scan_count = 0;
+  std::size_t modal_row_build_count = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 class TranscriptSearchProjectionCache final
 {
  public:
-  void rebuild_all(ComposerSnapshot const& snapshot, TranscriptLayout const& layout);
+  [[nodiscard]] TranscriptSearchUpdate rebuild_all(ComposerSnapshot const& snapshot, TranscriptLayout const& layout);
   void clear();
-  void refresh_after_transcript_mutation(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::ptrdiff_t item_index_shift,
-                                         std::size_t changed_from_item_index);
-  [[nodiscard]] std::vector<TranscriptSearchMatch> matches(std::string_view query) const;
+  [[nodiscard]] TranscriptSearchUpdate update_query(std::string query);
+  [[nodiscard]] TranscriptSearchUpdate refresh_after_transcript_mutation(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
+                                                                         std::ptrdiff_t item_index_shift, std::size_t changed_from_item_index);
+  [[nodiscard]] std::vector<TranscriptSearchMatch> const& matches() const noexcept;
+  [[nodiscard]] std::string const& query() const noexcept;
   [[nodiscard]] std::size_t projection_build_count() const noexcept;
+  [[nodiscard]] std::size_t match_scan_count() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   void rebuild_range(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::size_t first_item_index, std::size_t past_last_item_index);
+  void rebuild_affected(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::vector<bool> const& affected);
+  [[nodiscard]] TranscriptSearchUpdate replace_matches(std::vector<TranscriptSearchMatch> previous_matches, std::vector<bool> const* affected = nullptr);
 
   std::vector<TranscriptSearchProjection> projections_;
+  std::string query_;
+  std::vector<TranscriptSearchMatch> matches_;
   std::size_t projection_build_count_ = 0;
+  std::size_t match_scan_count_ = 0;
 };
 
 [[nodiscard]] bool transcript_search_query_valid(std::string_view query) noexcept;
@@ -68,6 +93,8 @@ class TranscriptSearchProjectionCache final
 [[nodiscard]] std::optional<std::size_t> shift_transcript_search_item_index(std::optional<std::size_t> item_index, std::ptrdiff_t item_index_shift) noexcept;
 [[nodiscard]] std::vector<TranscriptSearchMatch> build_transcript_search_matches(ComposerSnapshot const& snapshot, TranscriptLayout const& layout,
                                                                                  std::string_view query);
+void update_transcript_search_select_list_rows(SelectListView& view, std::vector<TranscriptSearchMatch> const& matches, std::string_view query,
+                                               std::size_t first_changed_match_row, std::size_t& modal_row_build_count);
 
 }  // namespace detail
 
@@ -85,11 +112,12 @@ class TranscriptSearchController final
   void refresh_after_transcript_mutation(std::ptrdiff_t item_index_shift, std::size_t changed_from_item_index);
   void refresh_after_resize();
   void close_before_prompt();
+  [[nodiscard]] detail::TranscriptSearchDiagnostics diagnostics() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
-  void rebuild(std::optional<std::size_t> selected_item_index, std::size_t fallback_selection);
+  void rebuild(std::optional<std::size_t> selected_item_index, std::size_t fallback_selection, std::size_t first_changed_match_row);
   void restore_saved_viewport(std::string status);
   void refresh_authoritative_layout();
 
@@ -99,13 +127,13 @@ class TranscriptSearchController final
   ActiveSelectList& active_select_list_;
   std::string query_;
   detail::TranscriptSearchProjectionCache projection_cache_;
-  std::vector<detail::TranscriptSearchMatch> matches_;
   detail::TranscriptViewportAnchor saved_viewport_anchor_ = {};
   std::size_t saved_scroll_offset_ = 0;
   std::size_t saved_transcript_generation_ = 0;
   std::size_t saved_width_ = 0;
   std::size_t saved_height_ = 0;
   std::ptrdiff_t accumulated_item_index_shift_ = 0;
+  std::size_t modal_row_build_count_ = 0;
 };
 
 }  // namespace ava::tui

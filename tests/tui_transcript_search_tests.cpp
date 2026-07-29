@@ -77,31 +77,42 @@ void test_transcript_search_uses_current_rendered_tool_and_thinking_presentation
 void test_transcript_search_is_stable_across_render_widths()
 {
   constexpr std::string_view kLongPath = "/workspace/src/components/transcript_search_boundary_stability.cpp";
+  constexpr std::string_view kToolToken = "/workspace/generated/very_long_unspaced_tool_card_path/abcdefghijklmnopqrstuvwxyz0123456789/result.json";
   ava::tui::ComposerSnapshot snapshot;
-  snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "prefix alpha beta suffix " + std::string(kLongPath) + " exact Äpfel"}};
-  auto const wide_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 120, snapshot.tool_presentation, snapshot.thinking_visible, false);
-  auto const narrow_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 14, snapshot.tool_presentation, snapshot.thinking_visible, false);
-  ava::tui::detail::TranscriptSearchProjectionCache cache;
-  cache.rebuild_all(snapshot, wide_layout);
-  auto const wide_phrase = cache.matches("alpha beta");
-  auto const wide_path = cache.matches(kLongPath);
-  auto const wide_non_ascii = cache.matches("Äpfel");
-  auto const wide_builds = cache.projection_build_count();
-  cache.rebuild_all(snapshot, narrow_layout);
-  auto const narrow_phrase = cache.matches("alpha beta");
-  auto const narrow_path = cache.matches(kLongPath);
-  auto const narrow_non_ascii = cache.matches("Äpfel");
-  auto const folded_non_ascii = cache.matches("äpfel");
-  expect(narrow_layout.lines.size() > wide_layout.lines.size() && wide_phrase.size() == 1 && narrow_phrase.size() == 1 && wide_path.size() == 1 &&
-             narrow_path.size() == 1 && wide_non_ascii.size() == 1 && narrow_non_ascii.size() == 1 && folded_non_ascii.empty() &&
-             wide_phrase.front().item_index == narrow_phrase.front().item_index && wide_path.front().item_index == narrow_path.front().item_index &&
-             !narrow_path.front().detail.empty() && narrow_path.front().detail.size() <= ava::tui::detail::kMaxTranscriptSearchDetailBytes &&
-             wide_builds == 1 && cache.projection_build_count() == 2,
-         "transcript search preserves whitespace phrases and hard-wrapped unspaced paths across actual wide/narrow renders while matching non-ASCII bytes "
-         "exactly");
+  snapshot.transcript = {
+      ava::tui::TranscriptItem{.label = "ava", .text = "prefix alpha beta suffix " + std::string(kLongPath) + " exact Äpfel"},
+      ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                  .name = "custom_tool",
+                                                                  .argument_summary = "inspect",
+                                                                  .result_summary = "done",
+                                                                  .result_json = "{\"output\":\"" + std::string(kToolToken) + "\"}",
+                                                                  .lifecycle = ava::tui::ToolLifecycleState::Complete}},
+  };
+  for (auto const presentation : {ava::tui::ToolPresentation::Rich, ava::tui::ToolPresentation::Expanded})
+  {
+    auto const wide_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 120, presentation, snapshot.thinking_visible, false);
+    auto const narrow_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 40, presentation, snapshot.thinking_visible, false);
+    auto const wide_phrase = ava::tui::detail::build_transcript_search_matches(snapshot, wide_layout, "alpha beta");
+    auto const narrow_phrase = ava::tui::detail::build_transcript_search_matches(snapshot, narrow_layout, "alpha beta");
+    auto const wide_path = ava::tui::detail::build_transcript_search_matches(snapshot, wide_layout, kLongPath);
+    auto const narrow_path = ava::tui::detail::build_transcript_search_matches(snapshot, narrow_layout, kLongPath);
+    auto const wide_tool_token = ava::tui::detail::build_transcript_search_matches(snapshot, wide_layout, kToolToken);
+    auto const narrow_tool_token = ava::tui::detail::build_transcript_search_matches(snapshot, narrow_layout, kToolToken);
+    auto const wide_non_ascii = ava::tui::detail::build_transcript_search_matches(snapshot, wide_layout, "Äpfel");
+    auto const narrow_non_ascii = ava::tui::detail::build_transcript_search_matches(snapshot, narrow_layout, "Äpfel");
+    auto const folded_non_ascii = ava::tui::detail::build_transcript_search_matches(snapshot, narrow_layout, "äpfel");
+    expect(narrow_layout.lines.size() > wide_layout.lines.size() && wide_phrase.size() == 1 && narrow_phrase.size() == 1 && wide_path.size() == 1 &&
+               narrow_path.size() == 1 && wide_tool_token.size() == 1 && narrow_tool_token.size() == 1 && wide_tool_token.front().item_index == 1 &&
+               narrow_tool_token.front().item_index == 1 && wide_non_ascii.size() == 1 && narrow_non_ascii.size() == 1 && folded_non_ascii.empty() &&
+               !narrow_path.front().detail.empty() && narrow_path.front().detail.size() <= ava::tui::detail::kMaxTranscriptSearchDetailBytes,
+           "transcript search preserves prose and actual Rich/Expanded tool-card hard-wrapped unspaced content across wide and narrow renders: presentation=" +
+               std::string(ava::tui::to_string(presentation)) + " wide-lines=" + std::to_string(wide_layout.lines.size()) +
+               " narrow-lines=" + std::to_string(narrow_layout.lines.size()) + " wide-tool=" + std::to_string(wide_tool_token.size()) +
+               " narrow-tool=" + std::to_string(narrow_tool_token.size()));
+  }
 }
 
-void test_transcript_search_projection_cache_rebuilds_only_changed_suffix()
+void test_transcript_search_projection_match_and_modal_updates_are_suffix_bounded()
 {
   ava::tui::ComposerSnapshot snapshot;
   ava::tui::detail::TranscriptLayout layout;
@@ -121,39 +132,129 @@ void test_transcript_search_projection_cache_rebuilds_only_changed_suffix()
   }
 
   ava::tui::detail::TranscriptSearchProjectionCache cache;
-  cache.rebuild_all(snapshot, layout);
+  static_cast<void>(cache.update_query("retained item"));
+  auto initial_update = cache.rebuild_all(snapshot, layout);
+  ava::tui::SelectListView view;
+  std::size_t modal_row_build_count = 0;
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), initial_update.first_changed_match_row,
+                                                              modal_row_build_count);
   auto const initial_builds = cache.projection_build_count();
-  snapshot.transcript.back().text = "active tail replacement";
-  layout.lines.back() = "active tail replacement";
-  cache.refresh_after_transcript_mutation(snapshot, layout, 0, ava::tui::kMaxTranscriptItems - 1);
-  auto const tail_builds = cache.projection_build_count();
-  auto const active_tail = cache.matches("active tail replacement");
-  auto const builds_before_queries = cache.projection_build_count();
-  static_cast<void>(cache.matches("retained item [500]"));
-  static_cast<void>(cache.matches("ACTIVE TAIL"));
+  auto const initial_scans = cache.match_scan_count();
 
-  auto const old_layout = layout;
-  auto const old_max_scroll = old_layout.lines.size() - 20;
-  auto const old_anchor = ava::tui::detail::capture_transcript_viewport_anchor(old_layout, old_max_scroll, old_max_scroll - 500);
+  snapshot.transcript.back().text = "retained item tail replacement";
+  layout.lines.back() = snapshot.transcript.back().text;
+  auto tail_update = cache.refresh_after_transcript_mutation(snapshot, layout, 0, ava::tui::kMaxTranscriptItems - 1);
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), tail_update.first_changed_match_row, modal_row_build_count);
+  auto const query_builds = cache.projection_build_count();
+  auto query_update = cache.update_query("RETAINED ITEM");
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), query_update.first_changed_match_row,
+                                                              modal_row_build_count);
+  auto const query_scans = cache.match_scan_count();
+  auto const same_query_update = cache.update_query("RETAINED ITEM");
+  auto const same_query_scans = cache.match_scan_count();
+
+  snapshot.transcript.back().text = "retained item tail replacement twice";
+  layout.lines.back() = snapshot.transcript.back().text;
+  auto repeated_tail_update = cache.refresh_after_transcript_mutation(snapshot, layout, 0, ava::tui::kMaxTranscriptItems - 1);
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), repeated_tail_update.first_changed_match_row,
+                                                              modal_row_build_count);
+  auto const empty_update = cache.update_query("");
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), empty_update.first_changed_match_row,
+                                                              modal_row_build_count);
+  snapshot.transcript.back().text = "empty query incremental tail";
+  layout.lines.back() = snapshot.transcript.back().text;
+  auto empty_tail_update = cache.refresh_after_transcript_mutation(snapshot, layout, 0, ava::tui::kMaxTranscriptItems - 1);
+  ava::tui::detail::update_transcript_search_select_list_rows(view, cache.matches(), cache.query(), empty_tail_update.first_changed_match_row,
+                                                              modal_row_build_count);
+
+  expect(
+      initial_builds == ava::tui::kMaxTranscriptItems && initial_scans == ava::tui::kMaxTranscriptItems && cache.matches().size() == 1000 &&
+          tail_update.first_changed_match_row == 999 && query_builds == initial_builds + 1 && query_update.first_changed_match_row == 0 &&
+          query_scans == initial_scans + 1 + ava::tui::kMaxTranscriptItems && same_query_update.first_changed_match_row == 1000 &&
+          same_query_scans == query_scans && repeated_tail_update.first_changed_match_row == 999 && empty_tail_update.first_changed_match_row == 999 &&
+          cache.projection_build_count() == initial_builds + 3 && cache.match_scan_count() == initial_scans + 3 + (2 * ava::tui::kMaxTranscriptItems) &&
+          modal_row_build_count == 3003,
+      "1,000 matching rows project and scan once, query edits rescan without projection, and repeated or empty-query tail updates rebuild, scan, and recreate "
+      "only one suffix row");
+}
+
+ava::tui::TranscriptItem context_tool(std::string name, std::string result)
+{
+  return ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                     .name = std::move(name),
+                                                                     .argument_summary = "path=src/context.cpp",
+                                                                     .result_summary = std::move(result),
+                                                                     .lifecycle = ava::tui::ToolLifecycleState::Complete}};
+}
+
+void test_transcript_search_rebuilds_negative_shift_render_boundaries()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.tool_presentation = ava::tui::ToolPresentation::Compact;
+  snapshot.transcript = {context_tool("read_file", "DUPLICATE ASSISTANT RESULT"),
+                         ava::tui::TranscriptItem{.label = "ava", .text = "DUPLICATE ASSISTANT RESULT"}};
+  auto layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("duplicate assistant result"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const initial_builds = cache.projection_build_count();
+  auto const initial_scans = cache.match_scan_count();
+  auto initial_matches = cache.matches();
+
   snapshot.transcript.erase(snapshot.transcript.begin());
-  snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "new capped tail"});
-  layout.lines.erase(layout.lines.begin());
-  layout.lines.push_back("new capped tail");
-  cache.refresh_after_transcript_mutation(snapshot, layout, -1, ava::tui::kMaxTranscriptItems - 1);
-  auto const builds_after_eviction = cache.projection_build_count();
-  auto const retained_after_eviction = cache.matches("retained item [1]");
-  auto const new_tail = cache.matches("new capped tail");
-  auto const new_max_scroll = layout.lines.size() - 20;
-  auto const restored_scroll = ava::tui::detail::restore_transcript_viewport_anchor(old_anchor, layout, new_max_scroll, -1);
-  auto const restored_start = new_max_scroll - std::min(restored_scroll, new_max_scroll);
-  auto const shifted_selection = ava::tui::detail::shift_transcript_search_item_index(std::size_t{500}, -1);
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  auto update = cache.refresh_after_transcript_mutation(snapshot, layout, -1, snapshot.transcript.size());
+  auto visible_matches = cache.matches();
+  expect(initial_matches.size() == 1 && initial_matches.front().identity == "tool · read_file" && visible_matches.size() == 1 &&
+             visible_matches.front().item_index == 0 && visible_matches.front().identity == "assistant" && update.first_changed_match_row == 0 &&
+             cache.projection_build_count() == initial_builds + 1 && cache.match_scan_count() == initial_scans + 1,
+         "evicting a tool rebuilds and rescans the new leading assistant so an adjacency-suppressed duplicate becomes visible and searchable");
 
-  expect(initial_builds == ava::tui::kMaxTranscriptItems && tail_builds == initial_builds + 1 && active_tail.size() == 1 &&
-             builds_before_queries == tail_builds && builds_after_eviction == tail_builds + 1 && cache.projection_build_count() == builds_after_eviction &&
-             retained_after_eviction.size() == 1 && retained_after_eviction.front().item_index == 0 && new_tail.size() == 1 &&
-             new_tail.front().item_index == ava::tui::kMaxTranscriptItems - 1 && shifted_selection == std::optional<std::size_t>{499} && restored_start == 499,
-         "transcript search caches 1,000 retained projections, rebuilds only changed tails, shifts cache/selection/anchor on eviction, and does no query "
-         "rebuilds");
+  snapshot.transcript = {context_tool("read_file", "first context"), context_tool("grep", "second context")};
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.update_query("2 tools"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const pair_builds = cache.projection_build_count();
+  auto const pair_scans = cache.match_scan_count();
+  snapshot.transcript.push_back(context_tool("glob", "third context"));
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, layout, 0, 2));
+  expect(cache.matches().empty() && cache.projection_build_count() == pair_builds + 2 && cache.match_scan_count() == pair_scans + 2,
+         "a context-tool tail append rebuilds and filters only the changed suffix plus the earlier group-heading owner");
+
+  snapshot.transcript = {context_tool("read_file", "first context"), context_tool("grep", "second context")};
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.update_query("context gathering"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const grouped_builds = cache.projection_build_count();
+  auto const grouped_scans = cache.match_scan_count();
+  auto grouped = cache.matches();
+  snapshot.transcript.erase(snapshot.transcript.begin());
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, layout, -1, snapshot.transcript.size()));
+  expect(grouped.size() == 1 && grouped.front().item_index == 0 && cache.matches().empty() && cache.projection_build_count() == grouped_builds + 1 &&
+             cache.match_scan_count() == grouped_scans + 1,
+         "negative cap shift rebuilds the actual new leading context tool and removes its stale synthetic group-heading match");
+}
+
+void test_transcript_search_rebuilds_positive_shift_join_boundary()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.tool_presentation = ava::tui::ToolPresentation::Compact;
+  snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "RESTORED PREFIX DUPLICATE"}};
+  auto layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("restored prefix duplicate"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const initial_builds = cache.projection_build_count();
+  auto const initial_scans = cache.match_scan_count();
+
+  snapshot.transcript.insert(snapshot.transcript.begin(), context_tool("read_file", "RESTORED PREFIX DUPLICATE"));
+  layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, false, false);
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, layout, 1, snapshot.transcript.size()));
+  expect(cache.matches().size() == 1 && cache.matches().front().item_index == 0 && cache.matches().front().identity == "tool · read_file" &&
+             cache.projection_build_count() == initial_builds + 1 && cache.match_scan_count() == initial_scans + 2,
+         "positive restored-prefix shift filters both the restored projection and first retained join item, removing the newly suppressed assistant match");
 }
 
 void test_transcript_search_details_and_queries_are_bounded()
@@ -180,6 +281,8 @@ void run_tui_transcript_search_tests()
   test_transcript_search_literal_and_sanitized_rendered_scope();
   test_transcript_search_uses_current_rendered_tool_and_thinking_presentation();
   test_transcript_search_is_stable_across_render_widths();
-  test_transcript_search_projection_cache_rebuilds_only_changed_suffix();
+  test_transcript_search_projection_match_and_modal_updates_are_suffix_bounded();
+  test_transcript_search_rebuilds_negative_shift_render_boundaries();
+  test_transcript_search_rebuilds_positive_shift_join_boundary();
   test_transcript_search_details_and_queries_are_bounded();
 }

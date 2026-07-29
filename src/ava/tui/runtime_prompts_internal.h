@@ -87,6 +87,8 @@ class RuntimePromptCoordinator final
     std::shared_ptr<PendingQuestionRequest> question;
 
     [[nodiscard]] explicit operator bool() const noexcept { return permission || question; }
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
   };
 
   [[nodiscard]] ClaimedPromptRequest claim_pending_request_locked();

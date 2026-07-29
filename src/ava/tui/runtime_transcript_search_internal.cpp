@@ -881,7 +881,7 @@ std::optional<bool> TranscriptSearchController::handle_input(InputEvent const& e
   }
 
   SelectListInputResult input_result;
-  if (event.key == Key::MouseLeftClick)
+  if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick)
   {
     auto const clicked = select_list_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column);
     if (!clicked)

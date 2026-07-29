@@ -185,6 +185,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
   }
   auto submitted = immediate_slash_submission ? *immediate_slash_submission : expanded_composer_draft_text(draft);
+  renderer_.clear_transcript_selection();
   draft_state_.clear_selection();
   reset_composer_draft(draft);
   jump_mode = ComposerJumpMode::None;

@@ -358,7 +358,7 @@ void run_tui_terminal_input_tests_part_1()
           ava::tui::terminal_escape_sequence_key("[<65;12;9M") == ava::tui::Key::MouseWheelDown &&
           ava::tui::terminal_escape_sequence_key("[<68;12;9M") == ava::tui::Key::MouseWheelUp &&
           ava::tui::terminal_escape_sequence_key("[<69;12;9M") == ava::tui::Key::MouseWheelDown &&
-          ava::tui::terminal_escape_sequence_key("[<0;12;9M") == ava::tui::Key::MouseLeftClick &&
+          ava::tui::terminal_escape_sequence_key("[<0;12;9M") == ava::tui::Key::MouseLeftPress &&
           ava::tui::terminal_escape_sequence_key("[<32;12;9M") == ava::tui::Key::MouseLeftDrag &&
           ava::tui::terminal_escape_sequence_key("[<64;12;9m") == ava::tui::Key::Unknown &&
           ava::tui::terminal_escape_sequence_key("[<65;12;9m") == ava::tui::Key::Unknown &&
@@ -412,23 +412,53 @@ void run_tui_terminal_input_tests_part_1()
     sequence.push_back(static_cast<char>(row + 32U));
     return sequence;
   };
-  auto const sgr_click = ava::tui::terminal_escape_sequence_event("[<0;12;9M");
-  auto const sgr_release = ava::tui::terminal_escape_sequence_event("[<0;12;9m");
-  auto const sgr_drag = ava::tui::terminal_escape_sequence_event("[<32;12;9M");
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const sgr_hover = ava::tui::terminal_escape_sequence_event("[<32;12;9M");
+  auto const sgr_press = ava::tui::terminal_escape_sequence_event("[<0;12;9M");
+  auto const sgr_drag = ava::tui::terminal_escape_sequence_event("[<32;14;10M");
+  auto const sgr_release = ava::tui::terminal_escape_sequence_event("[<0;14;10m");
+  auto const sgr_post_release_hover = ava::tui::terminal_escape_sequence_event("[<32;15;10M");
+  auto const sgr_shift_press = ava::tui::terminal_escape_sequence_event("[<4;12;9M");
+  auto const sgr_shift_motion = ava::tui::terminal_escape_sequence_event("[<36;14;10M");
   auto const sgr_wheel = ava::tui::terminal_escape_sequence_event("[<65;21;7M");
-  auto const legacy_click = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(0, 12, 9));
-  auto const legacy_release = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(3, 12, 9));
-  auto const legacy_drag = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 12, 9));
+  auto const sgr_shift_wheel = ava::tui::terminal_escape_sequence_event("[<69;22;8M");
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const legacy_hover = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 12, 9));
+  auto const legacy_press = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(0, 12, 9));
+  auto const legacy_drag = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 14, 10));
+  auto const legacy_release = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(3, 14, 10));
+  auto const legacy_post_release_hover = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 15, 10));
   auto const legacy_wheel = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(64, 21, 7));
-  expect(sgr_click.key == ava::tui::Key::MouseLeftClick && sgr_click.mouse_column == 12 && sgr_click.mouse_row == 9 &&
-             sgr_release.key == ava::tui::Key::MouseLeftRelease && sgr_release.mouse_column == 12 && sgr_release.mouse_row == 9 &&
-             sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 12 && sgr_drag.mouse_row == 9 &&
-             sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 && sgr_wheel.mouse_row == 7 &&
-             legacy_click.key == ava::tui::Key::MouseLeftClick && legacy_click.mouse_column == 12 && legacy_click.mouse_row == 9 &&
-             legacy_release.key == ava::tui::Key::MouseLeftRelease && legacy_release.mouse_column == 12 && legacy_release.mouse_row == 9 &&
-             legacy_drag.key == ava::tui::Key::MouseLeftDrag && legacy_drag.mouse_column == 12 && legacy_drag.mouse_row == 9 &&
-             legacy_wheel.key == ava::tui::Key::MouseWheelUp && legacy_wheel.mouse_column == 21 && legacy_wheel.mouse_row == 7,
-         "terminal escape parser preserves SGR and legacy mouse click, drag, release, and wheel coordinates");
+  expect(sgr_hover.key == ava::tui::Key::Unknown && sgr_press.key == ava::tui::Key::MouseLeftPress && sgr_press.mouse_column == 12 &&
+             sgr_press.mouse_row == 9 && sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 14 && sgr_drag.mouse_row == 10 &&
+             sgr_release.key == ava::tui::Key::MouseLeftRelease && sgr_release.mouse_column == 14 && sgr_release.mouse_row == 10 &&
+             sgr_post_release_hover.key == ava::tui::Key::Unknown && sgr_shift_press.key == ava::tui::Key::Unknown &&
+             sgr_shift_motion.key == ava::tui::Key::Unknown && sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 &&
+             sgr_wheel.mouse_row == 7 && sgr_shift_wheel.key == ava::tui::Key::MouseWheelDown && sgr_shift_wheel.mouse_column == 22 &&
+             sgr_shift_wheel.mouse_row == 8 && legacy_hover.key == ava::tui::Key::Unknown && legacy_press.key == ava::tui::Key::MouseLeftPress &&
+             legacy_drag.key == ava::tui::Key::MouseLeftDrag && legacy_release.key == ava::tui::Key::MouseLeftRelease &&
+             legacy_post_release_hover.key == ava::tui::Key::Unknown && legacy_wheel.key == ava::tui::Key::MouseWheelUp && legacy_wheel.mouse_column == 21 &&
+             legacy_wheel.mouse_row == 7,
+         "terminal mouse protocols preserve real press-drag-release lifecycles, ignore hover and Shift, and preserve wheels");
+#ifdef NCURSES_MOUSE_VERSION
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const ncurses_hover = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 3, 4);
+  auto const ncurses_press = ava::tui::terminal_ncurses_mouse_event(BUTTON1_PRESSED, 3, 4);
+  auto const ncurses_drag = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 5, 6);
+  auto const ncurses_release = ava::tui::terminal_ncurses_mouse_event(BUTTON1_RELEASED, 5, 6);
+  auto const ncurses_after_release = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 7, 8);
+  auto const ncurses_click = ava::tui::terminal_ncurses_mouse_event(BUTTON1_CLICKED, 9, 10);
+#ifdef BUTTON_SHIFT
+  auto const ncurses_shift_press = ava::tui::terminal_ncurses_mouse_event(BUTTON1_PRESSED | BUTTON_SHIFT, 3, 4);
+  auto const ncurses_shift_ignored = ncurses_shift_press.key == ava::tui::Key::Unknown;
+#else
+  auto const ncurses_shift_ignored = true;
+#endif
+  expect(ncurses_hover.key == ava::tui::Key::Unknown && ncurses_press.key == ava::tui::Key::MouseLeftPress &&
+             ncurses_drag.key == ava::tui::Key::MouseLeftDrag && ncurses_release.key == ava::tui::Key::MouseLeftRelease &&
+             ncurses_after_release.key == ava::tui::Key::Unknown && ncurses_click.key == ava::tui::Key::MouseLeftClick && ncurses_shift_ignored,
+         "ncurses mouse reports preserve owned left-button lifecycle and click fallback without hover selection");
+#endif
   expect(ava::tui::terminal_escape_sequence_complete("[13;2u") && ava::tui::terminal_escape_sequence_complete("[?25l") &&
              ava::tui::terminal_escape_sequence_complete("[45;5u") && ava::tui::terminal_escape_sequence_complete("[3;3~") &&
              ava::tui::terminal_escape_sequence_complete("[<0;12;9M") && ava::tui::terminal_escape_sequence_complete(legacy_mouse_sequence(0, 12, 9)) &&
@@ -2311,8 +2341,10 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
   ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
 
   expect(ava::tui::terminal_bracketed_paste_enable_sequence() == std::string_view("\x1b[?2004h") &&
-             ava::tui::terminal_bracketed_paste_disable_sequence() == std::string_view("\x1b[?2004l"),
-         "terminal lifecycle exposes bracketed paste enable/disable sequences");
+             ava::tui::terminal_bracketed_paste_disable_sequence() == std::string_view("\x1b[?2004l") &&
+             ava::tui::terminal_mouse_enable_sequence() == std::string_view("\x1b[?1003l\x1b[?1000h\x1b[?1002h\x1b[?1006h") &&
+             ava::tui::terminal_mouse_disable_sequence() == std::string_view("\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l"),
+         "terminal lifecycle exposes bracketed paste and button-motion SGR mouse enable/disable sequences");
 
   // enter -> arm
   ava::tui::arm_owned_terminal_protocols_on_enter();
@@ -2322,6 +2354,7 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
          "enter arms paste/mouse/Kitty push+query without enabling modifyOtherKeys yet");
   expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
              count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 1 &&
              !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
          "enter emits one Kitty query push and paste enable and never OSC 11");
 
@@ -2343,6 +2376,7 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
   expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 1 &&
              count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_disable_sequence()) == 1 &&
              count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_disable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()) == 1 &&
              !sequences_contain(std::vector<std::string>(capture.sequences.begin() + static_cast<std::ptrdiff_t>(after_enter), capture.sequences.end()),
                                 ava::tui::terminal_background_query_sequence()),
          "handoff emits balanced pop/disable sequences without OSC 11");
@@ -2362,6 +2396,7 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
              count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
              count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 2 &&
              count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 2 &&
              !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
          "resume uses push-only Kitty re-arm, re-enables paste/modifyOtherKeys, and never re-queries or probes OSC 11");
 
@@ -2386,6 +2421,8 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
              !ownership.modify_other_keys_desired && !ownership.keyboard_protocol_kitty_response_seen && !ownership.kitty_keyboard_supported,
          "final restore releases protocols and clears negotiation memory");
   expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 3 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) ==
+                 count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()) &&
              count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) +
                      count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) ==
                  count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()),

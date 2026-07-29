@@ -222,7 +222,11 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"collapsed write card did not expose a mouse target\nscreen:\n{collapsed_before_mouse}")
     write_header_row, write_header_text = write_header
     write_header_column = write_header_text.index("+ write") + 1
-    send_literal(tmux_exe, session, f"\x1b[<0;{write_header_column};{write_header_row}M")
+    send_literal(
+        tmux_exe,
+        session,
+        f"\x1b[<0;{write_header_column};{write_header_row}M\x1b[<0;{write_header_column};{write_header_row}m",
+    )
     mouse_expanded = wait_for(
         tmux_exe,
         session,
@@ -245,7 +249,11 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"expanded write card lost its clickable header\nscreen:\n{mouse_expanded}")
     expanded_header_row, expanded_header_text = expanded_write_header
     expanded_header_column = expanded_header_text.index("+ write") + 1
-    send_literal(tmux_exe, session, f"\x1b[<0;{expanded_header_column};{expanded_header_row}M")
+    send_literal(
+        tmux_exe,
+        session,
+        f"\x1b[<0;{expanded_header_column};{expanded_header_row}M\x1b[<0;{expanded_header_column};{expanded_header_row}m",
+    )
     wait_for_absent(tmux_exe, session, r"changed:", "write card mouse collapse")
     mouse_collapsed = wait_for(tmux_exe, session, r"\+ write.*wrote 27 bytes", "write card mouse collapse settled")
     if len([line for line in mouse_collapsed.splitlines() if "+ write" in line]) != 1:

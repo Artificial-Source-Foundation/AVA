@@ -592,6 +592,7 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
     case Key::AltW:
     case Key::CtrlAltRightBracket:
     case Key::AltY:
+    case Key::MouseLeftPress:
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:

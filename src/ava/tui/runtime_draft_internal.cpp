@@ -22,6 +22,7 @@ void RuntimeDraftState::clear_selection()
 {
   draft_selection_anchor = std::string::npos;
   draft_selection_cursor = std::string::npos;
+  mouse_selecting = false;
 }
 
 std::optional<std::pair<std::size_t, std::size_t>> RuntimeDraftState::selection_bounds() const

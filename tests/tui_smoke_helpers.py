@@ -769,19 +769,16 @@ class SmokeContext:
         config: pathlib.Path,
         state: pathlib.Path,
         data: pathlib.Path,
+        no_color: bool = True,
     ) -> str:
-        return self.pane_command(
-            home=home,
-            config=config,
-            state=state,
-            data=data,
-            extra={
-                "NO_COLOR": "1",
-                "COLORFGBG": "",
-                "MOONSHOT_API_KEY": "test-key",
-                "MOONSHOT_BASE_URL": f"http://127.0.0.1:{provider.port}",
-            },
-        )
+        extra = {
+            "COLORFGBG": "",
+            "MOONSHOT_API_KEY": "test-key",
+            "MOONSHOT_BASE_URL": f"http://127.0.0.1:{provider.port}",
+        }
+        if no_color:
+            extra["NO_COLOR"] = "1"
+        return self.pane_command(home=home, config=config, state=state, data=data, extra=extra)
 
     def close(self) -> None:
         if self._closed:

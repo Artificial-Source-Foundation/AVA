@@ -307,7 +307,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (snapshot.select_list)
     {
       auto input_result = [&]() {
-        if (input.event.key == Key::MouseLeftClick)
+        if (input.event.key == Key::MouseLeftPress || input.event.key == Key::MouseLeftClick)
         {
           if (auto const clicked = select_list_selection_for_screen_position(snapshot, input.event.mouse_row, input.event.mouse_column))
           {
@@ -411,6 +411,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.transcript.clear();
         ++snapshot.transcript_generation;
         draft_state.clear_selection();
+        renderer.clear_transcript_selection();
         reset_composer_draft(draft);
         jump_mode = ComposerJumpMode::None;
         draft_input.clear();
@@ -1225,6 +1226,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       path_completion_force_active = false;
       static_cast<void>(draft_state.copy_selection(snapshot));
     }
+    else if (is_action(TuiAction::CopySelection) && renderer.has_transcript_selection())
+    {
+      pending_escape_clear = false;
+      path_completion_force_active = false;
+      static_cast<void>(renderer.copy_transcript_selection());
+    }
     else if (is_action(TuiAction::ClearInput) && (!draft.text.empty() || !is_action(TuiAction::Interrupt)))
     {
       pending_escape_clear = false;
@@ -1373,72 +1380,89 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       scroll_down(kMouseWheelScrollRows);
     }
-    else if (event.key == Key::MouseLeftClick)
-    {
-      renderer.synchronize_detached_transcript_layout();
-      pending_escape_clear = false;
-      if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_slash_command();
-      }
-      else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
-                                                                                                        completion_cache, snapshot.file_references_generation))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_file_reference();
-      }
-      else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
-                                                                                                         completion_cache, snapshot.file_references_generation))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_path_completion();
-      }
-      else if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        static_cast<void>(toggle_tool_details_at(*tool_index));
-      }
-      else if (auto const thinking_index = detail::transcript_thinking_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        static_cast<void>(toggle_thinking_at(*thinking_index));
-      }
-      else if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
-        draft_selection_anchor = draft.cursor;
-        draft_selection_cursor = draft.cursor;
-        draft.vertical_column = std::string::npos;
-        draft.yank_start = std::string::npos;
-        draft.yank_end = std::string::npos;
-        history_index.reset();
-        draft_input.clear();
-        snapshot.status = "cursor moved";
-      }
-    }
-    else if (event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease)
+    else if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick || event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease)
     {
       pending_escape_clear = false;
-      if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+      auto const begins_click = event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick;
+      bool palette_claimed = false;
+      if (begins_click)
       {
-        auto const next_cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
-        if (draft_selection_anchor == std::string::npos)
-          draft_selection_anchor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
-        draft_selection_cursor = next_cursor;
-        draft.cursor = next_cursor;
-        draft.vertical_column = std::string::npos;
-        draft.yank_start = std::string::npos;
-        draft.yank_end = std::string::npos;
-        history_index.reset();
-        draft_input.clear();
-        snapshot.status = draft_state.selection_bounds() ? "selection active" : "cursor moved";
+        if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_slash_command();
+          palette_claimed = true;
+        }
+        else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(
+                     snapshot, event.mouse_row, event.mouse_column, completion_cache, snapshot.file_references_generation))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_file_reference();
+          palette_claimed = true;
+        }
+        else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(
+                     snapshot, event.mouse_row, event.mouse_column, completion_cache, snapshot.file_references_generation))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_path_completion();
+          palette_claimed = true;
+        }
+      }
+      if (!palette_claimed)
+      {
+        auto const transcript_mouse = renderer.handle_transcript_selection_mouse(event, toggle_tool_details_at, toggle_thinking_at);
+        if (transcript_mouse == TranscriptSelectionMouseResult::Ignored)
+        {
+          if (begins_click)
+          {
+            if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+            {
+              renderer.clear_transcript_selection();
+              draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
+              draft_state.clear_selection();
+              if (event.key == Key::MouseLeftPress)
+              {
+                draft_selection_anchor = draft.cursor;
+                draft_selection_cursor = draft.cursor;
+                draft_state.mouse_selecting = true;
+              }
+              draft.vertical_column = std::string::npos;
+              draft.yank_start = std::string::npos;
+              draft.yank_end = std::string::npos;
+              history_index.reset();
+              draft_input.clear();
+              snapshot.status = "cursor moved";
+            }
+          }
+          else if (draft_state.mouse_selecting)
+          {
+            if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+            {
+              auto const next_cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
+              draft_selection_cursor = next_cursor;
+              draft.cursor = next_cursor;
+              draft.vertical_column = std::string::npos;
+              draft.yank_start = std::string::npos;
+              draft.yank_end = std::string::npos;
+              history_index.reset();
+              draft_input.clear();
+              snapshot.status = draft_state.selection_bounds() ? "selection active" : "cursor moved";
+            }
+            if (event.key == Key::MouseLeftRelease)
+              draft_state.mouse_selecting = false;
+          }
+        }
       }
     }
     else if (draft_state.extend_selection_for_key(event.key, snapshot))
     {
-      // Selection state was updated by the helper.
+      renderer.clear_transcript_selection();
     }
     else if (event.key == Key::CtrlHome)
     {
@@ -1683,6 +1707,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (draft_state.selection_bounds())
       {
         draft_state.clear_selection();
+        pending_escape_clear = false;
+        snapshot.status.clear();
+      }
+      else if (renderer.has_transcript_selection())
+      {
+        renderer.clear_transcript_selection();
         pending_escape_clear = false;
         snapshot.status.clear();
       }

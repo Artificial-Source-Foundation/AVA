@@ -1575,6 +1575,8 @@ std::string key_display(Key key)
       return "MouseWheelUp";
     case Key::MouseWheelDown:
       return "MouseWheelDown";
+    case Key::MouseLeftPress:
+      return "MouseLeftPress";
     case Key::MouseLeftClick:
       return "MouseLeftClick";
     case Key::MouseLeftDrag:
@@ -1780,7 +1782,7 @@ std::string action_description(TuiAction action)
     case TuiAction::ClearInput:
       return "Clear the current composer input";
     case TuiAction::CopySelection:
-      return "Copy the selected composer text";
+      return "Copy the selected composer or transcript text";
     case TuiAction::ExternalEditor:
       return "Open the current draft in $VISUAL or $EDITOR";
     case TuiAction::Suspend:

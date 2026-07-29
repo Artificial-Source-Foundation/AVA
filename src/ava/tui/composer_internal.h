@@ -18,6 +18,7 @@ inline constexpr std::size_t kMinComposerBlockLines = 2;
 inline constexpr std::size_t kMaxComposerBlockLines = 8;
 inline constexpr std::size_t kMaxPaletteLines = 8;
 inline constexpr std::string_view kReverseVideo = "\x1b[7m";
+inline constexpr std::string_view kReverseVideoOff = "\x1b[27m";
 
 // The curses draw path currently maps these truecolor SGR forms directly.
 // Extend that parser before changing these to 256-color or basic ANSI codes.

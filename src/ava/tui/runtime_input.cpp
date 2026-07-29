@@ -5,6 +5,7 @@
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <cwchar>
 #include <deque>
 #include <optional>
@@ -26,11 +27,6 @@ std::deque<RuntimeInput>& startup_input_queue_storage()
   return queue;
 }
 
-bool mouse_state_matches(mmask_t state, mmask_t mask)
-{
-  return (state & mask) != 0;
-}
-
 RuntimeInput key_input(Key key)
 {
   return RuntimeInput{
@@ -40,18 +36,6 @@ RuntimeInput key_input(Key key)
 RuntimeInput event_input(InputEvent event)
 {
   return RuntimeInput{.event = std::move(event), .text = {}, .bracketed_paste = false, .resize = false};
-}
-
-RuntimeInput mouse_key_input(Key key, const MEVENT& mouse)
-{
-  return RuntimeInput{.event = InputEvent{.key = key,
-                                          .character = '\0',
-                                          .text = {},
-                                          .mouse_column = static_cast<std::size_t>(mouse.x + 1),
-                                          .mouse_row = static_cast<std::size_t>(mouse.y + 1)},
-                      .text = {},
-                      .bracketed_paste = false,
-                      .resize = false};
 }
 
 RuntimeInput unknown_input()
@@ -189,7 +173,8 @@ std::optional<RuntimeInput> read_escape_sequence_input()
     return unknown_input();
   if (consumed == "[200~")
     return read_bracketed_paste();
-  if (auto event = terminal_escape_sequence_event(consumed); event.key != Key::Unknown)
+  auto event = terminal_escape_sequence_event(consumed);
+  if (event.key != Key::Unknown)
     return event_input(std::move(event));
   if (terminal_escape_sequence_should_discard(consumed) || !terminal_escape_sequence_complete(consumed))
   {
@@ -488,36 +473,8 @@ RuntimeInput read_curses_input_from_terminal()
         MEVENT mouse{};
         if (getmouse(&mouse) != OK)
           return unknown_input();
-        // Shift-modified mouse is ignored so terminal-native Shift selection remains.
-#ifdef BUTTON_SHIFT
-        if (mouse_state_matches(mouse.bstate, BUTTON_SHIFT))
-          return unknown_input();
-#endif
-        if (mouse_state_matches(mouse.bstate, BUTTON4_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelUp, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON5_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelDown, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON1_RELEASED))
-        {
-          return mouse_key_input(Key::MouseLeftRelease, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON1_CLICKED))
-        {
-          return mouse_key_input(Key::MouseLeftClick, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, REPORT_MOUSE_POSITION))
-        {
-          return mouse_key_input(Key::MouseLeftDrag, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON1_PRESSED))
-        {
-          return mouse_key_input(Key::MouseLeftPress, mouse);
-        }
-        return unknown_input();
+        return event_input(terminal_ncurses_mouse_event(static_cast<std::uint64_t>(mouse.bstate), static_cast<std::size_t>(mouse.x + 1),
+                                                        static_cast<std::size_t>(mouse.y + 1)));
       }
 #endif
       default:

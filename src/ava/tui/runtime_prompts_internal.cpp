@@ -500,7 +500,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
     auto input_result = [&]() {
       if (!snapshot.question_prompt)
         return QuestionPromptInputResult{};
-      if (question_input->event.key == Key::MouseLeftClick)
+      if (question_input->event.key == Key::MouseLeftPress || question_input->event.key == Key::MouseLeftClick)
       {
         if (auto const clicked = question_option_for_screen_position(snapshot, question_input->event.mouse_row, question_input->event.mouse_column))
           return activate_question_option(*snapshot.question_prompt, *clicked);

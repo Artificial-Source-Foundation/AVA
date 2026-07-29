@@ -4,6 +4,7 @@
 #include "ava/core/result.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -197,6 +198,8 @@ void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] std::string_view terminal_modify_other_keys_disable_sequence();
 [[nodiscard]] std::string_view terminal_bracketed_paste_enable_sequence();
 [[nodiscard]] std::string_view terminal_bracketed_paste_disable_sequence();
+[[nodiscard]] std::string_view terminal_mouse_enable_sequence();
+[[nodiscard]] std::string_view terminal_mouse_disable_sequence();
 [[nodiscard]] std::optional<int> terminal_kitty_keyboard_flags_response(std::string_view sequence);
 [[nodiscard]] bool terminal_device_attributes_response(std::string_view sequence);
 [[nodiscard]] KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::string_view sequence, bool kitty_response_seen,
@@ -254,6 +257,10 @@ void disarm_terminal_background_response_handler();
 [[nodiscard]] bool terminal_background_response_handler_armed();
 [[nodiscard]] bool terminal_background_response_handle(std::string_view sequence);
 [[nodiscard]] InputEvent terminal_escape_sequence_event(std::string_view sequence);
+// Stateful ncurses mouse normalization. Motion is a drag only while AVA owns a
+// preceding left press; Shift reports are ignored and releases close ownership.
+[[nodiscard]] InputEvent terminal_ncurses_mouse_event(std::uint64_t button_state, std::size_t column, std::size_t row);
+void terminal_reset_mouse_tracking() noexcept;
 [[nodiscard]] Key terminal_escape_sequence_key(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_complete(std::string_view sequence);
 [[nodiscard]] bool terminal_escape_sequence_should_discard(std::string_view sequence);

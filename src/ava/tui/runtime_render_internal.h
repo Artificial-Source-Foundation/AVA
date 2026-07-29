@@ -2,10 +2,12 @@
 
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_draft_internal.h"
+#include "ava/tui/runtime_transcript_selection_internal.h"
 
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <utility>
@@ -111,6 +113,14 @@ class RuntimeRenderer final
   void discard_deferred_detached_transcript_update();
   [[nodiscard]] bool has_deferred_detached_transcript_update() const;
 
+  [[nodiscard]] TranscriptSelectionMouseResult handle_transcript_selection_mouse(InputEvent const& event, std::function<bool(std::size_t)> const& toggle_tool,
+                                                                                 std::function<bool(std::size_t)> const& toggle_thinking);
+  [[nodiscard]] bool copy_transcript_selection();
+  void clear_transcript_selection();
+  void note_live_transcript_selection_item_shift(std::ptrdiff_t item_index_shift) noexcept;
+  [[nodiscard]] bool has_transcript_selection() const noexcept;
+  [[nodiscard]] std::optional<TranscriptSelectionRange> transcript_selection_range() const noexcept;
+
   std::size_t transcript_scroll_offset = 0;
   std::size_t detached_new_output_count = 0;
   detail::CompletionMatchCache completion_cache;
@@ -125,10 +135,13 @@ class RuntimeRenderer final
  private:
   [[nodiscard]] bool render_full(bool freeze_transcript_layout);
   [[nodiscard]] bool paint(FrameRenderKind kind, bool freeze_transcript_layout);
+  [[nodiscard]] bool prepare_transcript_selection_authority();
 
   ComposerSnapshot& snapshot_;
   SidebarSnapshot& sidebar_;
   RuntimeDraftState& draft_state_;
+  RuntimeTranscriptSelectionState transcript_selection_;
+  std::ptrdiff_t pending_live_selection_item_index_shift_ = 0;
   FrameScheduler frame_scheduler_;
   std::optional<DeferredDetachedViewport> deferred_detached_viewport_ = std::nullopt;
 };

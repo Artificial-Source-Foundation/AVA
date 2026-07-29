@@ -154,6 +154,8 @@ void RuntimeRenderer::synchronize_detached_transcript_layout()
                                                            transcript_layout_cache, snapshot_.transcript_generation);
   transcript_scroll_offset = detail::restore_transcript_viewport_anchor(deferred.anchor, transcript_layout_cache.layout, max_scroll, deferred.item_index_shift);
   snapshot_.transcript_scroll_offset = transcript_scroll_offset;
+  transcript_selection_.apply_item_index_shift(deferred.item_index_shift, transcript_layout_cache.layout);
+  static_cast<void>(transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot_));
   deferred_detached_viewport_.reset();
 }
 
@@ -165,6 +167,65 @@ void RuntimeRenderer::discard_deferred_detached_transcript_update()
 bool RuntimeRenderer::has_deferred_detached_transcript_update() const
 {
   return deferred_detached_viewport_.has_value();
+}
+
+bool RuntimeRenderer::prepare_transcript_selection_authority()
+{
+  // A detached deferred viewport is deliberately frozen on the cache that was
+  // drawn. Never refresh it from the live transcript here.
+  if (!deferred_detached_viewport_)
+  {
+    auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot_.height);
+    auto const width = composer_canvas_layout(snapshot_).content_width;
+    auto const compact = detail::composer_layout_policy(snapshot_, height).compact_transcript_spacing;
+    detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot_.transcript, snapshot_.transcript_generation, width, snapshot_.tool_presentation,
+                                            snapshot_.thinking_visible, compact);
+    if (pending_live_selection_item_index_shift_ != 0)
+    {
+      transcript_selection_.apply_item_index_shift(pending_live_selection_item_index_shift_, transcript_layout_cache.layout);
+      pending_live_selection_item_index_shift_ = 0;
+    }
+  }
+  return transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot_);
+}
+
+TranscriptSelectionMouseResult RuntimeRenderer::handle_transcript_selection_mouse(InputEvent const& event, std::function<bool(std::size_t)> const& toggle_tool,
+                                                                                  std::function<bool(std::size_t)> const& toggle_thinking)
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  if (!prepare_transcript_selection_authority())
+    return TranscriptSelectionMouseResult::Ignored;
+  return transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset, toggle_tool, toggle_thinking);
+}
+
+bool RuntimeRenderer::copy_transcript_selection()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  return transcript_selection_.copy_selection(snapshot_, transcript_layout_cache);
+}
+
+void RuntimeRenderer::clear_transcript_selection()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.clear();
+  pending_live_selection_item_index_shift_ = 0;
+  transcript_selection_.publish(snapshot_);
+}
+
+void RuntimeRenderer::note_live_transcript_selection_item_shift(std::ptrdiff_t item_index_shift) noexcept
+{
+  if (!transcript_selection_.empty())
+    pending_live_selection_item_index_shift_ += item_index_shift;
+}
+
+bool RuntimeRenderer::has_transcript_selection() const noexcept
+{
+  return !transcript_selection_.empty();
+}
+
+std::optional<TranscriptSelectionRange> RuntimeRenderer::transcript_selection_range() const noexcept
+{
+  return transcript_selection_.range();
 }
 
 bool RuntimeRenderer::render()
@@ -252,6 +313,33 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     }
     snapshot.transcript_scroll_offset = transcript_scroll_offset;
     snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
+    detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);
+    auto const completion_palette_visible = completion_cache.model && completion_cache.model->palette_visible;
+    auto const slash_palette_is_visible =
+        !snapshot.slash_palette_suppressed && slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || slash_palette_is_visible ||
+        completion_palette_visible)
+    {
+      transcript_selection_.clear();
+      pending_live_selection_item_index_shift_ = 0;
+    }
+    if (!transcript_selection_.empty())
+    {
+      if (!freeze_detached_viewport)
+      {
+        auto const width = composer_canvas_layout(snapshot).content_width;
+        auto const compact = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
+        detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot.transcript, snapshot.transcript_generation, width, snapshot.tool_presentation,
+                                                snapshot.thinking_visible, compact);
+      }
+      if (!freeze_detached_viewport && pending_live_selection_item_index_shift_ != 0)
+      {
+        transcript_selection_.apply_item_index_shift(pending_live_selection_item_index_shift_, transcript_layout_cache.layout);
+        pending_live_selection_item_index_shift_ = 0;
+      }
+      static_cast<void>(transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot));
+    }
+    transcript_selection_.publish(snapshot);
     wrote = detail::draw_screen_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache, snapshot.transcript_generation,
                                        screen_row_cache, freeze_detached_viewport, freeze_modal_transcript_layout);
   }

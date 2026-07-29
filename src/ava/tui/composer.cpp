@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/runtime_transcript_selection_internal.h"
 #include "ava/tui/theme.h"
 
 #include <algorithm>
@@ -442,6 +443,9 @@ void apply_sgr_codes(std::vector<int> const& codes, CursesStyle& style)
         break;
       case 7:
         style.attributes |= A_REVERSE;
+        break;
+      case 27:
+        style.attributes &= ~A_REVERSE;
         break;
       case 9:
         // ncurses has no portable strike-through attribute. The snapshot renderer
@@ -1335,14 +1339,16 @@ bool status_is_alert(std::string_view status)
 {
   constexpr std::array kErrorPrefixes = {
       "invalid_argument:",   "io:",           "not_found:", "permission_denied:", "provider:", "session:", "tool:", "unknown:", "command disabled:",
-      "reference disabled:", "path disabled:"};
+      "reference disabled:", "path disabled:", "selection too large to copy", "clipboard unavailable"};
   return std::ranges::any_of(kErrorPrefixes, [status](std::string_view prefix) { return status.starts_with(prefix); });
 }
 
 std::vector<std::string> render_status_alert_lines(std::string_view status, std::size_t width, std::size_t max_lines)
 {
   std::vector<std::string> lines;
-  if (max_lines == 0 || status.empty() || !status_is_alert(status))
+  auto const alert = status_is_alert(status);
+  auto const copied_selection = status == "copied selection to clipboard";
+  if (max_lines == 0 || status.empty() || (!alert && !copied_selection))
     return lines;
 
   auto const parts = split_lines(status);
@@ -1350,10 +1356,10 @@ std::vector<std::string> render_status_alert_lines(std::string_view status, std:
   lines.reserve(visible_count);
   for (std::size_t index = 0; index < visible_count; ++index)
   {
-    auto line = std::string(index == 0 ? "! " : "  ") + sanitize_terminal_text(parts[index]);
+    auto line = std::string(index == 0 ? (alert ? "! " : "✓ ") : "  ") + sanitize_terminal_text(parts[index]);
     if (index + 1 == visible_count && parts.size() > visible_count)
       line += " ...";
-    line = std::string(index == 0 ? kSgrError : kSgrDim) + line + std::string(kSgrReset);
+    line = std::string(index == 0 ? (alert ? kSgrError : kSgrSuccess) : kSgrDim) + line + std::string(kSgrReset);
     lines.push_back(detail::fit_line_preserving_sgr(std::move(line), width));
   }
   return lines;
@@ -1644,7 +1650,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     // pre-modal width while non-geometry presentation settings continue to match.
     auto const frozen_cache_compatible =
         frozen_presentation_compatible && (active_cache.width == width || (freeze_transcript_layout && allow_frozen_width_mismatch));
-    if (!freeze_transcript_layout || !frozen_cache_compatible)
+    if (!selection_active && (!freeze_transcript_layout || !frozen_cache_compatible))
     {
       detail::refresh_transcript_layout_cache(active_cache, snapshot.transcript, transcript_generation, width, snapshot.tool_presentation,
                                               snapshot.thinking_visible, compact_spacing);

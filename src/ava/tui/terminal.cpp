@@ -43,6 +43,7 @@ bool g_modify_other_keys_enabled = false;
 bool g_modify_other_keys_desired = false;
 bool g_bracketed_paste_enabled = false;
 bool g_mouse_enabled = false;
+bool g_left_mouse_down = false;
 bool g_terminal_background_response_handler_armed = false;
 detail::TerminalSequenceWriter g_terminal_sequence_writer = nullptr;
 detail::TerminalFlushinpHook g_terminal_flushinp_hook = nullptr;
@@ -88,6 +89,8 @@ void configure_curses_colors()
 
 constexpr std::string_view kBracketedPasteEnableSequence = "\x1b[?2004h";
 constexpr std::string_view kBracketedPasteDisableSequence = "\x1b[?2004l";
+constexpr std::string_view kMouseEnableSequence = "\x1b[?1003l\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+constexpr std::string_view kMouseDisableSequence = "\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 void write_terminal_sequence(std::string_view sequence)
 {
@@ -106,6 +109,9 @@ void apply_mouse_enabled(bool enabled) noexcept
 {
   if (g_mouse_enabled == enabled)
     return;
+  // A protocol boundary invalidates any incomplete press/drag lifecycle. This
+  // also prevents a motion report after suspend/resume from becoming a drag.
+  g_left_mouse_down = false;
 #ifdef NCURSES_MOUSE_VERSION
   // Only touch ncurses mouse state when a screen is active. Pure sequence tests
   // still track ownership without requiring newterm.
@@ -132,6 +138,10 @@ void apply_mouse_enabled(bool enabled) noexcept
     }
   }
 #endif
+  // ncurses mouse activation is conditional on its runtime driver probe. Own
+  // the portable xterm protocol boundary explicitly as well so SGR reports work
+  // through multiplexers where has_mouse() remains false.
+  write_terminal_sequence(enabled ? kMouseEnableSequence : kMouseDisableSequence);
   g_mouse_enabled = enabled;
 }
 
@@ -1129,6 +1139,52 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   return Key::Unknown;
 }
 
+InputEvent normalized_left_mouse_event(bool shift, bool wheel_up, bool wheel_down, bool press, bool release, bool motion, bool clicked, std::size_t column,
+                                       std::size_t row)
+{
+  auto event = key_event(Key::Unknown);
+  if (wheel_up || wheel_down)
+  {
+    // Preserve transcript scrolling even when a terminal reports Shift with a
+    // wheel gesture; Shift ownership only suppresses button selection.
+    event.key = wheel_up ? Key::MouseWheelUp : Key::MouseWheelDown;
+  }
+  else if (shift)
+  {
+    // Shift belongs to terminal-native selection. Close AVA's lifecycle without
+    // consuming the report so a later unmodified hover cannot extend a drag.
+    g_left_mouse_down = false;
+    return event;
+  }
+  else if (clicked)
+  {
+    // ncurses CLICKED is a complete press/release fallback.
+    g_left_mouse_down = false;
+    event.key = Key::MouseLeftClick;
+  }
+  else if (release)
+  {
+    if (g_left_mouse_down)
+      event.key = Key::MouseLeftRelease;
+    g_left_mouse_down = false;
+  }
+  else if (motion && g_left_mouse_down)
+  {
+    event.key = Key::MouseLeftDrag;
+  }
+  else if (press)
+  {
+    g_left_mouse_down = true;
+    event.key = Key::MouseLeftPress;
+  }
+  if (event.key != Key::Unknown)
+  {
+    event.mouse_column = column;
+    event.mouse_row = row;
+  }
+  return event;
+}
+
 std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
 {
   if (!sequence.starts_with("[<") || sequence.size() < 7)
@@ -1143,40 +1199,16 @@ std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
   auto const row = parse_unsigned_int(sequence, index);
   if (!row || index + 1 != sequence.size() || (sequence[index] != 'M' && sequence[index] != 'm'))
     return std::nullopt;
-  auto key = Key::Unknown;
   auto const button_code = *button;
   auto const final = sequence[index];
   auto const is_motion = (button_code & 32) != 0;
   auto const is_wheel = (button_code & 64) != 0;
-  // SGR modifier bits: 4 = Shift, 8 = Meta/Alt, 16 = Control. AVA ignores
-  // Shift-modified mouse so terminal-native Shift selection remains available.
   auto const has_shift = (button_code & 4) != 0;
   auto const base_button = button_code & 3;
-  if (has_shift && !is_wheel)
-  {
-    key = Key::Unknown;
-  }
-  else if (is_wheel && final == 'M')
-  {
-    key = (button_code & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  }
-  else if (final == 'm' && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftRelease;
-  }
-  else if (final == 'M' && is_motion && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftDrag;
-  }
-  else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftPress;
-  }
-  return InputEvent{.key = key,
-                    .character = '\0',
-                    .text = {},
-                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(*column),
-                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(*row)};
+  return normalized_left_mouse_event(has_shift, is_wheel && final == 'M' && (button_code & 1) == 0, is_wheel && final == 'M' && (button_code & 1) != 0,
+                                     final == 'M' && !is_motion && !is_wheel && base_button == 0, final == 'm' && !is_wheel && base_button == 0,
+                                     final == 'M' && is_motion && !is_wheel && base_button == 0, false, static_cast<std::size_t>(*column),
+                                     static_cast<std::size_t>(*row));
 }
 
 Key sgr_mouse_key(std::string_view sequence)
@@ -1201,38 +1233,13 @@ std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
   if (button_byte < 32 || column_byte < 32 || row_byte < 32)
     return key_event(Key::Unknown);
   auto const button = static_cast<unsigned int>(button_byte - 32U);
-  auto key = Key::Unknown;
   auto const is_motion = (button & 32U) != 0;
   auto const is_wheel = (button & 64U) != 0;
-  // Legacy mouse encoding: bit 2 (value 4) is Shift. Ignore Shift-modified
-  // button reports so terminal-native Shift selection remains available.
   auto const has_shift = (button & 4U) != 0;
   auto const base_button = button & 3U;
-  if (has_shift && !is_wheel)
-  {
-    key = Key::Unknown;
-  }
-  else if (is_wheel)
-  {
-    key = (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  }
-  else if (base_button == 3U)
-  {
-    key = Key::MouseLeftRelease;
-  }
-  else if (is_motion && base_button == 0U)
-  {
-    key = Key::MouseLeftDrag;
-  }
-  else if (!is_motion && base_button == 0U)
-  {
-    key = Key::MouseLeftPress;
-  }
-  return InputEvent{.key = key,
-                    .character = '\0',
-                    .text = {},
-                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(column_byte - 32U),
-                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(row_byte - 32U)};
+  return normalized_left_mouse_event(has_shift, is_wheel && (button & 1U) == 0, is_wheel && (button & 1U) != 0, !is_motion && !is_wheel && base_button == 0U,
+                                     !is_wheel && base_button == 3U, is_motion && !is_wheel && base_button == 0U, false,
+                                     static_cast<std::size_t>(column_byte - 32U), static_cast<std::size_t>(row_byte - 32U));
 }
 
 Key legacy_mouse_key(std::string_view sequence)
@@ -1511,6 +1518,7 @@ void detail::reset_terminal_protocol_ownership_for_test() noexcept
   g_modify_other_keys_desired = false;
   g_bracketed_paste_enabled = false;
   g_mouse_enabled = false;
+  g_left_mouse_down = false;
 }
 
 void CursesSession::restore() noexcept
@@ -1615,6 +1623,16 @@ std::string_view terminal_bracketed_paste_enable_sequence()
 std::string_view terminal_bracketed_paste_disable_sequence()
 {
   return kBracketedPasteDisableSequence;
+}
+
+std::string_view terminal_mouse_enable_sequence()
+{
+  return kMouseEnableSequence;
+}
+
+std::string_view terminal_mouse_disable_sequence()
+{
+  return kMouseDisableSequence;
 }
 
 TerminalProtocolOwnership terminal_protocol_ownership() noexcept
@@ -1834,6 +1852,35 @@ bool terminal_background_response_handle(std::string_view sequence)
   auto const appearance = rgb_luminance(*color) >= 180 ? TerminalBackgroundAppearance::Light : TerminalBackgroundAppearance::Dark;
   set_detected_terminal_background_appearance(appearance);
   return true;
+}
+
+InputEvent terminal_ncurses_mouse_event(std::uint64_t button_state, std::size_t column, std::size_t row)
+{
+#ifdef NCURSES_MOUSE_VERSION
+  auto const matches = [button_state](mmask_t mask) { return (static_cast<mmask_t>(button_state) & mask) != 0; };
+#ifdef BUTTON_SHIFT
+  auto const shift = matches(BUTTON_SHIFT);
+#else
+  auto const shift = false;
+#endif
+#ifdef BUTTON5_PRESSED
+  auto const wheel_down = matches(BUTTON5_PRESSED);
+#else
+  auto const wheel_down = false;
+#endif
+  return normalized_left_mouse_event(shift, matches(BUTTON4_PRESSED), wheel_down, matches(BUTTON1_PRESSED), matches(BUTTON1_RELEASED),
+                                     matches(REPORT_MOUSE_POSITION), matches(BUTTON1_CLICKED), column, row);
+#else
+  static_cast<void>(button_state);
+  static_cast<void>(column);
+  static_cast<void>(row);
+  return key_event(Key::Unknown);
+#endif
+}
+
+void terminal_reset_mouse_tracking() noexcept
+{
+  g_left_mouse_down = false;
 }
 
 InputEvent terminal_escape_sequence_event(std::string_view sequence)

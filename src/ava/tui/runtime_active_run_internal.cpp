@@ -277,6 +277,7 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     }
     else
     {
+      renderer_.note_live_transcript_selection_item_shift(capped_update.item_index_shift);
       renderer_.discard_deferred_detached_transcript_update();
       transcript_scroll_offset = 0;
     }
@@ -303,6 +304,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller_.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
+    renderer.clear_transcript_selection();
     presentation_state_.apply_runtime_state_snapshot(options, std::move(runtime_state));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
@@ -616,6 +618,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     auto const shifted_first_new_item = static_cast<std::ptrdiff_t>(transcript_size_before_fallback) + item_index_shift;
     auto const changed_from_item_index = shifted_first_new_item > 0 ? static_cast<std::size_t>(shifted_first_new_item) : std::size_t{0};
     transcript_search_.refresh_after_transcript_mutation(item_index_shift, std::min(changed_from_item_index, snapshot.transcript.size()));
+    renderer_.note_live_transcript_selection_item_shift(item_index_shift);
   }
   if (!events_received && !transcript_search_.is_open())
     transcript_scroll_offset = 0;

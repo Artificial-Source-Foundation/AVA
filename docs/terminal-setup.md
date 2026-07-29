@@ -162,10 +162,11 @@ If paste submits line-by-line or bracket markers appear:
 
 ## Mouse
 
-AVA enables ncurses mouse support when available. It uses mouse input for:
+AVA enables xterm SGR button-motion reporting and ncurses mouse support when available. It uses mouse input for:
 
 - Selecting slash-palette, file-reference, path-completion, settings, keybinding, model, and session rows.
 - Moving the composer cursor and replacing dragged composer selections when coordinates are reported.
+- Drag-selecting visible transcript text for OSC 52 clipboard copy with the configured `copy_selection` key (Ctrl+C by default when the draft is empty). A click without movement still toggles tool/thinking headers; dragging from a header selects instead.
 - Mouse-wheel transcript scrolling and returning to the live tail.
 
 If mouse actions do not work:
@@ -173,7 +174,8 @@ If mouse actions do not work:
 - Confirm the terminal allows applications to receive mouse events.
 - In tmux, check `set -g mouse on` and retry in a fresh pane.
 - In screen, expect more conservative behavior; test outside screen before filing an AVA bug.
-- Remember that terminal mouse mode changes normal text selection. Most terminals offer a modifier such as Shift to force terminal-native selection instead of application mouse reporting.
+- Remember that terminal mouse mode changes normal text selection. Hold Shift for terminal-native selection; AVA ignores Shift-modified button reports while preserving wheel scrolling.
+- Transcript copy is bounded to 64 KiB and uses OSC 52. A truthful status reports success, an empty/oversize selection, or terminal write failure; the highlight remains after successful copy.
 
 ## Color And Theme Environment
 

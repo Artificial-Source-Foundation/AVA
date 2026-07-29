@@ -18,6 +18,7 @@ void run_tui_permission_tests_part_3();
 void run_tui_modal_tests_part_3();
 void run_tui_selector_tests();
 void run_tui_transcript_tests_part_1();
+void run_tui_transcript_selection_tests();
 void run_tui_transcript_search_tests();
 void run_tui_tool_card_tests_part_1();
 void run_tui_composer_rendering_tests_part_4();

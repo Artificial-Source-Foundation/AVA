@@ -141,11 +141,17 @@ void RuntimeRenderer::defer_detached_transcript_update(detail::TranscriptViewpor
 
 void RuntimeRenderer::synchronize_detached_transcript_layout()
 {
+  // Navigation max-scroll call sites invoke this before geometry math. Publish renderer
+  // chrome authority first so Wave A reserved-row height matches the eventual paint.
+  snapshot_.transcript_scroll_offset = transcript_scroll_offset;
+  snapshot_.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
   if (!deferred_detached_viewport_)
     return;
   if (transcript_scroll_offset == 0)
   {
     deferred_detached_viewport_.reset();
+    detached_new_output_count = 0;
+    snapshot_.transcript_new_output_count = 0;
     return;
   }
   auto deferred = *deferred_detached_viewport_;
@@ -153,7 +159,10 @@ void RuntimeRenderer::synchronize_detached_transcript_layout()
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, completion_cache, snapshot_.file_references_generation,
                                                            transcript_layout_cache, snapshot_.transcript_generation);
   transcript_scroll_offset = detail::restore_transcript_viewport_anchor(deferred.anchor, transcript_layout_cache.layout, max_scroll, deferred.item_index_shift);
+  if (transcript_scroll_offset == 0)
+    detached_new_output_count = 0;
   snapshot_.transcript_scroll_offset = transcript_scroll_offset;
+  snapshot_.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
   transcript_selection_.apply_item_index_shift(deferred.item_index_shift, transcript_layout_cache.layout);
   static_cast<void>(transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot_));
   deferred_detached_viewport_.reset();
@@ -305,6 +314,12 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
       detached_new_output_count = 0;
       detached_sidebar_snapshot.reset();
     }
+    // Publish renderer geometry authority before freeze/sync/clamp so Wave A chrome height
+    // (N-new reserved row) participates in max-scroll math. Snapshot lag after detached stream
+    // updates otherwise suppresses the row during sync while paint reserves it, shifting the
+    // visible numbered window by one.
+    snapshot.transcript_scroll_offset = transcript_scroll_offset;
+    snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
     snapshot.sidebar = transcript_scroll_offset > 0 && detached_sidebar_snapshot ? *detached_sidebar_snapshot : sidebar;
     auto const [width, height] = terminal_size();
     snapshot.width = width;
@@ -339,6 +354,7 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
       detached_sidebar_snapshot.reset();
       snapshot.sidebar = sidebar;
     }
+    // Re-publish final scroll/count after sync/clamp; live tail clears count truthfully.
     snapshot.transcript_scroll_offset = transcript_scroll_offset;
     snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
     detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);

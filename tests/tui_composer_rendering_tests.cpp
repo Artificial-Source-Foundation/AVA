@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -372,6 +373,158 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   return passed;
 }
 
+bool test_detached_completion_publish_preserves_numbered_window()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(32, 120));
+
+  auto numbered_window = [](std::vector<std::string> const& surfaces) {
+    std::vector<int> numbers;
+    for (auto const& surface : surfaces)
+    {
+      auto const visible = strip_sgr(surface);
+      auto const marker = visible.find("stream line ");
+      if (marker == std::string::npos || marker + 15 > visible.size())
+        continue;
+      auto const digits = visible.substr(marker + 12, 3);
+      if (digits.size() != 3 || !std::ranges::all_of(digits, [](unsigned char ch) { return std::isdigit(ch) != 0; }))
+        continue;
+      numbers.push_back(std::stoi(digits));
+    }
+    return numbers;
+  };
+
+  auto build_stream_text = [](int first_inclusive, int last_inclusive) {
+    std::string text;
+    for (int index = first_inclusive; index <= last_inclusive; ++index)
+    {
+      if (!text.empty())
+        text.push_back('\n');
+      char buffer[32];
+      std::snprintf(buffer, sizeof(buffer), "stream line %03d", index);
+      text += buffer;
+    }
+    return text;
+  };
+
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "detached-completion-geometry";
+  options.mode = "build";
+  options.provider = "fake";
+  options.model = "geometry-model";
+  options.workspace = "/workspace/detached-completion";
+  options.key_bindings = ava::tui::default_key_bindings();
+  options.initial_transcript = {ava::tui::TranscriptItem{.label = "ava", .text = build_stream_text(0, 29)}};
+
+  ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.sidebar = presentation.sidebar;
+  presentation.snapshot.processing = true;
+  presentation.snapshot.input = "STREAM-DRAFT-KEEP";
+  presentation.snapshot.input_cursor = presentation.snapshot.input.size();
+  presentation.snapshot.active_run_hint = ava::tui::runtime_views::active_run_hint_for(options.key_bindings);
+  ava::tui::RuntimeDraftState draft_state;
+  draft_state.draft.text = presentation.snapshot.input;
+  draft_state.draft.cursor = presentation.snapshot.input_cursor;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+
+  if (!renderer.render())
+  {
+    static_cast<void>(endwin());
+    delscreen(screen);
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  auto const [width, height] = ava::tui::terminal_size();
+  presentation.snapshot.width = width;
+  presentation.snapshot.height = height;
+  auto const max_scroll = ava::tui::detail::composer_max_transcript_scroll_offset_cached(
+      presentation.snapshot, width, height, renderer.completion_cache, presentation.snapshot.file_references_generation, renderer.transcript_layout_cache,
+      presentation.snapshot.transcript_generation);
+  if (max_scroll == 0)
+  {
+    static_cast<void>(endwin());
+    delscreen(screen);
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  // Detach while the active-run contextual row is already reserved (processing=true, count=0).
+  renderer.transcript_scroll_offset = std::min<std::size_t>(3, max_scroll);
+  renderer.detached_sidebar_snapshot = presentation.sidebar;
+  presentation.snapshot.transcript_scroll_offset = renderer.transcript_scroll_offset;
+  presentation.snapshot.transcript_new_output_count = 0;
+  if (!renderer.render())
+  {
+    static_cast<void>(endwin());
+    delscreen(screen);
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  auto const detached_scroll = renderer.transcript_scroll_offset;
+  auto const detached_max_scroll = ava::tui::detail::composer_max_transcript_scroll_offset_cached(
+      presentation.snapshot, width, height, renderer.completion_cache, presentation.snapshot.file_references_generation, renderer.transcript_layout_cache,
+      presentation.snapshot.transcript_generation);
+  auto const anchor = ava::tui::detail::capture_transcript_viewport_anchor(renderer.transcript_layout_cache.layout, detached_max_scroll, detached_scroll);
+  auto const before_numbers = numbered_window(renderer.screen_row_cache.surfaces);
+  auto const draft_before = draft_state.draft.text;
+  auto const snapshot_count_before = presentation.snapshot.transcript_new_output_count;
+
+  // Stream continues while detached without publishing count into the snapshot (UpdatedNoRender path).
+  constexpr int kNewOutputCount = 35;
+  presentation.snapshot.transcript.back().text += "\n" + build_stream_text(30, 30 + kNewOutputCount - 1);
+  ++presentation.snapshot.transcript_generation;
+  renderer.defer_detached_transcript_update(anchor, 0);
+  renderer.detached_new_output_count = static_cast<std::size_t>(kNewOutputCount);
+  presentation.snapshot.transcript_new_output_count = 0;
+  presentation.snapshot.processing = false;
+
+  auto const rendered = renderer.render();
+  auto const after_numbers = numbered_window(renderer.screen_row_cache.surfaces);
+  auto const surfaces_joined = tui_test_support::join_visible_lines(renderer.screen_row_cache.surfaces);
+  auto const hint_visible =
+      surfaces_joined.find(std::to_string(kNewOutputCount) + " new") != std::string::npos && surfaces_joined.find("Ctrl+End") != std::string::npos;
+  bool const passed = rendered && !renderer.render_failed() && snapshot_count_before == 0 && detached_scroll > 0 && anchor.valid && !before_numbers.empty() &&
+                      before_numbers == after_numbers && hint_visible && !renderer.has_deferred_detached_transcript_update() &&
+                      presentation.snapshot.transcript_new_output_count == static_cast<std::size_t>(kNewOutputCount) &&
+                      presentation.snapshot.transcript_scroll_offset == renderer.transcript_scroll_offset && renderer.transcript_scroll_offset > 0 &&
+                      draft_state.draft.text == draft_before && presentation.snapshot.input == draft_before && !presentation.snapshot.processing;
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return passed;
+}
+
 bool test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless()
 {
   ScopedEnvVar term_guard("TERM", "xterm-256color");
@@ -464,6 +617,10 @@ void run_tui_prompt_search_race_tests()
   expect(test_atomic_search_input_prompt_precedence(),
          "actual prompt-coordinator locking linearizes retained search input before provider enqueue, then lets the queued prompt discard stale input and run "
          "before-prompt ahead of nested resolution across 50 synchronized repetitions");
+  // After virtual-terminal smoke: full RuntimeRenderer::render initializes the static color-pair cache.
+  expect(test_detached_completion_publish_preserves_numbered_window(),
+         "detached completion publishes N-new chrome authority before sync so the numbered transcript window and draft stay put while the deferred viewport is "
+         "consumed");
 }
 
 void run_tui_composer_rendering_tests_part_1()

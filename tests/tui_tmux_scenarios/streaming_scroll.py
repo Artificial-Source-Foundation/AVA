@@ -166,12 +166,53 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
         )
     _assert_no_deleted_scrollback_text(completed_detached, "completed detached stream")
 
-    send_literal(tmux_exe, session, "\x1b[1;5F")
+    live_stream_screen = completed_detached
+    for step in range(32):
+        previous_numbers = [int(value) for value in _NUMBERED_LINE.findall(live_stream_screen)]
+        observed_change = False
+
+        def reverse_step_synchronized(screen: str) -> bool:
+            nonlocal observed_change
+            changed = "STREAM COMPLETE" in screen or [int(value) for value in _NUMBERED_LINE.findall(screen)] != previous_numbers
+            if not changed:
+                return False
+            if observed_change:
+                return True
+            observed_change = True
+            return False
+
+        send_literal(tmux_exe, session, wheel_down)
+        live_stream_screen = wait_for_screen_state(
+            tmux_exe,
+            session,
+            reverse_step_synchronized,
+            f"streaming-scroll synchronized reverse wheel step {step + 1}",
+            timeout=1.0,
+        )
+        metadata_count = sum(1 for line in live_stream_screen.splitlines() if "AVA TUI Fake" in line)
+        if "STREAM COMPLETE" in live_stream_screen and metadata_count == 1:
+            break
+    if "STREAM COMPLETE" not in live_stream_screen or metadata_count != 1 or complete_draft not in live_stream_screen:
+        raise RuntimeError(f"reverse-direction wheel events did not return to the completed live tail\nscreen:\n{live_stream_screen}")
+    _assert_no_deleted_scrollback_text(live_stream_screen, "restored completed live tail")
 
     def restored_live_tail(screen: str) -> bool:
         numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
         return "STREAM COMPLETE" in screen and complete_draft in screen and bool(numbers) and numbers[-1] == 59
 
+    # Re-detach deterministically so Ctrl+End can prove live-tail restore independently of wheel.
+    send_literal(tmux_exe, session, wheel_up * 16)
+    ctrl_end_detached = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen
+        and "STREAM COMPLETE" not in screen
+        and bool([int(value) for value in _NUMBERED_LINE.findall(screen)]),
+        "streaming-scroll re-detached before Ctrl+End live-tail restore",
+    )
+    _assert_no_deleted_scrollback_text(ctrl_end_detached, "re-detached before Ctrl+End")
+
+    send_literal(tmux_exe, session, "\x1b[1;5F")
     ctrl_end_live = wait_for_screen_state(
         tmux_exe,
         session,

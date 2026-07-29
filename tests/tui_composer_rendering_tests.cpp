@@ -370,6 +370,85 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   return passed;
 }
 
+bool test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(24, 80));
+
+  auto exercise = [](std::vector<ava::tui::TranscriptItem> transcript, std::string_view session_id) {
+    ava::tui::TuiRuntimeOptions options;
+    options.session_id = std::string(session_id);
+    options.mode = "build";
+    options.provider = "fake";
+    options.model = "nav-model";
+    options.workspace = "/workspace/message-boundary-fit";
+    options.key_bindings = ava::tui::default_key_bindings();
+    options.initial_transcript = std::move(transcript);
+
+    ava::tui::RuntimePresentationState presentation(options);
+    presentation.snapshot.sidebar = presentation.sidebar;
+    presentation.snapshot.input = "FIT-DRAFT-KEEP";
+    presentation.snapshot.input_cursor = presentation.snapshot.input.size();
+    ava::tui::RuntimeDraftState draft_state;
+    draft_state.draft.text = presentation.snapshot.input;
+    draft_state.draft.cursor = presentation.snapshot.input_cursor;
+    ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+    ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+
+    auto const draft_before = draft_state.draft.text;
+    auto const cursor_before = draft_state.draft.cursor;
+    auto const offset_before = renderer.transcript_scroll_offset;
+
+    navigation.scroll_to_message_boundary(true);
+    auto const prev_status = presentation.snapshot.status;
+    auto const prev_offset = renderer.transcript_scroll_offset;
+
+    navigation.scroll_to_message_boundary(false);
+    auto const next_status = presentation.snapshot.status;
+    auto const next_offset = renderer.transcript_scroll_offset;
+
+    bool const draft_unchanged =
+        draft_state.draft.text == draft_before && draft_state.draft.cursor == cursor_before && presentation.snapshot.input == draft_before;
+    return offset_before == 0 && prev_offset == 0 && next_offset == 0 && prev_status == "transcript fits on screen" &&
+           next_status == "transcript fits on screen" && draft_unchanged;
+  };
+
+  bool const empty_ok = exercise({}, "message-boundary-empty");
+  bool const fitting_ok =
+      exercise({ava::tui::TranscriptItem{.label = "you", .text = "short alpha"}, ava::tui::TranscriptItem{.label = "ava", .text = "short beta"}},
+               "message-boundary-fitting");
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return empty_ok && fitting_ok;
+}
+
 }  // namespace
 
 void run_tui_prompt_search_race_tests()
@@ -390,6 +469,8 @@ void run_tui_composer_rendering_tests_part_1()
   expect(test_transcript_message_boundary_navigation_and_live_tail_reset(),
          "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, and leaves "
          "the composer draft untouched while defaults keep MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
+  expect(test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless(),
+         "message-prev/message-next on empty or fitting transcripts stay at offset 0 with transcript-fits status and leave the composer draft untouched");
   {
     auto const started_at = std::chrono::steady_clock::time_point{};
     ava::tui::detail::ActiveRunCadence cadence(started_at);

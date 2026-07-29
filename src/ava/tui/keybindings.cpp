@@ -974,7 +974,8 @@ bool has_same_context_default_key_conflict(TuiKeyBindings const& bindings, TuiAc
   {
     for (auto const& [candidate, candidate_keys] : bindings.bindings)
     {
-      if (candidate == action || actions_can_share_key(action, candidate) || session_precedence_over_models(action, candidate))
+      if (candidate == action || actions_can_share_key(action, candidate) ||
+          session_precedence_over_models(action, candidate))
         continue;
       if (std::ranges::find(candidate_keys, key) != candidate_keys.end())
         return true;
@@ -1101,14 +1102,16 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::AltEnter;
   if (normalized == "backspace" || normalized == "bs")
     return Key::Backspace;
-  if (normalized == "shift+backspace" || normalized == "shiftbackspace" || normalized == "shift+bs" || normalized == "shiftbs")
+  if (normalized == "shift+backspace" || normalized == "shiftbackspace" || normalized == "shift+bs" ||
+      normalized == "shiftbs")
     return Key::ShiftBackspace;
-  if (normalized == "ctrl+backspace" || normalized == "ctrlbackspace" || normalized == "ctrl+bs" || normalized == "ctrlbs" ||
-      normalized == "control+backspace" || normalized == "controlbackspace")
+  if (normalized == "ctrl+backspace" || normalized == "ctrlbackspace" || normalized == "ctrl+bs" ||
+      normalized == "ctrlbs" || normalized == "control+backspace" || normalized == "controlbackspace")
     return Key::CtrlBackspace;
   if (normalized == "delete" || normalized == "del")
     return Key::Delete;
-  if (normalized == "shift+delete" || normalized == "shiftdelete" || normalized == "shift+del" || normalized == "shiftdel")
+  if (normalized == "shift+delete" || normalized == "shiftdelete" || normalized == "shift+del" ||
+      normalized == "shiftdel")
     return Key::ShiftDelete;
   if (normalized == "insert" || normalized == "ins")
     return Key::Insert;
@@ -1118,7 +1121,8 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::Tab;
   if (normalized == "space")
     return Key::Space;
-  if (normalized == "ctrl+space" || normalized == "ctrlspace" || normalized == "control+space" || normalized == "controlspace")
+  if (normalized == "ctrl+space" || normalized == "ctrlspace" || normalized == "control+space" ||
+      normalized == "controlspace")
     return Key::CtrlSpace;
   if (normalized == "ctrl+0" || normalized == "ctrl0" || normalized == "control+0" || normalized == "control0")
     return Key::Ctrl0;
@@ -1156,49 +1160,65 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::ArrowLeft;
   if (normalized == "arrowright" || normalized == "right")
     return Key::ArrowRight;
-  if (normalized == "shift+arrowup" || normalized == "shiftarrowup" || normalized == "shift+up" || normalized == "shiftup")
+  if (normalized == "shift+arrowup" || normalized == "shiftarrowup" || normalized == "shift+up" ||
+      normalized == "shiftup")
     return Key::ShiftArrowUp;
-  if (normalized == "shift+arrowdown" || normalized == "shiftarrowdown" || normalized == "shift+down" || normalized == "shiftdown")
+  if (normalized == "shift+arrowdown" || normalized == "shiftarrowdown" || normalized == "shift+down" ||
+      normalized == "shiftdown")
     return Key::ShiftArrowDown;
-  if (normalized == "shift+arrowleft" || normalized == "shiftarrowleft" || normalized == "shift+left" || normalized == "shiftleft")
+  if (normalized == "shift+arrowleft" || normalized == "shiftarrowleft" || normalized == "shift+left" ||
+      normalized == "shiftleft")
     return Key::ShiftArrowLeft;
-  if (normalized == "shift+arrowright" || normalized == "shiftarrowright" || normalized == "shift+right" || normalized == "shiftright")
+  if (normalized == "shift+arrowright" || normalized == "shiftarrowright" || normalized == "shift+right" ||
+      normalized == "shiftright")
     return Key::ShiftArrowRight;
-  if (normalized == "shift+ctrl+arrowleft" || normalized == "ctrl+shift+arrowleft" || normalized == "shiftctrlarrowleft" ||
-      normalized == "ctrlshiftarrowleft" || normalized == "shift+ctrl+left" || normalized == "ctrl+shift+left" || normalized == "shiftctrlleft" ||
+  if (normalized == "shift+ctrl+arrowleft" || normalized == "ctrl+shift+arrowleft" ||
+      normalized == "shiftctrlarrowleft" || normalized == "ctrlshiftarrowleft" ||
+      normalized == "shift+ctrl+left" || normalized == "ctrl+shift+left" || normalized == "shiftctrlleft" ||
       normalized == "ctrlshiftleft")
     return Key::ShiftCtrlArrowLeft;
-  if (normalized == "shift+ctrl+arrowright" || normalized == "ctrl+shift+arrowright" || normalized == "shiftctrlarrowright" ||
-      normalized == "ctrlshiftarrowright" || normalized == "shift+ctrl+right" || normalized == "ctrl+shift+right" || normalized == "shiftctrlright" ||
+  if (normalized == "shift+ctrl+arrowright" || normalized == "ctrl+shift+arrowright" ||
+      normalized == "shiftctrlarrowright" || normalized == "ctrlshiftarrowright" ||
+      normalized == "shift+ctrl+right" || normalized == "ctrl+shift+right" || normalized == "shiftctrlright" ||
       normalized == "ctrlshiftright")
     return Key::ShiftCtrlArrowRight;
-  if (normalized == "shift+alt+arrowleft" || normalized == "alt+shift+arrowleft" || normalized == "shiftaltarrowleft" || normalized == "altshiftarrowleft" ||
-      normalized == "shift+alt+left" || normalized == "alt+shift+left" || normalized == "shiftaltleft" || normalized == "altshiftleft" ||
-      normalized == "shift+meta+arrowleft" || normalized == "meta+shift+arrowleft" || normalized == "shiftmetaarrowleft" ||
-      normalized == "metashiftarrowleft" || normalized == "shift+meta+left" || normalized == "meta+shift+left" || normalized == "shiftmetaleft" ||
+  if (normalized == "shift+alt+arrowleft" || normalized == "alt+shift+arrowleft" ||
+      normalized == "shiftaltarrowleft" || normalized == "altshiftarrowleft" || normalized == "shift+alt+left" ||
+      normalized == "alt+shift+left" || normalized == "shiftaltleft" || normalized == "altshiftleft" ||
+      normalized == "shift+meta+arrowleft" || normalized == "meta+shift+arrowleft" ||
+      normalized == "shiftmetaarrowleft" || normalized == "metashiftarrowleft" ||
+      normalized == "shift+meta+left" || normalized == "meta+shift+left" || normalized == "shiftmetaleft" ||
       normalized == "metashiftleft")
     return Key::ShiftAltArrowLeft;
-  if (normalized == "shift+alt+arrowright" || normalized == "alt+shift+arrowright" || normalized == "shiftaltarrowright" ||
-      normalized == "altshiftarrowright" || normalized == "shift+alt+right" || normalized == "alt+shift+right" || normalized == "shiftaltright" ||
-      normalized == "altshiftright" || normalized == "shift+meta+arrowright" || normalized == "meta+shift+arrowright" || normalized == "shiftmetaarrowright" ||
-      normalized == "metashiftarrowright" || normalized == "shift+meta+right" || normalized == "meta+shift+right" || normalized == "shiftmetaright" ||
-      normalized == "metashiftright")
+  if (normalized == "shift+alt+arrowright" || normalized == "alt+shift+arrowright" ||
+      normalized == "shiftaltarrowright" || normalized == "altshiftarrowright" ||
+      normalized == "shift+alt+right" || normalized == "alt+shift+right" || normalized == "shiftaltright" ||
+      normalized == "altshiftright" || normalized == "shift+meta+arrowright" ||
+      normalized == "meta+shift+arrowright" || normalized == "shiftmetaarrowright" ||
+      normalized == "metashiftarrowright" || normalized == "shift+meta+right" ||
+      normalized == "meta+shift+right" || normalized == "shiftmetaright" || normalized == "metashiftright")
     return Key::ShiftAltArrowRight;
-  if (normalized == "ctrl+arrowleft" || normalized == "ctrlarrowleft" || normalized == "ctrl+left" || normalized == "ctrlleft")
+  if (normalized == "ctrl+arrowleft" || normalized == "ctrlarrowleft" || normalized == "ctrl+left" ||
+      normalized == "ctrlleft")
     return Key::CtrlArrowLeft;
-  if (normalized == "ctrl+arrowright" || normalized == "ctrlarrowright" || normalized == "ctrl+right" || normalized == "ctrlright")
+  if (normalized == "ctrl+arrowright" || normalized == "ctrlarrowright" || normalized == "ctrl+right" ||
+      normalized == "ctrlright")
     return Key::CtrlArrowRight;
-  if (normalized == "alt+arrowleft" || normalized == "altarrowleft" || normalized == "alt+left" || normalized == "altleft" || normalized == "meta+arrowleft" ||
-      normalized == "metaarrowleft" || normalized == "meta+left" || normalized == "metaleft")
+  if (normalized == "alt+arrowleft" || normalized == "altarrowleft" || normalized == "alt+left" ||
+      normalized == "altleft" || normalized == "meta+arrowleft" || normalized == "metaarrowleft" ||
+      normalized == "meta+left" || normalized == "metaleft")
     return Key::AltArrowLeft;
-  if (normalized == "alt+arrowright" || normalized == "altarrowright" || normalized == "alt+right" || normalized == "altright" ||
-      normalized == "meta+arrowright" || normalized == "metaarrowright" || normalized == "meta+right" || normalized == "metaright")
+  if (normalized == "alt+arrowright" || normalized == "altarrowright" || normalized == "alt+right" ||
+      normalized == "altright" || normalized == "meta+arrowright" || normalized == "metaarrowright" ||
+      normalized == "meta+right" || normalized == "metaright")
     return Key::AltArrowRight;
-  if (normalized == "alt+arrowup" || normalized == "altarrowup" || normalized == "alt+up" || normalized == "altup" || normalized == "meta+arrowup" ||
-      normalized == "metaarrowup" || normalized == "meta+up" || normalized == "metaup")
+  if (normalized == "alt+arrowup" || normalized == "altarrowup" || normalized == "alt+up" ||
+      normalized == "altup" || normalized == "meta+arrowup" || normalized == "metaarrowup" ||
+      normalized == "meta+up" || normalized == "metaup")
     return Key::AltArrowUp;
-  if (normalized == "alt+arrowdown" || normalized == "altarrowdown" || normalized == "alt+down" || normalized == "altdown" || normalized == "meta+arrowdown" ||
-      normalized == "metaarrowdown" || normalized == "meta+down" || normalized == "metadown")
+  if (normalized == "alt+arrowdown" || normalized == "altarrowdown" || normalized == "alt+down" ||
+      normalized == "altdown" || normalized == "meta+arrowdown" || normalized == "metaarrowdown" ||
+      normalized == "meta+down" || normalized == "metadown")
     return Key::AltArrowDown;
   if (normalized == "pageup" || normalized == "pgup")
     return Key::PageUp;
@@ -1208,19 +1228,23 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::Home;
   if (normalized == "end")
     return Key::End;
-  if (normalized == "ctrl+home" || normalized == "ctrlhome" || normalized == "control+home" || normalized == "controlhome")
+  if (normalized == "ctrl+home" || normalized == "ctrlhome" || normalized == "control+home" ||
+      normalized == "controlhome")
     return Key::CtrlHome;
-  if (normalized == "ctrl+end" || normalized == "ctrlend" || normalized == "control+end" || normalized == "controlend")
+  if (normalized == "ctrl+end" || normalized == "ctrlend" || normalized == "control+end" ||
+      normalized == "controlend")
     return Key::CtrlEnd;
   if (normalized == "shift+home" || normalized == "shifthome")
     return Key::ShiftHome;
   if (normalized == "shift+end" || normalized == "shiftend")
     return Key::ShiftEnd;
-  if (normalized == "shift+ctrl+home" || normalized == "ctrl+shift+home" || normalized == "shiftctrlhome" || normalized == "ctrlshifthome" ||
-      normalized == "shift+control+home" || normalized == "control+shift+home" || normalized == "shiftcontrolhome" || normalized == "controlshifthome")
+  if (normalized == "shift+ctrl+home" || normalized == "ctrl+shift+home" || normalized == "shiftctrlhome" ||
+      normalized == "ctrlshifthome" || normalized == "shift+control+home" || normalized == "control+shift+home" ||
+      normalized == "shiftcontrolhome" || normalized == "controlshifthome")
     return Key::ShiftCtrlHome;
-  if (normalized == "shift+ctrl+end" || normalized == "ctrl+shift+end" || normalized == "shiftctrlend" || normalized == "ctrlshiftend" ||
-      normalized == "shift+control+end" || normalized == "control+shift+end" || normalized == "shiftcontrolend" || normalized == "controlshiftend")
+  if (normalized == "shift+ctrl+end" || normalized == "ctrl+shift+end" || normalized == "shiftctrlend" ||
+      normalized == "ctrlshiftend" || normalized == "shift+control+end" || normalized == "control+shift+end" ||
+      normalized == "shiftcontrolend" || normalized == "controlshiftend")
     return Key::ShiftCtrlEnd;
   if (normalized == "ctrl+a" || normalized == "ctrla")
     return Key::CtrlA;
@@ -1252,11 +1276,13 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::CtrlO;
   if (normalized == "ctrl+p" || normalized == "ctrlp")
     return Key::CtrlP;
-  if (normalized == "shift+ctrl+p" || normalized == "ctrl+shift+p" || normalized == "shiftctrlp" || normalized == "ctrlshiftp")
+  if (normalized == "shift+ctrl+p" || normalized == "ctrl+shift+p" || normalized == "shiftctrlp" ||
+      normalized == "ctrlshiftp")
     return Key::CtrlShiftP;
   if (normalized == "ctrl+r" || normalized == "ctrlr")
     return Key::CtrlR;
-  if (normalized == "ctrl+]" || normalized == "ctrl]" || normalized == "ctrl+rightbracket" || normalized == "ctrlrightbracket")
+  if (normalized == "ctrl+]" || normalized == "ctrl]" || normalized == "ctrl+rightbracket" ||
+      normalized == "ctrlrightbracket")
     return Key::CtrlRightBracket;
   if (normalized == "ctrl+s" || normalized == "ctrls")
     return Key::CtrlS;
@@ -1298,14 +1324,15 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::F11;
   if (normalized == "f12")
     return Key::F12;
-  if (normalized == "alt+backspace" || normalized == "altbackspace" || normalized == "meta+backspace" || normalized == "metabackspace")
+  if (normalized == "alt+backspace" || normalized == "altbackspace" || normalized == "meta+backspace" ||
+      normalized == "metabackspace")
     return Key::AltBackspace;
   if (normalized == "alt+b" || normalized == "altb" || normalized == "meta+b" || normalized == "metab")
     return Key::AltB;
   if (normalized == "alt+d" || normalized == "altd" || normalized == "meta+d" || normalized == "metad")
     return Key::AltD;
-  if (normalized == "alt+delete" || normalized == "altdelete" || normalized == "alt+del" || normalized == "altdel" || normalized == "meta+delete" ||
-      normalized == "metadelete" || normalized == "meta+del" || normalized == "metadel")
+  if (normalized == "alt+delete" || normalized == "altdelete" || normalized == "alt+del" || normalized == "altdel" ||
+      normalized == "meta+delete" || normalized == "metadelete" || normalized == "meta+del" || normalized == "metadel")
     return Key::AltDelete;
   if (normalized == "alt+f" || normalized == "altf" || normalized == "meta+f" || normalized == "metaf")
     return Key::AltF;
@@ -1319,9 +1346,9 @@ std::optional<Key> parse_key_name(std::string_view text)
     return Key::AltL;
   if (normalized == "alt+w" || normalized == "altw" || normalized == "meta+w" || normalized == "metaw")
     return Key::AltW;
-  if (normalized == "ctrl+alt+]" || normalized == "ctrlalt]" || normalized == "alt+ctrl+]" || normalized == "altctrl]" ||
-      normalized == "ctrl+alt+rightbracket" || normalized == "ctrlaltrightbracket" || normalized == "alt+ctrl+rightbracket" ||
-      normalized == "altctrlrightbracket")
+  if (normalized == "ctrl+alt+]" || normalized == "ctrlalt]" || normalized == "alt+ctrl+]" ||
+      normalized == "altctrl]" || normalized == "ctrl+alt+rightbracket" || normalized == "ctrlaltrightbracket" ||
+      normalized == "alt+ctrl+rightbracket" || normalized == "altctrlrightbracket")
     return Key::CtrlAltRightBracket;
   if (normalized == "alt+y" || normalized == "alty" || normalized == "meta+y" || normalized == "metay")
     return Key::AltY;

@@ -50,7 +50,6 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/diff", .description = "Show the latest or matching tool diff in the TUI", .hint = "[query]", .category = "General"},
       CommandCatalogEntry{.command = "/copy",
                           .description = "Copy the latest AVA message, a public user turn, or matching tool, diff, or permission details in the TUI",
-                          .hint = "[user|tool|diff|permission] [query]",
                           .category = "General"},
       CommandCatalogEntry{.command = "/share",
                           .description = "Share a session export",
@@ -70,8 +69,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .enabled = false,
                           .disabled_reason = "package install/update is deferred pending local-source, provenance, trust, rollback, and compatibility policy"},
       CommandCatalogEntry{.command = "/thinking",
-                          .description = "Toggle inline thinking visibility, or expand/collapse the latest long thinking block",
-                          .hint = "[details]",
+                          .description = "Toggle inline thinking visibility, or use /thinking details for the latest long thinking block",
                           .category = "General"},
       CommandCatalogEntry{
           .command = "/attach", .aliases = {"/image"}, .description = "Attach an image to the next TUI prompt", .hint = "<path>", .category = "Files"},

@@ -165,7 +165,9 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
         lambda screen: tuple(screen.splitlines()[:-4]) != multiline_transcript_rows and "first" in screen and "second" in screen,
         "multiline draft physical Ghostty arrow transcript movement",
     )
-    if any(text in multiline_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    # /help intentionally lists the jump_to_bottom action name; only the
+    # removed detached-banner phrases indicate stale product chrome.
+    if any(text in multiline_scrolled for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"multiline arrow scroll surfaced deleted detached chrome\nscreen:\n{multiline_scrolled}")
     send_literal(tmux_exe, session, "X")
     moved = wait_for(tmux_exe, session, r"secondX", "multiline draft cursor preserved by arrow scroll")
@@ -237,7 +239,7 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
         lambda screen: tuple(screen.splitlines()[:-3]) != transcript_live_rows and "draft stays while scrolling" in screen,
         "raw SGR mouse wheel transcript movement",
     )
-    if any(text in wheel_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    if any(text in wheel_scrolled for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"raw SGR mouse wheel surfaced deleted detached chrome\nscreen:\n{wheel_scrolled}")
     # Reset the physical-wheel burst at a harmless non-wheel boundary before
     # asserting the reverse gesture; Right at end-of-draft preserves content.
@@ -255,7 +257,7 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
         lambda screen: tuple(screen.splitlines()[:-3]) != transcript_live_rows and "draft stays while scrolling" in screen,
         "physical Ghostty Up arrow transcript movement with Num Lock",
     )
-    if any(text in arrow_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    if any(text in arrow_scrolled for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"physical Up arrow surfaced deleted detached chrome\nscreen:\n{arrow_scrolled}")
     send_literal(tmux_exe, session, "\x1b[1;129B")
     arrow_tail = wait_for_screen_state(

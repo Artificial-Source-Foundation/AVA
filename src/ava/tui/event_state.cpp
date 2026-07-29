@@ -588,6 +588,17 @@ void settle_responding_activity(TuiEventState& state, ToolTimelineStatus status,
   existing->detail = std::move(detail);
 }
 
+void settle_running_retry_activities(TuiEventState& state, ToolTimelineStatus status, std::string const& detail)
+{
+  for (auto& activity : state.activity)
+  {
+    if (activity.status != ToolTimelineStatus::Running || activity.label != "retry")
+      continue;
+    activity.status = status;
+    activity.detail = detail;
+  }
+}
+
 bool is_cancel_error(ava::event::ErrorPayload const& payload)
 {
   return payload.error_message == "agent loop canceled" || payload.text == "agent loop canceled" ||
@@ -1135,6 +1146,24 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
   std::visit(
       [&]<typename Event>(Event const& typed_event) {
         auto const& payload = typed_event.payload;
+        if constexpr (!std::same_as<Event, ava::event::RetryEvent> && !std::same_as<Event, ava::event::RetryTickEvent>)
+        {
+          if constexpr (std::same_as<Event, ava::event::CancellationEvent>)
+          {
+            settle_running_retry_activities(state, ToolTimelineStatus::Canceled, "retry canceled");
+          }
+          else if constexpr (std::same_as<Event, ava::event::ErrorEvent>)
+          {
+            if (is_cancel_error(payload))
+              settle_running_retry_activities(state, ToolTimelineStatus::Canceled, "retry canceled");
+            else
+              settle_running_retry_activities(state, ToolTimelineStatus::Error, "retry failed");
+          }
+          else
+          {
+            settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry completed");
+          }
+        }
         if constexpr (std::same_as<Event, ava::event::SessionStartEvent>)
         {
           state.current_mode = payload.mode;
@@ -1309,9 +1338,18 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
           if (!payload.text.empty())
             detail += " - " + payload.text;
           upsert_retry_countdown_transcript(state, detail);
-          upsert_sidebar_activity(
-              state,
-              SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
+          if (payload.remaining_ms == 0)
+          {
+            upsert_sidebar_activity(
+                state,
+                SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = "retry completed", .status = ToolTimelineStatus::Success});
+          }
+          else
+          {
+            upsert_sidebar_activity(
+                state,
+                SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
+          }
           state.run_status = TuiEventRunStatus::Running;
         }
         else if constexpr (std::same_as<Event, ava::event::CancellationEvent>)

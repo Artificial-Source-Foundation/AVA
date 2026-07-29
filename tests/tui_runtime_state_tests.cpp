@@ -108,6 +108,45 @@ void apply_session_start(ava::tui::TuiEventState& state, ava::core::Mode mode, s
   return {{}, ava::event::RetryTickEvent{.payload = std::move(payload), .diagnostics = std::move(diagnostics)}};
 }
 
+[[nodiscard]] bool visible_contains(std::vector<std::string> const& lines, std::string_view needle)
+{
+  return std::ranges::any_of(lines, [&](std::string const& line) { return strip_sgr(line).find(needle) != std::string::npos; });
+}
+
+[[nodiscard]] std::vector<std::string> render_processing_with_event_activity(ava::tui::TuiEventState const& state)
+{
+  return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                              .provider = "openai",
+                                                              .model = "gpt-5.5",
+                                                              .session_id = "session_test",
+                                                              .input = "",
+                                                              .status = "thinking...",
+                                                              .processing = true,
+                                                              .active_run_hint = ava::tui::ActiveRunHint{.interrupt = "Esc"},
+                                                              .transcript = {},
+                                                              .width = 88,
+                                                              .height = 12,
+                                                              .sidebar = ava::tui::SidebarSnapshot{.activity = state.activity}});
+}
+
+[[nodiscard]] ava::event::RetryPayload sample_retry_payload(std::size_t remaining_ms = 0)
+{
+  auto payload = ava::event::RetryPayload{};
+  payload.trigger = "rate_limit";
+  payload.reason = "rate_limit";
+  payload.attempt = 2;
+  payload.max_attempts = 5;
+  payload.delay_ms = 1000;
+  payload.remaining_ms = remaining_ms;
+  return payload;
+}
+
+[[nodiscard]] ava::tui::SidebarActivityItem const* find_retry_activity(ava::tui::TuiEventState const& state)
+{
+  auto existing = std::ranges::find_if(state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.label == "retry"; });
+  return existing == state.activity.end() ? nullptr : &*existing;
+}
+
 [[nodiscard]] ava::event::RuntimeEvent cancellation_event(ava::event::CancellationPayload payload)
 {
   return {{}, ava::event::CancellationEvent{.payload = std::move(payload)}};
@@ -1105,6 +1144,12 @@ void test_tui_event_state_reduces_runtime_events()
   auto retry_tick_update_payload = retry_tick_payload;
   retry_tick_update_payload.remaining_ms = 25;
   ava::tui::apply_runtime_event(lifecycle_state, retry_tick_event(retry_tick_update_payload));
+  expect(std::ranges::any_of(lifecycle_state.activity,
+                             [](ava::tui::SidebarActivityItem const& activity) {
+                               return activity.label == "retry" && activity.status == ava::tui::ToolTimelineStatus::Running &&
+                                      activity.detail.find("remaining=25ms") != std::string::npos;
+                             }),
+         "tui event state keeps running retry countdown activity while remaining_ms is positive");
   auto compaction_end_payload = ava::event::CompactionPayload{};
   compaction_end_payload.trigger = "context_overflow";
   compaction_end_payload.attempt = 1;
@@ -1126,7 +1171,8 @@ void test_tui_event_state_reduces_runtime_events()
              lifecycle_state.transcript[2].text.find("summary=1234 bytes") != std::string::npos &&
              std::ranges::any_of(lifecycle_state.activity,
                                  [](ava::tui::SidebarActivityItem const& activity) {
-                                   return activity.label == "retry" && activity.detail.find("remaining=25ms") != std::string::npos;
+                                   return activity.label == "retry" && activity.status == ava::tui::ToolTimelineStatus::Success &&
+                                          activity.detail == "retry completed";
                                  }),
          "tui event state renders backend retry, retry countdown, and compaction markers with backend-provided detail");
   auto const compaction_render = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -1749,9 +1795,143 @@ void test_tui_typed_runtime_inherits_session_identity_fields()
 
 }  // namespace
 
+void test_tui_retry_activity_settles_and_restores_contextual_hint()
+{
+  auto assert_retry_chrome = [](ava::tui::TuiEventState const& state, std::string_view expected_chrome, std::string const& case_name) {
+    auto const lines = render_processing_with_event_activity(state);
+    expect(visible_contains(lines, expected_chrome) && visible_contains(lines, "Esc stop") && !visible_contains(lines, "type a follow-up"), case_name);
+  };
+  auto assert_normal_hint = [](ava::tui::TuiEventState const& state, std::string const& case_name) {
+    auto const lines = render_processing_with_event_activity(state);
+    expect(visible_contains(lines, "Esc stop · type a follow-up") && !visible_contains(lines, "retry attempt") && !visible_contains(lines, "retry 0ms") &&
+               !visible_contains(lines, "retry countdown"),
+           case_name);
+  };
+
+  ava::tui::TuiEventState running_state;
+  ava::tui::apply_runtime_event(running_state, retry_event(sample_retry_payload()));
+  auto const* running_retry = find_retry_activity(running_state);
+  expect(running_retry && running_retry->status == ava::tui::ToolTimelineStatus::Running &&
+             running_retry->detail.find("retrying after rate_limit") != std::string::npos && running_state.transcript.size() == 1 &&
+             running_state.transcript[0].label == "audit",
+         "tui event state keeps running retry activity visible after RetryEvent");
+  assert_retry_chrome(running_state, "Esc stop · retry attempt 2/5", "tui event-state-to-render surfaces running retry chrome from typed RetryEvent activity");
+
+  ava::tui::TuiEventState countdown_state = running_state;
+  ava::tui::apply_runtime_event(countdown_state, retry_tick_event(sample_retry_payload(1500)));
+  auto const* countdown_retry = find_retry_activity(countdown_state);
+  expect(countdown_retry && countdown_retry->status == ava::tui::ToolTimelineStatus::Running &&
+             countdown_retry->detail.find("remaining=1500ms") != std::string::npos && countdown_state.transcript.size() == 2 &&
+             countdown_state.transcript[1].text.find("remaining=1500ms") != std::string::npos,
+         "tui event state updates running retry countdown activity and preserves audit transcript text");
+  assert_retry_chrome(countdown_state, "Esc stop · retry 1500ms",
+                      "tui event-state-to-render surfaces running retry countdown chrome from typed RetryTick activity");
+
+  ava::tui::apply_runtime_event(countdown_state, retry_tick_event(sample_retry_payload(0)));
+  auto const* zero_retry = find_retry_activity(countdown_state);
+  expect(zero_retry && zero_retry->status == ava::tui::ToolTimelineStatus::Success && zero_retry->detail == "retry completed" &&
+             countdown_state.transcript.size() == 2 && countdown_state.transcript[1].text.find("remaining=0ms") != std::string::npos &&
+             countdown_state.transcript[0].text.find("retrying after rate_limit") != std::string::npos,
+         "tui event state settles retry activity on remaining_ms==0 while preserving retry transcript audits");
+  assert_normal_hint(countdown_state, "tui event-state-to-render drops retry chrome after remaining_ms==0 and restores the normal contextual hint");
+
+  auto settle_with_progress = [&](auto apply_progress, std::string_view progress_name) {
+    ava::tui::TuiEventState state;
+    state.activity.push_back(
+        ava::tui::SidebarActivityItem{.id = "unrelated:read", .label = "read_file", .detail = "already done", .status = ava::tui::ToolTimelineStatus::Success});
+    ava::tui::apply_runtime_event(state, retry_event(sample_retry_payload()));
+    ava::tui::apply_runtime_event(state, retry_tick_event(sample_retry_payload(900)));
+    auto const before_lines = render_processing_with_event_activity(state);
+    expect(visible_contains(before_lines, "retry 900ms"), std::string("precondition: running retry chrome visible before ") + std::string(progress_name));
+    apply_progress(state);
+    auto const* retry = find_retry_activity(state);
+    auto const unrelated = std::ranges::find_if(state.activity, [](ava::tui::SidebarActivityItem const& activity) { return activity.id == "unrelated:read"; });
+    expect(retry && retry->status == ava::tui::ToolTimelineStatus::Success && retry->detail == "retry completed" && unrelated != state.activity.end() &&
+               unrelated->label == "read_file" && unrelated->detail == "already done" && unrelated->status == ava::tui::ToolTimelineStatus::Success,
+           std::string("tui event state settles running retry on ") + std::string(progress_name) + " without changing unrelated activity");
+    assert_normal_hint(state, std::string("tui event-state-to-render restores normal contextual hint after ") + std::string(progress_name));
+  };
+
+  settle_with_progress(
+      [](ava::tui::TuiEventState& state) {
+        auto payload = ava::event::MessagePayload{};
+        payload.text = "hello";
+        ava::tui::apply_runtime_event(state, message_update_event(std::move(payload)));
+      },
+      "assistant message progress");
+
+  settle_with_progress(
+      [](ava::tui::TuiEventState& state) {
+        auto payload = ava::event::ProviderPayload{};
+        payload.status = "tool_call_start";
+        payload.tool = "read_file";
+        payload.call_id = "provider_retry_settle";
+        ava::tui::apply_runtime_event(state, provider_event(std::move(payload)));
+      },
+      "provider progress");
+
+  settle_with_progress(
+      [](ava::tui::TuiEventState& state) {
+        auto payload = ava::event::ToolPayload{};
+        payload.call_id = "call_retry_settle";
+        payload.tool = "read_file";
+        payload.text = "path=README.md";
+        ava::tui::apply_runtime_event(state, tool_start_event(std::move(payload)));
+      },
+      "tool progress");
+
+  settle_with_progress(
+      [](ava::tui::TuiEventState& state) {
+        auto payload = ava::event::CompletionPayload{};
+        payload.stop_reason = "stop";
+        ava::tui::apply_runtime_event(state, completion_event(std::move(payload)));
+      },
+      "completion progress");
+
+  ava::tui::TuiEventState canceled_state;
+  ava::tui::apply_runtime_event(canceled_state, retry_event(sample_retry_payload()));
+  ava::tui::apply_runtime_event(canceled_state, retry_tick_event(sample_retry_payload(500)));
+  ava::tui::apply_runtime_event(canceled_state, cancellation_event(ava::event::CancellationPayload{}));
+  auto const* canceled_retry = find_retry_activity(canceled_state);
+  expect(canceled_retry && canceled_retry->status == ava::tui::ToolTimelineStatus::Canceled && canceled_retry->detail == "retry canceled" &&
+             canceled_state.run_status == ava::tui::TuiEventRunStatus::Canceled,
+         "tui event state settles running retry as Canceled on cancellation");
+  assert_normal_hint(canceled_state, "tui event-state-to-render removes retry chrome after cancellation settlement");
+
+  ava::tui::TuiEventState error_state;
+  ava::tui::apply_runtime_event(error_state, retry_event(sample_retry_payload()));
+  ava::tui::apply_runtime_event(error_state, retry_tick_event(sample_retry_payload(500)));
+  auto error_payload = ava::event::ErrorPayload{};
+  error_payload.error_message = "provider unavailable";
+  error_payload.text = "provider unavailable";
+  ava::tui::apply_runtime_event(error_state, error_event(std::move(error_payload)));
+  auto const* failed_retry = find_retry_activity(error_state);
+  expect(failed_retry && failed_retry->status == ava::tui::ToolTimelineStatus::Error && failed_retry->detail == "retry failed" &&
+             error_state.run_status == ava::tui::TuiEventRunStatus::Error,
+         "tui event state settles running retry as Error on terminal non-cancel failure");
+  assert_normal_hint(error_state, "tui event-state-to-render removes retry chrome after error settlement");
+
+  ava::tui::TuiEventState reactivate_state;
+  ava::tui::apply_runtime_event(reactivate_state, retry_event(sample_retry_payload()));
+  ava::tui::apply_runtime_event(reactivate_state, retry_tick_event(sample_retry_payload(0)));
+  auto const* settled = find_retry_activity(reactivate_state);
+  expect(settled && settled->status == ava::tui::ToolTimelineStatus::Success, "precondition: zero remaining settles retry before later reactivation");
+  auto second_retry = sample_retry_payload();
+  second_retry.attempt = 3;
+  ava::tui::apply_runtime_event(reactivate_state, retry_event(std::move(second_retry)));
+  auto const* reactivated = find_retry_activity(reactivate_state);
+  expect(reactivated && reactivated->status == ava::tui::ToolTimelineStatus::Running && reactivated->detail.find("attempt 3/5") != std::string::npos &&
+             reactivate_state.transcript.size() >= 2 &&
+             std::ranges::count_if(reactivate_state.transcript, [](ava::tui::TranscriptItem const& item) { return item.label == "audit"; }) >= 2,
+         "tui event state lets a later RetryEvent reactivate settled retry activity while preserving prior transcript audits");
+  assert_retry_chrome(reactivate_state, "Esc stop · retry attempt 3/5",
+                      "tui event-state-to-render restores retry chrome after a later typed RetryEvent reactivation");
+}
+
 void run_tui_runtime_event_state_tests()
 {
   test_tui_event_state_reduces_runtime_events();
+  test_tui_retry_activity_settles_and_restores_contextual_hint();
   test_tui_transcript_projection_and_cap_parity();
   test_tui_mixed_runtime_event_queue_preserves_order_and_context();
   test_tui_typed_runtime_inherits_session_identity_fields();

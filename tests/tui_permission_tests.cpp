@@ -118,6 +118,113 @@ void run_tui_permission_tests_part_1()
   expect(!one_shot_remember_availability.allow_remember_available && one_shot_remember_availability.deny_remember_available &&
              !unavailable_storage_remember_availability.allow_remember_available && !unavailable_storage_remember_availability.deny_remember_available,
          "tui runtime enables a persistent deny but not a persistent allow for one-shot Critical prompts when rule storage exists");
+
+  ava::tui::PermissionPromptView guidance_prompt{
+      .tool_name = "bash", .operation = "bash", .target = "", .command = "true", .reason = "ask", .selected_choice = ava::tui::PermissionPromptChoice::Allow};
+  auto guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'G'});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::Redraw && guidance_input.guidance_mode &&
+             guidance_input.selected_choice == ava::tui::PermissionPromptChoice::Deny && guidance_input.guidance_text.empty(),
+         "permission prompt G enters guidance mode as one-shot reject without resolving");
+  guidance_prompt.guidance_mode = true;
+  guidance_prompt.selected_choice = ava::tui::PermissionPromptChoice::Deny;
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'A'});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::Redraw && guidance_input.guidance_mode && guidance_input.guidance_text == "A" &&
+             guidance_input.selected_choice == ava::tui::PermissionPromptChoice::Deny,
+         "permission guidance mode treats A as text and never authorizes");
+  guidance_prompt.guidance_text = "A";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Space});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::Redraw && guidance_input.guidance_text == "A ",
+         "permission guidance mode Space appends a space instead of resolving");
+  guidance_prompt.guidance_text = "A ";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt,
+                                                            ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'x', .text = "safe\nline\x01"});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::Redraw && guidance_input.guidance_text == "A safeline",
+         "permission guidance mode strips controls and newlines from pasted text");
+  guidance_prompt.guidance_text = "base";
+  // Combining acute accent on 'e' (U+0301) is one compact cluster with the base.
+  guidance_input = ava::tui::handle_permission_prompt_input(
+      guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = '\0', .text = std::string("e\xCC\x81")});
+  expect(guidance_input.guidance_text == std::string("basee\xCC\x81"), "permission guidance mode appends combining clusters intact");
+  guidance_prompt.guidance_text = guidance_input.guidance_text;
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Backspace});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::Redraw && guidance_input.guidance_text == "base",
+         "permission guidance Backspace removes one compact cluster atomically");
+  // ZWJ family emoji cluster must erase as one unit.
+  std::string const zwj_family = "\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7";
+  guidance_prompt.guidance_text = "x" + zwj_family;
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Backspace});
+  expect(guidance_input.guidance_text == "x", "permission guidance Backspace removes a ZWJ emoji cluster atomically");
+
+  guidance_prompt.guidance_text = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes, 'a');
+  auto const at_cap = guidance_prompt.guidance_text;
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'z'});
+  expect(guidance_input.guidance_text == at_cap && guidance_input.guidance_text.size() == ava::permissions::kMaxPermissionUserGuidanceBytes,
+         "permission guidance enforces the exact 2048-byte cap without growth");
+  // Multi-byte cluster at the boundary must not partially split.
+  guidance_prompt.guidance_text = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes - 1, 'b');
+  guidance_input = ava::tui::handle_permission_prompt_input(
+      guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = '\0', .text = std::string("\xC3\xA9")});  // é
+  expect(guidance_input.guidance_text.size() == ava::permissions::kMaxPermissionUserGuidanceBytes - 1 &&
+             guidance_input.guidance_text.find("\xC3") == std::string::npos,
+         "permission guidance over-cap rejects a multi-byte cluster without splitting it");
+
+  guidance_prompt.guidance_text = "do not escalate";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny &&
+             guidance_input.selected_choice == ava::tui::PermissionPromptChoice::Deny && guidance_input.guidance_text == "do not escalate",
+         "permission guidance Enter resolves one-shot reject with the optional text");
+
+  guidance_prompt.guidance_text = "will discard";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny && guidance_input.guidance_text.empty(),
+         "permission guidance Escape resolves reject with no guidance");
+  guidance_prompt.guidance_text = "will discard";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::CtrlC});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny && guidance_input.guidance_text.empty(),
+         "permission guidance Ctrl-C resolves reject with no guidance");
+  guidance_prompt.guidance_text = "will discard";
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::CtrlD});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny && guidance_input.guidance_text.empty(),
+         "permission guidance Ctrl-D resolves reject with no guidance");
+
+  guidance_prompt.guidance_text = "locked";
+  for (auto const key : {ava::tui::Key::Tab, ava::tui::Key::ArrowLeft, ava::tui::Key::ArrowRight, ava::tui::Key::ArrowUp, ava::tui::Key::ArrowDown})
+  {
+    guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = key});
+    expect(guidance_input.action == ava::tui::PermissionPromptInputAction::None && guidance_input.guidance_mode &&
+               guidance_input.selected_choice == ava::tui::PermissionPromptChoice::Deny && guidance_input.guidance_text == "locked",
+           "permission guidance mode ignores navigation/authorization keys");
+  }
+
+  guidance_prompt.guidance_mode = true;
+  guidance_prompt.guidance_text.clear();
+  guidance_input = ava::tui::handle_permission_prompt_input(guidance_prompt, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(guidance_input.action == ava::tui::PermissionPromptInputAction::ResolveDeny && guidance_input.guidance_text.empty(),
+         "empty guidance Enter is ordinary one-shot reject");
+
+  // Choice-only overload remains unchanged: G is unmapped there.
+  auto choice_only = ava::tui::handle_permission_prompt_input(ava::tui::PermissionPromptChoice::Allow,
+                                                              ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'G'});
+  expect(choice_only.action == ava::tui::PermissionPromptInputAction::None && choice_only.selected_choice == ava::tui::PermissionPromptChoice::Allow,
+         "choice-only permission input overload leaves G unmapped for compatibility");
+
+  expect(ava::permissions::validated_permission_user_guidance("use the workspace recipe") == std::string("use the workspace recipe"),
+         "permission guidance validator accepts compact control-free UTF-8");
+  expect(!ava::permissions::validated_permission_user_guidance(""), "permission guidance validator rejects empty guidance");
+  expect(!ava::permissions::validated_permission_user_guidance("line\nbreak"), "permission guidance validator rejects newlines as forged controls");
+  expect(!ava::permissions::validated_permission_user_guidance(std::string("bad\x01byte")), "permission guidance validator rejects control bytes");
+  expect(!ava::permissions::validated_permission_user_guidance(std::string(ava::permissions::kMaxPermissionUserGuidanceBytes + 1, 'x')),
+         "permission guidance validator rejects over-cap forged guidance");
+  expect(!ava::permissions::validated_permission_user_guidance(std::string("bad\xC3")), "permission guidance validator rejects invalid UTF-8");
+
+  // Runtime stop / Esc-family paths must never carry guidance on the decision.
+  ava::permissions::PermissionResolutionDecision stop_decision{ava::permissions::PermissionResolution::Deny};
+  expect(stop_decision.user_guidance.empty() && stop_decision.reason.empty() && ava::permissions::to_string(stop_decision) == "deny",
+         "runtime stop-style one-shot deny keeps user_guidance distinct and empty");
+  ava::permissions::PermissionResolutionDecision guided_decision{ava::permissions::PermissionResolution::Deny};
+  guided_decision.user_guidance = "stay in the workspace";
+  expect(guided_decision.user_guidance == "stay in the workspace" && guided_decision.reason.empty() && ava::permissions::to_string(guided_decision) == "deny",
+         "PermissionResolutionDecision carries one-shot guidance separately from reason/resolution");
 }
 void run_tui_permission_tests_part_2()
 {
@@ -530,6 +637,144 @@ void run_tui_permission_tests_part_3()
     expect(std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("Permission required") != std::string::npos; }) &&
                std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("Allow once") != std::string::npos; }),
            "minimum-height permission dock remains visible above a wrapped composer draft");
+  }
+
+  auto guidance_view = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                      .operation = "bash",
+                                                      .target = "",
+                                                      .command = "git push origin main",
+                                                      .reason = "external state",
+                                                      .risk = "high",
+                                                      .selected_choice = ava::tui::PermissionPromptChoice::Deny,
+                                                      .guidance_mode = true,
+                                                      .guidance_text = "do not escalate privileges"};
+  auto const guidance_rows = ava::tui::detail::render_permission_prompt(guidance_view, 96, 8);
+  auto const guidance_text = tui_test_support::join_visible_lines(guidance_rows);
+  expect(guidance_text.find("Guidance:") != std::string::npos && guidance_text.find("do not escalate privileges") != std::string::npos &&
+             guidance_text.find("› Reject") != std::string::npos && guidance_text.find("Allow once") != std::string::npos &&
+             std::ranges::any_of(guidance_rows,
+                                 [](std::string const& row) {
+                                   auto const visible = strip_sgr(row);
+                                   return visible.find("reject") != std::string::npos && visible.find("Esc") != std::string::npos;
+                                 }) &&
+             guidance_text.find("A/D shortcuts") == std::string::npos,
+         "permission guidance mode renders a Guidance row and reject-only controls without allow shortcuts");
+
+  guidance_view.guidance_text.clear();
+  auto const empty_guidance_rows = ava::tui::detail::render_permission_prompt(guidance_view, 96, 6);
+  expect(tui_test_support::join_visible_lines(empty_guidance_rows).find("optional reason for the model") != std::string::npos,
+         "empty guidance mode shows the optional model-facing placeholder");
+
+  for (auto const budget : {std::size_t{1}, std::size_t{2}, std::size_t{3}, std::size_t{4}})
+  {
+    auto tiny_guidance = guidance_view;
+    tiny_guidance.guidance_text = "keep it local";
+    auto const tiny_rows = ava::tui::detail::render_permission_prompt(tiny_guidance, 28, budget);
+    auto const tiny_text = tui_test_support::join_visible_lines(tiny_rows);
+    expect(!tiny_rows.empty() && tiny_rows.size() <= budget &&
+               std::ranges::all_of(tiny_rows, [](std::string const& row) { return row.find('\n') == std::string::npos && visible_columns(row) <= 28; }) &&
+               tiny_text.find("Guidance:") != std::string::npos &&
+               (budget == 1 || tiny_text.find("keep it local") != std::string::npos || tiny_text.find("Guidance:") != std::string::npos),
+           "permission guidance renderer keeps Guidance identity at tiny row budget " + std::to_string(budget));
+  }
+
+  {
+    ScopedEnvVar no_color_guard("NO_COLOR", "1");
+    auto plain_guidance_view = guidance_view;
+    plain_guidance_view.guidance_mode = true;
+    plain_guidance_view.guidance_text = "do not escalate privileges";
+    auto const plain_guidance = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                     .provider = "openai",
+                                                                                     .model = "gpt-5.5",
+                                                                                     .session_id = "session_test",
+                                                                                     .input = "",
+                                                                                     .status = "permission guidance",
+                                                                                     .transcript = {},
+                                                                                     .permission_prompt = plain_guidance_view,
+                                                                                     .width = 80,
+                                                                                     .height = 12});
+    expect(std::ranges::any_of(plain_guidance,
+                               [](std::string const& line) {
+                                 return line.find("Guidance:") != std::string::npos && line.find("do not escalate privileges") != std::string::npos &&
+                                        line.find('\x1b') == std::string::npos;
+                               }) &&
+               std::ranges::all_of(plain_guidance, [](std::string const& line) { return line.find('\x1b') == std::string::npos; }),
+           "permission guidance remains truthful under NO_COLOR without ANSI styling");
+  }
+
+  auto const guide_keys_modal = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_test",
+                                 .input = "",
+                                 .status = "permission required",
+                                 .transcript = {},
+                                 .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                                                     .operation = "bash",
+                                                                                     .target = "",
+                                                                                     .command = "true",
+                                                                                     .reason = "ask",
+                                                                                     .selected_choice = ava::tui::PermissionPromptChoice::Deny},
+                                 .width = 120,
+                                 .height = 10});
+  expect(std::ranges::any_of(guide_keys_modal,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("G=guide") != std::string::npos || visible.find("G guide") != std::string::npos;
+                             }),
+         "permission dock advertises G guide rejection in key help");
+
+  auto remember_recipe = ava::tui::PermissionPromptView{.tool_name = "bash",
+                                                        .operation = "bash",
+                                                        .target = "",
+                                                        .command = "cmake --build build",
+                                                        .reason = "sealed",
+                                                        .allow_remember_available = true,
+                                                        .deny_remember_available = true,
+                                                        .recipe_display = "cmake --build <build>",
+                                                        .workspace_recipe_key = "deadbeefhash",
+                                                        .selected_choice = ava::tui::PermissionPromptChoice::DenyRemember};
+  auto const recipe_preview_rows = ava::tui::detail::render_permission_prompt(remember_recipe, 120, 10);
+  auto const recipe_preview = tui_test_support::join_visible_lines(recipe_preview_rows);
+  expect(recipe_preview.find("Always reject: workspace recipe · cmake --build <build>") != std::string::npos &&
+             recipe_preview.find("deadbeefhash") == std::string::npos,
+         "remembered deny preview shows workspace recipe display without recipe hashes");
+
+  remember_recipe.recipe_display.clear();
+  remember_recipe.workspace_recipe_key.clear();
+  remember_recipe.command = "git push origin main";
+  auto const command_preview = tui_test_support::join_visible_lines(ava::tui::detail::render_permission_prompt(remember_recipe, 120, 10));
+  expect(command_preview.find("Always reject: workspace exact command · $ git push origin main") != std::string::npos,
+         "remembered deny preview shows workspace exact command basis");
+
+  auto remember_path = ava::tui::PermissionPromptView{.tool_name = "write_file",
+                                                      .operation = "write_file",
+                                                      .target = "/tmp/outside.txt",
+                                                      .reason = "external",
+                                                      .allow_remember_available = true,
+                                                      .deny_remember_available = true,
+                                                      .selected_choice = ava::tui::PermissionPromptChoice::AllowRemember};
+  auto const path_preview = tui_test_support::join_visible_lines(ava::tui::detail::render_permission_prompt(remember_path, 120, 10));
+  expect(path_preview.find("Always allow: workspace exact path · /tmp/outside.txt") != std::string::npos,
+         "remembered allow preview shows workspace exact path basis");
+
+  auto remember_tool = ava::tui::PermissionPromptView{.tool_name = "web_fetch",
+                                                      .operation = "network_fetch",
+                                                      .target = "",
+                                                      .reason = "network",
+                                                      .allow_remember_available = true,
+                                                      .deny_remember_available = true,
+                                                      .selected_choice = ava::tui::PermissionPromptChoice::DenyRemember};
+  auto const tool_preview = tui_test_support::join_visible_lines(ava::tui::detail::render_permission_prompt(remember_tool, 120, 10));
+  expect(tool_preview.find("Always reject: workspace exact operation · web_fetch") != std::string::npos,
+         "remembered deny preview shows workspace exact tool/operation basis");
+
+  for (auto const budget : {std::size_t{1}, std::size_t{2}, std::size_t{3}, std::size_t{4}})
+  {
+    auto const tiny_remember = tui_test_support::join_visible_lines(ava::tui::detail::render_permission_prompt(remember_recipe, 40, budget));
+    expect(tiny_remember.find("workspace exact command") == std::string::npos && tiny_remember.find("Always reject:") == std::string::npos,
+           "remembered rule preview stays hidden at tiny row budget " + std::to_string(budget));
   }
 }
 namespace {

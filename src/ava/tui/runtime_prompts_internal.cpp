@@ -126,7 +126,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     snapshot.permission_prompt->deny_remember_available = deny_remember_available;
     snapshot.status = allow_session_available || allow_remember_available || deny_remember_available
                           ? permission_prompt_status(allow_session_available, allow_remember_available, deny_remember_available)
-                          : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+                          : "permission required: A=allow D=reject G=guide rejection Tab/Left/Right choose Enter/Space confirm Esc reject";
   }
   static_cast<void>(beep());
   if (!render())
@@ -134,7 +134,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
   }
 
-  auto resolve_choice = [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+  auto resolve_choice = [&](PermissionPromptChoice selected,
+                            std::string user_guidance = {}) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     auto const allow =
         selected == PermissionPromptChoice::Allow || selected == PermissionPromptChoice::AllowSession || selected == PermissionPromptChoice::AllowRemember;
     auto const remember = selected == PermissionPromptChoice::AllowRemember || selected == PermissionPromptChoice::DenyRemember;
@@ -256,6 +257,11 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       decision.reason = "remembered deny rule";
       decision.resolution_source = "persistent_rule_added";
       decision.rule_id = std::move(remembered_rule_id);
+      // Remembered deny stays separate from optional one-shot guidance.
+    }
+    else if (auto validated = ava::permissions::validated_permission_user_guidance(user_guidance))
+    {
+      decision.user_guidance = std::move(*validated);
     }
     return decision;
   };
@@ -320,11 +326,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       return resolve_choice(PermissionPromptChoice::Deny);
     }
 
-    auto input_result = snapshot.permission_prompt
-                            ? handle_permission_prompt_input(
-                                  snapshot.permission_prompt->selected_choice, choice_input->event, snapshot.permission_prompt->allow_session_available,
-                                  snapshot.permission_prompt->allow_remember_available, snapshot.permission_prompt->deny_remember_available)
-                            : PermissionPromptInputResult{};
+    auto input_result =
+        snapshot.permission_prompt ? handle_permission_prompt_input(*snapshot.permission_prompt, choice_input->event) : PermissionPromptInputResult{};
     if (input_result.action == PermissionPromptInputAction::ResolveAllow)
     {
       return resolve_choice(PermissionPromptChoice::Allow);
@@ -335,7 +338,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     if (input_result.action == PermissionPromptInputAction::ResolveDeny)
     {
-      return resolve_choice(PermissionPromptChoice::Deny);
+      return resolve_choice(PermissionPromptChoice::Deny, std::move(input_result.guidance_text));
     }
     if (input_result.action == PermissionPromptInputAction::ResolveAllowRemember)
     {
@@ -350,7 +353,11 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         if (snapshot.permission_prompt)
+        {
           snapshot.permission_prompt->selected_choice = input_result.selected_choice;
+          snapshot.permission_prompt->guidance_mode = input_result.guidance_mode;
+          snapshot.permission_prompt->guidance_text = std::move(input_result.guidance_text);
+        }
       }
       if (!render())
       {
@@ -363,13 +370,17 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
 
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+      bool const guidance_active = snapshot.permission_prompt && snapshot.permission_prompt->guidance_mode;
       bool const has_extended =
           snapshot.permission_prompt && (snapshot.permission_prompt->allow_session_available || snapshot.permission_prompt->allow_remember_available ||
                                          snapshot.permission_prompt->deny_remember_available);
-      snapshot.status =
-          has_extended ? permission_prompt_status(snapshot.permission_prompt->allow_session_available, snapshot.permission_prompt->allow_remember_available,
-                                                  snapshot.permission_prompt->deny_remember_available)
-                       : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+      if (guidance_active)
+        snapshot.status = "permission guidance: type optional reason Enter reject Esc reject";
+      else
+        snapshot.status =
+            has_extended ? permission_prompt_status(snapshot.permission_prompt->allow_session_available, snapshot.permission_prompt->allow_remember_available,
+                                                    snapshot.permission_prompt->deny_remember_available)
+                         : "permission required: A=allow D=reject G=guide rejection Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
     if (!render())
     {

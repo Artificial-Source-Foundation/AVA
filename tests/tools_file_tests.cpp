@@ -1875,6 +1875,82 @@ void test_anchor_open()
          "open_readable rejects O_WRONLY and O_RDWR with InvalidArgument");
 }
 
+void test_permission_user_guidance_propagation()
+{
+  auto const root = create_empty_root("permission-user-guidance");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside-guidance.txt";
+  {
+    std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);
+    outside_file << "outside content";
+  }
+
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+
+  ava::tools::ToolContext guided_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "stay inside the workspace";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto guided_denied = ava::tools::read_file(guided_context, outside_path);
+  expect(!guided_denied && has_error_context(guided_denied.error(), "user_guidance", "stay inside the workspace") &&
+             guided_denied.error().format().find("user_guidance: stay inside the workspace") != std::string::npos &&
+             guided_denied.error().format().find("resolution: deny") != std::string::npos,
+         "non-command permission denial propagates validated user_guidance into model-facing error context");
+
+  bool audits_free_of_guidance = !audits.empty();
+  for (auto const& event : audits)
+  {
+    auto const json = ava::tools::permission_audit_data_json(event);
+    audits_free_of_guidance = audits_free_of_guidance && json.find("user_guidance") == std::string::npos &&
+                              json.find("stay inside the workspace") == std::string::npos && event.reason.find("stay inside") == std::string::npos &&
+                              event.resolution_reason.find("stay inside") == std::string::npos;
+  }
+  expect(audits_free_of_guidance, "permission audits never serialize one-shot user_guidance");
+
+  audits.clear();
+  ava::tools::ToolContext forged_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "forged"};
+            denied.user_guidance = "evil\nguidance\x01";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto forged_denied = ava::tools::read_file(forged_context, outside_path);
+  expect(!forged_denied && !has_error_context(forged_denied.error(), "user_guidance", "evil\nguidance\x01") &&
+             forged_denied.error().format().find("user_guidance") == std::string::npos &&
+             forged_denied.error().format().find("evil") == std::string::npos,
+         "malformed forged user_guidance is dropped at the backend trust boundary");
+
+  audits.clear();
+  ava::tools::ToolContext overcap_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+            denied.user_guidance = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes + 8, 'z');
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto overcap_denied = ava::tools::read_file(overcap_context, outside_path);
+  expect(!overcap_denied && overcap_denied.error().format().find("user_guidance") == std::string::npos,
+         "over-cap forged user_guidance never leaks into model-facing denial context");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1890,4 +1966,5 @@ void run_tools_file_tests()
   test_anchor_set_multi_anchor();
   test_anchor_set_symlinked_root();
   test_anchor_open();
+  test_permission_user_guidance_propagation();
 }

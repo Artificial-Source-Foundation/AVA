@@ -289,6 +289,8 @@ struct PermissionPromptInputResult
 {
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   PermissionPromptInputAction action = PermissionPromptInputAction::None;
+  bool guidance_mode = false;
+  std::string guidance_text = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -318,6 +320,8 @@ struct PermissionPromptView
   std::string workspace_recipe_key = {};
   std::string effective_allowed_scopes = {};
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
+  bool guidance_mode = false;
+  std::string guidance_text = {};
   std::string request_id = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -614,6 +618,9 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
                                                                          bool allow_session_available = false, bool allow_remember_available = false,
                                                                          bool deny_remember_available = false);
+// Full-view overload: supports optional one-shot denial-guidance editing while
+// preserving the choice-only overload for source/test compatibility.
+[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptView const& prompt, InputEvent event);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] QuestionPromptInputResult activate_question_option(QuestionPromptView const& prompt, std::size_t option_index);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);

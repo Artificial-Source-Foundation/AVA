@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/command/environment.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/json.h"
 #include "ava/core/mode.h"
 #include "ava/core/open_beneath.h"
 #include "ava/core/path.h"
@@ -24,6 +25,24 @@ PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution 
 PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in)
     : resolution(resolution_in), reason(std::move(reason_in))
 {
+}
+
+namespace {
+
+bool guidance_has_forbidden_byte(std::string_view value) noexcept
+{
+  return std::ranges::any_of(value, [](unsigned char ch) { return ch < 0x20 || ch == 0x7F; });
+}
+
+}  // namespace
+
+std::optional<std::string> validated_permission_user_guidance(std::string_view value)
+{
+  if (value.empty() || value.size() > kMaxPermissionUserGuidanceBytes || guidance_has_forbidden_byte(value) || !ava::core::json::is_valid_utf8(value))
+  {
+    return std::nullopt;
+  }
+  return std::string(value);
 }
 
 bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution)

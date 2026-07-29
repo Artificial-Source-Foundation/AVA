@@ -1259,6 +1259,62 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
          "JSON body and file/config payload commands persist one-shot redacted audits with no payload markers or stable recipe keys");
 }
 
+void test_command_permission_user_guidance_propagation()
+{
+  auto const root = temp_root() / "command-permission-user-guidance";
+  std::error_code cleanup;
+  std::filesystem::remove_all(root, cleanup);
+  std::filesystem::create_directories(root);
+  expect(::chmod(root.c_str(), S_IRWXU) == 0, "command guidance fixture workspace is owner-only");
+
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+
+  ava::tools::ToolContext guided_context{
+      .workspace_dir = root,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "use the sealed workspace recipe instead";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto guided = ava::tools::ensure_permission(guided_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");
+  expect(!guided && guided.error().format().find("user_guidance: use the sealed workspace recipe instead") != std::string::npos &&
+             guided.error().format().find("resolution: deny") != std::string::npos,
+         "RunCommand permission denial propagates validated user_guidance into model-facing error context");
+
+  bool audits_free_of_guidance = !audits.empty();
+  for (auto const& event : audits)
+  {
+    auto const json = ava::tools::permission_audit_data_json(event);
+    audits_free_of_guidance = audits_free_of_guidance && json.find("user_guidance") == std::string::npos &&
+                              json.find("use the sealed workspace recipe instead") == std::string::npos &&
+                              event.reason.find("sealed workspace recipe") == std::string::npos &&
+                              event.resolution_reason.find("sealed workspace recipe") == std::string::npos;
+  }
+  expect(audits_free_of_guidance, "RunCommand permission audits never serialize one-shot user_guidance");
+
+  audits.clear();
+  ava::tools::ToolContext forged_context{
+      .workspace_dir = root,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+            denied.user_guidance = "no\nwire\x7fleak";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto forged = ava::tools::ensure_permission(forged_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");
+  expect(!forged && forged.error().format().find("user_guidance") == std::string::npos && forged.error().format().find("wire") == std::string::npos,
+         "malformed forged RunCommand user_guidance is dropped and never leaks");
+}
+
 void run_tools_process_network_tests()
 {
   test_bash_tool();
@@ -1271,4 +1327,5 @@ void run_tools_process_network_tests()
   test_credential_command_audit_omits_secrets();
   test_denied_command_diagnostics_redact_arguments();
   test_payload_command_audits_persist_no_markers_or_recipes();
+  test_command_permission_user_guidance_propagation();
 }

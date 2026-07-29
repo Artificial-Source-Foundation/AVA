@@ -143,7 +143,7 @@ std::string permission_prompt_status(bool allow_session_available, bool allow_re
   std::string status = "permission required: A=allow once";
   if (allow_session_available)
     status += " S=allow session";
-  status += " D=reject";
+  status += " D=reject G=guide rejection";
   if (remember_available)
     status += " R=remember";
   status += " Tab/Left/Right choose Enter confirm Esc reject";

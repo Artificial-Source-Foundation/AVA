@@ -142,6 +142,10 @@ struct PermissionResolutionDecision
 {
   PermissionResolution resolution = PermissionResolution::Deny;
   std::string reason;
+  // Optional one-shot user-authored denial guidance for the model-facing tool
+  // error only. Never a remembered-rule reason and never part of permission
+  // audit/event serialization.
+  std::string user_guidance;
   std::string resolution_source;
   std::string rule_id;
   bool authoritative = false;
@@ -152,6 +156,14 @@ struct PermissionResolutionDecision
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
+
+// Bound for optional one-shot denial guidance carried on PermissionResolutionDecision
+// and emitted (after revalidation) on model-facing permission-denied tool errors.
+inline constexpr std::size_t kMaxPermissionUserGuidanceBytes = 2048;
+
+// Trust-boundary validation for user_guidance: non-empty, <=2048 bytes, valid
+// UTF-8, and free of control bytes/newlines. Invalid values are dropped.
+[[nodiscard]] std::optional<std::string> validated_permission_user_guidance(std::string_view value);
 
 struct PermissionPrompt
 {

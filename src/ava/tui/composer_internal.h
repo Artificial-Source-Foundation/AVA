@@ -380,7 +380,8 @@ inline void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::v
 
 [[nodiscard]] ComposerFrame render_composer_frame_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                                          TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation, bool center_canvas = true,
-                                                         bool allow_transcript_gap = true, bool freeze_transcript_layout = false);
+                                                         bool allow_transcript_gap = true, bool freeze_transcript_layout = false,
+                                                         bool allow_frozen_width_mismatch = false);
 [[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout_cached(ComposerSnapshot const& snapshot,
                                                                                                CompletionMatchCache& completion_cache,
                                                                                                std::size_t source_revision);
@@ -396,7 +397,7 @@ inline void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::v
                                                                                                       std::size_t source_revision);
 [[nodiscard]] bool draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                       TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache,
-                                      bool freeze_transcript_layout = false);
+                                      bool freeze_transcript_layout = false, bool allow_frozen_width_mismatch = false);
 [[nodiscard]] bool draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                                  TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache);
 void clear_composer_terminal_graphics() noexcept;

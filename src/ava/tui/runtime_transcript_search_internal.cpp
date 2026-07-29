@@ -751,6 +751,7 @@ void TranscriptSearchController::rebuild(std::optional<std::size_t> selected_ite
         .placeholder = "Literal query (empty lists all)",
         .empty_text = "No transcript matches",
         .footer_hint = "Enter jump · Esc restore",
+        .freeze_underlying_transcript_layout = true,
     };
     first_changed_match_row = 0;
   }

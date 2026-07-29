@@ -427,6 +427,9 @@ struct SelectListView
   std::string placeholder = "Search";
   std::string empty_text = "No matches";
   std::string footer_hint;
+  // When set, RuntimeRenderer freezes the pre-modal transcript layout cache for draws
+  // while this selector is shown, even if the modal canvas width differs.
+  bool freeze_underlying_transcript_layout = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

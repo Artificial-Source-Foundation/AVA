@@ -975,7 +975,7 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
 
 ComposerFrame render_composer_main_frame(ComposerSnapshot snapshot, std::size_t width, std::size_t height, detail::CompletionMatchCache& completion_cache,
                                          std::size_t source_revision, detail::TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation,
-                                         bool freeze_transcript_layout)
+                                         bool freeze_transcript_layout, bool allow_frozen_width_mismatch)
 {
   snapshot.width = width;
   snapshot.height = height;
@@ -986,7 +986,7 @@ ComposerFrame render_composer_main_frame(ComposerSnapshot snapshot, std::size_t 
   snapshot.reasoning_feedback.reset();
   snapshot.sidebar = std::nullopt;
   return detail::render_composer_frame_cached(snapshot, completion_cache, source_revision, transcript_cache, transcript_generation, false, true,
-                                              freeze_transcript_layout);
+                                              freeze_transcript_layout, allow_frozen_width_mismatch);
 }
 
 std::string pad_line_to_width(std::string line, std::size_t width)
@@ -1418,7 +1418,7 @@ ComposerCanvasLayout composer_canvas_layout(ComposerSnapshot const& snapshot)
 
 ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                                    TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation, bool center_canvas,
-                                                   bool allow_transcript_gap, bool freeze_transcript_layout)
+                                                   bool allow_transcript_gap, bool freeze_transcript_layout, bool allow_frozen_width_mismatch)
 {
   refresh_completion_match_cache(completion_cache, snapshot, source_revision);
   auto const width = std::max<std::size_t>(detail::kMinWidth, snapshot.width);
@@ -1429,7 +1429,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     auto inner = snapshot;
     inner.width = canvas.content_width;
     auto frame = detail::render_composer_frame_cached(inner, completion_cache, source_revision, transcript_cache, transcript_generation, false,
-                                                      allow_transcript_gap, freeze_transcript_layout);
+                                                      allow_transcript_gap, freeze_transcript_layout, allow_frozen_width_mismatch);
     auto const right = width - canvas.left - canvas.content_width;
     for (auto& line : frame.lines)
     {
@@ -1448,7 +1448,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     // Preserve the modal's authoritative vertical policy while rendering its quiet backdrop.
     base.sidebar_drawer_visible = true;
     auto frame = detail::render_composer_frame_cached(base, completion_cache, source_revision, transcript_cache, transcript_generation, false, false,
-                                                      freeze_transcript_layout);
+                                                      freeze_transcript_layout, allow_frozen_width_mismatch);
     frame.lines = overlay_question_modal(quiet_modal_backdrop(std::move(frame.lines)), prompt, width, height);
     frame.graphics.clear();
     return finish_frame(std::move(frame));
@@ -1463,7 +1463,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     // Preserve the modal's authoritative vertical policy while rendering its quiet backdrop.
     base.sidebar_drawer_visible = true;
     auto frame = detail::render_composer_frame_cached(base, completion_cache, source_revision, transcript_cache, transcript_generation, false, false,
-                                                      freeze_transcript_layout);
+                                                      freeze_transcript_layout, allow_frozen_width_mismatch);
     frame.lines = overlay_select_list_modal(quiet_modal_backdrop(std::move(frame.lines)), view, width, height);
     frame.graphics.clear();
     return finish_frame(std::move(frame));
@@ -1473,7 +1473,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     auto const sidebar_width = std::min<std::size_t>(kSidebarWidth, width / 3);
     auto const main_width = canvas.content_width;
     auto main_frame = render_composer_main_frame(snapshot, main_width, height, completion_cache, source_revision, transcript_cache, transcript_generation,
-                                                 freeze_transcript_layout);
+                                                 freeze_transcript_layout, allow_frozen_width_mismatch);
     auto sidebar_lines = render_sidebar(*snapshot.sidebar, sidebar_width, height);
     ComposerFrame combined;
     combined.lines.reserve(height);
@@ -1513,8 +1513,12 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
   {
     auto& active_cache = transcript_cache ? *transcript_cache : local_transcript_cache;
     auto const compact_spacing = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
-    auto const frozen_cache_compatible = active_cache.valid && active_cache.width == width && active_cache.tool_presentation == snapshot.tool_presentation &&
-                                         active_cache.thinking_visible == snapshot.thinking_visible && active_cache.compact_spacing == compact_spacing;
+    auto const frozen_presentation_compatible = active_cache.valid && active_cache.tool_presentation == snapshot.tool_presentation &&
+                                                active_cache.thinking_visible == snapshot.thinking_visible && active_cache.compact_spacing == compact_spacing;
+    // Ordinary detached freeze still requires width parity. Modal underlying-layout freeze may keep a
+    // pre-modal width while non-geometry presentation settings continue to match.
+    auto const frozen_cache_compatible =
+        frozen_presentation_compatible && (active_cache.width == width || (freeze_transcript_layout && allow_frozen_width_mismatch));
     if (!freeze_transcript_layout || !frozen_cache_compatible)
     {
       detail::refresh_transcript_layout_cache(active_cache, snapshot.transcript, transcript_generation, width, snapshot.tool_presentation,
@@ -1871,7 +1875,7 @@ void detail::clear_composer_terminal_graphics() noexcept
 
 bool detail::draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                 TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache,
-                                bool freeze_transcript_layout)
+                                bool freeze_transcript_layout, bool allow_frozen_width_mismatch)
 {
   auto& active_image_ids = active_kitty_image_ids();
   initialize_color_pairs();
@@ -1895,7 +1899,7 @@ bool detail::draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatc
   }
   auto const canvas = composer_canvas_layout(snapshot);
   auto frame = detail::render_composer_frame_cached(snapshot, completion_cache, source_revision, &transcript_cache, transcript_generation, true, true,
-                                                    freeze_transcript_layout);
+                                                    freeze_transcript_layout, allow_frozen_width_mismatch);
   auto const& lines = frame.lines;
   std::vector<std::string> surfaces;
   surfaces.reserve(lines.size());

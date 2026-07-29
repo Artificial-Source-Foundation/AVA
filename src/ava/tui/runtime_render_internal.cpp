@@ -221,11 +221,17 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     snapshot.width = width;
     snapshot.height = height;
     auto const compact_spacing = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
-    auto const frozen_cache_compatible = transcript_layout_cache.valid && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width &&
-                                         transcript_layout_cache.tool_presentation == snapshot.tool_presentation &&
-                                         transcript_layout_cache.thinking_visible == snapshot.thinking_visible &&
-                                         transcript_layout_cache.compact_spacing == compact_spacing;
-    auto const freeze_detached_viewport = freeze_transcript_layout && deferred_detached_viewport_.has_value() && frozen_cache_compatible;
+    auto const presentation_settings_compatible = transcript_layout_cache.valid && transcript_layout_cache.tool_presentation == snapshot.tool_presentation &&
+                                                  transcript_layout_cache.thinking_visible == snapshot.thinking_visible &&
+                                                  transcript_layout_cache.compact_spacing == compact_spacing;
+    auto const frozen_cache_compatible = presentation_settings_compatible && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width;
+    auto const freeze_modal_transcript_layout =
+        snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout && presentation_settings_compatible;
+    // Detached freeze keeps a width-compatible cache across scheduled paints. Modal freeze keeps the
+    // pre-modal underlying layout even when the active selector canvas width differs, and freezes the
+    // draw itself whether or not a deferred detached viewport is pending.
+    auto const freeze_detached_viewport =
+        freeze_modal_transcript_layout || (freeze_transcript_layout && deferred_detached_viewport_.has_value() && frozen_cache_compatible);
     auto const synchronized_detached_viewport = deferred_detached_viewport_.has_value() && !freeze_detached_viewport;
     if (synchronized_detached_viewport)
       synchronize_detached_transcript_layout();
@@ -247,7 +253,7 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     snapshot.transcript_scroll_offset = transcript_scroll_offset;
     snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
     wrote = detail::draw_screen_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache, snapshot.transcript_generation,
-                                       screen_row_cache, freeze_detached_viewport);
+                                       screen_row_cache, freeze_detached_viewport, freeze_modal_transcript_layout);
   }
   return wrote && !terminal_signal_received();
 }

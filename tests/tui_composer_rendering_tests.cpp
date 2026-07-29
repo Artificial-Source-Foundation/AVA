@@ -269,6 +269,107 @@ bool test_atomic_search_input_prompt_precedence()
   return passed;
 }
 
+bool test_transcript_message_boundary_navigation_and_live_tail_reset()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(24, 80));
+
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "message-boundary-nav";
+  options.mode = "build";
+  options.provider = "fake";
+  options.model = "nav-model";
+  options.workspace = "/workspace/message-boundary";
+  options.key_bindings = ava::tui::default_key_bindings();
+  auto tall_message = [](std::string_view name, int lines) {
+    std::string text(name);
+    for (int index = 0; index < lines; ++index) text += "\n" + std::string(name) + " line " + std::to_string(index);
+    return text;
+  };
+  options.initial_transcript = {
+      ava::tui::TranscriptItem{.label = "you", .text = tall_message("alpha", 12)},
+      ava::tui::TranscriptItem{.label = "ava", .text = tall_message("beta", 14)},
+      ava::tui::TranscriptItem{.label = "you", .text = tall_message("gamma", 12)},
+      ava::tui::TranscriptItem{.label = "ava", .text = tall_message("delta", 16)},
+  };
+
+  ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.sidebar = presentation.sidebar;
+  presentation.snapshot.input = "NAV-DRAFT-KEEP";
+  presentation.snapshot.input_cursor = presentation.snapshot.input.size();
+  ava::tui::RuntimeDraftState draft_state;
+  draft_state.draft.text = presentation.snapshot.input;
+  draft_state.draft.cursor = presentation.snapshot.input_cursor;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+
+  navigation.scroll_up(1000);
+  auto const oldest_offset = renderer.transcript_scroll_offset;
+  auto const draft_before = draft_state.draft.text;
+  auto const cursor_before = draft_state.draft.cursor;
+  bool const detached = oldest_offset > 0;
+
+  navigation.scroll_to_message_boundary(true);
+  auto const oldest_status = presentation.snapshot.status;
+  auto const oldest_boundary_offset = renderer.transcript_scroll_offset;
+
+  navigation.scroll_to_message_boundary(false);
+  auto const next_status = presentation.snapshot.status;
+  auto const next_offset = renderer.transcript_scroll_offset;
+
+  navigation.scroll_to_message_boundary(true);
+  auto const prev_status = presentation.snapshot.status;
+  auto const prev_offset = renderer.transcript_scroll_offset;
+
+  navigation.jump_to_bottom("live tail");
+  auto const live_status = presentation.snapshot.status;
+  auto const live_offset = renderer.transcript_scroll_offset;
+
+  navigation.scroll_to_message_boundary(false);
+  auto const already_live_status = presentation.snapshot.status;
+  auto const already_live_offset = renderer.transcript_scroll_offset;
+
+  bool const draft_unchanged =
+      draft_state.draft.text == draft_before && draft_state.draft.cursor == cursor_before && presentation.snapshot.input == draft_before;
+
+  bool const passed = detached && oldest_status == "oldest message visible" && oldest_boundary_offset == oldest_offset && next_offset < oldest_offset &&
+                      next_offset > 0 && next_status == "next message" && prev_offset > next_offset && prev_status == "previous message" && live_offset == 0 &&
+                      live_status == "live tail" && already_live_offset == 0 && already_live_status == "live tail" && draft_unchanged &&
+                      ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessagePrev, ava::tui::Key::AltK) &&
+                      ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessageNext, ava::tui::Key::AltJ) &&
+                      ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::JumpToBottom, ava::tui::Key::CtrlEnd);
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return passed;
+}
+
 }  // namespace
 
 void run_tui_prompt_search_race_tests()
@@ -286,6 +387,9 @@ void run_tui_prompt_search_race_tests()
 
 void run_tui_composer_rendering_tests_part_1()
 {
+  expect(test_transcript_message_boundary_navigation_and_live_tail_reset(),
+         "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, and leaves "
+         "the composer draft untouched while defaults keep MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
   {
     auto const started_at = std::chrono::steady_clock::time_point{};
     ava::tui::detail::ActiveRunCadence cadence(started_at);

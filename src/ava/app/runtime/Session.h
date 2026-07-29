@@ -214,8 +214,29 @@ class Session : protected Session_aggregate_base
   static ava::core::Result<Session> open_owned(
       OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
 
+  // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
+  static ava::core::Result<Session> open_at(OpenContext context, std::filesystem::path const& workspace_root,
+                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request);
+
+  // Create a persistent session at `workspace_root` and `current_dir`, overriding
+  // those locations in `context`.
+  static ava::core::Result<Session> create_at(OpenContext context, std::filesystem::path const& workspace_root,
+                                                              std::filesystem::path const& current_dir);
+
+  // Create a persistent session inheriting active state from `current` and
+  // frontend-only policy from `base_context`.
+  ava::core::Result<Session> create_similar(OpenContext const& base_context) const;
+
+  // Open a session using `request`, inheriting active state from `current` and
+  // frontend-only policy from `base_context`.
+  ava::core::Result<Session> open_similar(runtime::OpenContext const& base_context, runtime::SessionLifecycleRequest request) const;
+
   Session create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
+
+  // Single app-owned authority boundary for local command planning. Keep this
+  // short, stable list in sync for direct commands and model ToolContexts.
+  std::vector<std::filesystem::path> command_authority_roots_for_session() const;
 
   // Accessors.
 
@@ -361,7 +382,7 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] OpenContext replacement_open_context(runtime::OpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
-  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
+  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_metadata(ava::session::SessionMetadataUpdate update);
 
   // Append a mode change entry through the runtime owner's serialized route.
   //

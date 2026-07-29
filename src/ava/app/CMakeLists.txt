@@ -79,7 +79,6 @@ target_sources(ava_app
     "runtime_event_adapters.cpp"
     "runtime_reasoning.cpp"
     "runtime_retry.cpp"
-    "runtime_sessions.cpp"
     "session_run_controller.cpp"
     "session_title_coordinator.cpp"
     "subagent_delivery_manager.cpp"

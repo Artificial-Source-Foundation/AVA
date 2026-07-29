@@ -232,7 +232,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   metadata_update.name = "Stats audit";
   metadata_update.actor = "test";
   auto const initial_id = session->store.session_id();
-  auto appended_metadata = session->append_runtime_session_metadata(std::move(metadata_update));
+  auto appended_metadata = session->append_metadata(std::move(metadata_update));
 
   auto appended_user = session->append_owned(ava::session::SessionEntry{.id = "entry_user",
                                                                         .parent_id = "",

@@ -5,7 +5,6 @@
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
 #include "ava/config/auth.h"

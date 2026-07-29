@@ -12,7 +12,6 @@
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
@@ -399,7 +398,7 @@ void test_app_runtime_replacement_open_context()
 
   ava::app::runtime::OpenContext at_context;
   at_context.paths = paths;
-  auto created_at = ava::app::create_runtime_session_at(at_context, workspace, current_dir);
+  auto created_at = ava::app::runtime::Session::create_at(at_context, workspace, current_dir);
   auto created_metadata = created_at ? ava::session::load_session_metadata(created_at->store)
                                      : ava::core::Result<ava::session::SessionMetadataView>(std::unexpected(created_at.error()));
   expect(created_at && created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,

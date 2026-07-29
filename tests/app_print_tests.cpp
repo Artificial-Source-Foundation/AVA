@@ -9,7 +9,6 @@
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission.h"
@@ -633,7 +632,7 @@ void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
   if (!session)
     return;
 
-  auto const roots = ava::app::command_authority_roots_for_session(*session);
+  auto const roots = session->command_authority_roots_for_session();
   auto const direct_context = ava::app::make_tool_context(*session, nullptr);
   auto const contains = [&roots](std::filesystem::path const& path) {
     auto const normalized = path.lexically_normal();

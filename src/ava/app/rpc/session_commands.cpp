@@ -7,7 +7,6 @@
 #include "session_operators.h"
 #include "ava/event/events.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/agent/job_control.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
@@ -352,7 +351,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     update.actor = "rpc";
-    auto metadata = session_ts::wat(session)->append_runtime_session_metadata(std::move(update));
+    auto metadata = session_ts::wat(session)->append_metadata(std::move(update));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(*metadata)));

@@ -3,7 +3,6 @@
 #include "ava/app/line_shell.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"

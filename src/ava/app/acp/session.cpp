@@ -3,7 +3,6 @@
 #include "ava/app/acp/client_tools.h"
 #include "ava/app/acp/session.h"
 #include "ava/app/runtime_credentials.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/config/session_title_config.h"
@@ -839,7 +838,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
   auto options = options_.open_context;
   options.paths = options_.paths;
   options.tool_visibility.mode = ava::agent::ToolVisibilityMode::Default;
-  auto session = create_runtime_session_at(std::move(options), options_.launch_root, cwd);
+  auto session = ava::app::runtime::Session::create_at(std::move(options), options_.launch_root, cwd);
   if (!session)
     return std::unexpected(std::move(session.error()));
   session->resources().mcp_config = std::move(mcp_config);
@@ -869,7 +868,7 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   runtime::SessionLifecycleRequest request;
   request.requested_session_id = std::string(session_id);
   request.expected_original_cwd = cwd;
-  auto session = open_runtime_session_at(std::move(options), options_.launch_root, cwd, std::move(request));
+  auto session = ava::app::runtime::Session::open_at(std::move(options), options_.launch_root, cwd, std::move(request));
   if (!session)
     return std::unexpected(std::move(session.error()));
   session->resources().mcp_config = std::move(mcp_config);

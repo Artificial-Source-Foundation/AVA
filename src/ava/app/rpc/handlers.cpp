@@ -7,7 +7,6 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_catalog.h"
 #include "ava/app/runtime_credentials.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -25,7 +24,7 @@ ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config
 
 ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenContext const& base_context)
 {
-  return create_runtime_session_like(current, base_context);
+  return current.create_similar(base_context);
 }
 
 ava::core::Result<runtime::Session> open_requested_session(runtime::Session const& current, runtime::OpenContext const& base_context,
@@ -33,7 +32,7 @@ ava::core::Result<runtime::Session> open_requested_session(runtime::Session cons
 {
   runtime::SessionLifecycleRequest request;
   request.requested_session_id = std::string(requested_session_id);
-  return open_runtime_session_like(current, base_context, std::move(request));
+  return current.open_similar(base_context, std::move(request));
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command)

@@ -4,7 +4,6 @@
 #include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/tools/tool_io.h"
@@ -447,7 +446,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   base.paths = fixture.paths;
   base.subagent_coordinator = fixture.coordinator;
   base.subagent_delivery_manager = fixture.manager;
-  auto replacement = ava::app::create_runtime_session_like(*fixture.session, base);
+  auto replacement = fixture.session->create_similar(base);
   expect(replacement.has_value(), "navigation creates another visible session while parent delivery is pending");
   if (!replacement)
     return;

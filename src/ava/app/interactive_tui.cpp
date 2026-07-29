@@ -10,7 +10,6 @@
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"

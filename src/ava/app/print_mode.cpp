@@ -3,7 +3,6 @@
 #include "ava/http/curl_transport.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/tui/composer.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"

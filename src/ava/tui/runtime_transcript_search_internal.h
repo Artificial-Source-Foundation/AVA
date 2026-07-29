@@ -37,6 +37,8 @@ struct TranscriptSearchProjection
   bool available = false;
   std::string identity;
   std::string searchable_text;
+  std::string unspaced_searchable_text;
+  std::vector<std::size_t> row_boundary_offsets;
   std::string default_detail;
 
   AVA_DEBUG_PRINT_MEMBERS_ON

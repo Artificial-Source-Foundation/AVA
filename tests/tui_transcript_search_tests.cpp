@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -73,24 +74,31 @@ void test_transcript_search_uses_current_rendered_tool_and_thinking_presentation
          "transcript search includes thinking only when the current transcript layout renders it");
 }
 
-void test_transcript_search_is_stable_across_soft_wraps()
+void test_transcript_search_is_stable_across_render_widths()
 {
+  constexpr std::string_view kLongPath = "/workspace/src/components/transcript_search_boundary_stability.cpp";
   ava::tui::ComposerSnapshot snapshot;
-  snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "prefix alpha beta suffix Äpfel"}};
-  auto const wide_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 80, snapshot.tool_presentation, snapshot.thinking_visible, false);
+  snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "prefix alpha beta suffix " + std::string(kLongPath) + " exact Äpfel"}};
+  auto const wide_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 120, snapshot.tool_presentation, snapshot.thinking_visible, false);
   auto const narrow_layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, 14, snapshot.tool_presentation, snapshot.thinking_visible, false);
   ava::tui::detail::TranscriptSearchProjectionCache cache;
   cache.rebuild_all(snapshot, wide_layout);
   auto const wide_phrase = cache.matches("alpha beta");
+  auto const wide_path = cache.matches(kLongPath);
+  auto const wide_non_ascii = cache.matches("Äpfel");
   auto const wide_builds = cache.projection_build_count();
   cache.rebuild_all(snapshot, narrow_layout);
   auto const narrow_phrase = cache.matches("alpha beta");
-  auto const exact_non_ascii = cache.matches("Äpfel");
+  auto const narrow_path = cache.matches(kLongPath);
+  auto const narrow_non_ascii = cache.matches("Äpfel");
   auto const folded_non_ascii = cache.matches("äpfel");
-  expect(narrow_layout.lines.size() > wide_layout.lines.size() && wide_phrase.size() == 1 && narrow_phrase.size() == 1 &&
-             wide_phrase.front().item_index == narrow_phrase.front().item_index && wide_builds == 1 && cache.projection_build_count() == 2 &&
-             exact_non_ascii.size() == 1 && folded_non_ascii.empty(),
-         "transcript search preserves literal phrase identity across soft wrapping while keeping non-ASCII matching exact");
+  expect(narrow_layout.lines.size() > wide_layout.lines.size() && wide_phrase.size() == 1 && narrow_phrase.size() == 1 && wide_path.size() == 1 &&
+             narrow_path.size() == 1 && wide_non_ascii.size() == 1 && narrow_non_ascii.size() == 1 && folded_non_ascii.empty() &&
+             wide_phrase.front().item_index == narrow_phrase.front().item_index && wide_path.front().item_index == narrow_path.front().item_index &&
+             !narrow_path.front().detail.empty() && narrow_path.front().detail.size() <= ava::tui::detail::kMaxTranscriptSearchDetailBytes &&
+             wide_builds == 1 && cache.projection_build_count() == 2,
+         "transcript search preserves whitespace phrases and hard-wrapped unspaced paths across actual wide/narrow renders while matching non-ASCII bytes "
+         "exactly");
 }
 
 void test_transcript_search_projection_cache_rebuilds_only_changed_suffix()
@@ -155,11 +163,14 @@ void test_transcript_search_details_and_queries_are_bounded()
   ava::tui::detail::TranscriptLayout layout{
       .lines = {std::string(400, 'x') + " MATCH"}, .message_starts = {0}, .content_starts = {0}, .message_item_indices = {0}};
   auto matches = ava::tui::detail::build_transcript_search_matches(snapshot, layout, "match");
+  std::string max_query(ava::tui::detail::kMaxTranscriptSearchQueryBytes - 1, 'a');
+  max_query.push_back('b');
+  auto repetitive_candidate = std::string(16 * 1024, 'a') + "b";
   std::string too_long(ava::tui::detail::kMaxTranscriptSearchQueryBytes + 1, 'q');
   expect(matches.size() == 1 && matches.front().detail.size() <= ava::tui::detail::kMaxTranscriptSearchDetailBytes &&
-             !ava::tui::detail::transcript_search_query_valid(too_long) && !ava::tui::detail::transcript_search_query_valid("line\nbreak") &&
-             ava::tui::detail::transcript_search_query_valid("spaces are literal"),
-         "transcript search bounds rendered details and rejects oversized or control-bearing modal queries");
+             ava::tui::detail::transcript_search_literal_match(repetitive_candidate, max_query) && !ava::tui::detail::transcript_search_query_valid(too_long) &&
+             !ava::tui::detail::transcript_search_query_valid("line\nbreak") && ava::tui::detail::transcript_search_query_valid("spaces are literal"),
+         "transcript search bounds rendered details, handles a maximum-length repetitive literal, and rejects oversized or control-bearing modal queries");
 }
 
 }  // namespace
@@ -168,7 +179,7 @@ void run_tui_transcript_search_tests()
 {
   test_transcript_search_literal_and_sanitized_rendered_scope();
   test_transcript_search_uses_current_rendered_tool_and_thinking_presentation();
-  test_transcript_search_is_stable_across_soft_wraps();
+  test_transcript_search_is_stable_across_render_widths();
   test_transcript_search_projection_cache_rebuilds_only_changed_suffix();
   test_transcript_search_details_and_queries_are_bounded();
 }

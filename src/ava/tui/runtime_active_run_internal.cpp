@@ -420,6 +420,23 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       return detail::PendingPromptServiceResult::Serviced;
     };
     auto dispatch_retained_input = [&](runtime_input::RuntimeInput const& input) {
+      if (transcript_search_.is_open())
+      {
+        auto const result = prompt_coordinator.dispatch_search_input_with_prompt_precedence(
+            [&]() { return handle_transcript_search_input(input).value_or(false); }, cancel_requested, request_stop,
+            [&]() { transcript_search_.close_before_prompt(); });
+        if (result == SearchInputPromptDispatchResult::PromptServiced)
+        {
+          if (drain_events(state) != RuntimeEventDrainResult::RenderFailed)
+            return true;
+        }
+        else if (result == SearchInputPromptDispatchResult::InputHandled)
+        {
+          return true;
+        }
+        fail_active_run();
+        return false;
+      }
       auto const result = detail::dispatch_retained_input_with_prompt_precedence(service_pending_prompt, [&]() { return handle_input(state, input); });
       if (result == detail::RetainedInputDispatchResult::Failed)
       {

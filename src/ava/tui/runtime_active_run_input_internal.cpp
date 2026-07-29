@@ -335,8 +335,10 @@ void RuntimeActiveRunController::insert_active_text(runtime_input::RuntimeInput 
   }
 }
 
-bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
+std::optional<bool> RuntimeActiveRunController::handle_transcript_search_input(runtime_input::RuntimeInput const& active_input)
 {
+  if (!transcript_search_.is_open())
+    return std::nullopt;
   if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
     renderer_.wheel_governor.reset();
   if (active_input.resize)
@@ -349,9 +351,22 @@ bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runt
   {
     return true;
   }
+  return transcript_search_.handle_input(active_input.event).value_or(true);
+}
 
-  if (auto handled = transcript_search_.handle_input(active_input.event))
+bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
+{
+  if (auto handled = handle_transcript_search_input(active_input))
     return *handled;
+  if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+    renderer_.wheel_governor.reset();
+  if (active_input.resize)
+    return renderer_.render();
+  if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+      !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+  {
+    return true;
+  }
 
   auto result = handle_preemptive_input(state, active_input);
   if (result != InputHandling::Unhandled)

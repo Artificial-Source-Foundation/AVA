@@ -7,6 +7,7 @@
 #include "ava/tui/runtime_transcript_search_internal.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <limits>
@@ -105,27 +106,56 @@ char fold_ascii(char ch) noexcept
   return ch;
 }
 
-std::optional<std::size_t> literal_match_offset(std::string_view candidate, std::string_view query) noexcept
+class FoldedLiteralMatcher final
 {
-  if (query.empty())
-    return std::size_t{0};
-  if (query.size() > candidate.size())
-    return std::nullopt;
-  for (std::size_t start = 0; start + query.size() <= candidate.size(); ++start)
+ public:
+  explicit FoldedLiteralMatcher(std::string_view query) noexcept : query_(query)
   {
-    bool equal = true;
-    for (std::size_t offset = 0; offset < query.size(); ++offset)
+    if (query_.size() > kMaxTranscriptSearchQueryBytes)
+      return;
+    for (std::size_t index = 1, matched = 0; index < query_.size(); ++index)
     {
-      if (fold_ascii(candidate[start + offset]) != fold_ascii(query[offset]))
-      {
-        equal = false;
-        break;
-      }
+      while (matched > 0 && fold_ascii(query_[index]) != fold_ascii(query_[matched])) matched = prefix_lengths_[matched - 1];
+      if (fold_ascii(query_[index]) == fold_ascii(query_[matched]))
+        ++matched;
+      prefix_lengths_[index] = matched;
     }
-    if (equal)
-      return start;
   }
-  return std::nullopt;
+
+  [[nodiscard]] std::optional<std::size_t> match_offset(std::string_view candidate) const noexcept
+  {
+    if (query_.empty())
+      return std::size_t{0};
+    if (query_.size() > candidate.size() || query_.size() > kMaxTranscriptSearchQueryBytes)
+      return std::nullopt;
+    for (std::size_t index = 0, matched = 0; index < candidate.size(); ++index)
+    {
+      while (matched > 0 && fold_ascii(candidate[index]) != fold_ascii(query_[matched])) matched = prefix_lengths_[matched - 1];
+      if (fold_ascii(candidate[index]) == fold_ascii(query_[matched]))
+        ++matched;
+      if (matched == query_.size())
+        return index + 1 - query_.size();
+    }
+    return std::nullopt;
+  }
+
+ private:
+  std::string_view query_;
+  std::array<std::size_t, kMaxTranscriptSearchQueryBytes> prefix_lengths_{};
+};
+
+std::optional<std::size_t> projection_match_offset(TranscriptSearchProjection const& projection, FoldedLiteralMatcher const& matcher) noexcept
+{
+  // Search both legal presentations of rendered row boundaries with one KMP
+  // prefix table: one space preserves wrapped phrases, while omission rejoins
+  // hard-wrapped tokens. Both passes remain linear in projected bytes.
+  if (auto const offset = matcher.match_offset(projection.searchable_text))
+    return offset;
+  auto const unspaced_offset = matcher.match_offset(projection.unspaced_searchable_text);
+  if (!unspaced_offset)
+    return std::nullopt;
+  auto const boundaries_before_match = std::ranges::upper_bound(projection.row_boundary_offsets, *unspaced_offset);
+  return *unspaced_offset + static_cast<std::size_t>(boundaries_before_match - projection.row_boundary_offsets.begin());
 }
 
 TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, TranscriptLayout const& layout, std::size_t position)
@@ -133,8 +163,12 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
   auto const item_index = layout.message_item_indices[position];
   auto const start = std::min(layout.message_starts[position], layout.lines.size());
   auto const end = position + 1 < layout.message_starts.size() ? std::min(layout.message_starts[position + 1], layout.lines.size()) : layout.lines.size();
-  TranscriptSearchProjection projection{
-      .available = true, .identity = match_identity(snapshot.transcript[item_index]), .searchable_text = {}, .default_detail = {}};
+  TranscriptSearchProjection projection{.available = true,
+                                        .identity = match_identity(snapshot.transcript[item_index]),
+                                        .searchable_text = {},
+                                        .unspaced_searchable_text = {},
+                                        .row_boundary_offsets = {},
+                                        .default_detail = {}};
   bool first_row = true;
   for (auto line_index = start; line_index < end; ++line_index)
   {
@@ -142,8 +176,12 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
     if (projection.default_detail.empty() && !blank(line))
       projection.default_detail = line;
     if (!first_row)
+    {
+      projection.row_boundary_offsets.push_back(projection.unspaced_searchable_text.size());
       projection.searchable_text.push_back(' ');
+    }
     projection.searchable_text += line;
+    projection.unspaced_searchable_text += line;
     first_row = false;
   }
   projection.default_detail = bound_utf8_detail(std::move(projection.default_detail));
@@ -177,7 +215,7 @@ bool transcript_search_query_valid(std::string_view query) noexcept
 
 bool transcript_search_literal_match(std::string_view candidate, std::string_view query) noexcept
 {
-  return literal_match_offset(candidate, query).has_value();
+  return FoldedLiteralMatcher(query).match_offset(candidate).has_value();
 }
 
 std::optional<std::size_t> shift_transcript_search_item_index(std::optional<std::size_t> item_index, std::ptrdiff_t item_index_shift) noexcept
@@ -241,12 +279,13 @@ std::vector<TranscriptSearchMatch> TranscriptSearchProjectionCache::matches(std:
   std::vector<TranscriptSearchMatch> matches;
   if (!transcript_search_query_valid(query))
     return matches;
+  FoldedLiteralMatcher matcher(query);
   for (std::size_t item_index = 0; item_index < projections_.size(); ++item_index)
   {
     auto const& projection = projections_[item_index];
     if (!projection.available)
       continue;
-    auto const offset = literal_match_offset(projection.searchable_text, query);
+    auto const offset = projection_match_offset(projection, matcher);
     if (!offset)
       continue;
     matches.push_back(TranscriptSearchMatch{.item_index = item_index, .identity = projection.identity, .detail = relevant_detail(projection, query, *offset)});

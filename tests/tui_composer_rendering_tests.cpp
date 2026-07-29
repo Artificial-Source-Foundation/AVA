@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
+#include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -25,6 +27,155 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <curses.h>
+
+namespace {
+
+bool test_atomic_search_input_prompt_precedence()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(12, 80));
+
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "search_prompt_race";
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.session_id = options.session_id;
+  snapshot.width = 80;
+  snapshot.height = 12;
+  ava::tui::SidebarSnapshot sidebar;
+  ava::tui::RuntimeDraftState draft_state;
+  ava::tui::RuntimeRenderer renderer(snapshot, sidebar, draft_state);
+  ava::tui::TuiSessionGrantRegistry session_grants;
+  ava::tui::RuntimePromptCoordinator coordinator(options, snapshot, session_grants, renderer);
+  auto resolver = coordinator.question_resolver();
+
+  bool passed = true;
+  for (std::size_t iteration = 0; iteration < 50 && passed; ++iteration)
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool start_provider = false;
+    bool provider_attempted = false;
+    bool dispatch_returned = false;
+    bool provider_resolved = false;
+    bool provider_timed_out = false;
+    std::vector<std::string> order;
+    ava::core::Result<ava::agent::QuestionAnswer> answer = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question resolver did not run"));
+    ava::agent::QuestionPrompt prompt{
+        .header = "Atomic prompt", .question = "Resolve after retained search input", .options = {{.value = "done", .label = "Done"}}, .auto_resolve = [&]() {
+          std::lock_guard lock(mutex);
+          order.push_back("resolver");
+          return true;
+        }};
+
+    std::jthread provider([&]() {
+      {
+        std::unique_lock lock(mutex);
+        if (!changed.wait_for(lock, std::chrono::seconds(1), [&]() { return start_provider; }))
+        {
+          provider_timed_out = true;
+          changed.notify_all();
+          return;
+        }
+        provider_attempted = true;
+      }
+      changed.notify_all();
+      answer = resolver(prompt);
+      {
+        std::lock_guard lock(mutex);
+        provider_resolved = true;
+        if (!dispatch_returned)
+          order.push_back("resolved-before-dispatch-returned");
+      }
+      changed.notify_all();
+    });
+
+    auto const initial = coordinator.dispatch_search_input_with_prompt_precedence([&]() {
+      std::unique_lock lock(mutex);
+      order.push_back("search-input");
+      start_provider = true;
+      changed.notify_all();
+      if (!changed.wait_for(lock, std::chrono::seconds(1), [&]() { return provider_attempted || provider_timed_out; }))
+        provider_timed_out = true;
+      return !provider_timed_out && !provider_resolved;
+    });
+    {
+      std::lock_guard lock(mutex);
+      dispatch_returned = true;
+    }
+    changed.notify_all();
+    std::this_thread::yield();
+
+    auto queued = ava::tui::SearchInputPromptDispatchResult::InputHandled;
+    bool queued_attempt_dispatched = false;
+    auto const claim_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (queued == ava::tui::SearchInputPromptDispatchResult::InputHandled && std::chrono::steady_clock::now() < claim_deadline)
+    {
+      queued_attempt_dispatched = false;
+      queued = coordinator.dispatch_search_input_with_prompt_precedence(
+          [&]() {
+            queued_attempt_dispatched = true;
+            return true;
+          },
+          {}, {},
+          [&]() {
+            std::lock_guard lock(mutex);
+            order.push_back("before-prompt");
+          });
+      if (queued == ava::tui::SearchInputPromptDispatchResult::InputHandled)
+        std::this_thread::yield();
+    }
+    {
+      std::unique_lock lock(mutex);
+      if (!changed.wait_for(lock, std::chrono::seconds(1), [&]() { return provider_resolved || provider_timed_out; }))
+        provider_timed_out = true;
+    }
+    passed = initial == ava::tui::SearchInputPromptDispatchResult::InputHandled && queued == ava::tui::SearchInputPromptDispatchResult::PromptServiced &&
+             !queued_attempt_dispatched && !provider_timed_out && provider_resolved && answer &&
+             order == std::vector<std::string>({"search-input", "before-prompt", "resolver"});
+    if (!passed)
+      coordinator.fail_pending_requests();
+  }
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return passed;
+}
+
+}  // namespace
+
+void run_tui_prompt_search_race_tests()
+{
+  expect(test_atomic_search_input_prompt_precedence(),
+         "actual prompt-coordinator locking linearizes retained search input before provider enqueue, then lets the queued prompt discard stale input and run "
+         "before-prompt ahead of nested resolution across 50 synchronized repetitions");
+}
 
 void run_tui_composer_rendering_tests_part_1()
 {
@@ -52,54 +203,15 @@ void run_tui_composer_rendering_tests_part_1()
            "while the spinner advances at 120ms boundaries");
   }
   {
-    std::atomic_bool pending_prompt = false;
-    std::mutex synchronization_mutex;
-    std::condition_variable synchronization;
-    bool initial_prompt_check_complete = false;
-    bool prompt_arrived = false;
-    std::atomic_bool producer_timed_out = false;
-    std::vector<std::string> order;
-    auto service_prompt = [&]() {
-      if (!pending_prompt.exchange(false))
-      {
-        order.push_back("initial-none");
-        {
-          std::lock_guard lock(synchronization_mutex);
-          initial_prompt_check_complete = true;
-        }
-        synchronization.notify_all();
-        return ava::tui::detail::PendingPromptServiceResult::None;
-      }
-      order.push_back("claimed");
-      ava::tui::detail::run_claimed_prompt_with_precedence([&]() { order.push_back("before-prompt"); }, [&]() { order.push_back("nested-prompt"); });
-      return ava::tui::detail::PendingPromptServiceResult::Serviced;
-    };
-    std::jthread producer([&]() {
-      std::unique_lock lock(synchronization_mutex);
-      if (!synchronization.wait_for(lock, std::chrono::seconds(1), [&]() { return initial_prompt_check_complete; }))
-      {
-        producer_timed_out = true;
-        return;
-      }
-      pending_prompt.store(true);
-      prompt_arrived = true;
-      lock.unlock();
-      synchronization.notify_all();
-    });
-    auto const initial = service_prompt();
-    bool prompt_arrived_before_deadline = false;
-    {
-      std::unique_lock lock(synchronization_mutex);
-      prompt_arrived_before_deadline = synchronization.wait_for(lock, std::chrono::seconds(1), [&]() { return prompt_arrived || producer_timed_out.load(); });
-    }
-    auto const retained = ava::tui::detail::dispatch_retained_input_with_prompt_precedence(service_prompt, [&]() {
-      order.push_back("stale-input");
-      return true;
-    });
-    expect(initial == ava::tui::detail::PendingPromptServiceResult::None && prompt_arrived_before_deadline && !producer_timed_out.load() &&
-               retained == ava::tui::detail::RetainedInputDispatchResult::PromptServiced &&
-               order == std::vector<std::string>({"initial-none", "claimed", "before-prompt", "nested-prompt"}),
-           "a prompt arriving after the initial poll check is claimed permission-first, closes search before nested prompt work, and discards retained input");
+    bool input_dispatched = false;
+    auto const retained =
+        ava::tui::detail::dispatch_retained_input_with_prompt_precedence([]() { return ava::tui::detail::PendingPromptServiceResult::Serviced; },
+                                                                         [&]() {
+                                                                           input_dispatched = true;
+                                                                           return true;
+                                                                         });
+    expect(retained == ava::tui::detail::RetainedInputDispatchResult::PromptServiced && !input_dispatched,
+           "ordinary retained input keeps the second prompt check and discards the event when that check claims a prompt");
   }
   {
     auto const unchanged =

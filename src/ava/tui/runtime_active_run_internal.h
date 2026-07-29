@@ -102,6 +102,7 @@ class RuntimeActiveRunController final
   [[nodiscard]] RuntimeActiveRunOutcome run(std::string submitted);
 
  private:
+  [[nodiscard]] std::optional<bool> handle_transcript_search_input(runtime_input::RuntimeInput const& input);
   [[nodiscard]] bool handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& input);
   [[nodiscard]] RuntimeEventDrainResult drain_events(RuntimeActiveRunState& state);
   [[nodiscard]] bool request_stop(RuntimeActiveRunState& state);

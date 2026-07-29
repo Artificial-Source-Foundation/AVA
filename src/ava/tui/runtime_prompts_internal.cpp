@@ -33,13 +33,6 @@ bool detail::prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::s
   return (key == Key::MouseWheelUp || key == Key::MouseWheelDown) && deadline && now < *deadline;
 }
 
-void detail::run_claimed_prompt_with_precedence(std::function<void()> const& before_prompt, std::function<void()> const& service_prompt)
-{
-  if (before_prompt)
-    before_prompt();
-  service_prompt();
-}
-
 PendingPermissionRequest::PendingPermissionRequest(ava::permissions::PermissionPrompt prompt_in) : prompt(std::move(prompt_in))
 {
 }
@@ -630,41 +623,69 @@ void RuntimePromptCoordinator::fail_pending_requests()
   }
 }
 
+RuntimePromptCoordinator::ClaimedPromptRequest RuntimePromptCoordinator::claim_pending_request_locked()
+{
+  ClaimedPromptRequest request;
+  if (!pending_permission_requests_.empty())
+  {
+    request.permission = std::move(pending_permission_requests_.front());
+    pending_permission_requests_.pop_front();
+  }
+  else if (!pending_question_requests_.empty())
+  {
+    request.question = std::move(pending_question_requests_.front());
+    pending_question_requests_.pop_front();
+  }
+  return request;
+}
+
+void RuntimePromptCoordinator::service_claimed_request(ClaimedPromptRequest request, std::function<bool()> const& stop_requested,
+                                                       std::function<bool()> const& request_stop, std::function<void()> const& before_prompt)
+{
+  if (before_prompt)
+    before_prompt();
+  if (request.permission)
+  {
+    complete_permission_request(request.permission, resolve_permission_prompt(request.permission->prompt, stop_requested, request_stop));
+    return;
+  }
+  complete_question_request(request.question, resolve_question_prompt(request.question->prompt, stop_requested, request_stop));
+}
+
 bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop,
                                                        std::function<void()> const& before_prompt)
 {
-  auto& prompt_request_mutex = prompt_request_mutex_;
-  auto& pending_permission_requests = pending_permission_requests_;
-  auto& pending_question_requests = pending_question_requests_;
-  std::shared_ptr<PendingPermissionRequest> permission_request;
-  std::shared_ptr<PendingQuestionRequest> question_request;
+  ClaimedPromptRequest request;
   {
-    std::lock_guard<std::mutex> lock(prompt_request_mutex);
-    if (!pending_permission_requests.empty())
-    {
-      permission_request = std::move(pending_permission_requests.front());
-      pending_permission_requests.pop_front();
-    }
-    else if (!pending_question_requests.empty())
-    {
-      question_request = std::move(pending_question_requests.front());
-      pending_question_requests.pop_front();
-    }
+    std::lock_guard<std::mutex> lock(prompt_request_mutex_);
+    request = claim_pending_request_locked();
   }
-  if (permission_request)
+  if (!request)
+    return false;
+  service_claimed_request(std::move(request), stop_requested, request_stop, before_prompt);
+  return true;
+}
+
+SearchInputPromptDispatchResult RuntimePromptCoordinator::dispatch_search_input_with_prompt_precedence(std::function<bool()> const& dispatch_search_input,
+                                                                                                       std::function<bool()> const& stop_requested,
+                                                                                                       std::function<bool()> const& request_stop,
+                                                                                                       std::function<void()> const& before_prompt)
+{
+  ClaimedPromptRequest request;
+  bool input_handled = false;
   {
-    detail::run_claimed_prompt_with_precedence(before_prompt, [&]() {
-      complete_permission_request(permission_request, resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
-    });
-    return true;
+    std::lock_guard<std::mutex> lock(prompt_request_mutex_);
+    request = claim_pending_request_locked();
+    // The caller restricts this callback to the bounded search-modal handler.
+    // It cannot run local commands, and prompt rendering/resolution starts only
+    // after this lock is released, preserving the prompt-before-UI lock order.
+    if (!request)
+      input_handled = dispatch_search_input();
   }
-  if (question_request)
-  {
-    detail::run_claimed_prompt_with_precedence(
-        before_prompt, [&]() { complete_question_request(question_request, resolve_question_prompt(question_request->prompt, stop_requested, request_stop)); });
-    return true;
-  }
-  return false;
+  if (!request)
+    return input_handled ? SearchInputPromptDispatchResult::InputHandled : SearchInputPromptDispatchResult::InputFailed;
+  service_claimed_request(std::move(request), stop_requested, request_stop, before_prompt);
+  return SearchInputPromptDispatchResult::PromptServiced;
 }
 
 ava::permissions::PermissionResolver RuntimePromptCoordinator::permission_resolver()

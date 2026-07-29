@@ -22,8 +22,7 @@ namespace ava::tui {
 namespace detail {
 [[nodiscard]] bool prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::steady_clock::time_point> const& deadline,
                                                  std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
-void run_claimed_prompt_with_precedence(std::function<void()> const& before_prompt, std::function<void()> const& service_prompt);
-} // namespace detail
+}  // namespace detail
 
 struct ComposerSnapshot;
 struct TuiRuntimeOptions;
@@ -54,6 +53,13 @@ struct PendingQuestionRequest
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+enum class SearchInputPromptDispatchResult
+{
+  PromptServiced,
+  InputHandled,
+  InputFailed,
+};
+
 class RuntimePromptCoordinator final
 {
  public:
@@ -66,11 +72,26 @@ class RuntimePromptCoordinator final
   void fail_pending_requests();
   [[nodiscard]] bool service_pending_request(std::function<bool()> const& stop_requested = {}, std::function<bool()> const& request_stop = {},
                                              std::function<void()> const& before_prompt = {});
+  [[nodiscard]] SearchInputPromptDispatchResult dispatch_search_input_with_prompt_precedence(std::function<bool()> const& dispatch_search_input,
+                                                                                             std::function<bool()> const& stop_requested = {},
+                                                                                             std::function<bool()> const& request_stop = {},
+                                                                                             std::function<void()> const& before_prompt = {});
   void set_audit_sink(ava::event::RuntimeEventSink sink);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
+  struct ClaimedPromptRequest
+  {
+    std::shared_ptr<PendingPermissionRequest> permission;
+    std::shared_ptr<PendingQuestionRequest> question;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return permission || question; }
+  };
+
+  [[nodiscard]] ClaimedPromptRequest claim_pending_request_locked();
+  void service_claimed_request(ClaimedPromptRequest request, std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop,
+                               std::function<void()> const& before_prompt);
   void emit_prompt_audit(std::string status, std::string text, std::string permission_request_id = {}, std::string tool_name = {}, std::string reason = {},
                          std::string resolution_reason = {});
   [[nodiscard]] ava::core::Result<ava::permissions::PermissionResolutionDecision> resolve_permission_prompt(ava::permissions::PermissionPrompt const& prompt,

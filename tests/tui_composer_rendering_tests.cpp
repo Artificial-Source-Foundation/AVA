@@ -15,6 +15,7 @@
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
+#include "ava/tui/theme.h"
 
 #include <algorithm>
 #include <atomic>
@@ -697,11 +698,27 @@ void run_tui_composer_rendering_tests_part_1()
     auto const reset_at = screen_line.find(reset);
     auto const reapplied_default_bg =
         reset_at == std::string::npos ? std::string::npos : screen_line.find(std::string(ava::tui::detail::kSgrScreenBg), reset_at + reset.size());
+    auto const ordinary_dock = ava::tui::detail::render_composer_block(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_ordinary_dock_bg",
+                                   .input = "draft",
+                                   .status = "ready",
+                                   .transcript = {},
+                                   .width = 40,
+                                   .height = 12},
+        40, 2);
     expect(ava::tui::detail::kSgrScreenBg == "\x1b[49m" && first_default_bg == 0 && reset_at != std::string::npos &&
                reapplied_default_bg != std::string::npos && screen_line.find(kLegacyScreenRgb) == std::string::npos &&
-               composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos,
-           "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB while composer "
-           "contrast surfaces remain explicitly styled");
+               composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos &&
+               ordinary_dock.size() == 2 &&
+               std::ranges::all_of(ordinary_dock,
+                                   [](std::string const& line) {
+                                     return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+                                   }),
+           "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB; ordinary composer "
+           "dock rows inherit that screen background while elevated composer contrast surfaces remain explicitly styled");
   }
   {
     using Clock = ava::tui::WheelBurstGovernor::Clock;
@@ -857,19 +874,23 @@ void run_tui_composer_rendering_tests_part_1()
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
   expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos, "tui starts short chats at the top of the transcript area");
   expect(lines.size() == 14 && strip_sgr(lines[12]).starts_with("│  /help") && strip_sgr(lines[13]).starts_with("│  GPT-5.5") &&
-             strip_sgr(lines[11]).starts_with("│  ") && lines[11].find("\x1b[48;2;26;31;46m") != std::string::npos &&
+             strip_sgr(lines[11]).starts_with("│  ") && lines[11].find("\x1b[49m") != std::string::npos &&
+             lines[11].find("\x1b[48;2;26;31;46m") == std::string::npos && lines[12].find("\x1b[49m") != std::string::npos &&
+             lines[12].find("\x1b[48;2;26;31;46m") == std::string::npos && lines[13].find("\x1b[49m") != std::string::npos &&
+             lines[13].find("\x1b[48;2;26;31;46m") == std::string::npos &&
              std::ranges::none_of(lines, [](std::string const& line) { return line.find("/ commands") != std::string::npos; }),
-         "tui keeps a one-line draft in the bottom input/footer rows below the elevated composer padding row");
+         "tui keeps a one-line draft in the bottom input/footer rows below screen-background composer padding");
   expect(std::ranges::any_of(lines, [](std::string const& line) { return strip_sgr(line).find("│  /help") != std::string::npos; }),
          "tui renders the quiet composer input without a prompt glyph");
   expect(std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("slash palette dismissed") != std::string::npos; }),
          "tui keeps transient composer status text out of the footer");
   expect(std::ranges::any_of(lines,
                              [](std::string const& line) {
-                               return line.find("\x1b[48;2;26;31;46m") != std::string::npos && line.find("\x1b[38;2;77;158;246m│") != std::string::npos &&
-                                      strip_sgr(line).find("❯") == std::string::npos;
-                             }),
-         "tui preserves the elevated composer surface with one quiet accent boundary");
+                               return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[38;2;77;158;246m│") != std::string::npos &&
+                                      line.find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(line).find("❯") == std::string::npos;
+                             }) &&
+             std::ranges::none_of(lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }),
+         "tui ordinary composer dock inherits the screen/transcript background with one quiet accent boundary");
   expect(std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("╭─ You") != std::string::npos; }) &&
              std::ranges::none_of(lines, [](std::string const& line) { return strip_sgr(line).find("╭─ AVA") != std::string::npos; }) &&
              std::ranges::any_of(lines,
@@ -933,10 +954,110 @@ void run_tui_composer_rendering_tests_part_1()
   while (!idle_input.empty() && idle_input.back() == ' ') idle_input.pop_back();
   while (!idle_footer.empty() && idle_footer.back() == ' ') idle_footer.pop_back();
   expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 3.2%" &&
-             idle_two_row_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
-             std::ranges::count_if(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) == 2 &&
+             idle_two_row_lines[8].find("\x1b[49m") != std::string::npos && idle_two_row_lines[9].find("\x1b[49m") != std::string::npos &&
+             std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
-         "tui empty composer is exactly two bottom rows with one boundary, quiet gutter, pure footer, and no prompt glyph");
+         "tui empty composer is exactly two bottom screen-background rows with one boundary, quiet gutter, pure footer, and no prompt glyph");
+  {
+    auto const palette_frame = ava::tui::render_composer(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_palette_bg",
+                                   .input = "/h",
+                                   .status = "ready",
+                                   .transcript = {},
+                                   .slash_commands = {ava::tui::SlashCommandItem{.command = "/help", .description = "Show help", .category = "General"}},
+                                   .selected_slash_command_index = 0,
+                                   .width = 80,
+                                   .height = 12});
+    auto const select_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_select_bg",
+        .input = {},
+        .status = "ready",
+        .transcript = {},
+        .select_list =
+            ava::tui::SelectListView{
+                .title = "Models",
+                .subtitle = {},
+                .items = {ava::tui::SelectListItemView{.value = "a",
+                                                       .label = "Alpha",
+                                                       .description = {},
+                                                       .group = {},
+                                                       .detail = {},
+                                                       .badge = {},
+                                                       .enabled = true,
+                                                       .disabled_reason = {}}},
+                .selected_item_index = 0,
+                .query = {},
+                .footer_hint = {}},
+        .width = 80,
+        .height = 16});
+    auto const palette_row = std::ranges::find_if(palette_frame, [](std::string const& line) { return strip_sgr(line).find("/help") != std::string::npos; });
+    auto const select_row = std::ranges::find_if(select_frame, [](std::string const& line) { return strip_sgr(line).find("Alpha") != std::string::npos; });
+    auto const dock_input = std::ranges::find_if(palette_frame, [](std::string const& line) { return strip_sgr(line).starts_with("│  /h"); });
+    expect(palette_row != palette_frame.end() && select_row != select_frame.end() && dock_input != palette_frame.end() &&
+               palette_row->find("\x1b[48;2;26;31;46m") != std::string::npos && select_row->find("\x1b[48;2;26;31;46m") != std::string::npos &&
+               dock_input->find("\x1b[49m") != std::string::npos && dock_input->find("\x1b[48;2;26;31;46m") == std::string::npos,
+           "tui keeps elevated composer backgrounds on palette/select-list rows while the ordinary draft dock stays on the screen background");
+  }
+  {
+    auto const dock_uses_screen_bg = [](std::vector<std::string> const& rendered) {
+      return std::ranges::any_of(rendered,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).find("Type a message...") != std::string::npos && line.find("\x1b[49m") != std::string::npos &&
+                                          line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+                                 }) &&
+             std::ranges::none_of(rendered, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; });
+    };
+    auto const idle_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                          .provider = "openai",
+                                                          .model = "gpt-5.5",
+                                                          .session_id = "session_theme_dock_bg",
+                                                          .input = "",
+                                                          .status = "ready",
+                                                          .transcript = {},
+                                                          .width = 60,
+                                                          .height = 10};
+    ava::tui::set_tui_config_theme(std::nullopt);
+    auto const dark_lines = ava::tui::render_composer(idle_snapshot);
+    {
+      ScopedEnvVar light_theme("AVA_TUI_THEME", "light");
+      ava::tui::set_tui_config_theme(std::nullopt);
+      auto const light_lines = ava::tui::render_composer(idle_snapshot);
+      expect(dock_uses_screen_bg(dark_lines) && dock_uses_screen_bg(light_lines),
+             "tui ordinary composer dock keeps terminal-default screen background under built-in dark and light themes");
+    }
+    ava::tui::TuiCustomTheme custom{
+        .name = "dockbg",
+        .path = "dockbg.json",
+        .palette = ava::tui::TuiThemePalette{.text = -1,
+                                             .muted = 242,
+                                             .success = 34,
+                                             .warning = 220,
+                                             .error = 196,
+                                             .accent = 39,
+                                             .screen_bg = 255,
+                                             .composer_bg = 236,
+                                             .tool_bg = 235,
+                                             .question_bg = 237},
+        .revision = "test-dockbg"};
+    ava::tui::set_tui_config_theme("dockbg", custom);
+    auto const custom_lines = ava::tui::render_composer(idle_snapshot);
+    expect(dock_uses_screen_bg(custom_lines),
+           "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
+    ava::tui::set_tui_config_theme(std::nullopt);
+    {
+      ScopedEnvVar no_color_guard("NO_COLOR", "1");
+      auto const plain_lines = ava::tui::render_composer(idle_snapshot);
+      expect(std::ranges::all_of(plain_lines, [](std::string const& line) { return line.find('\x1b') == std::string::npos; }) &&
+                 std::ranges::any_of(plain_lines, [](std::string const& line) { return line.find("Type a message...") != std::string::npos; }),
+             "tui ordinary composer dock stays SGR-free under NO_COLOR");
+    }
+  }
   {
     std::vector<ava::tui::TranscriptItem> filled_transcript;
     for (int index = 0; index < 20; ++index)
@@ -964,8 +1085,10 @@ void run_tui_composer_rendering_tests_part_1()
     expect(roomy_gap_frame.size() == 13 && strip_sgr(roomy_gap_frame[8]).find("gap item 19") != std::string::npos &&
                strip_sgr(roomy_gap_frame[9]).find_first_not_of(' ') == std::string::npos &&
                roomy_gap_frame[9].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[10]).starts_with("│  ") &&
-               roomy_gap_frame[10].find("\x1b[48;2;26;31;46m") != std::string::npos && strip_sgr(roomy_gap_frame[11]).starts_with("│  Type a message...") &&
-               strip_sgr(roomy_gap_frame[12]).starts_with("│  GPT-5.5") && compact_gap_frame.size() == 12 &&
+               roomy_gap_frame[10].find("\x1b[49m") != std::string::npos && roomy_gap_frame[10].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+               strip_sgr(roomy_gap_frame[11]).starts_with("│  Type a message...") && roomy_gap_frame[11].find("\x1b[49m") != std::string::npos &&
+               roomy_gap_frame[11].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[12]).starts_with("│  GPT-5.5") &&
+               roomy_gap_frame[12].find("\x1b[49m") != std::string::npos && compact_gap_frame.size() == 12 &&
                strip_sgr(compact_gap_frame[9]).find("gap item 19") != std::string::npos && strip_sgr(compact_gap_frame[10]).starts_with("│  ") &&
                strip_sgr(crowded_gap_frame.front()).find("gap item 19") != std::string::npos && roomy_max == compact_max + 1 &&
                ava::tui::detail::composer_layout_policy(roomy_gap_snapshot, 13).transcript_composer_gap_lines == 1 &&
@@ -975,8 +1098,8 @@ void run_tui_composer_rendering_tests_part_1()
                ava::tui::detail::composer_layout_policy(modal_policy_snapshot, 24).composer_top_padding_lines == 0 &&
                ava::tui::detail::composer_block_line_count(permission_policy_snapshot, 13, 80) == 2 &&
                strip_sgr(permission_policy_frame[11]).starts_with("│  Type a message...") && strip_sgr(permission_policy_frame[12]).starts_with("│  GPT-5.5"),
-           "tui roomy ordinary layouts reserve a screen-background breathing gap and one elevated guttered composer row above the unchanged input/footer rows, "
-           "while compact and authoritative layouts reclaim that elevated row");
+           "tui roomy ordinary layouts reserve a screen-background breathing gap and one guttered screen-background composer row above the unchanged "
+           "input/footer rows, while compact and authoritative layouts reclaim that padding row");
   }
   auto const composer_lines_for = [&](std::string input, std::size_t width = 80) {
     auto snapshot = idle_two_row_snapshot;
@@ -998,10 +1121,12 @@ void run_tui_composer_rendering_tests_part_1()
     auto const first_visible_draft_cursor = ava::tui::composer_input_cursor_for_screen_position(roomy_multiline_snapshot, 8, 4);
     expect(layout.top_padding == 1 && layout.first_visible == 3 && layout.visible_input_lines == 6 && layout.hidden_above == 3 &&
                scrolled_layout.first_visible == 1 && elevated_draft.size() == 14 && strip_sgr(elevated_draft[6]).starts_with("│  ") &&
-               strip_sgr(elevated_draft[7]).starts_with("│  four") && strip_sgr(elevated_draft[13]).starts_with("│  GPT-5.5") &&
+               elevated_draft[6].find("\x1b[49m") != std::string::npos && elevated_draft[6].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+               strip_sgr(elevated_draft[7]).starts_with("│  four") && elevated_draft[7].find("\x1b[49m") != std::string::npos &&
+               strip_sgr(elevated_draft[13]).starts_with("│  GPT-5.5") && elevated_draft[13].find("\x1b[49m") != std::string::npos &&
                !ava::tui::composer_input_cursor_for_screen_position(roomy_multiline_snapshot, 7, 4) && first_visible_draft_cursor &&
                *first_visible_draft_cursor == std::string("one\ntwo\nthree\n").size(),
-           "tui roomy multiline drafts reserve the elevated row before deriving their viewport, scrolling, cursor, and hit-test rows");
+           "tui roomy multiline drafts reserve the screen-background padding row before deriving their viewport, scrolling, cursor, and hit-test rows");
   }
 
   auto const processing_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -1020,14 +1145,15 @@ void run_tui_composer_rendering_tests_part_1()
   expect(processing_lines.size() == 10 && strip_sgr(processing_lines[7]).find("Esc stop · type a follow-up") != std::string::npos &&
              strip_sgr(processing_lines[8]).starts_with("│  Type a message...") && strip_sgr(processing_lines[9]).starts_with("│  GPT-5.5") &&
              strip_sgr(processing_lines[9]).find("▂") != std::string::npos && processing_lines[9].find("\x1b[38;2;77;158;246m▂") != std::string::npos &&
-             processing_lines[7].find("\x1b[48;2;26;31;46m") != std::string::npos &&
+             processing_lines[7].find("\x1b[49m") != std::string::npos && processing_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             processing_lines[8].find("\x1b[49m") != std::string::npos && processing_lines[9].find("\x1b[49m") != std::string::npos &&
              std::ranges::all_of(processing_lines,
                                  [](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("thinking...") == std::string::npos && visible.find("working") == std::string::npos &&
                                           visible.find("1.3k (0.7%)") == std::string::npos && visible.find("❯") == std::string::npos;
                                  }),
-         "tui processing composer adds only a contextual active-run row while the footer remains model metadata plus a calm blue indicator");
+         "tui processing composer adds only a screen-background contextual active-run row while the footer remains model metadata plus a calm blue indicator");
   expect(ava::tui::detail::kProcessingIndicatorFrameDelay == std::chrono::milliseconds(120) &&
              std::ranges::all_of(ava::tui::detail::kProcessingIndicatorFrames,
                                  [](std::string_view frame) {

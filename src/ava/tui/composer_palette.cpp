@@ -728,7 +728,7 @@ SlashCommandItem completion_display_item(FileReferenceItem const& reference, Com
 
 std::string palette_prefix()
 {
-  return composer_gutter();
+  return composer_gutter(kSgrComposerBg);
 }
 
 std::size_t palette_content_width(std::size_t width)

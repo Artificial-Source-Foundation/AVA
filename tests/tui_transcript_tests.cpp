@@ -55,13 +55,15 @@ void run_tui_transcript_tests_part_1()
                                                                                           .width = 50,
                                                                                           .height = 12,
                                                                                           .tool_presentation = ava::tui::ToolPresentation::Compact});
-  auto const composer_bg_rows = [](std::vector<std::string> const& rendered) {
-    return static_cast<std::size_t>(
-        std::ranges::count_if(rendered, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }));
+  auto const dock_gutter_rows = [](std::vector<std::string> const& rendered) {
+    return static_cast<std::size_t>(std::ranges::count_if(rendered, [](std::string const& line) {
+      return strip_sgr(line).starts_with("│  ") && line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+    }));
   };
-  expect(composer_bg_rows(grown_composer_height) > composer_bg_rows(empty_composer_height) &&
-             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("│  five") != std::string::npos; }),
-         "tui composer grows with multiline input and keeps the latest line visible");
+  expect(dock_gutter_rows(grown_composer_height) > dock_gutter_rows(empty_composer_height) &&
+             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("│  five") != std::string::npos; }) &&
+             std::ranges::none_of(grown_composer_height, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }),
+         "tui composer grows with multiline input on the screen background and keeps the latest line visible");
   auto const tall_draft = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                .provider = "openai",
                                                                                .model = "gpt-5.5",

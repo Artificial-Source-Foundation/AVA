@@ -157,7 +157,7 @@ compatibility with existing custom themes.
 | `error` | Error or denial status. |
 | `accent` | Focus, selection, and brand accents. |
 | `screenBg` | Main screen background. Built-in dark/light inherit the terminal default; custom themes may set an explicit color. |
-| `composerBg` | Composer/input background. |
+| `composerBg` | Elevated palette/select-list panel background. Ordinary draft/footer dock rows inherit `screenBg` like transcript chat. |
 | `toolBg` | Optional low-contrast tool-card background. |
 | `questionBg` | Optional distinct question dock/modal background. |
 

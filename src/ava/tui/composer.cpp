@@ -1183,7 +1183,7 @@ std::vector<std::string> render_active_run_hint_lines(ComposerSnapshot const& sn
   append_hint_segment(text, detached_hint);
   if (text.empty())
     return {};
-  return {detail::composer_surface_line(detail::composer_gutter() + std::string(kSgrDim) + text + std::string(kSgrReset), width)};
+  return {detail::screen_surface_line(detail::composer_gutter() + std::string(kSgrDim) + text + std::string(kSgrReset), width)};
 }
 
 std::vector<std::string> render_empty_transcript_discovery_lines(ComposerSnapshot const& snapshot, detail::CompletionMatchCache const& completion_cache,

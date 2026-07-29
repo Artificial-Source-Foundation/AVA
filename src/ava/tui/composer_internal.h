@@ -68,9 +68,11 @@ enum class NcursesColorRole
 // Maps AVA's truecolor SGR values to the semantic ncurses palette roles.
 [[nodiscard]] NcursesColorRole ncurses_color_role_for_sgr(std::string_view sgr);
 
-[[nodiscard]] inline std::string composer_gutter()
+// Ordinary dock gutters inherit the screen/transcript background. Elevated palette
+// surfaces pass kSgrComposerBg so their left rail stays on the composer panel.
+[[nodiscard]] inline std::string composer_gutter(std::string_view background_sgr = kSgrScreenBg)
 {
-  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
+  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(background_sgr) + "  ";
 }
 
 struct ComposerLayoutPolicy

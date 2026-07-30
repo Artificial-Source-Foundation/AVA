@@ -16,6 +16,7 @@ constexpr std::size_t kMaxDescriptionDisplayBytes = 160;
 constexpr std::size_t kMaxExpandedTaskResultBytes = 4 * 1024;
 constexpr std::size_t kMaxExpandedTaskResultLines = 40;
 constexpr std::size_t kMaxHumanLabelBytes = 64;
+constexpr std::string_view kEllipsis = "…";
 
 std::string lower_ascii(std::string_view text)
 {
@@ -70,6 +71,38 @@ std::string humanize_identifier(std::string_view text)
   return human;
 }
 
+// Cap text to max_bytes while keeping whole UTF-8 / compact terminal clusters.
+std::string truncate_to_utf8_clusters(std::string_view text, std::size_t max_bytes)
+{
+  if (text.size() <= max_bytes)
+    return std::string(text);
+  if (max_bytes == 0)
+    return {};
+
+  auto const ellipsis_bytes = kEllipsis.size();
+  auto const budget = max_bytes > ellipsis_bytes ? max_bytes - ellipsis_bytes : max_bytes;
+  std::size_t index = 0;
+  std::size_t kept = 0;
+  while (index < text.size())
+  {
+    auto const step = terminal_text_cluster_bytes(text, index);
+    if (step == 0)
+      break;
+    if (kept + step > budget)
+      break;
+    kept += step;
+    index += step;
+  }
+  if (kept == 0 && max_bytes >= ellipsis_bytes)
+    return std::string(kEllipsis);
+  if (kept == 0)
+    return {};
+  std::string out(text.substr(0, kept));
+  if (kept < text.size() && out.size() + ellipsis_bytes <= max_bytes)
+    out += kEllipsis;
+  return out;
+}
+
 std::string sanitize_plain_field(std::string_view text, std::size_t max_bytes)
 {
   auto sanitized = sanitize_terminal_text(text);
@@ -79,27 +112,7 @@ std::string sanitize_plain_field(std::string_view text, std::size_t max_bytes)
     if (ch == '\n' || ch == '\r' || ch == '\t')
       ch = ' ';
   }
-  // Drop angle-bracket markup so model-facing XML never leaks through plain fields.
-  std::string without_markup;
-  without_markup.reserve(sanitized.size());
-  bool in_tag = false;
-  for (char const ch : sanitized)
-  {
-    if (ch == '<')
-    {
-      in_tag = true;
-      continue;
-    }
-    if (ch == '>')
-    {
-      in_tag = false;
-      continue;
-    }
-    if (!in_tag)
-      without_markup.push_back(ch);
-  }
-  sanitized = std::move(without_markup);
-  // Collapse repeated spaces.
+  // Collapse repeated spaces without stripping legitimate markup-like text.
   std::string collapsed;
   collapsed.reserve(sanitized.size());
   bool previous_space = false;
@@ -119,50 +132,21 @@ std::string sanitize_plain_field(std::string_view text, std::size_t max_bytes)
   }
   while (!collapsed.empty() && collapsed.back() == ' ') collapsed.pop_back();
   while (!collapsed.empty() && collapsed.front() == ' ') collapsed.erase(collapsed.begin());
-  if (collapsed.size() > max_bytes)
-  {
-    collapsed.resize(max_bytes);
-    while (!collapsed.empty() && static_cast<unsigned char>(collapsed.back()) < 0x20) collapsed.pop_back();
-    if (!collapsed.empty())
-      collapsed += "…";
-  }
-  return collapsed;
+  return truncate_to_utf8_clusters(collapsed, max_bytes);
 }
 
 std::string sanitize_expanded_body(std::string_view text)
 {
+  // Plain allowlisted task_result only: sanitize terminal controls, keep code-like text.
   auto sanitized = sanitize_terminal_text(text);
-  // Strip angle-bracket markup blocks without attempting XML parsing.
-  std::string without_markup;
-  without_markup.reserve(sanitized.size());
-  bool in_tag = false;
-  for (char const ch : sanitized)
-  {
-    if (ch == '<')
-    {
-      in_tag = true;
-      continue;
-    }
-    if (ch == '>')
-    {
-      in_tag = false;
-      continue;
-    }
-    if (!in_tag)
-      without_markup.push_back(ch);
-  }
-  // Bound by bytes first.
-  if (without_markup.size() > kMaxExpandedTaskResultBytes)
-  {
-    without_markup.resize(kMaxExpandedTaskResultBytes);
-    without_markup += "…";
-  }
-  // Bound by logical lines.
+  sanitized = truncate_to_utf8_clusters(sanitized, kMaxExpandedTaskResultBytes);
+
+  // Bound by logical lines after the byte/cluster cap.
   std::size_t lines = 1;
-  std::size_t cut = without_markup.size();
-  for (std::size_t index = 0; index < without_markup.size(); ++index)
+  std::size_t cut = sanitized.size();
+  for (std::size_t index = 0; index < sanitized.size(); ++index)
   {
-    if (without_markup[index] != '\n')
+    if (sanitized[index] != '\n')
       continue;
     ++lines;
     if (lines > kMaxExpandedTaskResultLines)
@@ -171,13 +155,17 @@ std::string sanitize_expanded_body(std::string_view text)
       break;
     }
   }
-  if (cut < without_markup.size())
+  if (cut < sanitized.size())
   {
-    without_markup.resize(cut);
-    without_markup += "\n…";
+    sanitized.resize(cut);
+    while (!sanitized.empty() && (sanitized.back() == '\n' || sanitized.back() == '\r')) sanitized.pop_back();
+    if (!sanitized.empty())
+      sanitized += "\n…";
+    else
+      sanitized = "…";
   }
-  while (!without_markup.empty() && (without_markup.back() == '\n' || without_markup.back() == '\r')) without_markup.pop_back();
-  return without_markup;
+  while (!sanitized.empty() && (sanitized.back() == '\n' || sanitized.back() == '\r')) sanitized.pop_back();
+  return sanitized;
 }
 
 bool looks_like_json_object(std::string_view text)
@@ -244,23 +232,6 @@ void append_search_token(std::string& text, std::string_view token)
   text += token;
 }
 
-std::string format_duration_ms(long long milliseconds)
-{
-  if (milliseconds < 0)
-    return {};
-  if (milliseconds < 1000)
-    return std::to_string(milliseconds) + "ms";
-  if (milliseconds < 60'000)
-  {
-    auto const whole = milliseconds / 1000;
-    auto const tenths = (milliseconds % 1000) / 100;
-    return std::to_string(whole) + "." + std::to_string(tenths) + "s";
-  }
-  auto const minutes = milliseconds / 60'000;
-  auto const seconds = (milliseconds % 60'000) / 1000;
-  return std::to_string(minutes) + "m" + std::to_string(seconds) + "s";
-}
-
 std::optional<bool> task_background_flag(std::string_view arguments_json)
 {
   if (!looks_like_json_object(arguments_json))
@@ -299,6 +270,7 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   presentation.kind = TaskJobToolKind::Task;
   presentation.display_name = "task";
 
+  // Production task serializer allowlist only (no invented duration fields).
   auto description = allowlisted_string(item.arguments_json, "description");
   if (!description)
     description = allowlisted_string(item.result_json, "description");
@@ -309,13 +281,6 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   auto const tool_calls = allowlisted_integer(item.result_json, "tool_calls");
   auto const task_result = allowlisted_string(item.result_json, "task_result");
   auto const background = task_background_flag(item.arguments_json);
-  long long duration_value = -1;
-  if (auto value = allowlisted_integer(item.result_json, "duration_ms"))
-    duration_value = *value;
-  else if (auto value = allowlisted_integer(item.result_json, "elapsed_ms"))
-    duration_value = *value;
-  else if (auto value = allowlisted_integer(item.result_json, "runtime_ms"))
-    duration_value = *value;
 
   if (subagent_type)
   {
@@ -330,7 +295,6 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   std::string primary;
   if (item.status == ToolTimelineStatus::Running)
   {
-    // Header order: type · description · running[/in background]
     append_part(primary, safe_description);
     append_part(primary, background && *background ? "running in background" : "running");
   }
@@ -347,17 +311,12 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   }
   else
   {
-    // Completed (or other success terminal states).
+    // Completed (or other success terminal states): type + description + tool count.
     append_part(primary, safe_description);
     if (tool_calls && *tool_calls > 0)
     {
       auto const count = *tool_calls;
       append_part(primary, std::to_string(count) + (count == 1 ? " tool" : " tools"));
-    }
-    if (duration_value >= 0)
-    {
-      if (auto formatted = format_duration_ms(duration_value); !formatted.empty())
-        append_part(primary, formatted);
     }
     if (primary.empty())
       append_part(primary, "completed");
@@ -367,6 +326,7 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   if (task_result)
     presentation.expanded_detail = sanitize_expanded_body(*task_result);
 
+  // Searchable corpus excludes task_result unless the caller adds it for explicit expansion.
   append_search_token(presentation.searchable_text, presentation.display_name);
   append_search_token(presentation.searchable_text, "task");
   append_search_token(presentation.searchable_text, safe_description);
@@ -384,8 +344,6 @@ TaskJobCardPresentation present_task(ToolTimelineItem const& item)
   if (tool_calls && *tool_calls > 0)
     append_search_token(presentation.searchable_text, std::to_string(*tool_calls) + " tools");
   append_search_token(presentation.searchable_text, presentation.primary);
-  // Expanded body is searchable only as the sanitized plain allowlisted field.
-  append_search_token(presentation.searchable_text, presentation.expanded_detail);
   return presentation;
 }
 
@@ -419,6 +377,7 @@ TaskJobCardPresentation present_job(ToolTimelineItem const& item)
   auto const state = allowlisted_string(item.result_json, "state");
   auto const mode = allowlisted_string(item.result_json, "mode");
   auto const tool_calls = allowlisted_integer(item.result_json, "tool_calls");
+  auto const total_jobs = allowlisted_integer(item.result_json, "total_jobs");
   auto const was_promoted = looks_like_json_object(item.result_json) && ava::core::json::field_value_start(item.result_json, "was_promoted")
                                 ? std::optional<bool>{allowlisted_bool(item.result_json, "was_promoted")}
                                 : std::nullopt;
@@ -435,7 +394,6 @@ TaskJobCardPresentation present_job(ToolTimelineItem const& item)
 
   auto const safe_action = action ? humanize_job_action(*action) : std::string{};
   auto const safe_state = state ? humanize_job_state(*state) : std::string{};
-  // mode is foreground/background
   std::string mode_label;
   if (mode)
   {
@@ -479,7 +437,11 @@ TaskJobCardPresentation present_job(ToolTimelineItem const& item)
       auto const count = *tool_calls;
       append_part(primary, std::to_string(count) + (count == 1 ? " tool" : " tools"));
     }
-    // Prefer stable public result summary/message when present and safe.
+    if (safe_action == "list" && total_jobs && *total_jobs >= 0)
+    {
+      auto const count = *total_jobs;
+      append_part(primary, std::to_string(count) + (count == 1 ? " job" : " jobs"));
+    }
     if (result_summary)
     {
       if (auto text = sanitize_plain_field(*result_summary, kMaxDescriptionDisplayBytes); !text.empty())
@@ -503,6 +465,8 @@ TaskJobCardPresentation present_job(ToolTimelineItem const& item)
     append_search_token(presentation.searchable_text, "promoted");
   if (tool_calls && *tool_calls > 0)
     append_search_token(presentation.searchable_text, std::to_string(*tool_calls) + " tools");
+  if (safe_action == "list" && total_jobs && *total_jobs >= 0)
+    append_search_token(presentation.searchable_text, std::to_string(*total_jobs) + " jobs");
   if (result_summary)
     append_search_token(presentation.searchable_text, sanitize_plain_field(*result_summary, kMaxDescriptionDisplayBytes));
   if (result_message)
@@ -517,10 +481,10 @@ TaskJobCardPresentation present_job(ToolTimelineItem const& item)
 
 TaskJobToolKind task_job_tool_kind(ToolTimelineItem const& item) noexcept
 {
-  auto const lowered = lower_ascii(item.name);
-  if (lowered == "task")
+  // Exact reserved tool names only — do not accept case spoofs.
+  if (item.name == "task")
     return TaskJobToolKind::Task;
-  if (lowered == "job")
+  if (item.name == "job")
     return TaskJobToolKind::Job;
   return TaskJobToolKind::None;
 }
@@ -528,6 +492,11 @@ TaskJobToolKind task_job_tool_kind(ToolTimelineItem const& item) noexcept
 bool is_task_or_job_tool(ToolTimelineItem const& item) noexcept
 {
   return task_job_tool_kind(item) != TaskJobToolKind::None;
+}
+
+bool task_job_explicitly_expanded(ToolTimelineItem const& item) noexcept
+{
+  return item.details_visible.has_value() && *item.details_visible;
 }
 
 TaskJobCardPresentation task_job_card_presentation(ToolTimelineItem const& item)
@@ -544,15 +513,23 @@ TaskJobCardPresentation task_job_card_presentation(ToolTimelineItem const& item)
   return {};
 }
 
-bool task_job_card_matches_query(TaskJobCardPresentation const& presentation, std::string_view query)
+bool task_job_card_matches_query(ToolTimelineItem const& item, TaskJobCardPresentation const& presentation, std::string_view query)
 {
   if (presentation.kind == TaskJobToolKind::None)
     return false;
   if (query.empty())
     return true;
-  auto const haystack = lower_ascii(presentation.searchable_text);
+  auto haystack = presentation.searchable_text;
+  // task_result participates in search only for explicitly expanded items.
+  if (task_job_explicitly_expanded(item) && !presentation.expanded_detail.empty())
+  {
+    if (!haystack.empty())
+      haystack.push_back('\n');
+    haystack += presentation.expanded_detail;
+  }
+  auto const lowered_haystack = lower_ascii(haystack);
   auto const needle = lower_ascii(query);
-  return !needle.empty() && haystack.find(needle) != std::string::npos;
+  return !needle.empty() && lowered_haystack.find(needle) != std::string::npos;
 }
 
 std::string task_job_card_copy_text(ToolTimelineItem const& item, TaskJobCardPresentation const& presentation)
@@ -591,7 +568,8 @@ std::string task_job_card_copy_text(ToolTimelineItem const& item, TaskJobCardPre
       append_block("state", sanitize_plain_field(*state, kMaxHumanLabelBytes));
     if (auto tool_calls = allowlisted_integer(item.result_json, "tool_calls"); tool_calls && *tool_calls > 0)
       append_block("tools", std::to_string(*tool_calls));
-    if (!presentation.expanded_detail.empty())
+    // Explicit expansion only — default Rich/collapsed copy omits task_result.
+    if (task_job_explicitly_expanded(item) && !presentation.expanded_detail.empty())
       append_block("task_result", presentation.expanded_detail);
   }
   else
@@ -610,6 +588,8 @@ std::string task_job_card_copy_text(ToolTimelineItem const& item, TaskJobCardPre
       append_block("promoted", allowlisted_bool(item.result_json, "was_promoted") ? "true" : "false");
     if (auto tool_calls = allowlisted_integer(item.result_json, "tool_calls"); tool_calls && *tool_calls > 0)
       append_block("tools", std::to_string(*tool_calls));
+    if (auto total_jobs = allowlisted_integer(item.result_json, "total_jobs"); total_jobs && *total_jobs >= 0)
+      append_block("jobs", std::to_string(*total_jobs));
     if (auto result_object = object_field_if_object(item.result_json, "result"))
     {
       if (auto summary = allowlisted_string(*result_object, "summary"))

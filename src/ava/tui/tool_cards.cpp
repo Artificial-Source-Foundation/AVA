@@ -1145,7 +1145,7 @@ bool tool_card_matches_copy_query(ToolTimelineItem const& item, std::string_view
   if (query.empty())
     return true;
   if (is_task_or_job_tool(item))
-    return task_job_card_matches_query(task_job_card_presentation(item), query);
+    return task_job_card_matches_query(item, task_job_card_presentation(item), query);
 
   auto const needle = lower_ascii(query);
   auto const matches = [&needle](std::string_view value) { return !value.empty() && lower_ascii(value).find(needle) != std::string::npos; };

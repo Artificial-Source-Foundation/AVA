@@ -988,6 +988,7 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
   bool freeze_pending = false;
   bool is_terminal = false;
   std::function<void()> after_capture_hook;
+  std::function<void()> before_publish_hook;
   {
     std::lock_guard state_lock(state->mutex);
     source = state->inspection_source;
@@ -998,8 +999,12 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
     freeze_pending = state->freeze_pending;
     is_terminal = terminal(state->snapshot.execution);
     after_capture_hook = options_.inspect_after_source_capture_for_test;
+    before_publish_hook = options_.inspect_before_publish_for_test;
   }
   SubagentLiveInspectionSource* const captured_source = source.get();
+  // Captured after the post-seam recheck below; used at final publish to reject
+  // older projections when a concurrent inspector already advanced generation.
+  std::uint64_t captured_content_generation = content_generation;
 
   auto current_frame_locked = [&]() -> std::shared_ptr<SubagentInspectorFrame const> {
     auto const current_published = state->published_inspection;
@@ -1044,6 +1049,9 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
     after_capture_hook();
 
   // Re-check after the test seam: complete/shutdown may have invalidated the source.
+  // Capture content_generation here (post-recheck, pre-fingerprint/project) so the
+  // final publish lock can detect concurrent generation advances and refuse to
+  // store an older projection under a newer generation number.
   {
     std::lock_guard state_lock(state->mutex);
     if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
@@ -1053,6 +1061,7 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
     published = state->published_inspection;
     published_fingerprint = state->published_fingerprint;
     content_generation = state->content_generation;
+    captured_content_generation = content_generation;
   }
 
   auto fingerprint = source->content_fingerprint();
@@ -1094,6 +1103,11 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
     return make_refresh_unavailable_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending);
   }
 
+  // Deterministic race seam: pause after fingerprint+project, before publish.
+  // Outside locks; lets a concurrent inspector publish a newer generation first.
+  if (before_publish_hook)
+    before_publish_hook();
+
   {
     std::lock_guard state_lock(state->mutex);
     // ARCH-INS-06: discard stale live results after complete/shutdown publication.
@@ -1101,8 +1115,21 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
       return current_frame_locked();
 
     // Another concurrent inspector may already have published this fingerprint.
+    // Return the cached current frame without advancing generation.
     if (state->published_fingerprint && *state->published_fingerprint == *fingerprint && state->published_inspection)
       return view_published_frame(state->published_inspection, terminal(state->snapshot.execution), state->freeze_pending);
+
+    // ARCH-INS-09: if content_generation moved since our post-recheck capture,
+    // a concurrent inspector already published a newer projection. Discard this
+    // older projection rather than advancing generation with stale content.
+    // No post-project fingerprint recheck: fingerprint I/O stays outside the
+    // lock once; same-fingerprint hits the cache path above, and a generation
+    // advance with a different fingerprint is exactly the concurrent-publish
+    // case this check covers. A fingerprint/content skew from an append between
+    // fingerprint and project cannot regress published content (projection reads
+    // at least as new as the fingerprint) and self-heals on the next inspect.
+    if (state->content_generation != captured_content_generation)
+      return current_frame_locked();
 
     state->content_generation = advance_content_generation(state->content_generation);
     auto frame = stamp_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending, false, false,

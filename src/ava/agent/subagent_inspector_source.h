@@ -5,6 +5,7 @@
 // must include subagent_inspector.h (path-free DTOs) only.
 
 #include "ava/agent/subagent_inspector.h"
+#include "ava/debug/print_members_on.h"
 #include "ava/session/session_store.h"
 #include "ava/core/result.h"
 

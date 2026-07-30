@@ -1011,6 +1011,112 @@ void test_live_inspection_deterministic_stale_inflight_race()
          "stale in-flight inspect returns the current terminal generation, not a stale live frame");
 }
 
+void test_live_inspection_monotonic_concurrent_publish_race()
+{
+  // ARCH-INS-09: inspector A projects C1 then pauses before publish; inspector B
+  // publishes C2; A must return current C2 without advancing generation or
+  // regressing content. Only A is blocked: remaining_blocks starts at 1.
+  std::mutex hook_mutex;
+  std::condition_variable hook_cv;
+  int remaining_blocks = 0;
+  bool hook_entered = false;
+  bool release_hook = false;
+
+  ava::agent::SubagentCoordinatorOptions options;
+  options.inspect_before_publish_for_test = [&] {
+    std::unique_lock lock(hook_mutex);
+    if (remaining_blocks <= 0)
+      return;
+    --remaining_blocks;
+    hook_entered = true;
+    hook_cv.notify_all();
+    expect(hook_cv.wait_for(lock, std::chrono::seconds(2), [&] { return release_hook; }),
+           "inspect_before_publish_for_test waits with a finite deadline");
+  };
+  auto coordinator = coordinator_with(std::move(options));
+  if (!coordinator)
+    return;
+
+  auto child = make_child_fixture("child_mono_race", "seed");
+  expect(static_cast<bool>(child), "monotonic race fixture builds child");
+  if (!child)
+    return;
+  auto worker = std::make_shared<BlockingWorker>();
+  auto started = coordinator->start_background("parent_mono_race", {.child_session_id = child->store.session_id()},
+                                               [worker](auto const& context) { return worker->run(context, "mono-done"); }, child->source);
+  expect(started && worker->wait_started(), "monotonic race fixture starts");
+  if (!started)
+    return;
+
+  auto initial = coordinator->inspect("parent_mono_race", started->job.identity.job_id);
+  expect(initial && (*initial)->generation == 1 && (*initial)->messages.size() == 1 && (*initial)->messages.front().text == "seed",
+         "monotonic race starts at generation 1 with seed content");
+  if (!initial)
+    return;
+
+  auto c1 = ava::session::SessionEntry{.id = "a_c1",
+                                       .parent_id = "",
+                                       .type = ava::session::EntryType::AssistantMessage,
+                                       .timestamp = ava::session::now_timestamp(),
+                                       .data_json = "{\"text\":\"C1\"}"};
+  expect(child->store.append(child->lease, c1).has_value(), "monotonic race appends C1");
+
+  {
+    std::lock_guard lock(hook_mutex);
+    remaining_blocks = 1;
+    hook_entered = false;
+    release_hook = false;
+  }
+  auto inspector_a =
+      std::async(std::launch::async, [&] { return coordinator->inspect("parent_mono_race", started->job.identity.job_id, (*initial)->generation); });
+  {
+    std::unique_lock lock(hook_mutex);
+    expect(hook_cv.wait_for(lock, std::chrono::seconds(2), [&] { return hook_entered; }),
+           "inspector A reaches before-publish seam with C1 projected");
+  }
+
+  auto c2 = ava::session::SessionEntry{.id = "a_c2",
+                                       .parent_id = "",
+                                       .type = ava::session::EntryType::AssistantMessage,
+                                       .timestamp = ava::session::now_timestamp(),
+                                       .data_json = "{\"text\":\"C2\"}"};
+  expect(child->store.append(child->lease, c2).has_value(), "monotonic race appends C2 while A is paused");
+
+  // remaining_blocks is already 0, so B must not block on the before-publish seam.
+  auto inspector_b = coordinator->inspect("parent_mono_race", started->job.identity.job_id, (*initial)->generation);
+  expect(inspector_b && !(*inspector_b)->not_modified && (*inspector_b)->generation == 2 && (*inspector_b)->messages.size() == 3 &&
+             (*inspector_b)->messages.back().text == "C2",
+         "inspector B publishes C2 at generation 2 without blocking");
+  if (!inspector_b)
+  {
+    std::lock_guard lock(hook_mutex);
+    release_hook = true;
+    hook_cv.notify_all();
+    inspector_a.wait();
+    return;
+  }
+
+  {
+    std::lock_guard lock(hook_mutex);
+    release_hook = true;
+    hook_cv.notify_all();
+  }
+  auto a_result = inspector_a.get();
+  expect(a_result && !(*a_result)->not_modified && (*a_result)->generation == 2 && (*a_result)->messages.size() == 3 &&
+             (*a_result)->messages.back().text == "C2",
+         "inspector A returns current C2 generation/content without regressing to C1 or minting a new generation");
+
+  auto current = coordinator->inspect("parent_mono_race", started->job.identity.job_id, (*inspector_b)->generation);
+  expect(current && (*current)->not_modified && (*current)->generation == 2, "current known generation returns not_modified at C2");
+  auto stale = coordinator->inspect("parent_mono_race", started->job.identity.job_id, (*initial)->generation);
+  expect(stale && !(*stale)->not_modified && (*stale)->generation == 2 && (*stale)->messages.size() == 3 && (*stale)->messages.back().text == "C2",
+         "stale known generation returns current C2 frame");
+
+  worker->finish();
+  auto terminal = coordinator->wait("parent_mono_race", started->job.identity.job_id, std::chrono::seconds(2));
+  expect(terminal && !terminal->timed_out, "monotonic race fixture reaches terminal");
+}
+
 void test_live_inspection_two_client_lost_response_and_sink()
 {
   std::mutex sink_mutex;
@@ -1321,6 +1427,7 @@ void run_subagent_coordinator_tests()
   test_live_inspection_missing_mismatch_owner_and_prepublication();
   test_live_inspection_generation_freeze_and_lifecycle();
   test_live_inspection_deterministic_stale_inflight_race();
+  test_live_inspection_monotonic_concurrent_publish_race();
   test_live_inspection_two_client_lost_response_and_sink();
   test_live_inspection_path_free_refresh_failures();
   test_live_inspection_eviction_and_freeze_failure();

@@ -92,6 +92,11 @@ struct SubagentCoordinatorOptions
   // test can complete/freeze the job while the inspector is paused. Production
   // leaves this empty. Must not perform coordinator I/O under JobState locks.
   std::function<void()> inspect_after_source_capture_for_test = nullptr;
+  // Deterministic test-only seam: after fingerprint + projection succeed and
+  // immediately before the final publish lock, invoke this hook so a test can
+  // interleave a concurrent inspect/publish while one inspector holds an older
+  // projection. Production leaves this empty. Outside JobState locks.
+  std::function<void()> inspect_before_publish_for_test = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

@@ -362,12 +362,15 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
       ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
                                                                           "reason=\"trusted local read\""});
   expect(add_permission_rule && add_permission_rule->handled && !add_permission_rule->output.empty() &&
-             add_permission_rule->output[0].find("added permission rule permrule_") != std::string::npos &&
-             add_permission_rule->output[0].find("path=src/main.cpp") != std::string::npos &&
-             add_permission_rule->output[0].find("trusted local read") != std::string::npos,
-         "command dispatcher /permissions add stores a quoted persistent path rule");
+             add_permission_rule->output[0].find("added permission rule") != std::string::npos &&
+             add_permission_rule->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
+             add_permission_rule->output[0].find("Rule ID: permrule_") != std::string::npos &&
+             add_permission_rule->output[0].find("trusted local read") == std::string::npos,
+         "command dispatcher /permissions add leads with a human receipt and secondary rule id");
   auto extract_rule_id = [](std::string const& text) {
-    auto const start = text.find("permrule_");
+    auto const marker = std::string_view("Rule ID: ");
+    auto const marker_pos = text.find(marker);
+    auto const start = marker_pos == std::string::npos ? text.find("permrule_") : marker_pos + marker.size();
     if (start == std::string::npos)
       return std::string{};
     auto end = start;
@@ -375,21 +378,109 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
     return text.substr(start, end - start);
   };
   auto const permission_rule_id = add_permission_rule ? extract_rule_id(add_permission_rule->output[0]) : std::string{};
-  expect(!permission_rule_id.empty(), "command dispatcher /permissions add exposes the created rule id");
+  expect(!permission_rule_id.empty() && permission_rule_id.starts_with("permrule_"),
+         "command dispatcher /permissions add exposes the created rule id on a secondary line");
+
+  auto add_explore_deny = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
+                                                    "reason=\"no explore subagents\""});
+  expect(add_explore_deny && add_explore_deny->handled && !add_explore_deny->output.empty() &&
+             add_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
+         "command dispatcher /permissions add summarizes exact Explore task identity without inference");
+  auto const explore_rule_id = add_explore_deny ? extract_rule_id(add_explore_deny->output[0]) : std::string{};
+  expect(!explore_rule_id.empty(), "command dispatcher /permissions add exposes Explore rule id secondarily");
+
+  auto add_skill_deny = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
+  expect(add_skill_deny && add_skill_deny->handled && !add_skill_deny->output.empty() &&
+             add_skill_deny->output[0].find("Block skills · Workspace") != std::string::npos,
+         "command dispatcher /permissions add summarizes skill blocks in human form");
+  auto const skill_rule_id = add_skill_deny ? extract_rule_id(add_skill_deny->output[0]) : std::string{};
+
+  auto add_global_read =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
+                                                                          "path=/etc/hosts reason=\"global reads\""});
+  expect(add_global_read && add_global_read->handled && !add_global_read->output.empty() &&
+             add_global_read->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos,
+         "command dispatcher /permissions add summarizes global file-read allows");
+  auto const global_read_rule_id = add_global_read ? extract_rule_id(add_global_read->output[0]) : std::string{};
+
+  auto add_exact_command_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
+                                                                          "command=\"git push origin main\" reason=\"block push\""});
+  expect(add_exact_command_deny && add_exact_command_deny->handled && !add_exact_command_deny->output.empty() &&
+             add_exact_command_deny->output[0].find("Block Exact command · Workspace") != std::string::npos &&
+             add_exact_command_deny->output[0].find("git push origin main") == std::string::npos,
+         "command dispatcher /permissions add receipts omit raw command bodies");
+  auto const exact_command_rule_id = add_exact_command_deny ? extract_rule_id(add_exact_command_deny->output[0]) : std::string{};
+  expect(!exact_command_rule_id.empty(), "command dispatcher /permissions add exposes exact-command rule id secondarily");
+
   auto permissions_list = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list trusted"});
   expect(permissions_list && permissions_list->handled && !permissions_list->output.empty() &&
-             permissions_list->output[0].find(permission_rule_id) != std::string::npos &&
-             permissions_list->output[0].find("built-in hard denies run first") != std::string::npos,
-         "command dispatcher /permissions list filters rules and explains precedence");
+             permissions_list->output[0].find("1. Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
+             permissions_list->output[0].find(permission_rule_id) == std::string::npos &&
+             permissions_list->output[0].find("built-in hard denies run first") != std::string::npos &&
+             permissions_list->output[0].find("ordinals are not remove authority") != std::string::npos &&
+             permissions_list->output[0].find("/permissions explain or /permissions remove") != std::string::npos,
+         "command dispatcher /permissions list filters by reason privately and shows human ordinals only");
+
+  auto permissions_list_human = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list file reads"});
+  expect(permissions_list_human && permissions_list_human->handled && !permissions_list_human->output.empty() &&
+             permissions_list_human->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
+             permissions_list_human->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos &&
+             permissions_list_human->output[0].find("Block Explore subagents") == std::string::npos,
+         "command dispatcher /permissions list filters by human summary words");
+
+  auto permissions_list_command_private =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
+  expect(permissions_list_command_private && permissions_list_command_private->handled && !permissions_list_command_private->output.empty() &&
+             permissions_list_command_private->output[0].find("filter: git push origin main") != std::string::npos &&
+             permissions_list_command_private->output[0].find("1. Block Exact command · Workspace") != std::string::npos &&
+             permissions_list_command_private->output[0].find("command=\"") == std::string::npos &&
+             permissions_list_command_private->output[0].find(exact_command_rule_id) == std::string::npos &&
+             permissions_list_command_private->output[0].find("recipe_key=") == std::string::npos &&
+             permissions_list_command_private->output[0].find("permrule_") == std::string::npos,
+         "command dispatcher /permissions list can match command text privately without printing rule bodies");
+
+  auto permissions_list_all = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list"});
+  expect(permissions_list_all && permissions_list_all->handled && !permissions_list_all->output.empty() &&
+             permissions_list_all->output[0].find("1. ") != std::string::npos && permissions_list_all->output[0].find("2. ") != std::string::npos &&
+             permissions_list_all->output[0].find("Block Explore subagents · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Block skills · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("permrule_") == std::string::npos &&
+             permissions_list_all->output[0].find("command=\"") == std::string::npos,
+         "command dispatcher /permissions list leads with stable human ordinals and omits rule ids and command bodies");
+
   auto permissions_explain = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permission-rules explain " + permission_rule_id});
   expect(permissions_explain && permissions_explain->handled && !permissions_explain->output.empty() &&
-             permissions_explain->output[0].find("Permission rule " + permission_rule_id) != std::string::npos &&
+             permissions_explain->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
+             permissions_explain->output[0].find("rule id: " + permission_rule_id) != std::string::npos &&
+             permissions_explain->output[0].find("path: src/main.cpp") != std::string::npos &&
              permissions_explain->output[0].find("matching: exact operation") != std::string::npos &&
              permissions_explain->output[0].find("precedence: built-in hard denies run first") != std::string::npos,
-         "command dispatcher /permissions explain reports rule matching and precedence diagnostics");
+         "command dispatcher /permissions explain leads with human summary and retains authority details");
+
+  auto permissions_explain_command =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
+  expect(permissions_explain_command && permissions_explain_command->handled && !permissions_explain_command->output.empty() &&
+             permissions_explain_command->output[0].find("Block Exact command · Workspace") != std::string::npos &&
+             permissions_explain_command->output[0].find("command: git push origin main") != std::string::npos &&
+             permissions_explain_command->output[0].find("rule id: " + exact_command_rule_id) != std::string::npos,
+         "command dispatcher /permissions explain retains exact command authority details");
+
+  auto permissions_remove_ordinal = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove 1"});
+  expect(permissions_remove_ordinal && permissions_remove_ordinal->handled && !permissions_remove_ordinal->output.empty() &&
+             permissions_remove_ordinal->output[0].find("list ordinals are display-only") != std::string::npos,
+         "command dispatcher /permissions remove rejects display ordinals");
+
+  auto permissions_explain_ordinal = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain 1"});
+  expect(permissions_explain_ordinal && permissions_explain_ordinal->handled && !permissions_explain_ordinal->output.empty() &&
+             permissions_explain_ordinal->output[0].find("list ordinals are display-only") != std::string::npos,
+         "command dispatcher /permissions explain rejects display ordinals");
+
   auto permissions_diagnose = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/perms diagnose"});
   expect(permissions_diagnose && permissions_diagnose->handled && !permissions_diagnose->output.empty() &&
-             permissions_diagnose->output[0].find("loaded rules: 1") != std::string::npos &&
+             permissions_diagnose->output[0].find("loaded rules: 5") != std::string::npos &&
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit = ava::agent::append_permission_decision(
@@ -477,8 +568,18 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   expect(permission_completion_available, "command catalog argument completions expose persistent permission rule ids for explain and remove");
   auto remove_permission_rule = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + permission_rule_id});
   expect(remove_permission_rule && remove_permission_rule->handled && !remove_permission_rule->output.empty() &&
-             remove_permission_rule->output[0].find("removed permission rule " + permission_rule_id) != std::string::npos,
-         "command dispatcher /permissions remove deletes persistent rules by id");
+             remove_permission_rule->output[0].find("removed permission rule") != std::string::npos &&
+             remove_permission_rule->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
+             remove_permission_rule->output[0].find("Rule ID: " + permission_rule_id) != std::string::npos,
+         "command dispatcher /permissions remove deletes persistent rules by exact id with human receipt");
+
+  for (auto const& rule_id : {explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id})
+  {
+    auto removed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
+    expect(removed && removed->handled && !removed->output.empty() && removed->output[0].find("Rule ID: " + rule_id) != std::string::npos,
+           "command dispatcher /permissions remove deletes remaining fixture rules by exact id");
+  }
+
   auto permissions_after_remove = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list"});
   expect(permissions_after_remove && permissions_after_remove->handled && !permissions_after_remove->output.empty() &&
              permissions_after_remove->output[0].find("No persistent permission rules") != std::string::npos,

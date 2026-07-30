@@ -107,11 +107,25 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     remembered_rule = wait_for(
         tmux_exe,
         session,
-        r'(?s)permrule_.*deny bash.*command="git push origin main"',
+        r"(?s)Permission rules:.*1\. Block Exact command · Workspace(?: · Build)?",
         "remembered permission rule listing",
     )
-    if 'command="git push origin main"' not in remembered_rule or "deny bash" not in remembered_rule:
-        raise RuntimeError(f"remembered exact critical-command deny rule was not listed\nscreen:\n{remembered_rule}")
+    list_match = re.search(
+        r"(?s)Permission rules:.*?Use /permissions explain or /permissions remove, then choose or complete a rule\.",
+        remembered_rule,
+    )
+    list_section = list_match.group(0) if list_match else ""
+    if (
+        not list_section
+        or "1. Block Exact command · Workspace" not in list_section
+        or "git push origin main" in list_section
+        or "permrule_" in list_section
+        or 'command="' in list_section
+    ):
+        raise RuntimeError(
+            "remembered exact critical-command deny rule was not listed as a human summary without raw command body\n"
+            f"screen:\n{remembered_rule}"
+        )
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/bash git push origin main")

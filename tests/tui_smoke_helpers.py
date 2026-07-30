@@ -28,7 +28,7 @@ SKIP = 77
 # Footer value emitted by AVA's active-context meter: a known model-window
 # percentage, a sub-0.1% sentinel, or an estimated compact token count when
 # the model has no context-window metadata.
-ACTIVE_CONTEXT_STATUS_PATTERN = r"(?:<0\.1%|\d+(?:\.\d+)?%|~\d+(?:\.\d+)?[km]?)"
+ACTIVE_CONTEXT_STATUS_PATTERN = r"(?:~\d+(?:\.\d+)?[km]?|\d+(?:\.\d+)?[km]? \((?:<0\.1%|\d+(?:\.\d+)?%)\))"
 
 
 def enabled(value: str | None) -> bool:

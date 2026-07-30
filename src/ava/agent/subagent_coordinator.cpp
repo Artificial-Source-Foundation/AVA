@@ -17,6 +17,9 @@ constexpr std::size_t kMaxIdBytes = 96;
 constexpr std::size_t kMaxSummaryBytes = 16U * 1024U;
 constexpr std::size_t kMaxErrorBytes = 4U * 1024U;
 constexpr std::size_t kMaxStopReasonBytes = 1024;
+// Matches the model task description bound; never stores the full prompt.
+constexpr std::size_t kMaxDisplayTitleBytes = 256;
+constexpr std::size_t kMaxDisplaySubagentTypeBytes = 128;
 constexpr std::size_t kMaxAccountingValue = 1024U * 1024U;
 constexpr std::size_t kMaxIdentityGenerationAttempts = 8;
 constexpr std::string_view kPublicationCommitStateContext = "subagent_publication_commit_state";
@@ -132,6 +135,38 @@ bool normalize_text(std::string& value, std::size_t max_bytes, std::string_view 
     changed = true;
   }
   return truncate_utf8(value, max_bytes) || changed;
+}
+
+// Process-local interactive display only. Replaces controls, collapses
+// interior whitespace, rejects invalid UTF-8, and never retains prompt text.
+std::string make_display_field(std::string_view raw, std::size_t max_bytes)
+{
+  std::string value;
+  value.reserve(std::min(raw.size(), max_bytes));
+  bool pending_space = false;
+  auto flush_space = [&] {
+    if (pending_space && !value.empty())
+      value.push_back(' ');
+    pending_space = false;
+  };
+  for (char const ch : raw)
+  {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20U || byte == 0x7FU || ch == ' ')
+    {
+      pending_space = !value.empty();
+      continue;
+    }
+    flush_space();
+    value.push_back(ch);
+    if (value.size() >= max_bytes + 4)
+      break;
+  }
+  if (!ava::core::json::is_valid_utf8(value))
+    return {};
+  truncate_utf8(value, max_bytes);
+  while (!value.empty() && value.back() == ' ') value.pop_back();
+  return value;
 }
 
 BackgroundJobCompletion exception_completion(std::string const& job_id, std::stop_token const& stop_token, std::string cause)
@@ -492,7 +527,9 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
                            .execution = SubagentExecutionState::Starting,
                            .delivery = SubagentDeliveryState::Direct,
                            .started_at = now,
-                           .updated_at = now};
+                           .updated_at = now,
+                           .display_title = make_display_field(options.title, kMaxDisplayTitleBytes),
+                           .display_subagent_type = make_display_field(options.subagent_type, kMaxDisplaySubagentTypeBytes)};
     candidate->interaction_gate = interaction_gate;
 
     std::lock_guard lock(mutex_);

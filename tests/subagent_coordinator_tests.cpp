@@ -199,12 +199,16 @@ void test_exact_v1_job_snapshot_and_enum_strings()
                                                               .stop_reason_truncated = true,
                                                               .provider_iterations = 11,
                                                               .tool_calls = 12,
-                                                              .tool_iterations = 13},
+                                                              .tool_iterations = 13,
+                                                              .display_title = "internal display only",
+                                                              .display_subagent_type = "explore"},
                                                       .timed_out = true};
   auto const expected =
       R"({"schema_version":1,"job_id":"job_fixed","task_id":"task_fixed","parent_session_id":"parent_fixed","child_session_id":"child_fixed","delivery_id":"delivery_fixed","mode":"background","state":"completed","delivery_state":"acknowledged","was_promoted":true,"cancel_requested":true,"timed_out":true,"started_at":"started","updated_at":"updated","promoted_at":null,"cancel_requested_at":"cancel-requested","terminal_at":null,"delivery_pending_at":"delivery-pending","last_delivery_attempt_at":null,"delivery_acknowledged_at":"delivery-acknowledged","delivery_attempts":7,"summary_truncated":true,"error_truncated":false,"stop_reason_truncated":true,"provider_iterations":11,"tool_calls":12,"tool_iterations":13,"result":{"status":"completed","summary":"fixed summary"}})";
-  expect(ava::agent::public_job_snapshot_json(snapshot, ava::agent::PublicJobContent::IncludeTerminalResult) == expected,
-         "exact schema-version-1 public snapshot JSON retains every field, nullable value, counter, truncation flag, and terminal result shape");
+  auto const encoded = ava::agent::public_job_snapshot_json(snapshot, ava::agent::PublicJobContent::IncludeTerminalResult);
+  expect(encoded == expected && encoded.find("display_title") == std::string::npos && encoded.find("internal display only") == std::string::npos &&
+             encoded.find("\"title\"") == std::string::npos && encoded.find("explore") == std::string::npos,
+         "exact schema-version-1 public snapshot JSON retains every field, nullable value, counter, truncation flag, and terminal result shape while omitting internal display fields");
 
   std::array const modes{ava::agent::SubagentJobMode::Foreground, ava::agent::SubagentJobMode::Background};
   std::array const mode_strings{std::string_view("foreground"), std::string_view("background")};

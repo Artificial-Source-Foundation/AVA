@@ -331,11 +331,31 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
   ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
 
+  navigation.jump_to_bottom("live tail");
+  auto const live_before_wheel = renderer.transcript_scroll_offset;
+  navigation.scroll_up(ava::tui::kTranscriptWheelScrollRows);
+  auto const wheel_up_offset = renderer.transcript_scroll_offset;
+  bool const wheel_up_detached = wheel_up_offset == ava::tui::kTranscriptWheelScrollRows && renderer.detached_sidebar_snapshot.has_value();
+  navigation.scroll_down(ava::tui::kTranscriptWheelScrollRows);
+  auto const wheel_down_live = renderer.transcript_scroll_offset;
+  bool const wheel_reverse_reattached =
+      live_before_wheel == 0 && wheel_down_live == 0 && !renderer.detached_sidebar_snapshot.has_value() && renderer.detached_new_output_count == 0;
+  navigation.scroll_up(ava::tui::kTranscriptWheelScrollRows);
+  navigation.scroll_up(ava::tui::kTranscriptWheelScrollRows);
+  auto const two_wheel_ups = renderer.transcript_scroll_offset;
+  navigation.scroll_down(1);
+  auto const one_row_down = renderer.transcript_scroll_offset;
+  bool const wheel_step_is_three =
+      two_wheel_ups == ava::tui::kTranscriptWheelScrollRows * 2 && one_row_down + 1 == two_wheel_ups && ava::tui::kTranscriptWheelScrollRows == 3;
+
   navigation.scroll_up(1000);
   auto const oldest_offset = renderer.transcript_scroll_offset;
   auto const draft_before = draft_state.draft.text;
   auto const cursor_before = draft_state.draft.cursor;
   bool const detached = oldest_offset > 0;
+  auto const overscroll_offset = renderer.transcript_scroll_offset;
+  navigation.scroll_up(ava::tui::kTranscriptWheelScrollRows);
+  bool const wheel_clamps_at_oldest = renderer.transcript_scroll_offset == overscroll_offset;
 
   navigation.scroll_to_message_boundary(true);
   auto const oldest_status = presentation.snapshot.status;
@@ -360,8 +380,9 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   bool const draft_unchanged =
       draft_state.draft.text == draft_before && draft_state.draft.cursor == cursor_before && presentation.snapshot.input == draft_before;
 
-  bool const passed = detached && oldest_status == "oldest message visible" && oldest_boundary_offset == oldest_offset && next_offset < oldest_offset &&
-                      next_offset > 0 && next_status == "next message" && prev_offset > next_offset && prev_status == "previous message" && live_offset == 0 &&
+  bool const passed = wheel_up_detached && wheel_reverse_reattached && wheel_step_is_three && wheel_clamps_at_oldest && detached &&
+                      oldest_status == "oldest message visible" && oldest_boundary_offset == oldest_offset && next_offset < oldest_offset && next_offset > 0 &&
+                      next_status == "next message" && prev_offset > next_offset && prev_status == "previous message" && live_offset == 0 &&
                       live_status == "live tail" && already_live_offset == 0 && already_live_status == "live tail" && draft_unchanged &&
                       ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessagePrev, ava::tui::Key::AltK) &&
                       ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessageNext, ava::tui::Key::AltJ) &&
@@ -626,9 +647,11 @@ void run_tui_prompt_search_race_tests()
 
 void run_tui_composer_rendering_tests_part_1()
 {
-  expect(test_transcript_message_boundary_navigation_and_live_tail_reset(),
-         "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, and leaves "
-         "the composer draft untouched while defaults keep MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
+  expect(
+      test_transcript_message_boundary_navigation_and_live_tail_reset(),
+      "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, applies the "
+      "shared three-row transcript wheel step with reverse reattach and hard clamp, and leaves the composer draft untouched while defaults keep "
+      "MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
   expect(test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless(),
          "message-prev/message-next on empty or fitting transcripts stay at offset 0 with transcript-fits status and leave the composer draft untouched");
   {
@@ -723,21 +746,25 @@ void run_tui_composer_rendering_tests_part_1()
     auto const started_at = Clock::time_point{};
     ava::tui::WheelBurstGovernor governor;
     auto const first_up = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at);
-    auto const same_direction_after_paint =
-        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(16));
-    auto const reversed_within_interval =
-        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(39));
-    auto const accepted_at_interval =
-        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(40));
-    auto const keyboard = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::ArrowDown, started_at + std::chrono::milliseconds(41));
+    auto const same_direction_at_16 = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(16));
+    auto const same_direction_at_39 = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(39));
+    auto const same_direction_at_40 = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(40));
+    auto const reverse_immediate = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(40));
+    auto const same_reverse_within_window =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(56));
+    auto const same_reverse_at_interval =
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(80));
+    auto const keyboard = ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::ArrowDown, started_at + std::chrono::milliseconds(81));
     auto const accepted_after_non_wheel =
-        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(41));
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelUp, started_at + std::chrono::milliseconds(81));
     governor.reset();
     auto const accepted_after_explicit_reset =
-        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(41));
-    expect(first_up && !same_direction_after_paint && !reversed_within_interval && accepted_at_interval && keyboard && accepted_after_non_wheel &&
-               accepted_after_explicit_reset,
-           "runtime wheel wiring throttles all directions for 40ms across paints and resets at explicit non-wheel or reset boundaries");
+        ava::tui::runtime_wheel_input_accepted(governor, ava::tui::Key::MouseWheelDown, started_at + std::chrono::milliseconds(81));
+    expect(
+        ava::tui::kTranscriptWheelScrollRows == 3 && first_up && !same_direction_at_16 && !same_direction_at_39 && same_direction_at_40 && reverse_immediate &&
+            !same_reverse_within_window && same_reverse_at_interval && keyboard && accepted_after_non_wheel && accepted_after_explicit_reset,
+        "runtime wheel wiring accepts one same-direction event per 40ms, accepts immediate reversals as the new direction window, scrolls transcript by three "
+        "rows per accepted event, and resets at explicit non-wheel or reset boundaries");
   }
   {
     using Clock = std::chrono::steady_clock;

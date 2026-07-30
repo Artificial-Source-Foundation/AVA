@@ -56,7 +56,6 @@ using runtime_views::kSettingsReloadKeybindings;
 namespace {
 
 constexpr std::size_t kKeyboardScrollRows = 3;
-constexpr std::size_t kMouseWheelScrollRows = 1;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
 constexpr auto kTerminalBackgroundProbeDeadline = std::chrono::milliseconds(50);
 
@@ -1374,11 +1373,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (event.key == Key::MouseWheelUp)
     {
-      scroll_up(kMouseWheelScrollRows);
+      scroll_up(kTranscriptWheelScrollRows);
     }
     else if (event.key == Key::MouseWheelDown)
     {
-      scroll_down(kMouseWheelScrollRows);
+      scroll_down(kTranscriptWheelScrollRows);
     }
     else if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick || event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease ||
              event.key == Key::MousePointerCancel)

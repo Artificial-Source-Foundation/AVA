@@ -38,12 +38,18 @@ enum class WheelDirection
   Down,
 };
 
+// Shared transcript mouse-wheel step for idle and active-run paths. Selectors,
+// prompts, the sidebar drawer, and selection edge-autoscroll keep one-row steps.
+inline constexpr std::size_t kTranscriptWheelScrollRows = 3;
+
 class WheelBurstGovernor final
 {
  public:
   using Clock = std::chrono::steady_clock;
   static constexpr auto kAcceptedEventInterval = std::chrono::milliseconds(40);
 
+  // Same-direction events inside the interval are dropped. An opposite-direction
+  // event is accepted immediately and becomes the new accepted direction/time.
   [[nodiscard]] bool accept(WheelDirection direction, Clock::time_point now = Clock::now());
   void reset();
 
@@ -51,6 +57,7 @@ class WheelBurstGovernor final
 
  private:
   std::optional<Clock::time_point> last_accepted_at_ = std::nullopt;
+  std::optional<WheelDirection> last_accepted_direction_ = std::nullopt;
 };
 
 [[nodiscard]] bool runtime_wheel_input_accepted(WheelBurstGovernor& governor, Key key,

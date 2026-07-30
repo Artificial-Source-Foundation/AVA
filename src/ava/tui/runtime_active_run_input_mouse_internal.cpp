@@ -18,12 +18,6 @@
 
 namespace ava::tui {
 
-namespace {
-
-constexpr std::size_t kMouseWheelScrollRows = 1;
-
-}  // namespace
-
 // Mouse hit-testing/wheel.
 RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mouse_input(runtime_input::RuntimeInput const& active_input)
 {
@@ -142,12 +136,12 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
   }
   if (active_event.key == Key::MouseWheelUp)
   {
-    navigation_.scroll_up(kMouseWheelScrollRows);
+    navigation_.scroll_up(kTranscriptWheelScrollRows);
     return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::MouseWheelDown)
   {
-    navigation_.scroll_down(kMouseWheelScrollRows);
+    navigation_.scroll_down(kTranscriptWheelScrollRows);
     return to_input_handling(renderer_.request_render());
   }
   return InputHandling::Unhandled;

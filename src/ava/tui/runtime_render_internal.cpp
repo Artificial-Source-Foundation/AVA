@@ -35,17 +35,19 @@ std::pair<std::size_t, std::size_t> terminal_size()
   return {80, 24};
 }
 
-bool WheelBurstGovernor::accept(WheelDirection, Clock::time_point now)
+bool WheelBurstGovernor::accept(WheelDirection direction, Clock::time_point now)
 {
-  if (last_accepted_at_ && now < *last_accepted_at_ + kAcceptedEventInterval)
+  if (last_accepted_at_ && last_accepted_direction_ && *last_accepted_direction_ == direction && now < *last_accepted_at_ + kAcceptedEventInterval)
     return false;
   last_accepted_at_ = now;
+  last_accepted_direction_ = direction;
   return true;
 }
 
 void WheelBurstGovernor::reset()
 {
   last_accepted_at_.reset();
+  last_accepted_direction_.reset();
 }
 
 bool runtime_wheel_input_accepted(WheelBurstGovernor& governor, Key key, WheelBurstGovernor::Clock::time_point now)

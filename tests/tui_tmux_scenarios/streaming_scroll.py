@@ -116,6 +116,8 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
 
     wheel_up = "\x1b[<64;4;6M"
     wheel_down = "\x1b[<65;4;6M"
+    # One accepted transcript wheel event scrolls exactly three rendered rows.
+    wheel_scroll_rows = 3
     same_direction_started = time.monotonic()
     send_literal(tmux_exe, session, wheel_up * 12 + same_direction_suffix)
     same_direction_screen = wait_for(
@@ -123,11 +125,21 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     )
     same_direction_elapsed = time.monotonic() - same_direction_started
     same_direction_numbers = _numbered_window(same_direction_screen, "same-direction wheel-burst detached stream")
-    same_size_shift = [initial_numbers[0] - 1, *initial_numbers[:-1]]
-    one_extra_visible_row = [initial_numbers[0] - 1, *initial_numbers]
-    if same_direction_numbers not in (same_size_shift, one_extra_visible_row):
+
+    def _is_exact_wheel_up_step(before: list[int], after: list[int], step: int) -> bool:
+        if len(after) < 10 or after != list(range(after[0], after[-1] + 1)):
+            return False
+        if after[0] != before[0] - step:
+            return False
+        # Same-height window shifted by the wheel step.
+        if len(after) == len(before):
+            return after[-1] == before[-1] - step
+        # Detaching can free live-tail chrome rows; allow growth while keeping the step and bounds.
+        return len(after) > len(before) and after[-1] <= before[-1]
+
+    if not _is_exact_wheel_up_step(initial_numbers, same_direction_numbers, wheel_scroll_rows):
         raise RuntimeError(
-            "raw same-direction wheel burst did not produce exactly one upward transcript row\n"
+            "raw same-direction wheel burst did not produce exactly three upward transcript rows\n"
             f"active typing elapsed: {active_elapsed:.3f}s; wheel elapsed: {same_direction_elapsed:.3f}s\n"
             f"before: {initial_numbers}\nafter: {same_direction_numbers}\nscreen:\n{same_direction_screen}"
         )
@@ -347,12 +359,18 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     final_draft = idle_draft + "XFINAL"
     idle_started = time.monotonic()
     send_literal(tmux_exe, session, idle_draft + (wheel_up + wheel_down) * 40 + "XFINAL")
+
+    def idle_burst_live_tail(screen: str) -> bool:
+        # True live tail after an alternating wheel flood: numbered end at 059, completion
+        # chrome visible, and the exact draft retained. Do not use a single "AVA TUI Fake"
+        # count — footer model text and turn metadata can both legitimately include it.
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
+        return bool(numbers) and numbers[-1] == 59 and "STREAM COMPLETE" in screen and final_draft in screen
+
     final_screen = wait_for_screen_state(
         tmux_exe,
         session,
-        lambda screen: "stream line 059" in screen
-        and final_draft in screen
-        and sum(1 for line in screen.splitlines() if "AVA TUI Fake" in line) == 1,
+        idle_burst_live_tail,
         "streaming-scroll completed live tail and retained idle burst draft",
         timeout=2.0,
     )
@@ -360,16 +378,13 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     final_numbers = _numbered_window(final_screen, "streaming-scroll final live tail")
     lines = final_screen.splitlines()
     dimensions = tmux(tmux_exe, "display-message", "-p", "-t", session, "#{pane_width},#{pane_height}").stdout.strip()
-    metadata_lines = [line for line in lines if "AVA TUI Fake" in line]
     input_rows = [index for index, line in enumerate(lines) if final_draft in line]
-    if final_numbers[-1] != 59 or final_draft not in final_screen:
+    if final_numbers[-1] != 59 or final_draft not in final_screen or "STREAM COMPLETE" not in final_screen:
         raise RuntimeError(
             "idle typed/wheel burst did not retain the completed live tail with the exact draft/cursor result\n"
             f"active typing elapsed: {active_elapsed:.3f}s; active wheel elapsed: {burst_elapsed:.3f}s; idle elapsed: {idle_elapsed:.3f}s\n"
             f"screen:\n{final_screen}"
         )
-    if len(metadata_lines) != 1:
-        raise RuntimeError(f"streaming turn metadata did not appear exactly once\nmetadata: {metadata_lines}\nscreen:\n{final_screen}")
     if dimensions != "120,32" or len(lines) != 32 or any(len(line) > 120 for line in lines):
         raise RuntimeError(f"streaming final evidence did not retain exact bounded 120x32 dimensions\nscreen:\n{final_screen}")
     if (

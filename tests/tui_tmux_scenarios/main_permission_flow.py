@@ -104,10 +104,13 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/permissions list")
     send_keys(tmux_exe, session, "Enter")
+    # Remembered /bash deny stores the sealed plan cwd as target_path; summaries must
+    # path-qualify that authority (workspace root displays as ".") and keep Build mode.
+    remembered_bash_label = r"1\. Block Exact command · \. · Workspace · Build"
     remembered_rule = wait_for(
         tmux_exe,
         session,
-        r"(?s)Permission rules:.*1\. Block Exact command · Workspace(?: · Build)?",
+        rf"(?s)Permission rules:.*{remembered_bash_label}",
         "remembered permission rule listing",
     )
     list_match = re.search(
@@ -117,13 +120,13 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     list_section = list_match.group(0) if list_match else ""
     if (
         not list_section
-        or "1. Block Exact command · Workspace" not in list_section
+        or "1. Block Exact command · . · Workspace · Build" not in list_section
         or "git push origin main" in list_section
         or "permrule_" in list_section
         or 'command="' in list_section
     ):
         raise RuntimeError(
-            "remembered exact critical-command deny rule was not listed as a human summary without raw command body\n"
+            "remembered exact critical-command deny rule was not listed as a path-qualified human summary without raw command body\n"
             f"screen:\n{remembered_rule}"
         )
 

@@ -106,38 +106,73 @@ std::string permission_rule_storage_path(ava::permissions::PermissionRuleStore c
   return ava::permissions::enforceable_permission_rules_file(store, rule.scope).generic_string();
 }
 
-std::string title_case_token(std::string_view text)
-{
-  auto token = sanitize_inline_text(std::string(text));
-  if (token.empty())
-    return token;
-  bool capitalize_next = true;
-  for (char& ch : token)
-  {
-    auto const unsigned_ch = static_cast<unsigned char>(ch);
-    if (std::isalnum(unsigned_ch) != 0)
-    {
-      if (capitalize_next)
-      {
-        ch = static_cast<char>(std::toupper(unsigned_ch));
-        capitalize_next = false;
-      }
-      else
-      {
-        ch = static_cast<char>(std::tolower(unsigned_ch));
-      }
-      continue;
-    }
-    capitalize_next = ch == ' ' || ch == '-' || ch == '_' || ch == '.';
-    if (ch == '_' || ch == '.')
-      ch = ' ';
-  }
-  return token;
-}
-
 bool identity_equals_ascii_case_insensitive(std::string_view value, std::string_view expected)
 {
   return lower_ascii(value) == lower_ascii(expected);
+}
+
+// Dense primary-line qualifier budget: UTF-8-safe byte cap keeps list/receipt
+// lines compact without depending on TUI cluster width helpers.
+constexpr std::size_t kPermissionSummaryQualifierMaxBytes = 120;
+constexpr std::size_t kPermissionSummaryToolQualifierMaxBytes = 48;
+constexpr std::size_t kPermissionSummaryTaskTypeMaxBytes = 32;
+
+std::size_t utf8_prefix_bytes(std::string_view text, std::size_t max_bytes)
+{
+  if (text.size() <= max_bytes)
+    return text.size();
+  std::size_t index = 0;
+  std::size_t end = 0;
+  while (index < text.size())
+  {
+    auto const byte = static_cast<unsigned char>(text[index]);
+    std::size_t length = 0;
+    if (byte < 0x80U)
+      length = 1;
+    else if ((byte & 0xE0U) == 0xC0U)
+      length = 2;
+    else if ((byte & 0xF0U) == 0xE0U)
+      length = 3;
+    else if ((byte & 0xF8U) == 0xF0U)
+      length = 4;
+    else
+      length = 1;
+    if (index + length > text.size())
+      length = 1;
+    if (index + length > max_bytes)
+      break;
+    index += length;
+    end = index;
+  }
+  return end;
+}
+
+std::string bounded_safe_display_qualifier(std::string_view text, std::size_t max_bytes)
+{
+  auto cleaned = sanitize_inline_text(std::string(text));
+  cleaned.resize(utf8_prefix_bytes(cleaned, max_bytes));
+  return cleaned;
+}
+
+bool is_bounded_identifier_like_qualifier(std::string_view value, std::size_t max_bytes)
+{
+  if (value.empty() || value.size() > max_bytes)
+    return false;
+  for (char const ch : value)
+  {
+    auto const unsigned_ch = static_cast<unsigned char>(ch);
+    if (std::isalnum(unsigned_ch) == 0 && ch != '_' && ch != '-')
+      return false;
+  }
+  return true;
+}
+
+void append_summary_qualifier(std::string& summary, std::string_view qualifier)
+{
+  if (qualifier.empty())
+    return;
+  summary += " · ";
+  summary += qualifier;
 }
 
 std::string permission_rule_action_label(ava::permissions::PermissionAction action)
@@ -224,50 +259,87 @@ std::string permission_rule_operation_subject(ava::permissions::Operation operat
   return "operations";
 }
 
+bool task_run_is_explore_identity(ava::permissions::PersistentPermissionRule const& rule)
+{
+  // Only exact task/tool identity may claim Explore; never infer it from path or reason text.
+  return identity_equals_ascii_case_insensitive(rule.command, "explore") || identity_equals_ascii_case_insensitive(rule.tool_name, "explore");
+}
+
+bool tool_name_is_operation_default(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.tool_name.empty())
+    return true;
+
+  auto const operation_token = ava::permissions::to_string(rule.operation);
+  if (identity_equals_ascii_case_insensitive(rule.tool_name, operation_token))
+    return true;
+
+  switch (rule.operation)
+  {
+    case ava::permissions::Operation::ReadFile:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "read");
+    case ava::permissions::Operation::EditFile:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "edit");
+    case ava::permissions::Operation::SearchFiles:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "search") || identity_equals_ascii_case_insensitive(rule.tool_name, "grep") ||
+             identity_equals_ascii_case_insensitive(rule.tool_name, "glob") || identity_equals_ascii_case_insensitive(rule.tool_name, "list");
+    case ava::permissions::Operation::RunCommand:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "bash") || identity_equals_ascii_case_insensitive(rule.tool_name, "shell");
+    case ava::permissions::Operation::TaskRun:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "task");
+    case ava::permissions::Operation::SkillLoad:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "skill");
+    default:
+      return false;
+  }
+}
+
+// Fixed human operation class only. Qualifiers (tool, recipe display, path, task
+// type) are appended separately so forged names cannot replace authority class.
 std::string permission_rule_subject(ava::permissions::PersistentPermissionRule const& rule)
 {
   if (rule.operation == ava::permissions::Operation::TaskRun)
   {
-    // Only exact task/tool identity may claim Explore; never infer it from path or reason text.
-    if (identity_equals_ascii_case_insensitive(rule.command, "explore") || identity_equals_ascii_case_insensitive(rule.tool_name, "explore"))
+    if (task_run_is_explore_identity(rule))
       return "Explore subagents";
-    if (!rule.command.empty())
-      return title_case_token(rule.command) + " subagents";
-    if (!rule.tool_name.empty() && !identity_equals_ascii_case_insensitive(rule.tool_name, "task"))
-      return title_case_token(rule.tool_name) + " subagents";
     return "subagents";
   }
 
   if (rule.operation == ava::permissions::Operation::RunCommand)
   {
     if (!rule.recipe_display.empty())
-      return sanitize_inline_text(rule.recipe_display);
+      return "recipe";
     if (!rule.command.empty() || !rule.command_recipe_key.empty())
       return "Exact command";
-    if (!rule.tool_name.empty() && !identity_equals_ascii_case_insensitive(rule.tool_name, "bash") &&
-        !identity_equals_ascii_case_insensitive(rule.tool_name, "shell"))
-      return sanitize_inline_text(rule.tool_name);
     return "shell commands";
   }
 
-  if (rule.operation == ava::permissions::Operation::SkillLoad)
-    return "skills";
-
-  if (!rule.tool_name.empty())
-  {
-    auto const operation_token = ava::permissions::to_string(rule.operation);
-    if (!identity_equals_ascii_case_insensitive(rule.tool_name, operation_token) &&
-        !(rule.operation == ava::permissions::Operation::ReadFile && identity_equals_ascii_case_insensitive(rule.tool_name, "read")) &&
-        !(rule.operation == ava::permissions::Operation::EditFile && identity_equals_ascii_case_insensitive(rule.tool_name, "edit")) &&
-        !(rule.operation == ava::permissions::Operation::SearchFiles &&
-          (identity_equals_ascii_case_insensitive(rule.tool_name, "search") || identity_equals_ascii_case_insensitive(rule.tool_name, "grep") ||
-           identity_equals_ascii_case_insensitive(rule.tool_name, "glob") || identity_equals_ascii_case_insensitive(rule.tool_name, "list"))))
-    {
-      return sanitize_inline_text(rule.tool_name);
-    }
-  }
-
   return permission_rule_operation_subject(rule.operation);
+}
+
+std::string permission_rule_task_type_qualifier(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.operation != ava::permissions::Operation::TaskRun || task_run_is_explore_identity(rule))
+    return {};
+
+  // Task command/tool strings are forgeable. Keep only a short identifier-like
+  // type token; never print free-form task command bodies.
+  if (is_bounded_identifier_like_qualifier(rule.command, kPermissionSummaryTaskTypeMaxBytes))
+    return std::string(rule.command);
+  if (!tool_name_is_operation_default(rule) && is_bounded_identifier_like_qualifier(rule.tool_name, kPermissionSummaryTaskTypeMaxBytes))
+    return std::string(rule.tool_name);
+  return {};
+}
+
+std::string permission_rule_tool_qualifier(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.operation == ava::permissions::Operation::TaskRun)
+    return {};
+  if (rule.operation == ava::permissions::Operation::RunCommand && !rule.recipe_display.empty())
+    return {};
+  if (tool_name_is_operation_default(rule))
+    return {};
+  return bounded_safe_display_qualifier(rule.tool_name, kPermissionSummaryToolQualifierMaxBytes);
 }
 
 std::string format_permission_rule_summary_impl(ava::permissions::PersistentPermissionRule const& rule, std::filesystem::path const& workspace_dir)
@@ -276,25 +348,24 @@ std::string format_permission_rule_summary_impl(ava::permissions::PersistentPerm
   summary += ' ';
   summary += permission_rule_subject(rule);
 
-  // Path is a safe secondary subject qualifier when present and not already the whole subject.
-  if (!rule.target_path.empty() && rule.operation != ava::permissions::Operation::TaskRun && rule.operation != ava::permissions::Operation::RunCommand)
+  if (rule.operation == ava::permissions::Operation::RunCommand && !rule.recipe_display.empty())
+    append_summary_qualifier(summary, bounded_safe_display_qualifier(rule.recipe_display, kPermissionSummaryQualifierMaxBytes));
+  else if (rule.operation == ava::permissions::Operation::TaskRun)
+    append_summary_qualifier(summary, permission_rule_task_type_qualifier(rule));
+  else
+    append_summary_qualifier(summary, permission_rule_tool_qualifier(rule));
+
+  // Any non-empty target_path is authority-critical, including RunCommand cwd and TaskRun paths.
+  if (!rule.target_path.empty())
   {
     auto const path_text = sanitize_inline_text(display_permission_path(rule.target_path, workspace_dir));
-    if (!path_text.empty())
-    {
-      summary += " · ";
-      summary += path_text;
-    }
+    append_summary_qualifier(summary, path_text);
   }
 
-  summary += " · ";
-  summary += permission_rule_scope_label(rule.scope);
+  append_summary_qualifier(summary, permission_rule_scope_label(rule.scope));
 
   if (auto const mode_label = permission_rule_mode_label(rule.mode); !mode_label.empty())
-  {
-    summary += " · ";
-    summary += mode_label;
-  }
+    append_summary_qualifier(summary, mode_label);
   return summary;
 }
 

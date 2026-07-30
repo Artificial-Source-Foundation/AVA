@@ -5,6 +5,7 @@
 #include "tests/support/tui_test_support.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_permissions.h"
 #include "ava/app/command_sessions.h"
 #include "ava/app/commands.h"
 #include "ava/app/runtime/Session.h"
@@ -415,6 +416,129 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const exact_command_rule_id = add_exact_command_deny ? extract_rule_id(add_exact_command_deny->output[0]) : std::string{};
   expect(!exact_command_rule_id.empty(), "command dispatcher /permissions add exposes exact-command rule id secondarily");
 
+  auto add_path_command_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
+                                                                          "command=\"git status\" reason=\"path qualified bash\""});
+  expect(add_path_command_deny && add_path_command_deny->handled && !add_path_command_deny->output.empty() &&
+             add_path_command_deny->output[0].find("Block Exact command · scripts · Workspace") != std::string::npos &&
+             add_path_command_deny->output[0].find("git status") == std::string::npos,
+         "command dispatcher /permissions add path-qualifies RunCommand summaries");
+  auto const path_command_rule_id = add_path_command_deny ? extract_rule_id(add_path_command_deny->output[0]) : std::string{};
+
+  auto add_path_explore_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
+                                                                          "path=src reason=\"path qualified explore\""});
+  expect(add_path_explore_deny && add_path_explore_deny->handled && !add_path_explore_deny->output.empty() &&
+             add_path_explore_deny->output[0].find("Block Explore subagents · src · Workspace") != std::string::npos,
+         "command dispatcher /permissions add path-qualifies TaskRun Explore summaries");
+  auto const path_explore_rule_id = add_path_explore_deny ? extract_rule_id(add_path_explore_deny->output[0]) : std::string{};
+
+  auto add_forged_task_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task "
+                                                                          "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
+  expect(add_forged_task_deny && add_forged_task_deny->handled && !add_forged_task_deny->output.empty() &&
+             add_forged_task_deny->output[0].find("Block subagents · Workspace") != std::string::npos &&
+             add_forged_task_deny->output[0].find("rm -rf") == std::string::npos &&
+             add_forged_task_deny->output[0].find("/tmp/forged") == std::string::npos,
+         "command dispatcher /permissions add never prints free-form TaskRun command bodies");
+  auto const forged_task_rule_id = add_forged_task_deny ? extract_rule_id(add_forged_task_deny->output[0]) : std::string{};
+
+  auto add_typed_task_allow =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=task tool=task command=coder "
+                                                                          "reason=\"typed coder subagent\""});
+  expect(add_typed_task_allow && add_typed_task_allow->handled && !add_typed_task_allow->output.empty() &&
+             add_typed_task_allow->output[0].find("Allow subagents · coder · Workspace") != std::string::npos,
+         "command dispatcher /permissions add appends only identifier-like TaskRun type qualifiers");
+  auto const typed_task_rule_id = add_typed_task_allow ? extract_rule_id(add_typed_task_allow->output[0]) : std::string{};
+
+  auto add_mcp_read_collision =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=mcp.tool.call tool=read "
+                                                                          "reason=\"mcp read collision\""});
+  expect(add_mcp_read_collision && add_mcp_read_collision->handled && !add_mcp_read_collision->output.empty() &&
+             add_mcp_read_collision->output[0].find("Allow MCP tool calls · read · Workspace") != std::string::npos &&
+             add_mcp_read_collision->output[0].find("Allow file reads") == std::string::npos &&
+             add_mcp_read_collision->output[0].find("Allow read ·") == std::string::npos,
+         "command dispatcher /permissions add keeps MCP operation class when tool_name collides with read");
+  auto const mcp_read_rule_id = add_mcp_read_collision ? extract_rule_id(add_mcp_read_collision->output[0]) : std::string{};
+
+  auto add_plugin_bash_collision =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=plugin.tool.call tool=bash "
+                                                                          "reason=\"plugin bash collision\""});
+  expect(add_plugin_bash_collision && add_plugin_bash_collision->handled && !add_plugin_bash_collision->output.empty() &&
+             add_plugin_bash_collision->output[0].find("Allow plugin tool calls · bash · Workspace") != std::string::npos &&
+             add_plugin_bash_collision->output[0].find("Allow shell commands") == std::string::npos &&
+             add_plugin_bash_collision->output[0].find("Allow bash ·") == std::string::npos,
+         "command dispatcher /permissions add keeps plugin operation class when tool_name collides with bash");
+  auto const plugin_bash_rule_id = add_plugin_bash_collision ? extract_rule_id(add_plugin_bash_collision->output[0]) : std::string{};
+
+  auto add_forged_recipe_allow = ava::app::run_command(
+      *session, ava::app::CommandRequest{
+                    .command = "/permissions add action=allow operation=bash "
+                               "recipe_key=sha256:ava-command-workspace-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+                               "recipe_display=\"shell commands\" reason=\"forged recipe subject\""});
+  expect(add_forged_recipe_allow && add_forged_recipe_allow->handled && !add_forged_recipe_allow->output.empty() &&
+             add_forged_recipe_allow->output[0].find("Allow recipe · shell commands · Workspace") != std::string::npos &&
+             add_forged_recipe_allow->output[0].find("Allow shell commands · Workspace") == std::string::npos &&
+             add_forged_recipe_allow->output[0].find("sha256:ava-command-workspace-recipe-v1:") == std::string::npos &&
+             add_forged_recipe_allow->output[0].find("aaaaaaaaaaaaaaaa") == std::string::npos,
+         "command dispatcher /permissions add frames recipe_display under fixed recipe class and omits recipe key hashes");
+  auto const forged_recipe_rule_id = add_forged_recipe_allow ? extract_rule_id(add_forged_recipe_allow->output[0]) : std::string{};
+
+  {
+    std::string long_unicode_display;
+    long_unicode_display.reserve(80 * 3);
+    for (int index = 0; index < 80; ++index)
+      long_unicode_display += "你";
+    ava::permissions::PersistentPermissionRule long_recipe_rule{
+        .rule_id = "permrule_display_only",
+        .scope = ava::permissions::PermissionRuleScope::Workspace,
+        .workspace_dir = {},
+        .action = ava::permissions::PermissionAction::Allow,
+        .operation = ava::permissions::Operation::RunCommand,
+        .mode = ava::permissions::PermissionRuleMode::Any,
+        .tool_name = {},
+        .target_path = {},
+        .command = {},
+        .command_recipe_key = "sha256:ava-command-workspace-recipe-v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        .recipe_display = long_unicode_display,
+        .critical_acknowledged = false,
+        .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+        .reason = "unicode recipe bound",
+        .actor = {},
+        .created_at = {},
+    };
+    auto const long_summary = ava::app::format_permission_rule_summary(long_recipe_rule, session->workspace_dir());
+    expect(long_summary.starts_with("Allow recipe · ") && long_summary.find(" · Workspace") != std::string::npos &&
+               long_summary.find(long_unicode_display) == std::string::npos && long_summary.find("bbbbbbbb") == std::string::npos &&
+               long_summary.size() < long_unicode_display.size(),
+           "permission rule summary bounds long Unicode recipe_display without exposing recipe keys");
+    expect(long_summary.find("你") != std::string::npos, "permission rule summary retains a UTF-8-safe recipe_display prefix");
+  }
+
+  {
+    ava::permissions::PersistentPermissionRule network_read_collision{
+        .rule_id = "permrule_display_network",
+        .scope = ava::permissions::PermissionRuleScope::Workspace,
+        .workspace_dir = {},
+        .action = ava::permissions::PermissionAction::Allow,
+        .operation = ava::permissions::Operation::NetworkFetch,
+        .mode = ava::permissions::PermissionRuleMode::Any,
+        .tool_name = "read",
+        .target_path = {},
+        .command = "https://example.test",
+        .command_recipe_key = {},
+        .recipe_display = {},
+        .critical_acknowledged = false,
+        .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+        .reason = "network read collision",
+        .actor = {},
+        .created_at = {},
+    };
+    auto const network_summary = ava::app::format_permission_rule_summary(network_read_collision, session->workspace_dir());
+    expect(network_summary == "Allow network fetches · read · Workspace",
+           "permission rule summary keeps network operation class when tool_name collides with read");
+  }
+
   auto permissions_list = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list trusted"});
   expect(permissions_list && permissions_list->handled && !permissions_list->output.empty() &&
              permissions_list->output[0].find("1. Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
@@ -447,8 +571,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_list_all->output[0].find("1. ") != std::string::npos && permissions_list_all->output[0].find("2. ") != std::string::npos &&
              permissions_list_all->output[0].find("Block Explore subagents · Workspace") != std::string::npos &&
              permissions_list_all->output[0].find("Block skills · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Block Exact command · scripts · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Block Explore subagents · src · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Allow MCP tool calls · read · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Allow plugin tool calls · bash · Workspace") != std::string::npos &&
+             permissions_list_all->output[0].find("Allow recipe · shell commands · Workspace") != std::string::npos &&
              permissions_list_all->output[0].find("permrule_") == std::string::npos &&
-             permissions_list_all->output[0].find("command=\"") == std::string::npos,
+             permissions_list_all->output[0].find("command=\"") == std::string::npos &&
+             permissions_list_all->output[0].find("sha256:ava-command-workspace-recipe-v1:") == std::string::npos,
          "command dispatcher /permissions list leads with stable human ordinals and omits rule ids and command bodies");
 
   auto permissions_explain = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permission-rules explain " + permission_rule_id});
@@ -480,7 +610,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
 
   auto permissions_diagnose = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/perms diagnose"});
   expect(permissions_diagnose && permissions_diagnose->handled && !permissions_diagnose->output.empty() &&
-             permissions_diagnose->output[0].find("loaded rules: 5") != std::string::npos &&
+             permissions_diagnose->output[0].find("loaded rules: 12") != std::string::npos &&
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit = ava::agent::append_permission_decision(
@@ -573,7 +703,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              remove_permission_rule->output[0].find("Rule ID: " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions remove deletes persistent rules by exact id with human receipt");
 
-  for (auto const& rule_id : {explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id})
+  for (auto const& rule_id : {explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id, path_explore_rule_id,
+                              forged_task_rule_id, typed_task_rule_id, mcp_read_rule_id, plugin_bash_rule_id, forged_recipe_rule_id})
   {
     auto removed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
     expect(removed && removed->handled && !removed->output.empty() && removed->output[0].find("Rule ID: " + rule_id) != std::string::npos,

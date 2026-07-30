@@ -217,7 +217,7 @@ At idle, the composer has one quiet input surface and at most one visual
 boundary or gutter: no nested frame/card, duplicate composer title, persistent
 help row, empty attachment/queue/status row, or open menu. Only the
 draft/placeholder and settled one-line footer persist; that footer may show the
-active model, active conversation-context usage (`ctx N%`, or estimated `ctx ~N` when model-window metadata is unavailable), and the active spinner only. Contextual rows appear
+active model, active conversation-context usage (`ctx count (percent)`, or estimated `ctx ~count` when model-window metadata is unavailable), and the active spinner only. Contextual rows appear
 only while populated or relevant and release their rows when empty. These are
 terminal-native layout rules, not a pixel-look requirement.
 
@@ -779,7 +779,7 @@ Argument completions now carry an optional renderer-only display label. Configur
 
 Disabled command arguments, `@` references, and path candidates are browseable but cannot mutate a draft through Enter, Tab, or mouse. They beep and report a concise command/reference/path disabled status. Explicit forced Tab rejects a single disabled path rather than inserting it. Palette mouse mapping now obtains its first screen row from the composer-owned layout calculation shared with rendering, including alerts, queues, attachments, compositor height, palette viewport, automatic rail main width, and modal/drawer suppression.
 
-During an active run, explicit Tab has the same forced path fallback as idle (bare token, empty token after Space, and slash argument), and active mouse accepts slash/reference/path rows through the shared layout. A single muted contextual row appears only while processing and no palette/prompt/modal owns the dock: it shows `Esc stop` with an empty draft, or first configured queue/follow-up/dequeue key displays with a draft. Queued rows retain `/restore` and use the configured dequeue key when available. The contextual row is reserved by the shared layout and sits above any admitted error, which remains directly above the composer. The footer remains model, optional context count, and spinner only.
+During an active run, explicit Tab has the same forced path fallback as idle (bare token, empty token after Space, and slash argument), and active mouse accepts slash/reference/path rows through the shared layout. A single muted contextual row appears only while processing and no palette/prompt/modal owns the dock: it shows `Esc stop` with an empty draft, or first configured queue/follow-up/dequeue key displays with a draft. Queued rows retain `/restore` and use the configured dequeue key when available. The contextual row is reserved by the shared layout and sits above any admitted error, which remains directly above the composer. The footer remains model, optional active context usage (`ctx count (percent)` or `ctx ~count`), and spinner only.
 
 Test-first checkpoint: before production edits, the new deterministic `display_label` test was compiled with `scripts/build.sh --target ava_tests --jobs 2` and failed red because `SlashCommandArgumentCompletion` had no `display_label` member. After the narrow implementation, focused deterministic coverage passes for label matching/insertion, 80/40 palette priority/bounds, control sanitization, disabled reference/path queries, dock-aware row mapping, and active contextual keys/error placement. The existing trailing-Space, arrows, selector, footer, queue, attachment, and F1/F2 coverage remains in the same focused test. The session completion regression additionally proves a named title is primary while the raw session id is secondary.
 
@@ -1491,7 +1491,7 @@ The following are not implied by this roadmap:
 | OpenCode is a behavior/quality reference, not source or architecture | Preserved | Compare outcomes only; do not port implementation patterns wholesale |
 | Native C++23/ncursesw and narrow semantic seams | Preserved | Keep rendering out of backend contracts |
 | Plain Up/Down scroll transcript only | Preserved | Do not move or replace drafts; vertical/history actions stay configurable and unbound by default |
-| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx N%` or estimated `ctx ~N`), and active spinner only |
+| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and active spinner only |
 | Ordinary Space completion policy | Preserved | Ordinary Space never opens file/reference completion; explicit Tab may force empty-token path suggestions, while real `@` and path-like prefixes remain valid triggers |
 | Renderer tests plus PTY smokes as current evidence strategy | Preserved | Add a screen model only after demonstrated evidence failure or approval |
 | Responsive sidebar/shell policy | Refreshed by visual dogfood | Disclose actionable activity/modified files from `144x16`, idle metadata from `176x16`, suppress the rail for prompts/selectors, and keep complete `/sidebar` disclosure |

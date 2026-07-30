@@ -38,7 +38,7 @@ Common operations include:
 | Shell | `bash` | Parsed and classified before execution; unknown commands ask, high-risk commands deny. |
 | Network | `network.fetch`, `network.search` | Explicit approval required. |
 | LSP | `lsp.query`, `lsp.server.launch` | Queries are permissioned; server launch asks because it starts a process. |
-| Resources | `skill`, `task` | Skill loading and subagent task execution require approval. |
+| Resources | `skill`, `task` | Skill loading requires approval. Task/subagent launch is prompt-free and audited by policy; exact persisted task denies still win, and child sensitive actions remain independently permissioned. |
 | Plugins | `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe` | Launches and contributed operations require approval. |
 | MCP | `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, `mcp.resource.read` | Server process/session/tool/resource actions require approval. |
 

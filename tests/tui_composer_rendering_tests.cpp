@@ -2981,4 +2981,76 @@ void run_tui_composer_rendering_tests_part_4()
     return visible.find("Todos") != std::string::npos || visible.find("#b") != std::string::npos || visible.find("#c") != std::string::npos;
   });
   expect(todo_lines <= 3, "short-height terminals bound the sticky todo dock and do not starve the composer");
+
+  // Wide automatic rail must not reserve narrow-dock geometry after reducing to main-column width.
+  std::vector<ava::tui::TranscriptItem> geometry_transcript;
+  geometry_transcript.reserve(48);
+  for (std::size_t index = 0; index < 48; ++index)
+  {
+    if (index == 2)
+    {
+      geometry_transcript.push_back(ava::tui::TranscriptItem{
+          .label = "tool",
+          .text = "tool body",
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "bash", .argument_summary = "echo geometry"}});
+      continue;
+    }
+    geometry_transcript.push_back(ava::tui::TranscriptItem{.label = "you", .text = "geometry line " + std::to_string(index)});
+  }
+  auto wide_todo_geometry = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_todo_geometry_wide",
+      .input = "",
+      .status = "ready",
+      .transcript = geometry_transcript,
+      .width = 144,
+      .height = 24,
+      .sidebar = ava::tui::SidebarSnapshot{
+          .todos = active_todos, .session_id = "session_todo_geometry_wide", .mode = "build", .provider = "openai", .model = "gpt-5.5"}};
+  auto const wide_canvas = ava::tui::composer_canvas_layout(wide_todo_geometry);
+  expect(wide_canvas.rail_visible && wide_canvas.content_width < 144, "144xH active-todo layout uses the automatic rail and a reduced main content width");
+  auto wide_main_only = wide_todo_geometry;
+  wide_main_only.width = wide_canvas.content_width;
+  wide_main_only.sidebar = std::nullopt;
+  wide_main_only.reasoning_feedback.reset();
+  auto const wide_frame = ava::tui::render_composer(wide_todo_geometry);
+  auto const wide_scroll = ava::tui::composer_max_transcript_scroll_offset(wide_todo_geometry, 144, 24);
+  auto const wide_main_scroll = ava::tui::composer_max_transcript_scroll_offset(wide_main_only, wide_canvas.content_width, 24);
+  auto const wide_body = ava::tui::detail::transcript_body_screen_geometry(wide_todo_geometry);
+  auto const wide_main_body = ava::tui::detail::transcript_body_screen_geometry(wide_main_only);
+  auto const wide_tool_hit = ava::tui::detail::transcript_tool_card_header_for_screen_position(wide_todo_geometry, 1, wide_canvas.left + 4);
+  auto const wide_main_tool_hit = ava::tui::detail::transcript_tool_card_header_for_screen_position(wide_main_only, 1, 4);
+  expect(std::ranges::none_of(wide_frame,
+                              [](std::string const& line) {
+                                auto const visible = strip_sgr(line);
+                                return visible.find("Todos — 1/3 completed") != std::string::npos;
+                              }) &&
+             wide_scroll == wide_main_scroll && wide_body.valid && wide_main_body.valid && wide_body.transcript_height == wide_main_body.transcript_height &&
+             wide_body.content_width == wide_main_body.content_width && wide_body.content_width == wide_canvas.content_width &&
+             wide_tool_hit == wide_main_tool_hit,
+         "144xH active-todo rail reserves zero narrow dock and keeps scroll/hit geometry on the rendered main frame");
+
+  auto narrow_todo_geometry = wide_todo_geometry;
+  narrow_todo_geometry.width = 143;
+  narrow_todo_geometry.session_id = "session_todo_geometry_narrow";
+  narrow_todo_geometry.sidebar->session_id = "session_todo_geometry_narrow";
+  auto narrow_without_todos = narrow_todo_geometry;
+  narrow_without_todos.sidebar->todos.clear();
+  auto const narrow_canvas = ava::tui::composer_canvas_layout(narrow_todo_geometry);
+  auto const narrow_frame_geometry = ava::tui::render_composer(narrow_todo_geometry);
+  auto const narrow_scroll = ava::tui::composer_max_transcript_scroll_offset(narrow_todo_geometry, 143, 24);
+  auto const narrow_without_scroll = ava::tui::composer_max_transcript_scroll_offset(narrow_without_todos, 143, 24);
+  auto const narrow_body = ava::tui::detail::transcript_body_screen_geometry(narrow_todo_geometry);
+  auto const narrow_without_body = ava::tui::detail::transcript_body_screen_geometry(narrow_without_todos);
+  expect(!narrow_canvas.rail_visible &&
+             std::ranges::any_of(narrow_frame_geometry,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("Todos — 1/3 completed") != std::string::npos;
+                                 }) &&
+             narrow_body.valid && narrow_without_body.valid && narrow_body.transcript_height < narrow_without_body.transcript_height &&
+             narrow_scroll > narrow_without_scroll,
+         "143xH active-todo layout still paints the narrow dock and reserves matching scroll/hit geometry");
 }

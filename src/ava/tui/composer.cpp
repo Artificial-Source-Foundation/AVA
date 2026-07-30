@@ -1487,10 +1487,20 @@ struct ComposerVerticalLayout
   std::size_t transcript_composer_gap_lines = 0;
 };
 
-// Keep only todos so layout/hit-test geometry still reserves the narrow dock while
-// the automatic rail remains disabled for the already-reduced content width.
-void retain_todos_without_automatic_rail(ComposerSnapshot& snapshot)
+// Align main-column geometry with render behavior. Rail visibility must be decided
+// from the original full-width snapshot before reducing to content width.
+// - When the automatic rail is visible, clear sidebar/todo dock exactly like
+//   render_composer_main_frame (and drop one-action reasoning feedback).
+// - When the rail is not visible, keep only todos so the sticky narrow dock still
+//   reserves space without re-enabling automatic-rail side effects.
+void prepare_main_column_geometry_snapshot(ComposerSnapshot& snapshot, bool rail_visible)
 {
+  if (rail_visible)
+  {
+    snapshot.reasoning_feedback.reset();
+    snapshot.sidebar = std::nullopt;
+    return;
+  }
   auto todos = snapshot.sidebar ? snapshot.sidebar->todos : std::vector<TodoItem>{};
   snapshot.sidebar = SidebarSnapshot{.todos = std::move(todos)};
 }
@@ -1999,7 +2009,7 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  retain_todos_without_automatic_rail(main);
+  prepare_main_column_geometry_snapshot(main, canvas.rail_visible);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;
@@ -2052,7 +2062,7 @@ detail::TranscriptBodyScreenGeometry detail::transcript_body_screen_geometry(Com
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  retain_todos_without_automatic_rail(main);
+  prepare_main_column_geometry_snapshot(main, canvas.rail_visible);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;
@@ -2097,12 +2107,13 @@ std::optional<ComposerPaletteScreenLayout> detail::composer_palette_screen_layou
   if (snapshot.sidebar_drawer_visible || snapshot.select_list || (snapshot.question_prompt && snapshot.question_prompt->modal) ||
       snapshot.slash_palette_suppressed)
     return std::nullopt;
-  auto const width = composer_canvas_layout(snapshot).content_width;
+  auto const canvas = composer_canvas_layout(snapshot);
+  auto const width = canvas.content_width;
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  retain_todos_without_automatic_rail(main);
+  prepare_main_column_geometry_snapshot(main, canvas.rail_visible);
   std::size_t composer_lines = 0;
   std::vector<std::string> permission_lines;
   std::vector<std::string> question_lines;
@@ -2139,8 +2150,8 @@ std::size_t detail::composer_max_transcript_scroll_offset_cached(ComposerSnapsho
   layout_snapshot.height = height;
   auto const canvas = composer_canvas_layout(layout_snapshot);
   width = canvas.content_width;
-  if (canvas.rail_visible)
-    layout_snapshot.reasoning_feedback.reset();
+  layout_snapshot.width = width;
+  prepare_main_column_geometry_snapshot(layout_snapshot, canvas.rail_visible);
   if (sidebar_drawer_active(layout_snapshot))
     return 0;
   if ((snapshot.question_prompt && snapshot.question_prompt->modal) || snapshot.select_list)
@@ -2256,7 +2267,7 @@ std::optional<std::size_t> question_option_for_screen_position(ComposerSnapshot 
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  retain_todos_without_automatic_rail(main);
+  prepare_main_column_geometry_snapshot(main, canvas.rail_visible);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;

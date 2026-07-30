@@ -5,7 +5,6 @@
 #include "ava/core/strict_json.h"
 
 #include <algorithm>
-#include <cctype>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -26,7 +25,9 @@ bool is_ascii_semantic_id(std::string_view value) noexcept
     return false;
   for (unsigned char const ch : value)
   {
-    if (!(std::isalnum(ch) != 0 || ch == '_' || ch == '-'))
+    // Locale-independent [A-Za-z0-9_-] — never use std::isalnum here.
+    bool const is_ascii_alnum = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+    if (!(is_ascii_alnum || ch == '_' || ch == '-'))
       return false;
   }
   return true;

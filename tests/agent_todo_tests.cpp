@@ -80,6 +80,13 @@ void test_todowrite_validation_bounds()
   auto bad_id = ava::agent::todowrite_result(ctx, todo_call(R"({"todos":[{"id":"bad id!","content":"x","status":"pending"}]})"));
   expect(!bad_id.success && bad_id.result_text.find("id") != std::string::npos, "todowrite rejects non-semantic ids");
 
+  // Contract is explicit ASCII [A-Za-z0-9_-]; non-ASCII letters/bytes must fail independently of locale.
+  auto utf8_letter_id = ava::agent::todowrite_result(ctx, todo_call(R"({"todos":[{"id":"caf\u00e9","content":"x","status":"pending"}]})"));
+  expect(!utf8_letter_id.success && utf8_letter_id.result_text.find("id") != std::string::npos, "todowrite rejects non-ASCII UTF-8 letters in todo ids");
+
+  auto ascii_ok = ava::agent::todowrite_result(ctx, todo_call(R"({"todos":[{"id":"A-z_09","content":"x","status":"pending"}]})"));
+  expect(ascii_ok.success, "todowrite still accepts valid ASCII semantic ids");
+
   auto empty_content = ava::agent::todowrite_result(ctx, todo_call(R"({"todos":[{"id":"a","content":"","status":"pending"}]})"));
   expect(!empty_content.success, "todowrite rejects empty content");
 

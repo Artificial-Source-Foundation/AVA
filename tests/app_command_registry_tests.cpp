@@ -264,6 +264,54 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   if (!coordinator)
     return;
 
+  constexpr char kPromptLeak[] = "SECRET_PROMPT_SHOULD_NOT_LEAK_IN_JOBS_OUTPUT";
+  constexpr char kBoundedSummary[] = "BOUNDED_SUMMARY_UNIQUE_TOKEN";
+
+  // Deterministic completed fixture: list/show must omit terminal summary; result includes it.
+  auto completed_start = coordinator->start_background(
+      session.store.session_id(),
+      ava::agent::BackgroundJobStartOptions{
+          .title = "Review pull request",
+          .description = kPromptLeak,
+          .subagent_type = "general",
+          .child_session_id = "child_jobs_human_completed",
+      },
+      [](ava::agent::BackgroundJobContext const&) {
+        return ava::agent::BackgroundJobCompletion{
+            .state = ava::agent::BackgroundJobState::Completed, .final_text = kBoundedSummary, .stop_reason = "completed"};
+      });
+  expect(completed_start.has_value(), "completed fixture starts");
+  if (!completed_start)
+    return;
+  auto completed = coordinator->wait(session.store.session_id(), completed_start->job.identity.job_id, std::chrono::seconds(2));
+  expect(completed && !completed->timed_out && completed->job.execution == ava::agent::SubagentExecutionState::Completed &&
+             completed->job.summary == kBoundedSummary,
+         completed ? "completed fixture reaches terminal summary state"
+                   : "completed fixture reaches terminal summary state: " + completed.error().format());
+  if (!completed)
+    return;
+
+  auto const completed_id = completed->job.identity.job_id;
+  auto completed_list = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
+  auto completed_show = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show " + completed_id});
+  auto completed_result = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs result " + completed_id});
+  auto completed_result_ordinal = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs result 1"});
+  expect(completed_list && completed_list->handled && !completed_list->output.empty() &&
+             completed_list->output[0].find("Completed · Background · Review pull request") != std::string::npos &&
+             completed_list->output[0].find("id " + completed_id) != std::string::npos &&
+             completed_list->output[0].find(kBoundedSummary) == std::string::npos && completed_list->output[0].find(kPromptLeak) == std::string::npos &&
+             completed_show && completed_show->handled && !completed_show->output.empty() &&
+             completed_show->output[0].rfind("Completed · Background · Review pull request", 0) == 0 &&
+             completed_show->output[0].find("id " + completed_id) != std::string::npos &&
+             completed_show->output[0].find(kBoundedSummary) == std::string::npos && completed_show->output[0].find("result ") == std::string::npos &&
+             completed_result && completed_result->handled && !completed_result->output.empty() &&
+             completed_result->output[0].find("Completed · Background · Review pull request") != std::string::npos &&
+             completed_result->output[0].find("id " + completed_id) != std::string::npos &&
+             completed_result->output[0].find(std::string("result ") + kBoundedSummary) != std::string::npos &&
+             completed_result_ordinal && completed_result_ordinal->handled && !completed_result_ordinal->output.empty() &&
+             completed_result_ordinal->output[0] == "jobs: subagent job not found",
+         "interactive list/show omit terminal summary while /jobs result <exact id> includes the bounded summary");
+
   struct BlockingWorker
   {
     std::mutex mutex;
@@ -280,7 +328,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
       changed.wait(lock, [&] { return release || context.stop_token.stop_requested(); });
       if (context.stop_token.stop_requested())
         return {.state = ava::agent::BackgroundJobState::Canceled, .final_text = {}, .stop_reason = "canceled"};
-      return {.state = ava::agent::BackgroundJobState::Completed, .final_text = "bounded result text", .stop_reason = "completed"};
+      return {.state = ava::agent::BackgroundJobState::Completed, .final_text = "unexpected complete", .stop_reason = "completed"};
     }
 
     bool wait_started()
@@ -298,14 +346,13 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   };
 
   auto worker = std::make_shared<BlockingWorker>();
-  constexpr char kPromptLeak[] = "SECRET_PROMPT_SHOULD_NOT_LEAK_IN_JOBS_OUTPUT";
   auto started = coordinator->start_background(
       session.store.session_id(),
       ava::agent::BackgroundJobStartOptions{
           .title = std::string("Explore\x01repository\nnow"),
           .description = kPromptLeak,
           .subagent_type = "explore",
-          .child_session_id = "child_jobs_human",
+          .child_session_id = "child_jobs_human_running",
       },
       [worker](ava::agent::BackgroundJobContext const& context) { return worker->run(context); });
   expect(started && worker->wait_started() && !started->job.display_title.empty() && started->job.display_title.find('\x01') == std::string::npos &&
@@ -317,20 +364,26 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
 
   auto const public_list = ava::agent::public_job_list_json(coordinator->list(session.store.session_id()));
   auto const public_status = ava::agent::public_job_snapshot_json(*started);
+  auto const public_completed = ava::agent::public_job_snapshot_json(*completed);
+  auto const public_completed_result =
+      ava::agent::public_job_snapshot_json(*completed, ava::agent::PublicJobContent::IncludeTerminalResult);
   expect(public_list.find("\"schema_version\":1") != std::string::npos && public_list.find("\"title\"") == std::string::npos &&
              public_list.find("display_title") == std::string::npos && public_list.find("Explore") == std::string::npos &&
-             public_list.find(kPromptLeak) == std::string::npos && public_status.find("\"title\"") == std::string::npos &&
-             public_status.find("display_title") == std::string::npos && public_status.find(kPromptLeak) == std::string::npos &&
-             public_status.find("\"schema_version\":1") != std::string::npos,
-         "public job JSON stays schema v1 without title/display fields or prompt leakage");
+             public_list.find(kPromptLeak) == std::string::npos && public_list.find(kBoundedSummary) == std::string::npos &&
+             public_status.find("\"title\"") == std::string::npos && public_status.find("display_title") == std::string::npos &&
+             public_status.find(kPromptLeak) == std::string::npos && public_status.find("\"schema_version\":1") != std::string::npos &&
+             public_completed.find(kBoundedSummary) == std::string::npos &&
+             public_completed_result.find(kBoundedSummary) != std::string::npos &&
+             public_completed_result.find("\"schema_version\":1") != std::string::npos,
+         "public job JSON stays schema v1 without title/display fields or prompt leakage, and keeps list/status vs result content policy");
 
   auto list = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
-  expect(list && list->handled && !list->output.empty() && list->output[0].rfind("Jobs (1):", 0) == 0 &&
-             list->output[0].find("1. Running · Background · Explore repository now") != std::string::npos &&
+  expect(list && list->handled && !list->output.empty() && list->output[0].rfind("Jobs (2):", 0) == 0 &&
+             list->output[0].find("Running · Background · Explore repository now") != std::string::npos &&
              list->output[0].find("id " + started->job.identity.job_id) != std::string::npos && list->output[0].find("type explore") != std::string::npos &&
              list->output[0].find(kPromptLeak) == std::string::npos && list->output[0].find('\x01') == std::string::npos &&
-             list->output[0].find("\"jobs\"") == std::string::npos,
-         "interactive /jobs list is human text with display-only ordinals, sanitized title, and no prompt leak");
+             list->output[0].find("\"jobs\"") == std::string::npos && list->output[0].find(kBoundedSummary) == std::string::npos,
+         "interactive /jobs list is human text with display-only ordinals, sanitized title, and no prompt/summary leak");
 
   auto show = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show " + started->job.identity.job_id});
   expect(show && show->handled && !show->output.empty() && show->output[0].rfind("Running · Background · Explore repository now", 0) == 0 &&
@@ -342,13 +395,18 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
          "display ordinals are never accepted as job-control authority");
 
   auto canceled = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs cancel " + started->job.identity.job_id});
-  bool const cancel_human =
-      canceled && canceled->handled && !canceled->output.empty() && canceled->output[0].find("Background · Explore repository now") != std::string::npos &&
-      canceled->output[0].find("id " + started->job.identity.job_id) != std::string::npos &&
-      (canceled->output[0].find("Canceled") != std::string::npos || canceled->output[0].find("cancel requested") != std::string::npos ||
-       canceled->output[0].find("Running") != std::string::npos);
-  expect(cancel_human && canceled->output[0].find(kPromptLeak) == std::string::npos,
-         "interactive cancel receipt is humanized, truthful about cancel state, and retains the exact job id");
+  bool const has_cancel_state =
+      canceled && canceled->handled && !canceled->output.empty() &&
+      (canceled->output[0].find("Canceled") != std::string::npos || canceled->output[0].find("cancel requested") != std::string::npos);
+  // Legitimate race: cancel may still be Running only when cancel_requested is already visible, or already terminal Canceled.
+  bool const bare_running_without_cancel =
+      canceled && !canceled->output.empty() && canceled->output[0].find("Running") != std::string::npos &&
+      canceled->output[0].find("cancel requested") == std::string::npos && canceled->output[0].find("Canceled") == std::string::npos;
+  expect(has_cancel_state && !bare_running_without_cancel &&
+             canceled->output[0].find("Background · Explore repository now") != std::string::npos &&
+             canceled->output[0].find("id " + started->job.identity.job_id) != std::string::npos &&
+             canceled->output[0].find(kPromptLeak) == std::string::npos,
+         "interactive cancel receipt requires cancel requested or terminal Canceled and retains the exact job id");
 
   auto waited = coordinator->wait(session.store.session_id(), started->job.identity.job_id, std::chrono::seconds(2));
   bool const terminal = waited && !waited->timed_out &&

@@ -472,7 +472,7 @@ An application-scoped coordinator owns live workers and all job state across in-
 
 Background terminal summaries are delivered to the parent after the current committed turn boundary through isolated, zero-tool provider runs. Structured synthetic provenance, stable delivery identities, bounded same-process retries, and commit acknowledgement prevent duplicate same-process integration and ordinary user text from forging completion. Retained parent capsules preserve exact session append/read authority and refresh model, reasoning, mode, trust, prompt, and credential state before delivery.
 
-The model-visible `job` tool supports owner-scoped list, status, wait, result, and cancel. `/jobs` and RPC expose the same controls plus out-of-band promotion; TUI `/jobs` controls remain usable during an active run. Rich child-chat tabs/navigation and a dedicated promotion keybinding remain frontend follow-up work over the implemented backend contract.
+The model-visible `job` tool supports owner-scoped list, status, wait, result, and cancel. RPC exposes the same owner-bound controls plus out-of-band promotion as public `schema_version:1` JSON. Interactive `/jobs` exposes those controls as human text (display-only ordinals and process-local title/type; exact job IDs remain authority) rather than that JSON snapshot; TUI `/jobs` controls remain usable during an active run. Rich child-chat tabs/navigation and a dedicated promotion keybinding remain frontend follow-up work over the implemented backend contract.
 
 ## Validation Record
 

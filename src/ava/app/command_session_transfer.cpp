@@ -513,16 +513,19 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
   }
 
   auto owned_options = session.replacement_open_context({});
-  auto opened = runtime::Session::open_owned(owned_options, *imported_store, *imported_lease, true);
-  if (!opened)
+  auto unlocked_opened_result = runtime::Session::open_owned(owned_options, *imported_store, *imported_lease, true);
+  if (!unlocked_opened_result)
   {
-    auto error = std::move(opened.error());
+    auto error = std::move(unlocked_opened_result.error());
     attach_created_session_cleanup_context(*imported_store, *imported_lease, error);
     add_output(result, error.format());
     return result;
   }
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+  {
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
   result.session_tree_changed = true;
   add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
                          "\n  switched to " + session.store.session_id());

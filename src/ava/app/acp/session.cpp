@@ -838,13 +838,16 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
   auto options = options_.open_context;
   options.paths = options_.paths;
   options.tool_visibility.mode = ava::agent::ToolVisibilityMode::Default;
-  auto session = ava::app::runtime::Session::create_at(std::move(options), options_.launch_root, cwd);
-  if (!session)
-    return std::unexpected(std::move(session.error()));
-  session->resources().mcp_config = std::move(mcp_config);
-  auto inserted = insert_reserved(std::move(*session));
-  release_reservation = false;
-  return inserted;
+  auto unlocked_session_result = ava::app::runtime::Session::create_at(std::move(options), options_.launch_root, cwd);
+  if (!unlocked_session_result)
+    return std::unexpected(std::move(unlocked_session_result.error()));
+  {
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    session_w->resources().mcp_config = std::move(mcp_config);
+    auto inserted = insert_reserved(std::move(*session_w));
+    release_reservation = false;
+    return inserted;
+  }
 }
 
 ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std::string_view session_id, std::filesystem::path const& cwd,
@@ -868,13 +871,16 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   runtime::SessionLifecycleRequest request;
   request.requested_session_id = std::string(session_id);
   request.expected_original_cwd = cwd;
-  auto session = ava::app::runtime::Session::open_at(std::move(options), options_.launch_root, cwd, std::move(request));
-  if (!session)
-    return std::unexpected(std::move(session.error()));
-  session->resources().mcp_config = std::move(mcp_config);
-  auto inserted = insert_reserved(std::move(*session));
-  release_reservation = false;
-  return inserted;
+  auto unlocked_session_result = ava::app::runtime::Session::open_at(std::move(options), options_.launch_root, cwd, std::move(request));
+  if (!unlocked_session_result)
+    return std::unexpected(std::move(unlocked_session_result.error()));
+  {
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    session_w->resources().mcp_config = std::move(mcp_config);
+    auto inserted = insert_reserved(std::move(*session_w));
+    release_reservation = false;
+    return inserted;
+  }
 }
 
 std::weak_ptr<AcpSessionHost> AcpSessionRegistry::find(std::string_view session_id) const

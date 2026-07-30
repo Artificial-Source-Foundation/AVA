@@ -412,10 +412,13 @@ void test_coordinator_fallback_and_navigation_lifetime()
   coordinator->schedule(*session, "Design <skill>hidden scaffold</skill> durable navigation titles", *seeded, options);
   expect(state->wait_started(), "title navigation generator starts");
 
-  auto replacement = session->create_similar(ava::app::runtime::OpenContext{});
-  expect(replacement.has_value(), replacement ? "replacement session opens" : replacement.error().format());
-  if (replacement)
-    expect(session->replace_with(std::move(*replacement)).has_value(), "visible session navigation succeeds during title work");
+  auto unlocked_replacement_result = session->create_similar(ava::app::runtime::OpenContext{});
+  expect(unlocked_replacement_result.has_value(), unlocked_replacement_result ? "replacement session opens" : unlocked_replacement_result.error().format());
+  if (unlocked_replacement_result)
+  {
+    ava::app::runtime::session_ts::wat replacement_w(*unlocked_replacement_result);
+    expect(session->replace_with(std::move(*replacement_w)).has_value(), "visible session navigation succeeds during title work");
+  }
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "navigation title coordinator becomes idle");
   auto summaries = ava::session::SessionStore::list_sessions(session->workspace_dir(), session->paths().sessions_dir);

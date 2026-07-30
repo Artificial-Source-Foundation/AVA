@@ -11,6 +11,7 @@
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/session_run_controller.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -196,7 +197,7 @@ class Session : protected Session_aggregate_base
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
 
-  static ava::core::Result<Session> construct(
+  static ava::core::Result<session_ts> construct(
       OpenContext const& context, SessionLifecycleRequest const& request,
       ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
       bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
@@ -208,34 +209,34 @@ class Session : protected Session_aggregate_base
   //
   // An empty request creates a persistent session. Returns failure when selectors
   // conflict or the selected session cannot be created, recovered, or opened.
-  static ava::core::Result<Session> open(OpenContext const& context, SessionLifecycleRequest const& request = {});
+  static ava::core::Result<session_ts> open(OpenContext const& context, SessionLifecycleRequest const& request = {});
 
   // Consume an already-owned persistent store and its lease without reopening by path.
   // Inputs remain intact on failure so callers can roll back by stable identity.
-  static ava::core::Result<Session> open_owned(
+  static ava::core::Result<session_ts> open_owned(
       OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
 
   // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
-  static ava::core::Result<Session> open_at(OpenContext context, std::filesystem::path const& workspace_root,
+  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir, SessionLifecycleRequest request);
 
   // Create a persistent session at `workspace_root` and `current_dir`, overriding
   // those locations in `context`.
-  static ava::core::Result<Session> create_at(OpenContext context, std::filesystem::path const& workspace_root,
+  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root,
                                                               std::filesystem::path const& current_dir);
 
   // Create a persistent session inheriting active state from `current` and
   // frontend-only policy from `base_context`.
-  ava::core::Result<Session> create_similar(OpenContext const& base_context) const;
+  ava::core::Result<session_ts> create_similar(OpenContext const& base_context) const;
 
   // Open a session using `request`, inheriting active state from `current` and
   // frontend-only policy from `base_context`.
-  ava::core::Result<Session> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
+  ava::core::Result<session_ts> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
 
   Session create_detached(
     ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
 
-  ava::core::Result<Session> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
+  ava::core::Result<session_ts> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
   {
     SessionLifecycleRequest request;
     request.requested_session_id = std::string(requested_session_id);

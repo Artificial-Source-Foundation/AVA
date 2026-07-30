@@ -21,7 +21,7 @@ using session_command_support::trim_ascii;
 
 namespace {
 
-ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const& current)
+ava::core::Result<runtime::session_ts> create_fresh_session(runtime::Session const& current)
 {
   auto context = current.replacement_open_context({});
   runtime::SessionLifecycleRequest request;
@@ -64,16 +64,19 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
   auto const created_session_id = branched->store.session_id();
   auto const branch_from_entry_id = branched->branch_from_entry_id;
   auto owned_options = session.replacement_open_context({});
-  auto opened = runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
-  if (!opened)
+  auto unlocked_opened_result = runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
+  if (!unlocked_opened_result)
   {
-    auto error = std::move(opened.error());
+    auto error = std::move(unlocked_opened_result.error());
     ava::session::rollback_created_session_with_context(branched->store, branched->lease, error);
     return std::unexpected(std::move(error));
   }
-  opened->created = true;
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+  {
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    opened_w->created = true;
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
 
   result.session_tree_changed = true;
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
@@ -111,21 +114,25 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
 
   auto const trimmed_name = trim_ascii(name);
   auto const created_session_title = trimmed_name.empty() ? std::string("Untitled session") : sanitize_inline_text(trimmed_name);
-  auto opened = create_fresh_session(session);
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
+  auto unlocked_opened_result = create_fresh_session(session);
+  if (!unlocked_opened_result)
+    return std::unexpected(std::move(unlocked_opened_result.error()));
 
-  auto const created_session_id = opened->store.session_id();
-  if (!trimmed_name.empty())
+  std::string created_session_id;
   {
-    auto metadata =
-        opened->append_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
-    if (!metadata)
-      return std::unexpected(std::move(metadata.error()));
-  }
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    created_session_id = opened_w->store.session_id();
+    if (!trimmed_name.empty())
+    {
+      auto metadata =
+          opened_w->append_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+      if (!metadata)
+        return std::unexpected(std::move(metadata.error()));
+    }
 
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
 
   result.session_tree_changed = true;
   std::string output = "started session \"" + created_session_title + "\" · id " + created_session_id;
@@ -147,12 +154,15 @@ ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, s
     return result;
   }
 
-  auto opened = reopen_session(session, trimmed_session_id);
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
+  auto unlocked_opened_result = reopen_session(session, trimmed_session_id);
+  if (!unlocked_opened_result)
+    return std::unexpected(std::move(unlocked_opened_result.error()));
 
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+  {
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
   add_output(result, "resumed session " + session.store.session_id());
   return result;
 }

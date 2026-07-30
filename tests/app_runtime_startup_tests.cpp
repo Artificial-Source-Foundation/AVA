@@ -398,10 +398,10 @@ void test_app_runtime_replacement_open_context()
 
   ava::app::runtime::OpenContext at_context;
   at_context.paths = paths;
-  auto created_at = ava::app::runtime::Session::create_at(at_context, workspace, current_dir);
-  auto created_metadata = created_at ? ava::session::load_session_metadata(created_at->store)
-                                     : ava::core::Result<ava::session::SessionMetadataView>(std::unexpected(created_at.error()));
-  expect(created_at && created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
+  auto unlocked_created_at_result = ava::app::runtime::Session::create_at(at_context, workspace, current_dir);
+  auto created_metadata = unlocked_created_at_result ? ava::session::load_session_metadata(ava::app::runtime::session_ts::rat(*unlocked_created_at_result)->store)
+                                                     : ava::core::Result<ava::session::SessionMetadataView>(std::unexpected(unlocked_created_at_result.error()));
+  expect(unlocked_created_at_result && created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
          "location-explicit session creation has no startup lifecycle state");
 }
 

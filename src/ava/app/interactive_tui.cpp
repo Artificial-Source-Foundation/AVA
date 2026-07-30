@@ -31,10 +31,28 @@
 
 namespace ava::app::line_shell_internal {
 
+// THIS IS A HACK.
+// I didn't want to change too much of this code because I think Igo is working on it too;
+// We need to replace `state.session` with a temporarily unlocked Session reference however.
+// Doing that by redefining `state` at the top of every function.
+struct FakeState
+{
+  ShellState& real_state_;
+  ava::app::runtime::session_ts::wat session_w;
+  ava::app::runtime::Session& session;
+  operator ShellState&() { return real_state_; }
+
+  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.session), session(*session_w) { }
+};
+
 namespace version = ava::core::version;
 
-int run_tui(ShellState state)
+int run_tui(ShellState real_state)
 {
+  FakeState state{real_state};
+
+
+
   auto key_bindings = ava::tui::default_key_bindings();
   std::string keybind_status;
   if (auto loaded = ava::tui::load_key_bindings(state.session.paths().ava_config_dir / "keybinds.json"); loaded)
@@ -138,11 +156,14 @@ int run_tui(ShellState state)
       application_catalog.retarget_session(state.session.store.session_id());
       return state_snapshot(status_prefix + target_session_id + " (already open)");
     }
-    auto opened = state.session.open_requested(runtime_open_context(), target_session_id);
-    if (!opened)
-      return std::unexpected(std::move(opened.error()));
-    if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
+    auto unlocked_opened_result = state.session.open_requested(runtime_open_context(), target_session_id);
+    if (!unlocked_opened_result)
+      return std::unexpected(std::move(unlocked_opened_result.error()));
+    {
+      ava::app::runtime::session_ts::wat opened_w(*unlocked_opened_result);
+      if (auto replaced = state.session.replace_with(std::move(*opened_w)); !replaced)
+        return std::unexpected(std::move(replaced.error()));
+    }
     application_catalog.retarget_session(state.session.store.session_id());
     application_catalog.refresh_values(state.session, hotkeys);
     return state_snapshot(status_prefix + target_session_id);
@@ -359,7 +380,7 @@ int run_tui(ShellState state)
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> { return ava::app::cycle_runtime_reasoning(state.session); },
       .on_cycle_model = [&state, &state_snapshot](bool forward) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        auto model = forward ? ava::app::rpc::next_runtime_model(state.session) : ava::app::rpc::previous_runtime_model(state.session);
+        auto model = forward ? ava::app::rpc::next_runtime_model(state.session_w) : ava::app::rpc::previous_runtime_model(state.session_w);
         if (!model)
           return std::unexpected(std::move(model.error()));
         auto switched = state.session.switch_model(std::move(*model));
@@ -550,11 +571,14 @@ int run_tui(ShellState state)
           application_catalog.retarget_session(state.session.store.session_id());
           return state_snapshot("session already open");
         }
-        auto opened = state.session.open_requested(runtime_open_context(), value);
-        if (!opened)
-          return std::unexpected(std::move(opened.error()));
-        if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
-          return std::unexpected(std::move(replaced.error()));
+        auto unlocked_opened_result = state.session.open_requested(runtime_open_context(), value);
+        if (!unlocked_opened_result)
+          return std::unexpected(std::move(unlocked_opened_result.error()));
+        {
+          ava::app::runtime::session_ts::wat opened_w(*unlocked_opened_result);
+          if (auto replaced = state.session.replace_with(std::move(*opened_w)); !replaced)
+            return std::unexpected(std::move(replaced.error()));
+        }
         application_catalog.retarget_session(state.session.store.session_id());
         application_catalog.refresh_values(state.session, hotkeys);
         return state_snapshot("session opened");

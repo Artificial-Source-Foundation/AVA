@@ -434,9 +434,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return active_rejected;
 
     session_ts::wat session_w(session);
-    // FIXME: resolve_requested_model and next_runtime_model should accept a session_ts::rat.
     ava::core::Result<ava::config::ModelInfo> selected =
-        command.type == "set_model" ? resolve_requested_model(*session_w, command) : next_runtime_model(*session_w);
+        command.type == "set_model" ? resolve_requested_model(session_w, command) : next_runtime_model(session_w);
     if (!selected)
       return handled(write_error(context.output, command.id, selected.error()));
 
@@ -514,16 +513,19 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, branched.error()));
 
     auto owned_options = session_w->replacement_open_context(context.open_context);
-    auto opened = ava::app::runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
-    if (!opened)
+    auto unlocked_opened_result = ava::app::runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
+    if (!unlocked_opened_result)
     {
-      auto error = std::move(opened.error());
+      auto error = std::move(unlocked_opened_result.error());
       ava::session::rollback_created_session_with_context(branched->store, branched->lease, error);
       return handled(write_error(context.output, command.id, error));
     }
-    opened->created = true;
-    if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)
-      return handled(write_error(context.output, command.id, replaced.error()));
+    {
+      runtime::session_ts::wat opened_w(*unlocked_opened_result);
+      opened_w->created = true;
+      if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
+        return handled(write_error(context.output, command.id, replaced.error()));
+    }
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
   }
@@ -612,11 +614,14 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
     session_ts::wat session_w(session);
 
-    auto created = session_w->create_similar(context.open_context);
-    if (!created)
-      return handled(write_error(context.output, command.id, created.error()));
-    if (auto replaced = session_w->replace_with(std::move(*created)); !replaced)
-      return handled(write_error(context.output, command.id, replaced.error()));
+    auto unlocked_created_result = session_w->create_similar(context.open_context);
+    if (!unlocked_created_result)
+      return handled(write_error(context.output, command.id, unlocked_created_result.error()));
+    {
+      session_ts::wat created_w(*unlocked_created_result);
+      if (auto replaced = session_w->replace_with(std::move(*created_w)); !replaced)
+        return handled(write_error(context.output, command.id, replaced.error()));
+    }
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
   }
@@ -632,11 +637,14 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return active_rejected;
 
     session_ts::wat session_w(session);
-    auto opened = session_w->open_requested(context.open_context, *command.session_id);
-    if (!opened)
-      return handled(write_error(context.output, command.id, opened.error()));
-    if (auto replaced = session_w->replace_with(std::move(*opened)); !replaced)
-      return handled(write_error(context.output, command.id, replaced.error()));
+    auto unlocked_opened_result = session_w->open_requested(context.open_context, *command.session_id);
+    if (!unlocked_opened_result)
+      return handled(write_error(context.output, command.id, unlocked_opened_result.error()));
+    {
+      session_ts::wat opened_w(*unlocked_opened_result);
+      if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
+        return handled(write_error(context.output, command.id, replaced.error()));
+    }
     reset_cancel_after_session_switch(context.run_state);
     return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
   }

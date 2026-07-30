@@ -122,11 +122,12 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   }
   else
   {
-    auto target = reopen_session(session, requested_session_id);
-    if (!target)
-      return std::unexpected(std::move(target.error()));
-    target_id = target->store.session_id();
-    metadata = target->append_metadata(std::move(update));
+    auto unlocked_target_result = reopen_session(session, requested_session_id);
+    if (!unlocked_target_result)
+      return std::unexpected(std::move(unlocked_target_result.error()));
+    runtime::session_ts::wat target_w(*unlocked_target_result);
+    target_id = target_w->store.session_id();
+    metadata = target_w->append_metadata(std::move(update));
   }
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
@@ -158,17 +159,18 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   }
 
   auto const requested_session_id = parts.front();
-  auto target = reopen_session(session, requested_session_id);
-  if (!target)
-    return std::unexpected(std::move(target.error()));
+  auto unlocked_target_result = reopen_session(session, requested_session_id);
+  if (!unlocked_target_result)
+    return std::unexpected(std::move(unlocked_target_result.error()));
+  runtime::session_ts::wat target_w(*unlocked_target_result);
 
   if (parts.size() == 1)
   {
-    auto metadata = target->load_metadata();
+    auto metadata = target_w->load_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
-    auto text = metadata->labels.empty() ? std::string("session " + target->store.session_id() + " labels: <none>")
-                                         : std::string("session " + target->store.session_id() + " labels: " + labels_text(metadata->labels));
+    auto text = metadata->labels.empty() ? std::string("session " + target_w->store.session_id() + " labels: <none>")
+                                         : std::string("session " + target_w->store.session_id() + " labels: " + labels_text(metadata->labels));
     text += "\nusage: /sessions labels <id> <label...|--clear>";
     add_output(result, std::move(text));
     return result;
@@ -185,8 +187,8 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  std::string const target_id = target->store.session_id();
-  auto metadata = target->append_metadata(std::move(update));
+  std::string const target_id = target_w->store.session_id();
+  auto metadata = target_w->append_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -228,28 +230,29 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
     return result;
   }
 
-  auto target = reopen_session(session, requested_session_id);
-  if (!target)
-    return std::unexpected(std::move(target.error()));
+  auto unlocked_target_result = reopen_session(session, requested_session_id);
+  if (!unlocked_target_result)
+    return std::unexpected(std::move(unlocked_target_result.error()));
+  runtime::session_ts::wat target_w(*unlocked_target_result);
 
-  auto current_metadata = target->load_metadata();
+  auto current_metadata = target_w->load_metadata();
   if (!current_metadata)
     return std::unexpected(std::move(current_metadata.error()));
   if (current_metadata->archived == archived)
   {
-    add_output(result, "session " + target->store.session_id() + (archived ? " already archived" : " is not archived"));
+    add_output(result, "session " + target_w->store.session_id() + (archived ? " already archived" : " is not archived"));
     return result;
   }
 
   ava::session::SessionMetadataUpdate update;
   update.archived = archived;
   update.actor = "tui";
-  auto metadata = target->append_metadata(std::move(update));
+  auto metadata = target_w->append_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
   result.session_tree_changed = true;
-  add_output(result, "session " + target->store.session_id() + (metadata->archived ? " archived" : " unarchived"));
+  add_output(result, "session " + target_w->store.session_id() + (metadata->archived ? " archived" : " unarchived"));
   return result;
 }
 

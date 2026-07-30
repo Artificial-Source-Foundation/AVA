@@ -71,17 +71,18 @@ void test_app_compact_provider_summary_success()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "provider-backed /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "provider-backed /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  auto seeded = session->append_owned(ava::session::SessionEntry{.id = "entry_user_compact_source",
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  auto seeded = session_w->append_owned(ava::session::SessionEntry{.id = "entry_user_compact_source",
                                                                  .parent_id = "",
                                                                  .type = ava::session::EntryType::UserMessage,
                                                                  .timestamp = "2026-05-01T00:00:00Z",
                                                                  .data_json = "{\"text\":\"Goal: refactor compaction\"}"});
   expect(seeded.has_value(), "provider-backed /compact test seeds source entry");
-  auto seeded_reasoning = session->append_owned(ava::session::SessionEntry{
+  auto seeded_reasoning = session_w->append_owned(ava::session::SessionEntry{
       .id = "entry_reasoning_compact_source",
       .parent_id = "",
       .type = ava::session::EntryType::ReasoningBlock,
@@ -89,7 +90,7 @@ void test_app_compact_provider_summary_success()
       .data_json =
           R"({"provider":"anthropic","model":"claude","format":"anthropic_thinking","text":"visible compact reasoning","signature":"compact-secret-signature","redacted_data":"opaque-compaction-redacted","redacted":false})"});
   expect(seeded_reasoning.has_value(), "provider-backed /compact test seeds reasoning source entry");
-  auto seeded_redacted_reasoning = session->append_owned(ava::session::SessionEntry{
+  auto seeded_redacted_reasoning = session_w->append_owned(ava::session::SessionEntry{
       .id = "entry_redacted_reasoning_compact_source",
       .parent_id = "",
       .type = ava::session::EntryType::ReasoningBlock,
@@ -108,11 +109,11 @@ void test_app_compact_provider_summary_success()
   run_options.access_token = "token";
 
   auto compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
+      *session_w, ava::app::CommandRequest{
                     .command = "/compact Keep decisions",
                     .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                         std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session, entries, config, instructions, estimated_tokens, provider, transport, run_options);
+                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport, run_options);
                     }});
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("compaction summary recorded") != std::string::npos,
          "/compact records a provider-generated summary");
@@ -128,7 +129,7 @@ void test_app_compact_provider_summary_success()
              transport.requests()[0].body.find("Keep decisions") != std::string::npos,
          "provider-backed /compact sends deterministic prompt with sanitized source data and required sections");
 
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(entries && std::ranges::any_of(
                         *entries,
                         [&](ava::session::SessionEntry const& entry) {
@@ -155,11 +156,12 @@ void test_app_compact_rejects_replaced_current_session_history()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "replacement-safe /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "replacement-safe /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  expect(session
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  expect(session_w
              ->append_owned(ava::session::SessionEntry{.id = "original_compaction_source",
                                                        .parent_id = "",
                                                        .type = ava::session::EntryType::UserMessage,
@@ -177,24 +179,24 @@ void test_app_compact_rejects_replaced_current_session_history()
   if (!replacement)
     return;
   bool replaced = false;
-  session->store.set_after_lease_bound_read_for_test([&] {
+  session_w->store.set_after_lease_bound_read_for_test([&] {
     if (replaced)
       return;
     replaced = true;
-    std::filesystem::rename(session->store.session_path(), session->store.session_path().string() + ".parked");
-    std::ofstream file(session->store.session_path(), std::ios::binary | std::ios::trunc);
+    std::filesystem::rename(session_w->store.session_path(), session_w->store.session_path().string() + ".parked");
+    std::ofstream file(session_w->store.session_path(), std::ios::binary | std::ios::trunc);
     file << *replacement << '\n';
   });
   std::size_t generator_calls = 0;
   auto compact = ava::app::run_command(
-      *session,
+      *session_w,
       ava::app::CommandRequest{.command = "/compact",
                                .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&,
                                                                    std::string_view, std::size_t) -> ava::core::Result<std::string> {
                                  ++generator_calls;
                                  return std::string("must not summarize replacement");
                                }});
-  auto pathname_entries = session->store.load();
+  auto pathname_entries = session_w->store.load();
   expect(replaced && compact && compact->handled && generator_calls == 0 && !compact->output.empty() &&
              compact->output.front().find("replaced") != std::string::npos && pathname_entries && pathname_entries->size() == 1 &&
              pathname_entries->front().data_json.find("REPLACEMENT_COMPACTION_CANARY") != std::string::npos,
@@ -213,10 +215,11 @@ void test_app_compact_openai_oauth_streaming_summary_success()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "OAuth streaming /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "OAuth streaming /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   std::string const summary = "# Goal\nLive compaction works.";
   std::string const sse_body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + ava::core::json::escape(summary) +
@@ -230,11 +233,11 @@ void test_app_compact_openai_oauth_streaming_summary_success()
   run_options.openai_account_id = "acct_test";
 
   auto config = ava::session::default_compaction_config();
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(entries.has_value(), "OAuth streaming /compact test loads entries");
   if (!entries)
     return;
-  auto generated = ava::app::generate_compaction_summary(*session, *entries, config, "live", 12, provider, transport, run_options);
+  auto generated = ava::app::generate_compaction_summary(*session_w, *entries, config, "live", 12, provider, transport, run_options);
   expect(generated && *generated == summary, "OAuth streaming compaction summary parses SSE text deltas");
   expect(transport.requests().size() == 1 && transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].body.find("\"stream\":true") != std::string::npos &&
@@ -255,10 +258,11 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "provider failure /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "provider failure /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "{\"error\":{\"message\":\"boom\"}}"}});
@@ -266,13 +270,13 @@ void test_app_compact_provider_failure_leaves_session_untouched()
   run_options.access_token = "token";
 
   auto compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
+      *session_w, ava::app::CommandRequest{
                     .command = "/compact",
                     .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                         std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session, entries, config, instructions, estimated_tokens, provider, transport, run_options);
+                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport, run_options);
                     }});
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(compact && compact->handled && !compact->output.empty() &&
              compact->output[0].find("compaction summary request failed with status 500") != std::string::npos &&
              compact->output[0].find("boom") == std::string::npos,
@@ -292,13 +296,14 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "compaction callback-contract test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "compaction callback-contract test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto const config = ava::session::default_compaction_config();
-  auto const entries = session->store.load();
+  auto const entries = session_w->store.load();
   expect(entries.has_value(), "compaction callback-contract test loads session entries");
   if (!entries)
     return;
@@ -319,7 +324,7 @@ void test_compaction_observation_preserves_cancellation_callback_contract()
     ava::core::Result<std::string> result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "not run"));
     try
     {
-      result = ava::app::generate_compaction_summary(*session, *entries, config, "", 1, provider, transport, options);
+      result = ava::app::generate_compaction_summary(*session_w, *entries, config, "", 1, provider, transport, options);
     }
     catch (std::runtime_error const&)
     {
@@ -352,12 +357,13 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "provider cancellation auto compaction test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "provider cancellation auto compaction test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 100;
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 100;
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -369,8 +375,8 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   run_options.access_token = "token";
   run_options.cancel_requested = [&transport] { return transport.canceled(); };
 
-  auto result = ava::app::run_prompt(*session, "cancel during compaction", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "cancel during compaction", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(!result && result.error().message() == "agent loop canceled", "auto compaction reports cancellation raised during the provider summary request");
   expect(transport.requests().size() == 1, "canceled auto compaction dispatches only the summary request");
   expect(entries && count_compaction_entries(*entries) == 0, "canceled auto compaction leaves no partial compaction entry");
@@ -393,17 +399,18 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "oversized /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "oversized /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   auto compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
+      *session_w, ava::app::CommandRequest{
                     .command = "/compact",
                     .compaction_summary_generator = [](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&, std::string_view,
                                                        std::size_t) -> ava::core::Result<std::string> { return std::string("this summary is too large"); }});
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("generated compaction summary is too large") != std::string::npos,
          "/compact reports oversized generated summary");
   expect(entries && std::ranges::none_of(*entries, [](ava::session::SessionEntry const& entry) { return entry.type == ava::session::EntryType::Compaction; }),
@@ -422,14 +429,15 @@ void test_app_compact_cancellation_before_append_leaves_session_untouched()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "manual compaction cancellation test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "manual compaction cancellation test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   bool cancel = false;
   auto compact = ava::app::run_command(
-      *session,
+      *session_w,
       ava::app::CommandRequest{.command = "/compact",
                                .compaction_summary_generator = [&cancel](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&,
                                                                          std::string_view, std::size_t) -> ava::core::Result<std::string> {
@@ -438,7 +446,7 @@ void test_app_compact_cancellation_before_append_leaves_session_untouched()
                                },
                                .cancel_requested = [&cancel] { return cancel; },
                                .propagate_compaction_errors = true});
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(!compact && compact.error().message() == "agent loop canceled", "manual compaction observes cancellation before appending the generated summary");
   expect(entries && count_compaction_entries(*entries) == 0, "manual compaction cancellation leaves no partial compaction entry");
 }
@@ -498,23 +506,24 @@ void test_app_compaction_model_selection_uses_runtime_catalog()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open(options);
-  expect(session.has_value(), "compaction model-selection test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), "compaction model-selection test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto active = ava::app::resolve_compaction_config(*session, ava::session::default_compaction_config());
+  auto active = ava::app::resolve_compaction_config(*session_w, ava::session::default_compaction_config());
   auto same_config = ava::session::parse_compaction_config(R"({"model":"gpt-5.5"})");
-  auto same = same_config ? ava::app::resolve_compaction_config(*session, std::move(*same_config))
+  auto same = same_config ? ava::app::resolve_compaction_config(*session_w, std::move(*same_config))
                           : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(same_config.error()));
   auto cross_config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"claude-sonnet-4-5"})");
-  auto cross = cross_config ? ava::app::resolve_compaction_config(*session, std::move(*cross_config))
+  auto cross = cross_config ? ava::app::resolve_compaction_config(*session_w, std::move(*cross_config))
                             : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(cross_config.error()));
   auto unknown_config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"not-configured"})");
-  auto unknown = unknown_config ? ava::app::resolve_compaction_config(*session, std::move(*unknown_config))
+  auto unknown = unknown_config ? ava::app::resolve_compaction_config(*session_w, std::move(*unknown_config))
                                 : ava::core::Result<ava::session::CompactionConfig>(std::unexpected(unknown_config.error()));
-  expect(active && active->provider_id == session->model().provider_id && active->model_id == session->model().model_id && same &&
-             same->provider_id == session->model().provider_id && same->model_id == "gpt-5.5" && cross && cross->provider_id == "anthropic" &&
+  expect(active && active->provider_id == session_w->model().provider_id && active->model_id == session_w->model().model_id && same &&
+             same->provider_id == session_w->model().provider_id && same->model_id == "gpt-5.5" && cross && cross->provider_id == "anthropic" &&
              cross->model_id == "claude-sonnet-4-5" && !unknown && unknown.error().format().find("compaction_model: not-configured") != std::string::npos,
          "compaction selection defaults active, resolves same/cross-provider overrides, and rejects unknown models without fallback");
 }
@@ -628,22 +637,23 @@ void test_app_manual_compaction_uses_only_active_context()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open(options);
-  expect(session.has_value(), "active-context manual /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), "active-context manual /compact test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "replaced_old_user",
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "replaced_old_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = "2026-05-01T00:00:00Z",
                                                                      .data_json = "{\"text\":\"REPLACED_OLD_CONTEXT\"}"}));
   static_cast<void>(
-      session->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
+      session_w->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
                                                        .parent_id = "",
                                                        .type = ava::session::EntryType::Compaction,
                                                        .timestamp = "2026-05-01T00:00:01Z",
                                                        .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\",\"history_projection\":\"portable-v1\"}"}));
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "active_new_user",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "active_new_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = "2026-05-01T00:00:02Z",
@@ -651,7 +661,7 @@ void test_app_manual_compaction_uses_only_active_context()
 
   bool saw_active_projection = false;
   auto compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
+      *session_w, ava::app::CommandRequest{
                     .command = "/compact",
                     .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const&,
                                                         std::string_view, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
@@ -660,7 +670,7 @@ void test_app_manual_compaction_uses_only_active_context()
                                               entries.back().data_json.find("ACTIVE_NEW_CONTEXT") != std::string::npos && estimated_tokens > 0;
                       return std::string("NEXT ACTIVE SUMMARY");
                     }});
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   auto const checkpoint = entries ? latest_compaction_entry(*entries) : std::nullopt;
   auto const recent = checkpoint ? ava::core::json::string_field(checkpoint->data_json, "recent_context").value_or("") : std::string{};
   expect(compact && saw_active_projection && checkpoint && recent.find("ACTIVE_NEW_CONTEXT") != std::string::npos &&
@@ -689,9 +699,9 @@ void test_app_compact_honors_cross_provider_selection()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open(options);
-  expect(session.has_value(), "cross-provider /compact test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), "cross-provider /compact test opens runtime session");
+  if (!unlocked_session_result)
   {
     if (saved_key)
       setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
@@ -699,7 +709,8 @@ void test_app_compact_honors_cross_provider_selection()
       unsetenv("ANTHROPIC_API_KEY");
     return;
   }
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "cross_provider_user",
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "cross_provider_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -711,11 +722,11 @@ void test_app_compact_honors_cross_provider_selection()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "active-openai-token";
   auto compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
+      *session_w, ava::app::CommandRequest{
                     .command = "/compact",
                     .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                         std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session, entries, config, instructions, estimated_tokens, active_provider, transport,
+                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, active_provider, transport,
                                                                    run_options);
                     }});
   if (saved_key)
@@ -723,7 +734,7 @@ void test_app_compact_honors_cross_provider_selection()
   else
     unsetenv("ANTHROPIC_API_KEY");
 
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(compact && !transport.requests().empty() && transport.requests().front().url.find("anthropic.com") != std::string::npos &&
              transport.requests().front().body.find("claude-sonnet-4-5") != std::string::npos && compaction &&
@@ -744,21 +755,22 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "auto compaction test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "auto compaction test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 100;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 100;
 
   std::string const old_context = "old context marker " + std::string(420, 'x');
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_old_user",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_old_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + ava::core::json::escape(old_context) + "\"}"}));
   for (int index = 0; index < 6; ++index)
   {
-    static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_recent_" + std::to_string(index),
+    static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_recent_" + std::to_string(index),
                                                                        .parent_id = "",
                                                                        .type = ava::session::EntryType::AssistantMessage,
                                                                        .timestamp = ava::session::now_timestamp(),
@@ -771,8 +783,8 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "continue after compaction", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "continue after compaction", provider, transport, run_options);
+  auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(result && result->final_text == "compacted answer", "auto compaction prompt succeeds");
   expect(transport.requests().size() == 2, "auto compaction performs summary request then provider request");
@@ -808,14 +820,15 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "recent context token budget test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "recent context token budget test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 1000;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 1000;
   for (int index = 0; index < 4; ++index)
   {
-    static_cast<void>(session->append_owned(
+    static_cast<void>(session_w->append_owned(
         ava::session::SessionEntry{.id = "entry_budget_" + std::to_string(index),
                                    .parent_id = "",
                                    .type = ava::session::EntryType::UserMessage,
@@ -829,8 +842,8 @@ void test_app_auto_compaction_recent_context_respects_token_budget()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "after budget compaction", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "after budget compaction", provider, transport, run_options);
+  auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   auto const recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context") : std::optional<std::string>{};
   expect(result && result->final_text == "budget answer", "recent context token budget prompt succeeds");
@@ -855,15 +868,16 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "recent context UTF-8 truncation test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "recent context UTF-8 truncation test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 1000;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 1000;
 
   std::string emoji_tail;
   for (int index = 0; index < 80; ++index) emoji_tail += "\xF0\x9F\x98\x80";
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_utf8_budget",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_utf8_budget",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -875,8 +889,8 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "after utf8 compaction", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "after utf8 compaction", provider, transport, run_options);
+  auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   auto const recent_context = compaction ? ava::core::json::string_field(compaction->data_json, "recent_context") : std::optional<std::string>{};
   expect(result && result->final_text == "utf8 answer", "recent context UTF-8 prompt succeeds");
@@ -904,12 +918,13 @@ void test_app_auto_compaction_explicit_zero_disables()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "disabled auto compaction test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "disabled auto compaction test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 10;
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_big_user",
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 10;
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_big_user",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -920,8 +935,8 @@ void test_app_auto_compaction_explicit_zero_disables()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "do not compact", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "do not compact", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(result && result->final_text == "no compact answer", "explicit disabled auto compaction prompt succeeds");
   expect(transport.requests().size() == 1, "explicit disabled auto compaction does not call summary provider");
   expect(entries && count_compaction_entries(*entries) == 0, "explicit disabled auto compaction appends no compaction");
@@ -939,15 +954,16 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "default threshold auto compaction test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "default threshold auto compaction test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = std::nullopt;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = std::nullopt;
 
   auto const config = ava::session::default_compaction_config();
   auto const threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_default_threshold_big",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_default_threshold_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
@@ -959,8 +975,8 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "default threshold prompt", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "default threshold prompt", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(result && result->final_text == "default compact answer", "default threshold auto compaction prompt succeeds");
   expect(transport.requests().size() == 2, "default threshold auto compaction performs a summary request before provider request");
   expect(entries && count_compaction_entries(*entries) == 1, "default threshold auto compaction appends a compaction entry without model context metadata");
@@ -980,20 +996,21 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "auto compaction revalidation test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "auto compaction revalidation test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 100;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 100;
 
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_revalidate_big",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_revalidate_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session->owner_append_route(),
+  MutatingSummaryTransport transport(session_w->owner_append_route(),
                                      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
                                       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
                                       sse_response(final_text_sse("retry after stale"))});
@@ -1005,8 +1022,8 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
     return ava::core::VoidResult{};
   };
 
-  auto result = ava::app::run_prompt(*session, "retry stale summary", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "retry stale summary", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(result && result->final_text == "retry after stale", "auto compaction retries a stale snapshot and continues after a fresh summary");
   expect(transport.requests().size() == 3, "stale auto compaction regenerates one summary before the provider request");
   expect(entries && count_compaction_entries(*entries) == 1, "stale auto compaction appends only the summary generated from the fresh snapshot");
@@ -1038,28 +1055,29 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "repeated stale auto compaction test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "repeated stale auto compaction test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  session->model_selection().model.context_window_tokens = 100;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  session_w->model_selection().model.context_window_tokens = 100;
 
-  static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
+  static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
                                                                      .parent_id = "",
                                                                      .type = ava::session::EntryType::UserMessage,
                                                                      .timestamp = ava::session::now_timestamp(),
                                                                      .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session->owner_append_route(),
+  MutatingSummaryTransport transport(session_w->owner_append_route(),
                                      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
                                       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
                                      2);
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "repeated stale", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "repeated stale", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(!result && result.error().message().find("session changed during context compaction") != std::string::npos,
          "auto compaction returns a clear stale snapshot error after bounded retries are exhausted");
   expect(transport.requests().size() == 2, "repeated stale auto compaction stops after two summary attempts");
@@ -1078,10 +1096,11 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "context overflow retry test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "context overflow retry test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
@@ -1096,8 +1115,8 @@ void test_app_context_overflow_compacts_and_retries_once_successfully()
     return ava::core::VoidResult{};
   };
 
-  auto result = ava::app::run_prompt(*session, "overflow prompt", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "overflow prompt", provider, transport, run_options);
+  auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
   expect(result && result->final_text == "retry answer", "context overflow retry succeeds after compaction");
   expect(transport.requests().size() == 3, "context overflow performs original call, compaction, and one retry");
@@ -1151,10 +1170,11 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "context overflow compaction failure test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "context overflow compaction failure test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
@@ -1163,8 +1183,8 @@ void test_app_context_overflow_compaction_failure_leaves_no_partial_entry()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "overflow then summary fails", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "overflow then summary fails", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(!result && result.error().message() == "context overflow compaction failed", "context overflow returns clear compaction failure");
   expect(!result && result.error().format().find("compaction_provider_status: 429") != std::string::npos &&
              result.error().format().find("summary quota exhausted") == std::string::npos,
@@ -1185,18 +1205,19 @@ void test_app_non_overflow_provider_error_does_not_compact_or_retry()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "non-overflow provider error test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "non-overflow provider error test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = "server unavailable"}});
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "server error", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "server error", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(!result && result.error().message().find("OpenAI HTTP request failed") != std::string::npos, "non-overflow provider error is returned");
   expect(transport.requests().size() == 1, "non-overflow provider error does not retry");
   expect(entries && count_compaction_entries(*entries) == 0, "non-overflow provider error does not compact");
@@ -1302,10 +1323,11 @@ void test_app_context_overflow_retry_is_bounded()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "bounded overflow retry test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "bounded overflow retry test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
@@ -1315,8 +1337,8 @@ void test_app_context_overflow_retry_is_bounded()
   ava::app::runtime::RunOptions run_options;
   run_options.access_token = "token";
 
-  auto result = ava::app::run_prompt(*session, "overflow twice", provider, transport, run_options);
-  auto entries = session->store.load();
+  auto result = ava::app::run_prompt(*session_w, "overflow twice", provider, transport, run_options);
+  auto entries = session_w->store.load();
   expect(!result && ava::provider::is_context_overflow_error(result.error()), "second context overflow is returned instead of retried indefinitely");
   expect(transport.requests().size() == 3, "context overflow retry is attempted at most once");
   expect(entries && count_compaction_entries(*entries) == 1, "bounded context overflow retry appends one compaction entry");

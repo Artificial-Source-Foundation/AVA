@@ -1127,27 +1127,35 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     return 1;
   }
 
-  auto session = runtime::Session::open(options.open_context, options.lifecycle_request);
-  if (!session)
+  auto unlocked_session_result = runtime::Session::open(options.open_context, options.lifecycle_request);
+  if (!unlocked_session_result)
   {
-    err << session.error().format() << '\n';
+    err << unlocked_session_result.error().format() << '\n';
     return 1;
   }
+  runtime::session_ts& unlocked_session = *unlocked_session_result;
 
   runtime::RunOptions runtime_options;
-  runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
-  runtime_options.question_resolver = nullptr;
-  runtime_options.enable_transport_retries = true;
-  runtime_options.offline = session->is_offline() || options.open_context.offline;
-
-  auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(session->model().provider_id);
-  if (!provider)
+  // The Provider is kept alive till the end of this function.
+  std::unique_ptr<ava::provider::Provider> provider;
   {
-    err << provider.error().format() << '\n';
-    return 1;
+    runtime::session_ts::rat session_r(unlocked_session);
+
+    runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
+    runtime_options.question_resolver = nullptr;
+    runtime_options.enable_transport_retries = true;
+    runtime_options.offline = session_r->is_offline() || options.open_context.offline;
+
+    auto registry = ava::provider::builtin_provider_registry();
+    auto provider_result = registry.create(session_r->model().provider_id);
+    if (!provider_result)
+    {
+      err << provider_result.error().format() << '\n';
+      return 1;
+    }
+    provider = std::move(*provider_result);
   }
-  runtime::session_ts unlocked_session(std::move(*session));
+
   ava::http::CurlCliTransport transport;
   ava::core::VoidResult result;
   if (&in == &std::cin)
@@ -1158,11 +1166,11 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
       err << input.error().format() << '\n';
       return 1;
     }
-    result = run_rpc_loop(unlocked_session, options.open_context, **provider, transport, transport, std::move(runtime_options), **input, out);
+    result = run_rpc_loop(unlocked_session, options.open_context, *provider, transport, transport, std::move(runtime_options), **input, out);
   }
   else
   {
-    result = run_rpc_loop(unlocked_session, options.open_context, **provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
+    result = run_rpc_loop(unlocked_session, options.open_context, *provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
   }
   if (!result)
   {

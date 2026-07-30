@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/session/session_metadata.h"
 
 #include <cstddef>
@@ -16,6 +17,6 @@ namespace ava::app::session_command_support {
 [[nodiscard]] ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session);
 [[nodiscard]] std::string labels_text(std::vector<std::string> const& labels);
 [[nodiscard]] std::string shorten_middle(std::string text, std::size_t max_columns);
-[[nodiscard]] ava::core::Result<runtime::Session> reopen_session(runtime::Session const& current, std::string_view session_id);
+[[nodiscard]] ava::core::Result<runtime::session_ts> reopen_session(runtime::Session const& current, std::string_view session_id);
 
 }  // namespace ava::app::session_command_support

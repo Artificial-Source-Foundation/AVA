@@ -231,18 +231,19 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     return 2;
   }
 
-  auto session = runtime::Session::open(options.open_context, options.lifecycle_request);
-  if (!session)
+  auto unlocked_session_result = runtime::Session::open(options.open_context, options.lifecycle_request);
+  if (!unlocked_session_result)
   {
-    err << terminal_output_text(session.error().format(), sanitize_stderr) << '\n';
+    err << terminal_output_text(unlocked_session_result.error().format(), sanitize_stderr) << '\n';
     return 1;
   }
+  runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::http::CurlCliTransport default_transport;
   ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
   ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
   auto registry = ava::provider::builtin_provider_registry();
-  auto default_provider = registry.create(session->model().provider_id);
+  auto default_provider = registry.create(session_w->model().provider_id);
   if (!default_provider)
   {
     err << terminal_output_text(default_provider.error().format(), sanitize_stderr) << '\n';
@@ -251,10 +252,10 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::provider::Provider const& provider =
       options.provider_override ? options.provider_override->get() : static_cast<ava::provider::Provider const&>(**default_provider);
   runtime::RunOptions runtime_options;
-  runtime_options.offline = session->is_offline() || options.open_context.offline;
+  runtime_options.offline = session_w->is_offline() || options.open_context.offline;
   if (!runtime_options.offline)
   {
-    auto request_credential = ava::config::provider_credential_for_request(session->paths(), session->model().provider_id, auth_transport);
+    auto request_credential = ava::config::provider_credential_for_request(session_w->paths(), session_w->model().provider_id, auth_transport);
     if (!request_credential)
     {
       err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
@@ -262,8 +263,8 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     }
     if (!*request_credential)
     {
-      err << "print mode requires auth for provider `" << terminal_output_text(session->model().provider_id, sanitize_stderr) << "`. Configure a credential in "
-          << terminal_output_text(session->paths().auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
+      err << "print mode requires auth for provider `" << terminal_output_text(session_w->model().provider_id, sanitize_stderr) << "`. Configure a credential in "
+          << terminal_output_text(session_w->paths().auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
       return 1;
     }
     runtime_options.access_token = (*request_credential)->access_token;
@@ -278,7 +279,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
                                         .runtime_options = std::move(runtime_options),
                                         .sanitize_terminal_output = sanitize_stdout,
                                         .sanitize_terminal_diagnostics = sanitize_stderr};
-  auto result = run_print_prompt(*session, *prompt, provider, transport, run_options, out, err);
+  auto result = run_print_prompt(*session_w, *prompt, provider, transport, run_options, out, err);
   return result ? 0 : 1;
 }
 

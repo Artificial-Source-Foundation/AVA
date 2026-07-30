@@ -806,17 +806,20 @@ int run(int argc, char** argv)
         std::cin, std::cout, std::cerr, ava::app::rpc::RpcInputWake{});
   }
 
-  auto session = ava::app::runtime::Session::open(open_context, lifecycle_request);
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context, lifecycle_request);
+  if (!unlocked_session_result)
   {
-    std::cerr << session.error().format() << '\n';
+    std::cerr << unlocked_session_result.error().format() << '\n';
     return 1;
   }
 
   bool const print_farewell = stdin_is_tty() && stdout_is_tty();
-  int const status = run_interactive(*session);
+  int const status = run_interactive(*unlocked_session_result);
   if (print_farewell)
-    print_exit_card(*session, status);
+  {
+    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    print_exit_card(*session_r, status);
+  }
   return status;
 }
 

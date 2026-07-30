@@ -540,10 +540,10 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
 } // namespace
 
 // static
-ava::core::Result<Session> Session::construct(OpenContext const& context, runtime::SessionLifecycleRequest const& request, ava::session::SessionStore& store,
-                                              ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool should_append_session_start,
-                                              bool append_initial_session_name, std::shared_ptr<SubagentDeliveryManager> delivery_manager,
-                                              std::shared_ptr<SessionTitleCoordinator> title_coordinator)
+ava::core::Result<session_ts> Session::construct(OpenContext const& context, runtime::SessionLifecycleRequest const& request, ava::session::SessionStore& store,
+                                                 ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool should_append_session_start,
+                                                 bool append_initial_session_name, std::shared_ptr<SubagentDeliveryManager> delivery_manager,
+                                                 std::shared_ptr<SessionTitleCoordinator> title_coordinator)
 {
   auto directories = resolve_runtime_directories(context);
   if (!directories)
@@ -796,7 +796,7 @@ ava::core::Result<Session> Session::construct(OpenContext const& context, runtim
 }
 
 // static
-ava::core::Result<Session> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
+ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
 {
   if (request.requested_session_id && request.continue_last_session)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
@@ -926,20 +926,20 @@ ava::core::Result<Session> Session::open(runtime::OpenContext const& context, ru
       return std::unexpected(std::move(staged_recovery.error()));
   }
 
-  auto session =
+  auto unlocked_session_result =
       construct(context, request, *store, lease, created, load_existing_entries, created && should_append_session_start,
                 request.initial_session_name.has_value() && !request.fork_session_id, context.subagent_delivery_manager, context.session_title_coordinator);
-  if (!session && created_from_fork)
+  if (!unlocked_session_result && created_from_fork)
   {
-    auto error = std::move(session.error());
+    auto error = std::move(unlocked_session_result.error());
     ava::session::rollback_created_session_with_context(*store, lease, error);
     return std::unexpected(std::move(error));
   }
-  return session;
+  return unlocked_session_result;
 }
 
 // static
-ava::core::Result<Session> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
+ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires a persistent session"));
@@ -979,7 +979,7 @@ Session Session::create_detached(ava::session::SessionLease lease, ava::session:
 }
 
 // static
-ava::core::Result<Session> Session::create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
+ava::core::Result<session_ts> Session::create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
   context.workspace_dir = workspace_root;
   context.current_dir = current_dir;
@@ -987,7 +987,7 @@ ava::core::Result<Session> Session::create_at(OpenContext context, std::filesyst
 }
 
 // static
-ava::core::Result<Session> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root,
+ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir, SessionLifecycleRequest request)
 {
   context.workspace_dir = workspace_root;
@@ -995,12 +995,12 @@ ava::core::Result<Session> Session::open_at(OpenContext context, std::filesystem
   return Session::open(context, request);
 }
 
-ava::core::Result<Session> Session::create_similar(OpenContext const& base_context) const
+ava::core::Result<session_ts> Session::create_similar(OpenContext const& base_context) const
 {
   return create_at(replacement_open_context(base_context), workspace_dir(), current_dir());
 }
 
-ava::core::Result<Session> Session::open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const
+ava::core::Result<session_ts> Session::open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const
 {
   return open_at(replacement_open_context(base_context), workspace_dir(), current_dir(), std::move(request));
 }

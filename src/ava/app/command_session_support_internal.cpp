@@ -58,7 +58,7 @@ std::string shorten_middle(std::string text, std::size_t max_columns)
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
 }
 
-ava::core::Result<runtime::Session> reopen_session(runtime::Session const& current, std::string_view session_id)
+ava::core::Result<runtime::session_ts> reopen_session(runtime::Session const& current, std::string_view session_id)
 {
   auto context = current.replacement_open_context({});
   runtime::SessionLifecycleRequest request;

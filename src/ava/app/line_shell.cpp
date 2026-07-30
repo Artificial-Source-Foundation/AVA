@@ -60,15 +60,20 @@ void add_output(LineResult& result, std::string text)
 template <typename Callback>
 LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback, std::string_view provider_override = {})
 {
+  // MT: is this really single-threaded? `state_session.is_offline()` requires a lock,
+  // but obiously could be offline immediately after returning from that accessor if this isn't single threaded.
+  // For now just keep the lock for the whole duration of the function, but it smell badly.
+  runtime::Session const& state_session = *runtime::session_ts::rat(state.session);
+
   LineResult line_result;
-  if (state.session.is_offline())
+  if (state_session.is_offline())
   {
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
   }
-  auto const provider_id = provider_override.empty() ? std::string_view(state.session.model().provider_id) : provider_override;
+  auto const provider_id = provider_override.empty() ? std::string_view(state_session.model().provider_id) : provider_override;
   ava::http::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(state.session.paths(), provider_id, transport);
+  auto credential = ava::config::provider_credential_for_request(state_session.paths(), provider_id, transport);
   if (!credential)
   {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
@@ -78,7 +83,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   {
     if (provider_override.empty())
     {
-      add_output(line_result, ava::app::provider_auth_required_message(state.session, offline_suffix));
+      add_output(line_result, ava::app::provider_auth_required_message(state_session, offline_suffix));
     }
     else
     {
@@ -109,20 +114,23 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {
+  // MT: is this really single-threaded?
+  runtime::Session& state_session = *runtime::session_ts::wat(state.session);
+
   LineResult line_result;
   if (line.empty())
     return line_result;
-  if (ava::app::is_backend_command(line, state.session))
+  if (ava::app::is_backend_command(line, state_session))
   {
     if (is_compact_command(line))
     {
-      auto loaded_config = ava::session::load_compaction_config(state.session.paths());
+      auto loaded_config = ava::session::load_compaction_config(state_session.paths());
       if (!loaded_config)
       {
         add_output(line_result, loaded_config.error().format());
         return line_result;
       }
-      auto config = ava::app::resolve_compaction_config(state.session, std::move(*loaded_config));
+      auto config = ava::app::resolve_compaction_config(state_session, std::move(*loaded_config));
       if (!config)
       {
         add_output(line_result, config.error().format());
@@ -135,7 +143,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
             auto command_result = ava::app::run_command(
-                state.session,
+                state_session,
                 ava::app::CommandRequest{.command = line,
                                          .event_sink = event_sink,
                                          .permission_resolver = permission_resolver,
@@ -143,7 +151,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                          .compaction_summary_generator =
                                              [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                  std::string_view instructions, std::size_t estimated_tokens) {
-                                               return ava::app::generate_compaction_summary(state.session, entries, config, instructions, estimated_tokens,
+                                               return ava::app::generate_compaction_summary(state_session, entries, config, instructions, estimated_tokens,
                                                                                             provider, transport, run_options);
                                              },
                                          .cancel_requested = cancel_requested,
@@ -161,7 +169,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
           },
           summary_provider_id);
     }
-    auto command_result = ava::app::run_command(state.session, ava::app::CommandRequest{.command = line,
+    auto command_result = ava::app::run_command(state_session, ava::app::CommandRequest{.command = line,
                                                                                         .permission_resolver = permission_resolver,
                                                                                         .question_resolver = question_resolver,
                                                                                         .cancel_requested = cancel_requested,
@@ -184,7 +192,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                      run_options.event_sink = std::move(event_sink);
                                      run_options.cancel_requested = std::move(cancel_requested);
                                      run_options.take_steering_messages = std::move(take_steering_messages);
-                                     auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
+                                     auto result = ava::app::run_prompt(state_session, *command_result->prompt_message, provider, transport, run_options);
                                      LineResult prompt_result;
                                      if (!result)
                                      {
@@ -222,7 +230,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                  run_options.cancel_requested = std::move(cancel_requested);
                                  run_options.take_steering_messages = std::move(take_steering_messages);
                                  run_options.image_attachments = std::move(image_attachments);
-                                 auto result = ava::app::run_prompt(state.session, line, provider, transport, run_options);
+                                 auto result = ava::app::run_prompt(state_session, line, provider, transport, run_options);
                                  LineResult prompt_result;
                                  if (!result)
                                  {
@@ -245,23 +253,26 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
 
 int run_line_shell(ShellState state)
 {
+  // MT: is this really single-threaded?
+  runtime::Session const& state_session = *runtime::session_ts::rat(state.session);
+
   std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
-  std::cout << "mode: " << ava::agent::to_string(state.session.mode()) << " | session: " << state.session.store.session_id() << "\n";
-  std::cout << "provider: " << state.session.model().provider_id << " | model: " << state.session.model().model_id << "\n";
+  std::cout << "mode: " << ava::agent::to_string(state_session.mode()) << " | session: " << state_session.store.session_id() << "\n";
+  std::cout << "provider: " << state_session.model().provider_id << " | model: " << state_session.model().model_id << "\n";
   print_shell_help();
 
   std::string line;
   while (true)
   {
-    std::cout << "\n[" << ava::agent::to_string(state.session.mode()) << "] ava> " << std::flush;
+    std::cout << "\n[" << ava::agent::to_string(state_session.mode()) << "] ava> " << std::flush;
     if (!std::getline(std::cin, line))
     {
       std::cout << '\n';
-      print_resume_command(state.session.store);
+      print_resume_command(state_session.store);
       return 0;
     }
 
-    auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(state.session.permission_rule_store(), nullptr);
+    auto permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(state_session.permission_rule_store(), nullptr);
     auto const result = handle_line(state, line, permission_resolver);
     for (auto const& output : result.output)
     {
@@ -272,7 +283,7 @@ int run_line_shell(ShellState state)
     }
     if (result.quit)
     {
-      print_resume_command(state.session.store);
+      print_resume_command(state_session.store);
       return 0;
     }
   }
@@ -282,9 +293,9 @@ int run_line_shell(ShellState state)
 
 namespace ava::app {
 
-int run_interactive(runtime::Session& session)
+int run_interactive(runtime::session_ts& unlocked_session)
 {
-  line_shell_internal::ShellState state{.session = session};
+  line_shell_internal::ShellState state{.session = unlocked_session};
   if (ava::tui::terminal_is_tty())
     return line_shell_internal::run_tui(state);
   return line_shell_internal::run_line_shell(state);

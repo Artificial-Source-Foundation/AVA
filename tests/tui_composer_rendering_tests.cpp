@@ -721,23 +721,25 @@ void run_tui_composer_rendering_tests_part_1()
     auto const reset_at = screen_line.find(reset);
     auto const reapplied_default_bg =
         reset_at == std::string::npos ? std::string::npos : screen_line.find(std::string(ava::tui::detail::kSgrScreenBg), reset_at + reset.size());
-    auto const ordinary_dock = ava::tui::detail::render_composer_block(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                                                  .provider = "openai",
-                                                                                                  .model = "gpt-5.5",
-                                                                                                  .session_id = "session_ordinary_dock_bg",
-                                                                                                  .input = "draft",
-                                                                                                  .status = "ready",
-                                                                                                  .transcript = {},
-                                                                                                  .width = 40,
-                                                                                                  .height = 12},
-                                                                       40, 2);
+    auto const ordinary_dock = ava::tui::detail::render_composer_block(
+        ava::tui::ComposerSnapshot{.mode = "build",
+                                   .provider = "openai",
+                                   .model = "gpt-5.5",
+                                   .session_id = "session_ordinary_dock_bg",
+                                   .input = "draft",
+                                   .status = "ready",
+                                   .transcript = {},
+                                   .width = 40,
+                                   .height = 12},
+        40, 2);
     expect(ava::tui::detail::kSgrScreenBg == "\x1b[49m" && first_default_bg == 0 && reset_at != std::string::npos &&
                reapplied_default_bg != std::string::npos && screen_line.find(kLegacyScreenRgb) == std::string::npos &&
                composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos &&
                ordinary_dock.size() == 2 &&
-               std::ranges::all_of(
-                   ordinary_dock,
-                   [](std::string const& line) { return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos; }),
+               std::ranges::all_of(ordinary_dock,
+                                   [](std::string const& line) {
+                                     return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+                                   }),
            "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB; ordinary composer "
            "dock rows inherit that screen background while elevated composer contrast surfaces remain explicitly styled");
   }
@@ -1008,8 +1010,14 @@ void run_tui_composer_rendering_tests_part_1()
             ava::tui::SelectListView{
                 .title = "Models",
                 .subtitle = {},
-                .items = {ava::tui::SelectListItemView{
-                    .value = "a", .label = "Alpha", .description = {}, .group = {}, .detail = {}, .badge = {}, .enabled = true, .disabled_reason = {}}},
+                .items = {ava::tui::SelectListItemView{.value = "a",
+                                                       .label = "Alpha",
+                                                       .description = {},
+                                                       .group = {},
+                                                       .detail = {},
+                                                       .badge = {},
+                                                       .enabled = true,
+                                                       .disabled_reason = {}}},
                 .selected_item_index = 0,
                 .query = {},
                 .footer_hint = {}},
@@ -1050,22 +1058,24 @@ void run_tui_composer_rendering_tests_part_1()
       expect(dock_uses_screen_bg(dark_lines) && dock_uses_screen_bg(light_lines),
              "tui ordinary composer dock keeps terminal-default screen background under built-in dark and light themes");
     }
-    ava::tui::TuiCustomTheme custom{.name = "dockbg",
-                                    .path = "dockbg.json",
-                                    .palette = ava::tui::TuiThemePalette{.text = -1,
-                                                                         .muted = 242,
-                                                                         .success = 34,
-                                                                         .warning = 220,
-                                                                         .error = 196,
-                                                                         .accent = 39,
-                                                                         .screen_bg = 255,
-                                                                         .composer_bg = 236,
-                                                                         .tool_bg = 235,
-                                                                         .question_bg = 237},
-                                    .revision = "test-dockbg"};
+    ava::tui::TuiCustomTheme custom{
+        .name = "dockbg",
+        .path = "dockbg.json",
+        .palette = ava::tui::TuiThemePalette{.text = -1,
+                                             .muted = 242,
+                                             .success = 34,
+                                             .warning = 220,
+                                             .error = 196,
+                                             .accent = 39,
+                                             .screen_bg = 255,
+                                             .composer_bg = 236,
+                                             .tool_bg = 235,
+                                             .question_bg = 237},
+        .revision = "test-dockbg"};
     ava::tui::set_tui_config_theme("dockbg", custom);
     auto const custom_lines = ava::tui::render_composer(idle_snapshot);
-    expect(dock_uses_screen_bg(custom_lines), "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
+    expect(dock_uses_screen_bg(custom_lines),
+           "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
     ava::tui::set_tui_config_theme(std::nullopt);
     {
       ScopedEnvVar no_color_guard("NO_COLOR", "1");

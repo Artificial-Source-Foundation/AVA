@@ -23,6 +23,10 @@ from .common import _wait_for_normal_turn_request_count
 
 _NUMBERED_LINE = re.compile(r"stream line (\d{3})")
 _DELETED_SCROLLBACK_TEXT = ("scrollback detached", "updates below", "jump_to_bottom")
+# Role-specific final chrome: footer uses the catalog display name; assistant turn meta may render
+# either the display name or the bare model id depending on the meta assembly path.
+_FOOTER_MODEL_LINE = re.compile(r"^│\s+AVA TUI Fake\b.*\bctx\b")
+_ASSISTANT_META_LINE = re.compile(r"\*\s+Build · (?:AVA TUI Fake|ava-tui-fake)\b")
 
 
 def _wait_for_path(path: pathlib.Path, label: str, timeout: float = 10.0) -> None:
@@ -360,12 +364,23 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     idle_started = time.monotonic()
     send_literal(tmux_exe, session, idle_draft + (wheel_up + wheel_down) * 40 + "XFINAL")
 
+    def _footer_model_lines(screen: str) -> list[str]:
+        return [line for line in screen.splitlines() if _FOOTER_MODEL_LINE.search(line)]
+
+    def _assistant_meta_lines(screen: str) -> list[str]:
+        return [line for line in screen.splitlines() if _ASSISTANT_META_LINE.search(line)]
+
     def idle_burst_live_tail(screen: str) -> bool:
-        # True live tail after an alternating wheel flood: numbered end at 059, completion
-        # chrome visible, and the exact draft retained. Do not use a single "AVA TUI Fake"
-        # count — footer model text and turn metadata can both legitimately include it.
+        # Converge on true live tail with role-aware chrome before hard assertions fire.
         numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
-        return bool(numbers) and numbers[-1] == 59 and "STREAM COMPLETE" in screen and final_draft in screen
+        return (
+            bool(numbers)
+            and numbers[-1] == 59
+            and "STREAM COMPLETE" in screen
+            and final_draft in screen
+            and len(_footer_model_lines(screen)) == 1
+            and len(_assistant_meta_lines(screen)) == 1
+        )
 
     final_screen = wait_for_screen_state(
         tmux_exe,
@@ -379,11 +394,18 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     lines = final_screen.splitlines()
     dimensions = tmux(tmux_exe, "display-message", "-p", "-t", session, "#{pane_width},#{pane_height}").stdout.strip()
     input_rows = [index for index, line in enumerate(lines) if final_draft in line]
+    footer_lines = _footer_model_lines(final_screen)
+    assistant_meta_lines = _assistant_meta_lines(final_screen)
     if final_numbers[-1] != 59 or final_draft not in final_screen or "STREAM COMPLETE" not in final_screen:
         raise RuntimeError(
             "idle typed/wheel burst did not retain the completed live tail with the exact draft/cursor result\n"
             f"active typing elapsed: {active_elapsed:.3f}s; active wheel elapsed: {burst_elapsed:.3f}s; idle elapsed: {idle_elapsed:.3f}s\n"
             f"screen:\n{final_screen}"
+        )
+    if len(footer_lines) != 1 or len(assistant_meta_lines) != 1:
+        raise RuntimeError(
+            "streaming final frame did not keep exactly one footer model line and one assistant metadata line\n"
+            f"footer_model_lines={footer_lines!r}\nassistant_meta_lines={assistant_meta_lines!r}\nscreen:\n{final_screen}"
         )
     if dimensions != "120,32" or len(lines) != 32 or any(len(line) > 120 for line in lines):
         raise RuntimeError(f"streaming final evidence did not retain exact bounded 120x32 dimensions\nscreen:\n{final_screen}")

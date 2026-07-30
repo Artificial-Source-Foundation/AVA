@@ -220,35 +220,35 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
   auto line = build_left_status(width);
   if (snapshot.processing)
   {
-    auto const spinner =
-        std::string(kSgrAccent) + std::string(processing_indicator_frame(snapshot.spinner_frame)) + std::string(kSgrReset) + std::string(kSgrScreenBg);
+    auto const meter = processing_indicator_styled(snapshot.spinner_frame);
     constexpr auto kRightGap = std::size_t{2};
     constexpr auto kRightMargin = std::size_t{2};
     auto const left_columns = terminal_text_columns(line);
-    auto const spinner_columns = terminal_text_columns(spinner);
-    if (left_columns + spinner_columns + kRightGap + kRightMargin <= width)
+    auto const meter_columns = terminal_text_columns(meter);
+    if (left_columns + meter_columns + kRightGap + kRightMargin <= width)
     {
-      line += std::string(width - left_columns - spinner_columns - kRightMargin, ' ');
-      line += spinner;
+      line += std::string(width - left_columns - meter_columns - kRightMargin, ' ');
+      line += meter;
       line += std::string(kRightMargin, ' ');
     }
     else
     {
       constexpr auto kMinimumGap = std::size_t{1};
-      if (width > spinner_columns + kMinimumGap)
+      if (width > meter_columns + kMinimumGap)
       {
-        auto const left_budget = width - spinner_columns - kMinimumGap;
+        auto const left_budget = width - meter_columns - kMinimumGap;
         line = build_left_status(left_budget);
         auto const fitted_columns = terminal_text_columns(line);
         line += std::string(kSgrScreenBg);
         if (fitted_columns < left_budget)
           line.append(left_budget - fitted_columns, ' ');
         line += ' ';
-        line += spinner;
+        line += meter;
       }
       else
       {
-        line = fit_line_preserving_sgr(spinner, width);
+        // Keep the fixed four-cell meter width even on tiny terminals; fit_line clips only if forced.
+        line = fit_line_preserving_sgr(meter, width);
       }
     }
   }

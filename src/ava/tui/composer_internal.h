@@ -41,12 +41,41 @@ inline constexpr std::string_view kSgrComposerBg = "\x1b[48;2;26;31;46m";
 inline constexpr std::string_view kSgrToolBg = "\x1b[48;2;18;23;34m";
 inline constexpr std::string_view kSgrQuestionBg = "\x1b[48;2;32;38;56m";
 inline constexpr std::string_view kComposerBar = "│";
-inline constexpr std::array<std::string_view, 12> kProcessingIndicatorFrames = {"▁", "▂", "▃", "▄", "▅", "▆", "▇", "▆", "▅", "▄", "▃", "▂"};
+// Fixed-width four-cell signal meter. Outer bars use muted styling; the inner pair uses accent blue.
+inline constexpr std::array<std::string_view, 4> kProcessingIndicatorFrames = {"▂▄▇▃", "▃▆▄▂", "▅▃▇▄", "▄▇▅▂"};
 inline constexpr auto kProcessingIndicatorFrameDelay = std::chrono::milliseconds(120);
+inline constexpr std::size_t kProcessingIndicatorColumns = 4;
+// Lower-block meter glyphs are single-column and three UTF-8 bytes each.
+inline constexpr std::size_t kProcessingIndicatorBarBytes = 3;
 
 [[nodiscard]] inline std::string_view processing_indicator_frame(std::size_t frame)
 {
   return kProcessingIndicatorFrames[frame % kProcessingIndicatorFrames.size()];
+}
+
+// Styled meter for color terminals: muted | accent | accent | muted, then reset to screen bg.
+// NO_COLOR callers should use processing_indicator_frame() (or strip SGR from this result).
+[[nodiscard]] inline std::string processing_indicator_styled(std::size_t frame)
+{
+  auto const raw = processing_indicator_frame(frame);
+  if (raw.size() != kProcessingIndicatorBarBytes * kProcessingIndicatorColumns)
+    return std::string(raw);
+  auto const bar0 = raw.substr(0, kProcessingIndicatorBarBytes);
+  auto const bar1 = raw.substr(kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  auto const bar2 = raw.substr(2 * kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  auto const bar3 = raw.substr(3 * kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  std::string styled;
+  styled.reserve(raw.size() + kSgrMuted.size() * 2 + kSgrAccent.size() + kSgrReset.size() + kSgrScreenBg.size());
+  styled.append(kSgrMuted);
+  styled.append(bar0);
+  styled.append(kSgrAccent);
+  styled.append(bar1);
+  styled.append(bar2);
+  styled.append(kSgrMuted);
+  styled.append(bar3);
+  styled.append(kSgrReset);
+  styled.append(kSgrScreenBg);
+  return styled;
 }
 
 [[nodiscard]] inline std::size_t processing_indicator_elapsed_frames(std::chrono::steady_clock::duration elapsed)

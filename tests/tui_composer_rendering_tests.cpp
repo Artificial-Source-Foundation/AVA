@@ -698,25 +698,23 @@ void run_tui_composer_rendering_tests_part_1()
     auto const reset_at = screen_line.find(reset);
     auto const reapplied_default_bg =
         reset_at == std::string::npos ? std::string::npos : screen_line.find(std::string(ava::tui::detail::kSgrScreenBg), reset_at + reset.size());
-    auto const ordinary_dock = ava::tui::detail::render_composer_block(
-        ava::tui::ComposerSnapshot{.mode = "build",
-                                   .provider = "openai",
-                                   .model = "gpt-5.5",
-                                   .session_id = "session_ordinary_dock_bg",
-                                   .input = "draft",
-                                   .status = "ready",
-                                   .transcript = {},
-                                   .width = 40,
-                                   .height = 12},
-        40, 2);
+    auto const ordinary_dock = ava::tui::detail::render_composer_block(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                                  .provider = "openai",
+                                                                                                  .model = "gpt-5.5",
+                                                                                                  .session_id = "session_ordinary_dock_bg",
+                                                                                                  .input = "draft",
+                                                                                                  .status = "ready",
+                                                                                                  .transcript = {},
+                                                                                                  .width = 40,
+                                                                                                  .height = 12},
+                                                                       40, 2);
     expect(ava::tui::detail::kSgrScreenBg == "\x1b[49m" && first_default_bg == 0 && reset_at != std::string::npos &&
                reapplied_default_bg != std::string::npos && screen_line.find(kLegacyScreenRgb) == std::string::npos &&
                composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos &&
                ordinary_dock.size() == 2 &&
-               std::ranges::all_of(ordinary_dock,
-                                   [](std::string const& line) {
-                                     return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
-                                   }),
+               std::ranges::all_of(
+                   ordinary_dock,
+                   [](std::string const& line) { return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos; }),
            "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB; ordinary composer "
            "dock rows inherit that screen background while elevated composer contrast surfaces remain explicitly styled");
   }
@@ -983,14 +981,8 @@ void run_tui_composer_rendering_tests_part_1()
             ava::tui::SelectListView{
                 .title = "Models",
                 .subtitle = {},
-                .items = {ava::tui::SelectListItemView{.value = "a",
-                                                       .label = "Alpha",
-                                                       .description = {},
-                                                       .group = {},
-                                                       .detail = {},
-                                                       .badge = {},
-                                                       .enabled = true,
-                                                       .disabled_reason = {}}},
+                .items = {ava::tui::SelectListItemView{
+                    .value = "a", .label = "Alpha", .description = {}, .group = {}, .detail = {}, .badge = {}, .enabled = true, .disabled_reason = {}}},
                 .selected_item_index = 0,
                 .query = {},
                 .footer_hint = {}},
@@ -1031,24 +1023,22 @@ void run_tui_composer_rendering_tests_part_1()
       expect(dock_uses_screen_bg(dark_lines) && dock_uses_screen_bg(light_lines),
              "tui ordinary composer dock keeps terminal-default screen background under built-in dark and light themes");
     }
-    ava::tui::TuiCustomTheme custom{
-        .name = "dockbg",
-        .path = "dockbg.json",
-        .palette = ava::tui::TuiThemePalette{.text = -1,
-                                             .muted = 242,
-                                             .success = 34,
-                                             .warning = 220,
-                                             .error = 196,
-                                             .accent = 39,
-                                             .screen_bg = 255,
-                                             .composer_bg = 236,
-                                             .tool_bg = 235,
-                                             .question_bg = 237},
-        .revision = "test-dockbg"};
+    ava::tui::TuiCustomTheme custom{.name = "dockbg",
+                                    .path = "dockbg.json",
+                                    .palette = ava::tui::TuiThemePalette{.text = -1,
+                                                                         .muted = 242,
+                                                                         .success = 34,
+                                                                         .warning = 220,
+                                                                         .error = 196,
+                                                                         .accent = 39,
+                                                                         .screen_bg = 255,
+                                                                         .composer_bg = 236,
+                                                                         .tool_bg = 235,
+                                                                         .question_bg = 237},
+                                    .revision = "test-dockbg"};
     ava::tui::set_tui_config_theme("dockbg", custom);
     auto const custom_lines = ava::tui::render_composer(idle_snapshot);
-    expect(dock_uses_screen_bg(custom_lines),
-           "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
+    expect(dock_uses_screen_bg(custom_lines), "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
     ava::tui::set_tui_config_theme(std::nullopt);
     {
       ScopedEnvVar no_color_guard("NO_COLOR", "1");
@@ -1142,29 +1132,41 @@ void run_tui_composer_rendering_tests_part_1()
                                                                                      .transcript = {},
                                                                                      .width = 80,
                                                                                      .height = 10});
+  auto const processing_meter_raw = std::string(ava::tui::detail::processing_indicator_frame(1));
+  // Frame 1 is ▃▆▄▂: outer muted, inner pair accent blue.
+  auto const muted_outer = std::string(ava::tui::detail::kSgrMuted) + "▃";
+  auto const accent_inner = std::string(ava::tui::detail::kSgrAccent) + "▆";
   expect(processing_lines.size() == 10 && strip_sgr(processing_lines[7]).find("Esc stop · type a follow-up") != std::string::npos &&
              strip_sgr(processing_lines[8]).starts_with("│  Type a message...") && strip_sgr(processing_lines[9]).starts_with("│  GPT-5.5") &&
-             strip_sgr(processing_lines[9]).find("▂") != std::string::npos && processing_lines[9].find("\x1b[38;2;77;158;246m▂") != std::string::npos &&
-             processing_lines[7].find("\x1b[49m") != std::string::npos && processing_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos &&
-             processing_lines[8].find("\x1b[49m") != std::string::npos && processing_lines[9].find("\x1b[49m") != std::string::npos &&
+             strip_sgr(processing_lines[9]).find(processing_meter_raw) != std::string::npos && processing_lines[9].find(muted_outer) != std::string::npos &&
+             processing_lines[9].find(accent_inner) != std::string::npos && processing_lines[7].find("\x1b[49m") != std::string::npos &&
+             processing_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos && processing_lines[8].find("\x1b[49m") != std::string::npos &&
+             processing_lines[9].find("\x1b[49m") != std::string::npos &&
              std::ranges::all_of(processing_lines,
                                  [](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("thinking...") == std::string::npos && visible.find("working") == std::string::npos &&
                                           visible.find("1.3k (0.7%)") == std::string::npos && visible.find("❯") == std::string::npos;
                                  }),
-         "tui processing composer adds only a screen-background contextual active-run row while the footer remains model metadata plus a calm blue indicator");
-  expect(ava::tui::detail::kProcessingIndicatorFrameDelay == std::chrono::milliseconds(120) &&
+         "tui processing composer adds only a screen-background contextual active-run row while the footer remains model metadata plus a fixed four-cell "
+         "signal meter");
+  expect(ava::tui::detail::kProcessingIndicatorFrameDelay == std::chrono::milliseconds(120) && ava::tui::detail::kProcessingIndicatorColumns == 4 &&
+             ava::tui::detail::kProcessingIndicatorFrames.size() == 4 &&
              std::ranges::all_of(ava::tui::detail::kProcessingIndicatorFrames,
                                  [](std::string_view frame) {
-                                   return ava::tui::detail::terminal_text_columns(frame) == 1 && frame.find("\xE2\xA0") == std::string_view::npos;
+                                   return ava::tui::detail::terminal_text_columns(frame) == ava::tui::detail::kProcessingIndicatorColumns &&
+                                          frame.find("\xE2\xA0") == std::string_view::npos;
                                  }) &&
-             ava::tui::detail::processing_indicator_frame(0) == "▁" && ava::tui::detail::processing_indicator_frame(6) == "▇" &&
-             ava::tui::detail::processing_indicator_frame(12) == "▁" &&
+             ava::tui::detail::processing_indicator_frame(0) == "▂▄▇▃" && ava::tui::detail::processing_indicator_frame(1) == "▃▆▄▂" &&
+             ava::tui::detail::processing_indicator_frame(2) == "▅▃▇▄" && ava::tui::detail::processing_indicator_frame(3) == "▄▇▅▂" &&
+             ava::tui::detail::processing_indicator_frame(4) == "▂▄▇▃" &&
+             ava::tui::detail::terminal_text_columns(ava::tui::detail::processing_indicator_styled(0)) == ava::tui::detail::kProcessingIndicatorColumns &&
+             ava::tui::detail::processing_indicator_styled(0).find(std::string(ava::tui::detail::kSgrMuted)) != std::string::npos &&
+             ava::tui::detail::processing_indicator_styled(0).find(std::string(ava::tui::detail::kSgrAccent)) != std::string::npos &&
              ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(119)) == 0 &&
              ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(120)) == 1 &&
              ava::tui::detail::processing_indicator_elapsed_frames(std::chrono::milliseconds(365)) == 3,
-         "tui processing indicator has a shared 120ms one-cell lower-block sequence and advances by elapsed intervals independent of redraws");
+         "tui processing indicator has a shared 120ms four-cell lower-block signal meter and advances by elapsed intervals independent of redraws");
 
   auto narrow_footer_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                            .provider = "openai",
@@ -1189,14 +1191,33 @@ void run_tui_composer_rendering_tests_part_1()
   narrow_footer_snapshot.processing = true;
   narrow_footer_snapshot.spinner_frame = 1;
   auto const narrow_processing_lines = ava::tui::render_composer(narrow_footer_snapshot);
+  auto const narrow_meter_raw = std::string(ava::tui::detail::processing_indicator_frame(1));
+  auto const narrow_muted_outer = std::string(ava::tui::detail::kSgrMuted) + "▃";
+  auto const narrow_accent_inner = std::string(ava::tui::detail::kSgrAccent) + "▆";
+  // At width 20 the fixed four-cell meter keeps ctx metadata; the model label may collapse to ellipsis.
   expect(std::ranges::any_of(narrow_processing_lines,
-                             [](std::string const& line) {
+                             [&](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT") != std::string::npos && visible.find("ctx ~12k") != std::string::npos &&
-                                      visible.find("▂") != std::string::npos && line.find("\x1b[38;2;77;158;246m▂") != std::string::npos &&
+                               return visible.find("ctx ~12k") != std::string::npos && visible.find(narrow_meter_raw) != std::string::npos &&
+                                      line.find(narrow_muted_outer) != std::string::npos && line.find(narrow_accent_inner) != std::string::npos &&
                                       visible_columns(line) == 20;
                              }),
-         "tui preserves multi-digit context metadata and the blue breathing indicator beside a shortened model at the supported minimum width");
+         "tui preserves multi-digit context metadata and the four-cell signal meter at the supported minimum width");
+  {
+    ScopedEnvVar no_color_guard("NO_COLOR", "1");
+    auto plain_processing = narrow_footer_snapshot;
+    plain_processing.processing = true;
+    plain_processing.spinner_frame = 2;
+    auto const plain_lines = ava::tui::render_composer(plain_processing);
+    auto const plain_meter = std::string(ava::tui::detail::processing_indicator_frame(2));
+    expect(std::ranges::all_of(plain_lines, [](std::string const& line) { return line.find('\x1b') == std::string::npos; }) &&
+               std::ranges::any_of(plain_lines,
+                                   [&](std::string const& line) {
+                                     return line.find(plain_meter) != std::string::npos &&
+                                            ava::tui::detail::terminal_text_columns(plain_meter) == ava::tui::detail::kProcessingIndicatorColumns;
+                                   }),
+           "tui NO_COLOR processing footer retains the four meter glyphs with no SGR");
+  }
 
   auto expect_direct_footer_matches_frame = [&](ava::tui::ComposerSnapshot footer_snapshot, std::string const& layout_name) {
     footer_snapshot.processing = true;

@@ -307,17 +307,36 @@ void run_tui_selector_tests()
                                                                                   .select_list = hotkeys_view,
                                                                                   .width = 92,
                                                                                   .height = 18});
+  auto const mode_toggle_item = std::ranges::find_if(hotkeys_view.items, [](ava::tui::SelectListItemView const& item) { return item.value == "mode_toggle"; });
   expect(hotkeys_view.title == "Keybindings" && hotkeys_view.subtitle.find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
              hotkeys_view.subtitle.find("Enter drafts /keybindings set") != std::string::npos &&
              hotkeys_view.subtitle.find("/reload keybindings") != std::string::npos && hotkeys_view.footer_hint.find("Enter draft edit") != std::string::npos &&
-             std::ranges::any_of(hotkeys_view.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "mode_toggle" && item.detail.find("Tab") != std::string::npos && item.badge == "shared key";
-                                 }) &&
+             mode_toggle_item != hotkeys_view.items.end() && mode_toggle_item->label == "Toggle build/plan mode" && mode_toggle_item->value == "mode_toggle" &&
+             mode_toggle_item->description.find("mode_toggle") != std::string::npos && mode_toggle_item->detail.find("Tab") != std::string::npos &&
+             mode_toggle_item->badge == "shared key" &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Keybindings") != std::string::npos; }) &&
+             std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Toggle build/plan mode") != std::string::npos; }) &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }) &&
              std::ranges::none_of(hotkeys_frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),
-         "keybindings view exposes active bindings, edit drafting, config/reload guidance, and context-shared keys");
+         "keybindings view exposes human labels, machine draft values, edit drafting, config/reload guidance, and context-shared keys");
+
+  auto cursor_left_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  cursor_left_filter.query = "cursor_left";
+  auto const cursor_left_matches = ava::tui::filter_select_list_items(cursor_left_filter);
+  auto live_tail_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  live_tail_filter.query = "live tail";
+  auto const live_tail_matches = ava::tui::filter_select_list_items(live_tail_filter);
+  expect(!cursor_left_matches.empty() &&
+             std::ranges::any_of(cursor_left_matches,
+                                 [&](std::size_t index) {
+                                   return cursor_left_filter.items[index].value == "cursor_left" && cursor_left_filter.items[index].label == "Move cursor left";
+                                 }) &&
+             !live_tail_matches.empty() &&
+             std::ranges::any_of(live_tail_matches,
+                                 [&](std::size_t index) {
+                                   return live_tail_filter.items[index].value == "jump_to_bottom" && live_tail_filter.items[index].label == "Jump to live tail";
+                                 }),
+         "keybindings selector filters on both snake_case machine ids and human label words");
 
   ava::tui::set_tui_config_theme(std::nullopt);
   auto settings_key_bindings = ava::tui::default_key_bindings();

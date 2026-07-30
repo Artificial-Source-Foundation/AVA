@@ -104,6 +104,9 @@ struct TuiKeyBindings
 
 struct TuiKeyBindingHelpItem
 {
+  // Human-facing primary label for help/hotkeys/settings surfaces.
+  std::string label;
+  // Canonical machine action id for config JSON and /keybindings set|reset.
   std::string action;
   std::string description;
   std::string keys;
@@ -119,6 +122,8 @@ struct TuiKeyBindingHelpItem
 [[nodiscard]] std::optional<Key> parse_key_name(std::string_view text);
 [[nodiscard]] std::string key_display(Key key);
 [[nodiscard]] std::string action_name(TuiAction action);
+// Concise human primary label for help/hotkeys/settings. Canonical ids stay on action_name().
+[[nodiscard]] std::string action_label(TuiAction action);
 [[nodiscard]] std::optional<TuiAction> key_binding_action_from_name(std::string_view name);
 [[nodiscard]] std::string key_binding_config_action_id(TuiAction action);
 [[nodiscard]] std::string action_description(TuiAction action);

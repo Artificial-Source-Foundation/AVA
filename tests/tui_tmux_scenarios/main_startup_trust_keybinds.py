@@ -343,14 +343,20 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     keybindings_column = max(1, len(keybindings_row_text) - len(keybindings_row_text.lstrip()) + 4)
     send_literal(tmux_exe, session, f"\x1b[<0;{keybindings_column};{keybindings_row_number}M")
     settings_opened_hotkeys = wait_for(
-        tmux_exe, session, r"Search keybindings|mode_toggle", "settings mouse click opens keybindings view"
+        tmux_exe, session, r"Search keybindings|Toggle build/plan mode|mode_toggle", "settings mouse click opens keybindings view"
     )
     if "Search keybindings" not in settings_opened_hotkeys:
         raise RuntimeError(
             f"settings keybindings row mouse click did not open the active keybindings view\nscreen:\n{settings_opened_hotkeys}"
         )
     send_literal(tmux_exe, session, "cursor_left")
-    wait_for(tmux_exe, session, r"cursor_left", "settings-opened keybindings filtered action")
+    filtered_cursor_left = wait_for(
+        tmux_exe, session, r"Move cursor left|cursor_left", "settings-opened keybindings filtered action"
+    )
+    if "Move cursor left" not in filtered_cursor_left or "cursor_left" not in filtered_cursor_left:
+        raise RuntimeError(
+            f"settings-opened keybindings view did not show human label with machine id for cursor_left\nscreen:\n{filtered_cursor_left}"
+        )
     send_keys(tmux_exe, session, "Enter")
     hotkeys_edit_draft = wait_for(
         tmux_exe, session, r"/keybindings set cursor_left", "settings-opened keybindings drafts selected action"

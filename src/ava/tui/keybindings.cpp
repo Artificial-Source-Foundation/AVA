@@ -1758,6 +1758,172 @@ std::string action_name(TuiAction action)
   return "unknown";
 }
 
+std::string action_label(TuiAction action)
+{
+  switch (action)
+  {
+    case TuiAction::Submit:
+      return "Submit";
+    case TuiAction::NewLine:
+      return "Insert newline";
+    case TuiAction::Cancel:
+      return "Cancel";
+    case TuiAction::ClearInput:
+      return "Clear input";
+    case TuiAction::CopySelection:
+      return "Copy selection";
+    case TuiAction::ExternalEditor:
+      return "Open external editor";
+    case TuiAction::Suspend:
+      return "Suspend";
+    case TuiAction::ClipboardPasteImage:
+      return "Paste clipboard image";
+    case TuiAction::DeleteBackward:
+      return "Delete backward";
+    case TuiAction::DeleteForward:
+      return "Delete forward";
+    case TuiAction::HistoryPrev:
+      return "Previous history";
+    case TuiAction::HistoryNext:
+      return "Next history";
+    case TuiAction::PalettePrev:
+      return "Previous palette item";
+    case TuiAction::PaletteNext:
+      return "Next palette item";
+    case TuiAction::SelectPrev:
+      return "Previous item";
+    case TuiAction::SelectNext:
+      return "Next item";
+    case TuiAction::SelectPageUp:
+      return "Select page up";
+    case TuiAction::SelectPageDown:
+      return "Select page down";
+    case TuiAction::SelectConfirm:
+      return "Confirm selection";
+    case TuiAction::SelectCancel:
+      return "Cancel selection";
+    case TuiAction::CursorLeft:
+      return "Move cursor left";
+    case TuiAction::CursorRight:
+      return "Move cursor right";
+    case TuiAction::CursorUp:
+      return "Move cursor up";
+    case TuiAction::CursorDown:
+      return "Move cursor down";
+    case TuiAction::CursorLineStart:
+      return "Move to line start";
+    case TuiAction::CursorLineEnd:
+      return "Move to line end";
+    case TuiAction::CursorWordLeft:
+      return "Move word left";
+    case TuiAction::CursorWordRight:
+      return "Move word right";
+    case TuiAction::JumpForward:
+      return "Jump forward";
+    case TuiAction::JumpBackward:
+      return "Jump backward";
+    case TuiAction::DeleteWordBackward:
+      return "Delete word backward";
+    case TuiAction::DeleteWordForward:
+      return "Delete word forward";
+    case TuiAction::DeleteToLineStart:
+      return "Delete to line start";
+    case TuiAction::DeleteToLineEnd:
+      return "Delete to line end";
+    case TuiAction::Undo:
+      return "Undo";
+    case TuiAction::Redo:
+      return "Redo";
+    case TuiAction::Yank:
+      return "Yank";
+    case TuiAction::YankPop:
+      return "Yank pop";
+    case TuiAction::AutocompleteAccept:
+      return "Accept autocomplete";
+    case TuiAction::PromptAllow:
+      return "Allow prompt";
+    case TuiAction::PromptDeny:
+      return "Deny prompt";
+    case TuiAction::DetailsToggle:
+      return "Toggle details";
+    case TuiAction::PageUp:
+      return "Page up";
+    case TuiAction::PageDown:
+      return "Page down";
+    case TuiAction::ModeToggle:
+      return "Toggle build/plan mode";
+    case TuiAction::Interrupt:
+      return "Interrupt";
+    case TuiAction::Exit:
+      return "Exit";
+    case TuiAction::VariantCycle:
+      return "Cycle variant";
+    case TuiAction::ThinkingToggle:
+      return "Toggle thinking";
+    case TuiAction::ModelSelect:
+      return "Select model";
+    case TuiAction::ModelCycleForward:
+      return "Next model";
+    case TuiAction::ModelCycleBackward:
+      return "Previous model";
+    case TuiAction::ModelsSave:
+      return "Save models";
+    case TuiAction::ModelsEnableAll:
+      return "Enable all models";
+    case TuiAction::ModelsClearAll:
+      return "Clear all models";
+    case TuiAction::ModelsToggleProvider:
+      return "Toggle provider";
+    case TuiAction::ModelsReorderUp:
+      return "Reorder model up";
+    case TuiAction::ModelsReorderDown:
+      return "Reorder model down";
+    case TuiAction::MessageFollowUp:
+      return "Queue follow-up";
+    case TuiAction::MessageDequeue:
+      return "Dequeue message";
+    case TuiAction::MessagePrev:
+      return "Previous message";
+    case TuiAction::MessageNext:
+      return "Next message";
+    case TuiAction::JumpToBottom:
+      return "Jump to live tail";
+    case TuiAction::SessionNew:
+      return "New session";
+    case TuiAction::SessionTree:
+      return "Session tree";
+    case TuiAction::SessionFork:
+      return "Fork session";
+    case TuiAction::SessionResume:
+      return "Resume session";
+    case TuiAction::SessionTogglePath:
+      return "Toggle session path";
+    case TuiAction::SessionToggleSort:
+      return "Toggle session sort";
+    case TuiAction::SessionToggleNamedFilter:
+      return "Toggle named filter";
+    case TuiAction::SessionRename:
+      return "Rename session";
+    case TuiAction::SessionArchive:
+      return "Archive session";
+    case TuiAction::SessionArchiveNoninvasive:
+      return "Archive session quietly";
+    case TuiAction::TreeFoldOrUp:
+      return "Fold tree or up";
+    case TuiAction::TreeUnfoldOrDown:
+      return "Unfold tree or down";
+    case TuiAction::TreeEditLabel:
+      return "Edit tree label";
+    case TuiAction::TreeToggleLabelTimestamp:
+      return "Toggle label timestamp";
+    case TuiAction::TreeFilterLabeledOnly:
+      return "Filter labeled only";
+    case TuiAction::TreeFilterAll:
+      return "Show all sessions";
+  }
+  return "Unknown action";
+}
+
 std::optional<TuiAction> key_binding_action_from_name(std::string_view name)
 {
   auto const resolved = action_from_name(name);
@@ -1968,7 +2134,8 @@ std::vector<TuiKeyBindingHelpItem> key_binding_help_items(TuiKeyBindings const& 
     auto keys_text = keys_display(bindings, action);
     if (keys_text.empty())
       continue;
-    items.push_back(TuiKeyBindingHelpItem{.action = action_name(action), .description = action_description(action), .keys = std::move(keys_text)});
+    items.push_back(TuiKeyBindingHelpItem{
+        .label = action_label(action), .action = action_name(action), .description = action_description(action), .keys = std::move(keys_text)});
   }
   return items;
 }

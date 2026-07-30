@@ -17,6 +17,17 @@ std::vector<CommandHotkey> default_command_hotkeys()
   return hotkeys;
 }
 
+std::string hotkey_primary_label(CommandHotkey const& item)
+{
+  if (auto const action = ava::tui::key_binding_action_from_name(item.action))
+  {
+    auto label = ava::tui::action_label(*action);
+    if (!label.empty())
+      return label;
+  }
+  return item.action;
+}
+
 std::vector<CommandHotkey> effective_hotkeys(std::vector<CommandHotkey> const& hotkeys)
 {
   return hotkeys.empty() ? default_command_hotkeys() : hotkeys;
@@ -77,11 +88,14 @@ std::string command_rows(bool enabled)
 std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
 {
   auto const items = effective_hotkeys(hotkeys);
-  std::size_t action_width = 0;
+  std::size_t label_width = 0;
   std::size_t keys_width = 0;
+  std::vector<std::string> primaries;
+  primaries.reserve(items.size());
   for (auto const& item : items)
   {
-    action_width = std::max(action_width, item.action.size());
+    primaries.push_back(hotkey_primary_label(item));
+    label_width = std::max(label_width, primaries.back().size());
     keys_width = std::max(keys_width, item.keys.size());
   }
 
@@ -93,15 +107,22 @@ std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
   output += "  Reset: /keybindings reset <action> removes one override\n";
   output += "  Validate: /keybindings validate checks keybinds.json without reloading\n";
   output += "  Reload: /reload keybindings inside the interactive TUI\n";
-  for (auto const& item : items)
+  for (std::size_t index = 0; index < items.size(); ++index)
   {
-    output += "  " + item.action;
-    if (item.action.size() < action_width)
-      output += std::string(action_width - item.action.size(), ' ');
+    auto const& item = items[index];
+    auto const& primary = primaries[index];
+    output += "  " + primary;
+    if (primary.size() < label_width)
+      output += std::string(label_width - primary.size(), ' ');
     output += "  " + item.keys;
     if (item.keys.size() < keys_width)
       output += std::string(keys_width - item.keys.size(), ' ');
-    output += "  " + item.description + '\n';
+    // Machine id stays secondary detail after the human label and bound keys.
+    if (!item.action.empty() && item.action != primary)
+      output += "  " + item.action;
+    if (!item.description.empty())
+      output += "  " + item.description;
+    output += '\n';
   }
   return output;
 }

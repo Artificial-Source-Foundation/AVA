@@ -35,6 +35,15 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
              hotkeys->output[0].find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
              hotkeys->output[0].find("/reload keybindings") != std::string::npos,
          "command dispatcher /hotkeys reports effective keybind metadata");
+  auto const default_hotkeys_text = ava::app::command_hotkeys_text({});
+  auto const jump_line_pos = default_hotkeys_text.find("Jump to live tail");
+  auto const jump_id_pos = default_hotkeys_text.find("jump_to_bottom");
+  auto const mode_line_pos = default_hotkeys_text.find("Toggle build/plan mode");
+  auto const mode_id_pos = default_hotkeys_text.find("mode_toggle");
+  expect(jump_line_pos != std::string::npos && jump_id_pos != std::string::npos && jump_line_pos < jump_id_pos &&
+             default_hotkeys_text.find("Ctrl+End", jump_line_pos) != std::string::npos && mode_line_pos != std::string::npos &&
+             mode_id_pos != std::string::npos && mode_line_pos < mode_id_pos,
+         "command help/hotkeys dense text leads with human labels and keeps machine ids secondary");
   auto packages_disabled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/packages list"});
   expect(packages_disabled && packages_disabled->handled && !packages_disabled->output.empty() &&
              packages_disabled->output[0].find("/packages is disabled") != std::string::npos &&

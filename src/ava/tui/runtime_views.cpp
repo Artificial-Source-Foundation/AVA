@@ -268,9 +268,18 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
         break;
       }
     }
+    auto const human_label = item.label.empty() ? item.action : item.label;
+    // Keep the machine id in description so snake_case queries still match while the row leads with the human label.
+    auto description = item.action;
+    if (!item.description.empty())
+    {
+      if (!description.empty())
+        description += " · ";
+      description += item.description;
+    }
     view.items.push_back(SelectListItemView{.value = item.action,
-                                            .label = item.action,
-                                            .description = item.description,
+                                            .label = human_label,
+                                            .description = std::move(description),
                                             .group = "Hotkeys",
                                             .detail = item.keys,
                                             .badge = std::move(badge),

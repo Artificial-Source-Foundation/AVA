@@ -261,8 +261,15 @@ std::string permission_rule_operation_subject(ava::permissions::Operation operat
 
 bool task_run_is_explore_identity(ava::permissions::PersistentPermissionRule const& rule)
 {
-  // Only exact task/tool identity may claim Explore; never infer it from path or reason text.
-  return identity_equals_ascii_case_insensitive(rule.command, "explore") || identity_equals_ascii_case_insensitive(rule.tool_name, "explore");
+  // Explore class requires exact command identity "explore" plus a non-conflicting
+  // tool slot (empty, default task, or also explore). tool_name=explore alone,
+  // free-form command + explore tool, or explore command + conflicting tool must
+  // not claim Explore; they keep fixed "subagents" framing instead.
+  if (!identity_equals_ascii_case_insensitive(rule.command, "explore"))
+    return false;
+  if (rule.tool_name.empty())
+    return true;
+  return identity_equals_ascii_case_insensitive(rule.tool_name, "task") || identity_equals_ascii_case_insensitive(rule.tool_name, "explore");
 }
 
 bool tool_name_is_operation_default(ava::permissions::PersistentPermissionRule const& rule)

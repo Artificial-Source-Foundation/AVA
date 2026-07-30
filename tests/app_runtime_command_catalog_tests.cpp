@@ -387,7 +387,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                                     "reason=\"no explore subagents\""});
   expect(add_explore_deny && add_explore_deny->handled && !add_explore_deny->output.empty() &&
              add_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
-         "command dispatcher /permissions add summarizes exact Explore task identity without inference");
+         "command dispatcher /permissions add claims Explore only for command=explore with default tool=task");
   auto const explore_rule_id = add_explore_deny ? extract_rule_id(add_explore_deny->output[0]) : std::string{};
   expect(!explore_rule_id.empty(), "command dispatcher /permissions add exposes Explore rule id secondarily");
 
@@ -450,6 +450,77 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              add_typed_task_allow->output[0].find("Allow subagents · coder · Workspace") != std::string::npos,
          "command dispatcher /permissions add appends only identifier-like TaskRun type qualifiers");
   auto const typed_task_rule_id = add_typed_task_allow ? extract_rule_id(add_typed_task_allow->output[0]) : std::string{};
+
+  auto add_explore_explore_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=explore "
+                                                                          "reason=\"agreeing explore identity\""});
+  expect(add_explore_explore_deny && add_explore_explore_deny->handled && !add_explore_explore_deny->output.empty() &&
+             add_explore_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
+         "command dispatcher /permissions add claims Explore when command and tool both agree on explore");
+  auto const explore_explore_rule_id = add_explore_explore_deny ? extract_rule_id(add_explore_explore_deny->output[0]) : std::string{};
+
+  auto add_tool_only_explore_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
+                                                                          "reason=\"tool-only explore must not claim class\""});
+  expect(add_tool_only_explore_deny && add_tool_only_explore_deny->handled && !add_tool_only_explore_deny->output.empty() &&
+             add_tool_only_explore_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
+             add_tool_only_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
+         "command dispatcher /permissions add keeps subagents class for tool-only explore identity");
+  auto const tool_only_explore_rule_id = add_tool_only_explore_deny ? extract_rule_id(add_tool_only_explore_deny->output[0]) : std::string{};
+
+  auto add_freeform_explore_tool_deny = ava::app::run_command(
+      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
+                                                    "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
+  expect(add_freeform_explore_tool_deny && add_freeform_explore_tool_deny->handled && !add_freeform_explore_tool_deny->output.empty() &&
+             add_freeform_explore_tool_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
+             add_freeform_explore_tool_deny->output[0].find("Block Explore subagents") == std::string::npos &&
+             add_freeform_explore_tool_deny->output[0].find("rm -rf") == std::string::npos &&
+             add_freeform_explore_tool_deny->output[0].find("rm-secret") == std::string::npos &&
+             add_freeform_explore_tool_deny->output[0].find("/tmp/") == std::string::npos,
+         "command dispatcher /permissions add keeps subagents class for free-form command with explore tool and omits body");
+  auto const freeform_explore_tool_rule_id =
+      add_freeform_explore_tool_deny ? extract_rule_id(add_freeform_explore_tool_deny->output[0]) : std::string{};
+
+  auto add_mixed_coder_explore_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=coder "
+                                                                          "reason=\"mixed coder command explore tool\""});
+  expect(add_mixed_coder_explore_deny && add_mixed_coder_explore_deny->handled && !add_mixed_coder_explore_deny->output.empty() &&
+             add_mixed_coder_explore_deny->output[0].find("Block subagents · coder · Workspace") != std::string::npos &&
+             add_mixed_coder_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
+         "command dispatcher /permissions add keeps subagents class for coder command with explore tool");
+  auto const mixed_coder_explore_rule_id = add_mixed_coder_explore_deny ? extract_rule_id(add_mixed_coder_explore_deny->output[0]) : std::string{};
+
+  auto add_mixed_explore_coder_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=coder command=explore "
+                                                                          "reason=\"mixed explore command conflicting tool\""});
+  expect(add_mixed_explore_coder_deny && add_mixed_explore_coder_deny->handled && !add_mixed_explore_coder_deny->output.empty() &&
+             add_mixed_explore_coder_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
+             add_mixed_explore_coder_deny->output[0].find("Block Explore subagents") == std::string::npos,
+         "command dispatcher /permissions add keeps subagents class for explore command with conflicting tool");
+  auto const mixed_explore_coder_rule_id = add_mixed_explore_coder_deny ? extract_rule_id(add_mixed_explore_coder_deny->output[0]) : std::string{};
+
+  {
+    ava::permissions::PersistentPermissionRule explore_empty_tool{
+        .rule_id = "permrule_display_explore_empty_tool",
+        .scope = ava::permissions::PermissionRuleScope::Workspace,
+        .workspace_dir = {},
+        .action = ava::permissions::PermissionAction::Deny,
+        .operation = ava::permissions::Operation::TaskRun,
+        .mode = ava::permissions::PermissionRuleMode::Any,
+        .tool_name = {},
+        .target_path = {},
+        .command = "explore",
+        .command_recipe_key = {},
+        .recipe_display = {},
+        .critical_acknowledged = false,
+        .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+        .reason = "explore with empty tool",
+        .actor = {},
+        .created_at = {},
+    };
+    expect(ava::app::format_permission_rule_summary(explore_empty_tool, session->workspace_dir()) == "Block Explore subagents · Workspace",
+           "permission rule summary claims Explore for command=explore with empty tool_name");
+  }
 
   auto add_mcp_read_collision =
       ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=mcp.tool.call tool=read "
@@ -610,7 +681,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
 
   auto permissions_diagnose = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/perms diagnose"});
   expect(permissions_diagnose && permissions_diagnose->handled && !permissions_diagnose->output.empty() &&
-             permissions_diagnose->output[0].find("loaded rules: 12") != std::string::npos &&
+             permissions_diagnose->output[0].find("loaded rules: 17") != std::string::npos &&
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit = ava::agent::append_permission_decision(
@@ -704,7 +775,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "command dispatcher /permissions remove deletes persistent rules by exact id with human receipt");
 
   for (auto const& rule_id : {explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id, path_explore_rule_id,
-                              forged_task_rule_id, typed_task_rule_id, mcp_read_rule_id, plugin_bash_rule_id, forged_recipe_rule_id})
+                              forged_task_rule_id, typed_task_rule_id, explore_explore_rule_id, tool_only_explore_rule_id, freeform_explore_tool_rule_id,
+                              mixed_coder_explore_rule_id, mixed_explore_coder_rule_id, mcp_read_rule_id, plugin_bash_rule_id, forged_recipe_rule_id})
   {
     auto removed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
     expect(removed && removed->handled && !removed->output.empty() && removed->output[0].find("Rule ID: " + rule_id) != std::string::npos,

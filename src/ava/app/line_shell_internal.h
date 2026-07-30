@@ -1,8 +1,8 @@
 #pragma once
 
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/project_trust.h"
-#include "ava/event/RuntimeEvent.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"
@@ -53,6 +53,8 @@ void append_status_line(std::string& target, std::string line);
 
 [[nodiscard]] std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries);
 [[nodiscard]] std::optional<std::string> token_status_for_session(runtime::Session const& session);
+// Fail-closed presentation hydration from the latest successful committed todowrite.
+[[nodiscard]] std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session);
 [[nodiscard]] std::string format_active_context_status_value(long long tokens, std::optional<long long> context_window_tokens);
 [[nodiscard]] std::optional<std::string> active_context_status_for_session(runtime::Session const& session);
 [[nodiscard]] std::string session_selector_footer_hint(SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time);

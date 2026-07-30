@@ -253,6 +253,7 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
     transcript_search_.refresh_after_transcript_mutation(capped_update.item_index_shift, changed_from_item_index);
     snapshot.queued_messages = event_state.queued_messages;
     sidebar.activity = event_state.activity;
+    sidebar.todos = event_state.todos;
     if (run_cancel_requested.load() && event_state.run_status == TuiEventRunStatus::Running)
     {
       upsert_stopping_activity();
@@ -330,6 +331,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   }
   auto& event_queue = state.event_queue;
   auto& event_state = state.event_state;
+  // Carry hydrated/live todos into this run so a non-todo turn cannot clear them.
+  event_state.todos = sidebar.todos;
   auto& run_cancel_requested = state.run_cancel_requested;
   auto& close_after_submit = state.close_after_submit;
   auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };

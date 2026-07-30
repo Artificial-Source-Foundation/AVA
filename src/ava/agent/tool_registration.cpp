@@ -8,6 +8,7 @@
 #include "ava/agent/tool_dispatch_search.h"
 #include "ava/agent/tool_dispatch_skill.h"
 #include "ava/agent/tool_dispatch_task.h"
+#include "ava/agent/tool_dispatch_todo.h"
 #include "ava/agent/tool_dispatch_web.h"
 #include "ava/agent/tool_registration.h"
 #include "ava/tools/lsp_tools.h"
@@ -75,6 +76,8 @@ ToolExecutor builtin_tool_executor(std::string_view name)
     return ignore_dispatch_services(apply_patch_result);
   if (name == "question")
     return question_result;
+  if (name == "todowrite")
+    return ignore_dispatch_services(todowrite_result);
   return nullptr;
 }
 

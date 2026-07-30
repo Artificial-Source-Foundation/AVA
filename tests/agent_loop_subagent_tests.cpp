@@ -235,7 +235,7 @@ void test_agent_loop_child_rejects_unadvertised_task_and_job_calls()
       .mode = ava::agent::Mode::Build,
       .model = ava::agent::ModelInvocationOptions{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "child system prompt"},
       .access_token = "token",
-      .tool_visibility = {.excluded_tools = {"task", "job"}},
+      .tool_visibility = {.excluded_tools = {"task", "job", "todowrite"}},
       .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         return ava::permissions::PermissionResolution::Allow;
       },

@@ -316,7 +316,7 @@ ToolScheduleClassification classify_tool_for_scheduling(ProviderToolCall const& 
   if (metadata->permission_category == std::string_view("bash") || metadata->name == std::string_view("bash"))
     return classification(ToolScheduleEligibility::Barrier, "shell");
   if (metadata->permission_category == std::string_view("user") || metadata->execution_mode == std::string_view("synchronous_user_interaction") ||
-      metadata->name == std::string_view("question"))
+      metadata->name == std::string_view("question") || metadata->name == std::string_view("todowrite"))
   {
     return classification(ToolScheduleEligibility::Barrier, "user_interaction");
   }

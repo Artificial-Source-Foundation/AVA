@@ -597,11 +597,88 @@ bool sidebar_drawer_active(ComposerSnapshot const& snapshot)
   return snapshot.sidebar_drawer_visible && snapshot.sidebar.has_value() && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list;
 }
 
+bool todo_is_active(TodoItem const& item) noexcept
+{
+  return item.status == TodoStatus::Pending || item.status == TodoStatus::InProgress;
+}
+
+std::size_t count_todos_with_status(std::vector<TodoItem> const& todos, TodoStatus status) noexcept
+{
+  return static_cast<std::size_t>(std::ranges::count_if(todos, [status](TodoItem const& item) { return item.status == status; }));
+}
+
+bool sidebar_has_active_todos(SidebarSnapshot const& sidebar) noexcept
+{
+  return std::ranges::any_of(sidebar.todos, todo_is_active);
+}
+
 bool sidebar_has_actionable_data(SidebarSnapshot const& sidebar)
 {
   auto const has_running_activity =
       std::ranges::any_of(sidebar.activity, [](SidebarActivityItem const& activity) { return activity.status == ToolTimelineStatus::Running; });
-  return has_running_activity || !sidebar.modified_files.empty();
+  return has_running_activity || !sidebar.modified_files.empty() || sidebar_has_active_todos(sidebar);
+}
+
+std::string todo_status_marker(TodoStatus status)
+{
+  switch (status)
+  {
+    case TodoStatus::Pending:
+      return "○";
+    case TodoStatus::InProgress:
+      return "◉";
+    case TodoStatus::Completed:
+      return "✓";
+  }
+  return "?";
+}
+
+std::string_view todo_status_sgr(TodoStatus status)
+{
+  switch (status)
+  {
+    case TodoStatus::Pending:
+      return kSgrDim;
+    case TodoStatus::InProgress:
+      return kSgrWarning;
+    case TodoStatus::Completed:
+      return kSgrSuccess;
+  }
+  return kSgrDim;
+}
+
+std::string todo_status_label(TodoStatus status)
+{
+  switch (status)
+  {
+    case TodoStatus::Pending:
+      return "pending";
+    case TodoStatus::InProgress:
+      return "in progress";
+    case TodoStatus::Completed:
+      return "completed";
+  }
+  return "pending";
+}
+
+std::string format_todo_counts_header(std::vector<TodoItem> const& todos, bool active_only_title)
+{
+  auto const total = todos.size();
+  auto const completed = count_todos_with_status(todos, TodoStatus::Completed);
+  auto const in_progress = count_todos_with_status(todos, TodoStatus::InProgress);
+  auto const pending = count_todos_with_status(todos, TodoStatus::Pending);
+  auto const active = in_progress + pending;
+  if (active_only_title)
+    return "Todos — " + std::to_string(active) + " active";
+  return "Todos — " + std::to_string(completed) + "/" + std::to_string(total) + " completed · " + std::to_string(in_progress) + " in progress · " +
+         std::to_string(pending) + " pending";
+}
+
+std::string format_todo_rail_line(TodoItem const& item, std::size_t width)
+{
+  auto line = std::string(todo_status_sgr(item.status)) + todo_status_marker(item.status) + std::string(kSgrReset) + " #" + sanitize_terminal_text(item.id) +
+              " " + sanitize_terminal_text(item.content);
+  return detail::fit_line_preserving_sgr(std::move(line), width);
 }
 
 bool sidebar_visible(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height)
@@ -789,6 +866,22 @@ std::vector<std::string> render_sidebar_drawer_body(SidebarSnapshot const& sideb
     }
   }
 
+  push_sidebar_drawer_section(lines, "Todos", width);
+  if (sidebar.todos.empty())
+  {
+    push_sidebar_drawer_value(lines, "todos", "no todos", width);
+  }
+  else
+  {
+    push_sidebar_drawer_value(lines, "summary", format_todo_counts_header(sidebar.todos, false), width);
+    for (auto const& item : sidebar.todos)
+    {
+      auto value = todo_status_marker(item.status) + " #" + sanitize_terminal_text(item.id) + " [" + todo_status_label(item.status) + "] " +
+                   sanitize_terminal_text(item.content);
+      push_sidebar_drawer_value(lines, "todo", value, width);
+    }
+  }
+
   push_sidebar_drawer_section(lines, "Session", width);
   push_sidebar_drawer_value(lines, "mode", sanitize_terminal_text(sidebar.mode), width);
   push_sidebar_drawer_value(lines, "provider", sanitize_terminal_text(sidebar.provider), width);
@@ -887,6 +980,19 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
       push_sidebar_line(lines, "", width);
     push_sidebar_line(lines, std::string(kSgrBold) + sanitize_terminal_text(title) + std::string(kSgrReset), width);
   };
+
+  if (sidebar_has_active_todos(sidebar) && lines.size() < height)
+  {
+    begin_group(format_todo_counts_header(sidebar.todos, true));
+    for (auto const& item : sidebar.todos)
+    {
+      if (!todo_is_active(item))
+        continue;
+      push_sidebar_line(lines, format_todo_rail_line(item, width), width);
+      if (lines.size() >= height)
+        return lines;
+    }
+  }
 
   begin_group("Session");
   std::string metadata;
@@ -1381,12 +1487,106 @@ struct ComposerVerticalLayout
   std::size_t transcript_composer_gap_lines = 0;
 };
 
+// Keep only todos so layout/hit-test geometry still reserves the narrow dock while
+// the automatic rail remains disabled for the already-reduced content width.
+void retain_todos_without_automatic_rail(ComposerSnapshot& snapshot)
+{
+  auto todos = snapshot.sidebar ? snapshot.sidebar->todos : std::vector<TodoItem>{};
+  snapshot.sidebar = SidebarSnapshot{.todos = std::move(todos)};
+}
+
+bool todo_dock_suppressed(ComposerSnapshot const& snapshot, detail::CompletionMatchCache const& completion_cache, std::size_t width, std::size_t height)
+{
+  auto const completion_visible = completion_cache.model && completion_cache.model->palette_visible;
+  if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || completion_visible ||
+      slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands))
+  {
+    return true;
+  }
+  if (!snapshot.sidebar || !sidebar_has_active_todos(*snapshot.sidebar))
+    return true;
+  // Only when the automatic rail is not visible. Explicit /sidebar drawer already suppresses above.
+  if (sidebar_visible(snapshot, width, height))
+    return true;
+  return false;
+}
+
+std::size_t todo_dock_line_budget(ComposerSnapshot const& snapshot, detail::CompletionMatchCache const& completion_cache, std::size_t width, std::size_t height,
+                                  std::size_t reserved_non_dock_lines)
+{
+  if (todo_dock_suppressed(snapshot, completion_cache, width, height))
+    return 0;
+  if (height <= reserved_non_dock_lines)
+    return 0;
+  auto const available = height - reserved_non_dock_lines;
+  // Keep room for transcript (>=1) and the composer block itself.
+  if (available < 3)
+    return 0;
+  auto const max_dock = std::min<std::size_t>(available - 2, 6);
+  if (max_dock == 0)
+    return 0;
+  if (height < 12)
+    return std::min<std::size_t>(max_dock, 2);
+  return max_dock;
+}
+
+std::vector<std::string> render_todo_dock_lines(SidebarSnapshot const& sidebar, std::size_t width, std::size_t max_lines)
+{
+  std::vector<std::string> lines;
+  if (max_lines == 0 || !sidebar_has_active_todos(sidebar))
+    return lines;
+
+  auto const header = format_todo_counts_header(sidebar.todos, false);
+  lines.push_back(detail::screen_surface_line(std::string(kSgrBold) + sanitize_terminal_text(header) + std::string(kSgrReset), width));
+  if (max_lines == 1)
+    return lines;
+
+  std::vector<TodoItem const*> active;
+  active.reserve(sidebar.todos.size());
+  for (auto const& item : sidebar.todos)
+  {
+    if (todo_is_active(item))
+      active.push_back(&item);
+  }
+  if (active.empty())
+    return lines;
+
+  auto const body_budget = max_lines - 1;
+  auto const collapse_to_current = body_budget <= 1 || (body_budget == 2 && active.size() > 2);
+  if (collapse_to_current)
+  {
+    // Prefer the in_progress item when collapsing, else the first active item.
+    TodoItem const* current = active.front();
+    for (auto const* item : active)
+    {
+      if (item->status == TodoStatus::InProgress)
+      {
+        current = item;
+        break;
+      }
+    }
+    lines.push_back(detail::screen_surface_line(format_todo_rail_line(*current, width), width));
+    return lines;
+  }
+
+  auto const visible = std::min(active.size(), body_budget);
+  auto const overflow = active.size() > visible;
+  auto const item_slots = overflow && visible > 0 ? visible - 1 : visible;
+  for (std::size_t index = 0; index < item_slots; ++index) lines.push_back(detail::screen_surface_line(format_todo_rail_line(*active[index], width), width));
+  if (overflow)
+  {
+    auto const remaining = active.size() - item_slots;
+    lines.push_back(detail::screen_surface_line(std::string(kSgrDim) + "+" + std::to_string(remaining) + " more" + std::string(kSgrReset), width));
+  }
+  return lines;
+}
+
 ComposerVerticalLayout calculate_composer_vertical_layout(ComposerSnapshot const& snapshot, detail::CompletionMatchCache& completion_cache, std::size_t width,
                                                           std::size_t height, std::size_t& normal_composer_lines, std::vector<std::string>& permission_lines,
                                                           std::vector<std::string>& question_lines, std::vector<std::string>& status_alert_lines,
                                                           std::vector<std::string>& palette_lines, std::vector<std::string>& queued_lines,
-                                                          PendingAttachmentRender& pending_attachment_lines, bool emit_attachment_graphics,
-                                                          bool allow_transcript_gap = true)
+                                                          PendingAttachmentRender& pending_attachment_lines, std::vector<std::string>& todo_dock_lines,
+                                                          bool emit_attachment_graphics, bool allow_transcript_gap = true)
 {
   auto const prompt_active = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value();
   auto const desired_composer_lines = detail::composer_block_line_count(snapshot, height, width);
@@ -1432,8 +1632,12 @@ ComposerVerticalLayout calculate_composer_vertical_layout(ComposerSnapshot const
                                                   : 0;
   pending_attachment_lines = render_pending_attachment_lines(snapshot, width, pending_attachment_line_budget, emit_attachment_graphics);
 
-  auto const non_transcript_lines = normal_composer_lines + queued_lines.size() + pending_attachment_lines.lines.size() + status_alert_lines.size() +
-                                    palette_lines.size() + permission_lines.size() + question_lines.size();
+  auto const reserved_before_todo_dock = normal_composer_lines + permission_lines.size() + question_lines.size() + status_alert_lines.size() +
+                                         palette_lines.size() + queued_lines.size() + pending_attachment_lines.lines.size();
+  auto const todo_budget = todo_dock_line_budget(snapshot, completion_cache, width, height, reserved_before_todo_dock);
+  todo_dock_lines = (todo_budget > 0 && snapshot.sidebar) ? render_todo_dock_lines(*snapshot.sidebar, width, todo_budget) : std::vector<std::string>{};
+
+  auto const non_transcript_lines = reserved_before_todo_dock + todo_dock_lines.size();
   auto const available_lines = height > non_transcript_lines ? height - non_transcript_lines : std::size_t{0};
   auto const desired_gap = allow_transcript_gap ? detail::composer_layout_policy(snapshot, height).transcript_composer_gap_lines : std::size_t{0};
   auto const gap_lines = available_lines >= 2 ? std::min(desired_gap, available_lines - 1) : std::size_t{0};
@@ -1640,9 +1844,10 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender pending_attachment_lines;
+  std::vector<std::string> todo_dock_lines;
   auto const vertical_layout =
       calculate_composer_vertical_layout(snapshot, completion_cache, width, height, normal_composer_lines, permission_lines, question_lines, status_alert_lines,
-                                         palette_lines, queued_lines, pending_attachment_lines, true, allow_transcript_gap);
+                                         palette_lines, queued_lines, pending_attachment_lines, todo_dock_lines, true, allow_transcript_gap);
   auto const transcript_height = vertical_layout.transcript_height;
   std::vector<std::string> visible_transcript;
   detail::TranscriptLayoutCache local_transcript_cache;
@@ -1733,6 +1938,10 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     graphic.row += pending_attachment_start_row;
     frame.graphics.push_back(std::move(graphic));
   }
+  for (auto const& line : todo_dock_lines)
+  {
+    frame.lines.push_back(line);
+  }
   for (auto const& line : status_alert_lines)
   {
     frame.lines.push_back(line);
@@ -1790,7 +1999,7 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  main.sidebar = std::nullopt;
+  retain_todos_without_automatic_rail(main);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;
@@ -1800,8 +2009,9 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender attachments;
+  std::vector<std::string> todo_dock_lines;
   auto const vertical_layout = calculate_composer_vertical_layout(main, completion_cache, width, height, composer_lines, permission_lines, question_lines,
-                                                                  status_lines, palette_lines, queued_lines, attachments, false);
+                                                                  status_lines, palette_lines, queued_lines, attachments, todo_dock_lines, false);
   auto const transcript_height = vertical_layout.transcript_height;
   auto const row_index = row - 1;
   if (row_index >= transcript_height)
@@ -1842,7 +2052,7 @@ detail::TranscriptBodyScreenGeometry detail::transcript_body_screen_geometry(Com
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  main.sidebar = std::nullopt;
+  retain_todos_without_automatic_rail(main);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;
@@ -1852,8 +2062,9 @@ detail::TranscriptBodyScreenGeometry detail::transcript_body_screen_geometry(Com
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender attachments;
+  std::vector<std::string> todo_dock_lines;
   auto const vertical_layout = calculate_composer_vertical_layout(main, completion_cache, width, height, composer_lines, permission_lines, question_lines,
-                                                                  status_lines, palette_lines, queued_lines, attachments, false);
+                                                                  status_lines, palette_lines, queued_lines, attachments, todo_dock_lines, false);
   if (vertical_layout.transcript_height == 0)
     return {};
   return TranscriptBodyScreenGeometry{
@@ -1891,7 +2102,7 @@ std::optional<ComposerPaletteScreenLayout> detail::composer_palette_screen_layou
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  main.sidebar = std::nullopt;
+  retain_todos_without_automatic_rail(main);
   std::size_t composer_lines = 0;
   std::vector<std::string> permission_lines;
   std::vector<std::string> question_lines;
@@ -1899,8 +2110,9 @@ std::optional<ComposerPaletteScreenLayout> detail::composer_palette_screen_layou
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender attachments;
+  std::vector<std::string> todo_dock_lines;
   auto const vertical_layout = calculate_composer_vertical_layout(main, completion_cache, width, height, composer_lines, permission_lines, question_lines,
-                                                                  status_lines, palette_lines, queued_lines, attachments, false);
+                                                                  status_lines, palette_lines, queued_lines, attachments, todo_dock_lines, false);
   if (palette_lines.empty())
     return std::nullopt;
   return ComposerPaletteScreenLayout{.first_item_row = vertical_layout.transcript_height + vertical_layout.transcript_composer_gap_lines + 1,
@@ -1953,9 +2165,10 @@ std::size_t detail::composer_max_transcript_scroll_offset_cached(ComposerSnapsho
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender pending_attachment_lines;
-  auto const vertical_layout =
-      calculate_composer_vertical_layout(layout_snapshot, completion_cache, width, height, normal_composer_lines, permission_lines, question_lines,
-                                         status_alert_lines, palette_lines, queued_lines, pending_attachment_lines, false, allow_transcript_gap);
+  std::vector<std::string> todo_dock_lines;
+  auto const vertical_layout = calculate_composer_vertical_layout(layout_snapshot, completion_cache, width, height, normal_composer_lines, permission_lines,
+                                                                  question_lines, status_alert_lines, palette_lines, queued_lines, pending_attachment_lines,
+                                                                  todo_dock_lines, false, allow_transcript_gap);
   if (vertical_layout.transcript_height == 0)
     return 0;
   refresh_transcript_layout_cache(transcript_cache, snapshot.transcript, transcript_generation, width, snapshot.tool_presentation, snapshot.thinking_visible,
@@ -2043,7 +2256,7 @@ std::optional<std::size_t> question_option_for_screen_position(ComposerSnapshot 
   auto main = snapshot;
   main.width = width;
   main.height = height;
-  main.sidebar = std::nullopt;
+  retain_todos_without_automatic_rail(main);
   detail::CompletionMatchCache completion_cache;
   detail::refresh_completion_match_cache(completion_cache, main, main.file_references_generation);
   std::size_t composer_lines = 0;
@@ -2053,8 +2266,9 @@ std::optional<std::size_t> question_option_for_screen_position(ComposerSnapshot 
   std::vector<std::string> palette_lines;
   std::vector<std::string> queued_lines;
   PendingAttachmentRender attachments;
+  std::vector<std::string> todo_dock_lines;
   static_cast<void>(calculate_composer_vertical_layout(main, completion_cache, width, height, composer_lines, permission_lines, question_lines, status_lines,
-                                                       palette_lines, queued_lines, attachments, false));
+                                                       palette_lines, queued_lines, attachments, todo_dock_lines, false));
   if (question_lines.empty() || height < composer_lines + question_lines.size())
     return std::nullopt;
   auto const first_question_row = height - composer_lines - question_lines.size();

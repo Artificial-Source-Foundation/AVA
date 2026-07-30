@@ -1658,9 +1658,55 @@ void test_tui_diff_intraline_emphasis()
 }
 }  // namespace
 
+void test_tui_todowrite_tool_card_checklist()
+{
+  auto const success_json =
+      R"({"schema_version":1,"tool":"todowrite","ok":true,"todos":[{"id":"a","content":"First","status":"completed"},{"id":"b","content":"Second","status":"in_progress"},{"id":"c","content":"Third","status":"pending"}],"counts":{"total":3,"pending":1,"in_progress":1,"completed":1}})";
+  auto const card = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                  .name = "todowrite",
+                                                                                  .result_summary = "1/3 completed",
+                                                                                  .result_json = success_json,
+                                                                                  .lifecycle = ava::tui::ToolLifecycleState::Complete},
+                                                       100, ava::tui::ToolPresentation::Rich, false);
+  expect(std::ranges::any_of(card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("todowrite") != std::string::npos && visible.find("1/3 completed") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(card, [](std::string const& line) { return strip_sgr(line).find("#a First") != std::string::npos; }) &&
+             std::ranges::any_of(card, [](std::string const& line) { return strip_sgr(line).find("#b Second") != std::string::npos; }) &&
+             std::ranges::none_of(card, [](std::string const& line) { return strip_sgr(line).find("schema_version") != std::string::npos; }),
+         "todowrite success cards render a human checklist instead of raw JSON");
+
+  auto const clear_card = ava::tui::detail::render_tool_card(
+      ava::tui::ToolTimelineItem{
+          .status = ava::tui::ToolTimelineStatus::Success,
+          .name = "todowrite",
+          .result_summary = "todos cleared",
+          .result_json = R"({"schema_version":1,"tool":"todowrite","ok":true,"todos":[],"counts":{"total":0,"pending":0,"in_progress":0,"completed":0}})",
+          .lifecycle = ava::tui::ToolLifecycleState::Complete},
+      80, ava::tui::ToolPresentation::Rich, false);
+  expect(std::ranges::any_of(clear_card, [](std::string const& line) { return strip_sgr(line).find("todos cleared") != std::string::npos; }),
+         "todowrite clear cards say todos cleared");
+
+  auto const error_card = ava::tui::detail::render_tool_card(ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Error,
+                                                                                        .name = "todowrite",
+                                                                                        .result_summary = "todo id is invalid",
+                                                                                        .result_json = R"({"schema_version":1,"tool":"todowrite","ok":false})",
+                                                                                        .lifecycle = ava::tui::ToolLifecycleState::Error},
+                                                             80, ava::tui::ToolPresentation::Compact, false);
+  expect(std::ranges::any_of(error_card,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("x todowrite") != std::string::npos && visible.find("todo id is invalid") != std::string::npos;
+                             }),
+         "todowrite error cards remain ordinary error cards");
+}
+
 void run_tui_tool_card_detail_tests()
 {
   test_tui_large_tool_output_preview_is_bounded();
   test_tui_f5_progressive_tool_details();
   test_tui_diff_intraline_emphasis();
+  test_tui_todowrite_tool_card_checklist();
 }

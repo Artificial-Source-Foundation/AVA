@@ -24,7 +24,7 @@ struct ToolMetadata
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-inline constexpr std::array<ToolMetadata, 19> kBuiltinToolMetadata{{
+inline constexpr std::array<ToolMetadata, 20> kBuiltinToolMetadata{{
     ToolMetadata{
         .name = "read_file",
         .description = "Read a text file through AVA permission checks. Use offset and limit to continue "
@@ -206,6 +206,17 @@ inline constexpr std::array<ToolMetadata, 19> kBuiltinToolMetadata{{
         .output_bound_summary = "Returns the bounded user selection or custom answer text.",
         .execution_mode = "synchronous_user_interaction",
         .event_rendering_hint = "question",
+        .description_family = std::string_view("interaction")},
+    ToolMetadata{
+        .name = "todowrite",
+        .description = "Replace the conversation todo list with a full snapshot. Use for nontrivial multi-step work; keep one item in_progress while actively "
+                       "working; mark completed only after completion/verification; pass an empty list to clear.",
+        .schema_json =
+            R"({"type":"function","name":"todowrite","description":"Replace the conversation todo list with a full snapshot. Use for nontrivial multi-step work. Maintain exactly one in_progress item while actively working when practical; mark completed only after completion and verification; pass an empty todos array to clear the list.","parameters":{"type":"object","additionalProperties":false,"properties":{"todos":{"type":"array","maxItems":50,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":32,"description":"Stable ASCII semantic id matching [A-Za-z0-9_-]."},"content":{"type":"string","minLength":1,"maxLength":512,"description":"Human-readable todo text."},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"required":["id","content","status"]}}},"required":["todos"]}})",
+        .permission_category = "user",
+        .output_bound_summary = "Returns a schema-versioned full-list snapshot with counts; at most 50 items.",
+        .execution_mode = "synchronous",
+        .event_rendering_hint = "todo",
         .description_family = std::string_view("interaction")},
 }};
 

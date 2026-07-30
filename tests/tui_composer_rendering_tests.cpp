@@ -721,25 +721,23 @@ void run_tui_composer_rendering_tests_part_1()
     auto const reset_at = screen_line.find(reset);
     auto const reapplied_default_bg =
         reset_at == std::string::npos ? std::string::npos : screen_line.find(std::string(ava::tui::detail::kSgrScreenBg), reset_at + reset.size());
-    auto const ordinary_dock = ava::tui::detail::render_composer_block(
-        ava::tui::ComposerSnapshot{.mode = "build",
-                                   .provider = "openai",
-                                   .model = "gpt-5.5",
-                                   .session_id = "session_ordinary_dock_bg",
-                                   .input = "draft",
-                                   .status = "ready",
-                                   .transcript = {},
-                                   .width = 40,
-                                   .height = 12},
-        40, 2);
+    auto const ordinary_dock = ava::tui::detail::render_composer_block(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                                  .provider = "openai",
+                                                                                                  .model = "gpt-5.5",
+                                                                                                  .session_id = "session_ordinary_dock_bg",
+                                                                                                  .input = "draft",
+                                                                                                  .status = "ready",
+                                                                                                  .transcript = {},
+                                                                                                  .width = 40,
+                                                                                                  .height = 12},
+                                                                       40, 2);
     expect(ava::tui::detail::kSgrScreenBg == "\x1b[49m" && first_default_bg == 0 && reset_at != std::string::npos &&
                reapplied_default_bg != std::string::npos && screen_line.find(kLegacyScreenRgb) == std::string::npos &&
                composer_line.find("\x1b[48;2;26;31;46m") != std::string::npos && composer_line.find("\x1b[49m") == std::string::npos &&
                ordinary_dock.size() == 2 &&
-               std::ranges::all_of(ordinary_dock,
-                                   [](std::string const& line) {
-                                     return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
-                                   }),
+               std::ranges::all_of(
+                   ordinary_dock,
+                   [](std::string const& line) { return line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos; }),
            "screen_surface_line uses and reapplies SGR 49 for the terminal default background instead of the legacy hard-coded screen RGB; ordinary composer "
            "dock rows inherit that screen background while elevated composer contrast surfaces remain explicitly styled");
   }
@@ -1010,14 +1008,8 @@ void run_tui_composer_rendering_tests_part_1()
             ava::tui::SelectListView{
                 .title = "Models",
                 .subtitle = {},
-                .items = {ava::tui::SelectListItemView{.value = "a",
-                                                       .label = "Alpha",
-                                                       .description = {},
-                                                       .group = {},
-                                                       .detail = {},
-                                                       .badge = {},
-                                                       .enabled = true,
-                                                       .disabled_reason = {}}},
+                .items = {ava::tui::SelectListItemView{
+                    .value = "a", .label = "Alpha", .description = {}, .group = {}, .detail = {}, .badge = {}, .enabled = true, .disabled_reason = {}}},
                 .selected_item_index = 0,
                 .query = {},
                 .footer_hint = {}},
@@ -1058,24 +1050,22 @@ void run_tui_composer_rendering_tests_part_1()
       expect(dock_uses_screen_bg(dark_lines) && dock_uses_screen_bg(light_lines),
              "tui ordinary composer dock keeps terminal-default screen background under built-in dark and light themes");
     }
-    ava::tui::TuiCustomTheme custom{
-        .name = "dockbg",
-        .path = "dockbg.json",
-        .palette = ava::tui::TuiThemePalette{.text = -1,
-                                             .muted = 242,
-                                             .success = 34,
-                                             .warning = 220,
-                                             .error = 196,
-                                             .accent = 39,
-                                             .screen_bg = 255,
-                                             .composer_bg = 236,
-                                             .tool_bg = 235,
-                                             .question_bg = 237},
-        .revision = "test-dockbg"};
+    ava::tui::TuiCustomTheme custom{.name = "dockbg",
+                                    .path = "dockbg.json",
+                                    .palette = ava::tui::TuiThemePalette{.text = -1,
+                                                                         .muted = 242,
+                                                                         .success = 34,
+                                                                         .warning = 220,
+                                                                         .error = 196,
+                                                                         .accent = 39,
+                                                                         .screen_bg = 255,
+                                                                         .composer_bg = 236,
+                                                                         .tool_bg = 235,
+                                                                         .question_bg = 237},
+                                    .revision = "test-dockbg"};
     ava::tui::set_tui_config_theme("dockbg", custom);
     auto const custom_lines = ava::tui::render_composer(idle_snapshot);
-    expect(dock_uses_screen_bg(custom_lines),
-           "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
+    expect(dock_uses_screen_bg(custom_lines), "tui ordinary composer dock follows screen background semantics under a custom theme with distinct composerBg");
     ava::tui::set_tui_config_theme(std::nullopt);
     {
       ScopedEnvVar no_color_guard("NO_COLOR", "1");
@@ -2891,4 +2881,104 @@ void run_tui_composer_rendering_tests_part_4()
   expect(default_hint.interrupt == "Esc" && default_hint.jump_to_bottom == "Ctrl+End" && custom_hint.interrupt == "F9" && custom_hint.jump_to_bottom == "End" &&
              unbound_hint.interrupt.empty() && unbound_hint.jump_to_bottom.empty(),
          "Wave A active_run_hint_for derives Cancel stop and JumpToBottom labels through first_key_display so custom and unbound bindings stay truthful");
+
+  auto const active_todos = std::vector<ava::tui::TodoItem>{
+      {.id = "a", .content = "First task", .status = ava::tui::TodoStatus::Completed},
+      {.id = "b", .content = "Second task", .status = ava::tui::TodoStatus::InProgress},
+      {.id = "c", .content = "Third task", .status = ava::tui::TodoStatus::Pending},
+  };
+  auto const rail_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_todo_rail",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "you", .text = "work"}},
+      .width = 144,
+      .height = 22,
+      .sidebar =
+          ava::tui::SidebarSnapshot{.todos = active_todos, .session_id = "session_todo_rail", .mode = "build", .provider = "openai", .model = "gpt-5.5"}});
+  expect(std::ranges::any_of(rail_frame,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("Todos — 2 active") != std::string::npos;
+                             }) &&
+             std::ranges::any_of(rail_frame, [](std::string const& line) { return strip_sgr(line).find("#b") != std::string::npos; }) &&
+             std::ranges::none_of(rail_frame, [](std::string const& line) { return strip_sgr(line).find("#a") != std::string::npos; }),
+         "144-col automatic rail shows active todos only and uses the actionable width threshold");
+
+  auto const narrow_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_todo_dock",
+      .input = "",
+      .status = "ready",
+      .transcript = {ava::tui::TranscriptItem{.label = "you", .text = "work"}},
+      .width = 143,
+      .height = 24,
+      .sidebar =
+          ava::tui::SidebarSnapshot{.todos = active_todos, .session_id = "session_todo_dock", .mode = "build", .provider = "openai", .model = "gpt-5.5"}});
+  expect(std::ranges::any_of(narrow_frame,
+                             [](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("Todos — 1/3 completed") != std::string::npos && visible.find("in progress") != std::string::npos;
+                             }) &&
+             std::ranges::none_of(narrow_frame, [](std::string const& line) { return strip_sgr(line).find("Todos — 2 active") != std::string::npos; }),
+         "143-col terminals use the sticky narrow todo dock instead of the automatic rail title");
+
+  auto const completed_only = ava::tui::render_composer(
+      ava::tui::ComposerSnapshot{.mode = "build",
+                                 .provider = "openai",
+                                 .model = "gpt-5.5",
+                                 .session_id = "session_todo_done",
+                                 .input = "",
+                                 .status = "ready",
+                                 .transcript = {},
+                                 .width = 144,
+                                 .height = 22,
+                                 .sidebar = ava::tui::SidebarSnapshot{.todos = {{.id = "a", .content = "Done", .status = ava::tui::TodoStatus::Completed}},
+                                                                      .session_id = "session_todo_done",
+                                                                      .mode = "build",
+                                                                      .provider = "openai",
+                                                                      .model = "gpt-5.5"}});
+  expect(std::ranges::none_of(completed_only, [](std::string const& line) { return strip_sgr(line).find("Todos") != std::string::npos; }),
+         "completed-only todo lists hide the live automatic rail contribution");
+
+  auto const drawer = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_todo_drawer",
+      .input = "",
+      .status = "ready",
+      .transcript = {},
+      .width = 100,
+      .height = 24,
+      .sidebar =
+          ava::tui::SidebarSnapshot{.todos = active_todos, .session_id = "session_todo_drawer", .mode = "build", .provider = "openai", .model = "gpt-5.5"},
+      .sidebar_drawer_visible = true});
+  expect(std::ranges::any_of(drawer, [](std::string const& line) { return strip_sgr(line).find("Todos") != std::string::npos; }) &&
+             std::ranges::any_of(drawer, [](std::string const& line) { return strip_sgr(line).find("[completed]") != std::string::npos; }) &&
+             std::ranges::any_of(drawer, [](std::string const& line) { return strip_sgr(line).find("#a") != std::string::npos; }),
+         "/sidebar drawer includes a full Todos section with statuses");
+
+  auto const short_dock = ava::tui::render_composer(ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_todo_short",
+      .input = "hello",
+      .status = "ready",
+      .transcript = {},
+      .width = 80,
+      .height = 10,
+      .sidebar =
+          ava::tui::SidebarSnapshot{.todos = active_todos, .session_id = "session_todo_short", .mode = "build", .provider = "openai", .model = "gpt-5.5"}});
+  auto const todo_lines = std::ranges::count_if(short_dock, [](std::string const& line) {
+    auto const visible = strip_sgr(line);
+    return visible.find("Todos") != std::string::npos || visible.find("#b") != std::string::npos || visible.find("#c") != std::string::npos;
+  });
+  expect(todo_lines <= 3, "short-height terminals bound the sticky todo dock and do not starve the composer");
 }

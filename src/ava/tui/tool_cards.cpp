@@ -1304,9 +1304,156 @@ std::string resting_result_text(ToolTimelineItem const& item)
   return resting_text(item, result);
 }
 
+std::optional<TodoStatus> parse_card_todo_status(std::string_view value)
+{
+  if (value == "pending")
+    return TodoStatus::Pending;
+  if (value == "in_progress")
+    return TodoStatus::InProgress;
+  if (value == "completed")
+    return TodoStatus::Completed;
+  return std::nullopt;
+}
+
+std::string todo_card_marker(TodoStatus status)
+{
+  switch (status)
+  {
+    case TodoStatus::Pending:
+      return "○";
+    case TodoStatus::InProgress:
+      return "◉";
+    case TodoStatus::Completed:
+      return "✓";
+  }
+  return "?";
+}
+
+std::string_view todo_card_status_sgr(TodoStatus status)
+{
+  switch (status)
+  {
+    case TodoStatus::Pending:
+      return detail::kSgrDim;
+    case TodoStatus::InProgress:
+      return detail::kSgrWarning;
+    case TodoStatus::Completed:
+      return detail::kSgrSuccess;
+  }
+  return detail::kSgrDim;
+}
+
+bool bool_json_true(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start)
+    return false;
+  auto value = object.substr(*start);
+  while (!value.empty() && (value.front() == ' ' || value.front() == '\n' || value.front() == '\r' || value.front() == '\t')) value.remove_prefix(1);
+  return value.starts_with("true");
+}
+
+std::optional<std::vector<TodoItem>> parse_todowrite_card_todos(std::string_view result_json)
+{
+  if (!bool_json_true(result_json, "ok"))
+    return std::nullopt;
+  auto const tool = ava::core::json::string_field(result_json, "tool");
+  if (!tool || *tool != "todowrite")
+    return std::nullopt;
+  auto const objects = ava::core::json::strict_objects_in_array_field(result_json, "todos", 50);
+  if (!objects)
+    return std::nullopt;
+  std::vector<TodoItem> todos;
+  todos.reserve(objects->size());
+  for (auto const& object : *objects)
+  {
+    auto const id = ava::core::json::string_field(object, "id");
+    auto const content = ava::core::json::string_field(object, "content");
+    auto const status_text = ava::core::json::string_field(object, "status");
+    if (!id || !content || !status_text)
+      return std::nullopt;
+    auto const status = parse_card_todo_status(*status_text);
+    if (!status)
+      return std::nullopt;
+    todos.push_back(TodoItem{.id = *id, .content = *content, .status = *status});
+  }
+  return todos;
+}
+
+std::string todowrite_primary_summary(ToolTimelineItem const& item)
+{
+  if (item.status == ToolTimelineStatus::Error)
+    return item.result_summary.empty() ? std::string("failed") : sanitize_terminal_text(item.result_summary);
+  auto todos = parse_todowrite_card_todos(item.result_json);
+  if (!todos)
+    return item.result_summary.empty() ? std::string("todo list updated") : sanitize_terminal_text(item.result_summary);
+  if (todos->empty())
+    return "todos cleared";
+  std::size_t completed = 0;
+  std::size_t in_progress = 0;
+  std::size_t pending = 0;
+  for (auto const& todo : *todos)
+  {
+    switch (todo.status)
+    {
+      case TodoStatus::Completed:
+        ++completed;
+        break;
+      case TodoStatus::InProgress:
+        ++in_progress;
+        break;
+      case TodoStatus::Pending:
+        ++pending;
+        break;
+    }
+  }
+  return std::to_string(completed) + "/" + std::to_string(todos->size()) + " completed · " + std::to_string(in_progress) + " in progress · " +
+         std::to_string(pending) + " pending";
+}
+
+void append_todowrite_checklist(std::vector<std::string>& lines, ToolTimelineItem const& item, std::size_t width, ToolPresentation presentation)
+{
+  auto todos = parse_todowrite_card_todos(item.result_json);
+  if (!todos)
+    return;
+  if (todos->empty())
+  {
+    auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+    lines.push_back(detail::fit_line_preserving_sgr(prefix + std::string(detail::kSgrDim) + "todos cleared" + std::string(detail::kSgrReset), width));
+    return;
+  }
+  auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  auto const content_width = width > detail::terminal_text_columns(prefix + "✓ #id ") ? width - detail::terminal_text_columns(prefix) : std::size_t{1};
+  auto const max_items = presentation == ToolPresentation::Compact    ? std::size_t{0}
+                         : presentation == ToolPresentation::Expanded ? todos->size()
+                                                                      : std::min<std::size_t>(todos->size(), 8);
+  if (max_items == 0)
+    return;
+  auto const visible = std::min(todos->size(), max_items);
+  for (std::size_t index = 0; index < visible; ++index)
+  {
+    auto const& todo = (*todos)[index];
+    auto line = std::string(todo_card_status_sgr(todo.status)) + todo_card_marker(todo.status) + std::string(detail::kSgrReset) + " #" +
+                sanitize_terminal_text(todo.id) + " " + sanitize_terminal_text(todo.content);
+    lines.push_back(detail::fit_line_preserving_sgr(prefix + detail::fit_line_preserving_sgr(std::move(line), content_width), width));
+  }
+  if (todos->size() > visible)
+  {
+    lines.push_back(detail::fit_line_preserving_sgr(
+        prefix + std::string(detail::kSgrDim) + "+" + std::to_string(todos->size() - visible) + " more" + std::string(detail::kSgrReset), width));
+  }
+}
+
 std::string tool_primary_summary(ToolTimelineItem const& item, bool suppress_result_summary, bool is_shell, std::optional<std::string> const& command,
                                  std::optional<std::string> const& shell_status, std::optional<std::string> const& duration, std::string const& truncation)
 {
+  if (name_is(item, {"todowrite"}))
+  {
+    auto text = todowrite_primary_summary(item);
+    if (item.status != ToolTimelineStatus::Running && duration && !text.empty() && text.find(*duration) == std::string::npos)
+      text += " · " + *duration;
+    return text;
+  }
   auto const with_duration = [&](std::string text) {
     if (item.status != ToolTimelineStatus::Running && duration && !text.empty() && text.find(*duration) == std::string::npos)
       text += " · " + *duration;
@@ -1409,60 +1556,67 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
 
   if (presentation != ToolPresentation::Compact)
   {
-    auto call = human_call_text(item);
-    if (name_is(item, {"question"}))
-      call = first_json_string(item.result_json, {"question"}).value_or(call);
-    append_wrapped_call(lines, item, call, width);
-    if (auto answer = question_answer_text(item))
+    if (name_is(item, {"todowrite"}) && item.status == ToolTimelineStatus::Success)
     {
-      auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
-      auto const content_width = width > terminal_text_columns(prefix + "answer: ") ? width - terminal_text_columns(prefix + "answer: ") : std::size_t{1};
-      auto wrapped = wrap_transcript_text(sanitize_terminal_text(*answer), content_width);
-      for (std::size_t index = 0; index < wrapped.size(); ++index)
-      {
-        auto label = index == 0 ? std::string("answer: ") : std::string("        ");
-        lines.push_back(fit_line_preserving_sgr(prefix + std::string(kSgrSuccess) + label + wrapped[index] + std::string(kSgrReset), width));
-      }
-    }
-
-    auto const output = output_preview_text(item);
-    auto const output_repeats_result = output && same_payload(*output, item.result_summary);
-    auto const sanitized_result = sanitize_terminal_text(item.result_summary);
-    auto const result_visible_in_primary =
-        primary_raw == complete_primary_raw && !sanitized_result.empty() && complete_primary_raw.find(sanitized_result) != std::string::npos;
-    auto const generic_listing_result = directory_listing_tool(item) && item.result_summary == "ok";
-    if (!suppress_result_summary && !item.result_summary.empty() && !generic_listing_result && !permission_audit_payload(item, item.result_summary) && !output_repeats_result &&
-        !same_payload(item.result_summary, primary) && !result_visible_in_primary)
-    {
-      append_tool_detail_lines(lines, "result", project_display_path_aliases(item, item.result_summary), width);
-    }
-    if (output && !permission_audit_payload(item, *output) && (!output_repeats_result || item.truncated))
-    {
-      auto displayed = project_display_path_aliases(item, *output);
-      auto const cap = presentation == ToolPresentation::Expanded ? kExpandedOutputPreviewLines : rich_output_cap(item);
-      append_output_preview_lines(lines, item, "output", displayed, width, cap, is_shell, presentation != ToolPresentation::Expanded);
-    }
-
-    append_tool_detail_lines(lines, "changed", changed_paths_summary(item, true), width);
-    if (!truncation.empty())
-      append_tool_detail_lines(lines, "truncation", truncation, width);
-    if (presentation == ToolPresentation::Expanded)
-    {
-      auto const retained = is_shell ? byte_retention_summary(item) : std::string{};
-      append_tool_detail_lines(lines, "bytes", retained, width);
-      if (!item.spill_path.empty())
-        append_tool_detail_lines(lines, "full output", item.spill_path, width);
-      if (item.spill_truncated)
-        append_tool_detail_lines(lines, "spill incomplete", "true", width);
-      append_diff_lines(lines, item, width, kExpandedDiffPreviewLines);
+      append_todowrite_checklist(lines, item, width, presentation);
     }
     else
     {
-      if (!item.spill_path.empty())
-        append_tool_detail_lines(lines, "more", "expanded view includes retained output at " + item.spill_path, width);
-      if (!item.diff.empty())
-        append_diff_lines(lines, item, width, kRichFilePreviewLines);
-    }
+      auto call = human_call_text(item);
+      if (name_is(item, {"question"}))
+        call = first_json_string(item.result_json, {"question"}).value_or(call);
+      append_wrapped_call(lines, item, call, width);
+      if (auto answer = question_answer_text(item))
+      {
+        auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+        auto const content_width = width > terminal_text_columns(prefix + "answer: ") ? width - terminal_text_columns(prefix + "answer: ") : std::size_t{1};
+        auto wrapped = wrap_transcript_text(sanitize_terminal_text(*answer), content_width);
+        for (std::size_t index = 0; index < wrapped.size(); ++index)
+        {
+          auto label = index == 0 ? std::string("answer: ") : std::string("        ");
+          lines.push_back(fit_line_preserving_sgr(prefix + std::string(kSgrSuccess) + label + wrapped[index] + std::string(kSgrReset), width));
+        }
+      }
+
+      auto const output = output_preview_text(item);
+      auto const output_repeats_result = output && same_payload(*output, item.result_summary);
+      auto const sanitized_result = sanitize_terminal_text(item.result_summary);
+      auto const result_visible_in_primary =
+          primary_raw == complete_primary_raw && !sanitized_result.empty() && complete_primary_raw.find(sanitized_result) != std::string::npos;
+      auto const generic_listing_result = directory_listing_tool(item) && item.result_summary == "ok";
+      if (!suppress_result_summary && !item.result_summary.empty() && !generic_listing_result && !permission_audit_payload(item, item.result_summary) &&
+          !output_repeats_result && !same_payload(item.result_summary, primary) && !result_visible_in_primary)
+      {
+        append_tool_detail_lines(lines, "result", project_display_path_aliases(item, item.result_summary), width);
+      }
+      if (output && !permission_audit_payload(item, *output) && (!output_repeats_result || item.truncated))
+      {
+        auto displayed = project_display_path_aliases(item, *output);
+        auto const cap = presentation == ToolPresentation::Expanded ? kExpandedOutputPreviewLines : rich_output_cap(item);
+        append_output_preview_lines(lines, item, "output", displayed, width, cap, is_shell, presentation != ToolPresentation::Expanded);
+      }
+
+      append_tool_detail_lines(lines, "changed", changed_paths_summary(item, true), width);
+      if (!truncation.empty())
+        append_tool_detail_lines(lines, "truncation", truncation, width);
+      if (presentation == ToolPresentation::Expanded)
+      {
+        auto const retained = is_shell ? byte_retention_summary(item) : std::string{};
+        append_tool_detail_lines(lines, "bytes", retained, width);
+        if (!item.spill_path.empty())
+          append_tool_detail_lines(lines, "full output", item.spill_path, width);
+        if (item.spill_truncated)
+          append_tool_detail_lines(lines, "spill incomplete", "true", width);
+        append_diff_lines(lines, item, width, kExpandedDiffPreviewLines);
+      }
+      else
+      {
+        if (!item.spill_path.empty())
+          append_tool_detail_lines(lines, "more", "expanded view includes retained output at " + item.spill_path, width);
+        if (!item.diff.empty())
+          append_diff_lines(lines, item, width, kRichFilePreviewLines);
+      }
+    }  // non-todowrite detail body
   }
 
   for (auto& line : lines)

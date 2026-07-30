@@ -2044,6 +2044,56 @@ void test_tui_retry_activity_settles_and_restores_contextual_hint()
                       "tui event-state-to-render restores retry chrome after later reactivation following A/B/tick0 settlement");
 }
 
+void test_tui_todowrite_event_state_and_snapshot_hydration()
+{
+  auto const success_json =
+      R"({"schema_version":1,"tool":"todowrite","ok":true,"todos":[{"id":"a","content":"First","status":"completed"},{"id":"b","content":"Second","status":"in_progress"},{"id":"c","content":"Third","status":"pending"}],"counts":{"total":3,"pending":1,"in_progress":1,"completed":1}})";
+  auto make_todo_payload = [](std::string text, std::string call_id, std::string result_json, std::string status) {
+    ava::event::ToolPayload payload;
+    payload.text = std::move(text);
+    payload.call_id = std::move(call_id);
+    payload.tool = "todowrite";
+    payload.result_json = std::move(result_json);
+    payload.status = std::move(status);
+    return payload;
+  };
+
+  ava::tui::TuiEventState state;
+  ava::tui::apply_runtime_event(state, tool_result_event(make_todo_payload("1/3 completed", "call_todo_1", success_json, "completed")));
+  expect(state.todos.size() == 3 && state.todos[0].id == "a" && state.todos[0].status == ava::tui::TodoStatus::Completed &&
+             state.todos[1].status == ava::tui::TodoStatus::InProgress && state.todos[2].status == ava::tui::TodoStatus::Pending,
+         "successful todowrite ToolResult replaces event-state todos");
+
+  ava::tui::apply_runtime_event(
+      state, tool_result_event(
+                 make_todo_payload("failed", "call_todo_fail", R"({"schema_version":1,"tool":"todowrite","ok":false,"error":{"message":"bad"}})", "error")));
+  expect(state.todos.size() == 3, "failed todowrite ToolResult leaves existing todos unchanged");
+
+  ava::tui::apply_runtime_event(state, tool_result_event(make_todo_payload("ok", "call_todo_bad", R"({"ok":true,"todos":[})", "completed")));
+  expect(state.todos.size() == 3, "malformed successful todowrite ToolResult is ignored");
+
+  ava::tui::apply_runtime_event(
+      state,
+      tool_result_event(make_todo_payload(
+          "todos cleared", "call_todo_clear",
+          R"({"schema_version":1,"tool":"todowrite","ok":true,"todos":[],"counts":{"total":0,"pending":0,"in_progress":0,"completed":0}})", "completed")));
+  expect(state.todos.empty(), "empty successful todowrite snapshot clears event-state todos");
+
+  ava::tui::TuiRuntimeOptions options;
+  options.initial_todos = {ava::tui::TodoItem{.id = "seed", .content = "Hydrated", .status = ava::tui::TodoStatus::Pending}};
+  ava::tui::RuntimePresentationState presentation(options);
+  expect(presentation.sidebar.todos.size() == 1 && presentation.sidebar.todos.front().id == "seed", "runtime options hydrate sidebar todos at startup");
+  ava::tui::TuiRuntimeStateSnapshot switched;
+  switched.mode = "build";
+  switched.provider = "openai";
+  switched.model = "gpt-5.5";
+  switched.session_id = "session_b";
+  switched.todos = {ava::tui::TodoItem{.id = "switched", .content = "After switch", .status = ava::tui::TodoStatus::InProgress}};
+  presentation.apply_runtime_state_snapshot(options, std::move(switched));
+  expect(presentation.sidebar.todos.size() == 1 && presentation.sidebar.todos.front().id == "switched",
+         "runtime state snapshot replaces todos on session switch");
+}
+
 void run_tui_runtime_event_state_tests()
 {
   test_tui_event_state_reduces_runtime_events();
@@ -2051,6 +2101,7 @@ void run_tui_runtime_event_state_tests()
   test_tui_transcript_projection_and_cap_parity();
   test_tui_mixed_runtime_event_queue_preserves_order_and_context();
   test_tui_typed_runtime_inherits_session_identity_fields();
+  test_tui_todowrite_event_state_and_snapshot_hydration();
 }
 
 void run_tui_runtime_dispatch_tests()

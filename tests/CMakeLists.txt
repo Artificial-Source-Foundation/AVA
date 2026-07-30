@@ -75,6 +75,7 @@ set(AVA_TESTS_SOURCES
   "agent_loop_tests.cpp"
   "agent_loop_tool_execution_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
+  "agent_todo_tests.cpp"
   "app_compaction_tests.cpp"
   "app_command_registry_tests.cpp"
   "app_print_tests.cpp"
@@ -215,6 +216,7 @@ set(AVA_TEST_SUITES
   agent_loop_resilience
   agent_loop
   agent_tool_dispatcher
+  agent_todo
   tool_scheduler
   lsp
   plugin

@@ -76,6 +76,8 @@ struct TuiRuntimeStateSnapshot
   std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  // Presentation hydration for the latest committed todowrite snapshot.
+  std::vector<TodoItem> todos = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -136,6 +138,7 @@ struct TuiRuntimeOptions
   std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  std::vector<TodoItem> initial_todos = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;

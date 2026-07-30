@@ -133,6 +133,22 @@ struct SidebarModifiedFile
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+enum class TodoStatus
+{
+  Pending,
+  InProgress,
+  Completed,
+};
+
+struct TodoItem
+{
+  std::string id = {};
+  std::string content = {};
+  TodoStatus status = TodoStatus::Pending;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct QueuedMessageItem
 {
   std::string id = {};
@@ -201,6 +217,7 @@ struct SidebarSnapshot
 {
   std::vector<SidebarActivityItem> activity = {};
   std::vector<SidebarModifiedFile> modified_files = {};
+  std::vector<TodoItem> todos = {};
   std::string session_id = {};
   std::string mode = {};
   std::string provider = {};

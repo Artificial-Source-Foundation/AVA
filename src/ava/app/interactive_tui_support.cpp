@@ -4,6 +4,7 @@
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime_sessions.h"
+#include "ava/agent/todo.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
@@ -294,6 +295,40 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   if (!stats)
     return std::nullopt;
   return compact_token_status(*stats, session.model().context_window_tokens);
+}
+
+ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
+{
+  switch (status)
+  {
+    case ava::agent::TodoStatus::Pending:
+      return ava::tui::TodoStatus::Pending;
+    case ava::agent::TodoStatus::InProgress:
+      return ava::tui::TodoStatus::InProgress;
+    case ava::agent::TodoStatus::Completed:
+      return ava::tui::TodoStatus::Completed;
+  }
+  return ava::tui::TodoStatus::Pending;
+}
+
+std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority();
+  if (!read_authority)
+    return {};
+  auto entries = read_authority->load();
+  if (!entries)
+    return {};
+  auto snapshot = ava::agent::latest_committed_todowrite_snapshot(*entries);
+  if (!snapshot)
+    return {};
+  std::vector<ava::tui::TodoItem> todos;
+  todos.reserve(snapshot->todos.size());
+  for (auto const& item : snapshot->todos)
+  {
+    todos.push_back(ava::tui::TodoItem{.id = item.id, .content = item.content, .status = to_tui_todo_status(item.status)});
+  }
+  return todos;
 }
 
 ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::Session const& session)

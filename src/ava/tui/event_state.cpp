@@ -702,6 +702,78 @@ void record_modified_file(TuiEventState& state, ToolTimelineItem const& item)
                                state.modified_files.begin() + static_cast<std::ptrdiff_t>(state.modified_files.size() - kMaxModifiedFiles));
 }
 
+std::optional<TodoStatus> parse_todo_status_view(std::string_view value)
+{
+  if (value == "pending")
+    return TodoStatus::Pending;
+  if (value == "in_progress")
+    return TodoStatus::InProgress;
+  if (value == "completed")
+    return TodoStatus::Completed;
+  return std::nullopt;
+}
+
+// Fail-closed presentation parse of a normalized successful todowrite result.
+// Malformed historical/live payloads leave existing state unchanged.
+std::optional<std::vector<TodoItem>> parse_todowrite_result_todos(std::string_view result_json)
+{
+  if (!bool_field(result_json, "ok"))
+    return std::nullopt;
+  auto const tool = ava::core::json::string_field(result_json, "tool");
+  if (!tool || *tool != "todowrite")
+    return std::nullopt;
+  auto const schema = ava::core::json::integer_field(result_json, "schema_version");
+  if (!schema || *schema != 1)
+    return std::nullopt;
+  auto const objects = ava::core::json::strict_objects_in_array_field(result_json, "todos", 50);
+  if (!objects)
+    return std::nullopt;
+
+  std::vector<TodoItem> todos;
+  todos.reserve(objects->size());
+  std::size_t in_progress = 0;
+  for (auto const& object : *objects)
+  {
+    auto const id = ava::core::json::string_field(object, "id");
+    auto const content = ava::core::json::string_field(object, "content");
+    auto const status_text = ava::core::json::string_field(object, "status");
+    if (!id || id->empty() || id->size() > 32 || !content || content->empty() || content->size() > 512 || !status_text)
+      return std::nullopt;
+    auto const status = parse_todo_status_view(*status_text);
+    if (!status)
+      return std::nullopt;
+    if (*status == TodoStatus::InProgress)
+      ++in_progress;
+    if (in_progress > 1)
+      return std::nullopt;
+    for (unsigned char const ch : *id)
+    {
+      auto const is_alnum = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+      if (!(is_alnum || ch == '_' || ch == '-'))
+        return std::nullopt;
+    }
+    for (unsigned char const ch : *content)
+    {
+      if (ch < 0x20 || ch == 0x7F)
+        return std::nullopt;
+    }
+    if (std::ranges::any_of(todos, [&](TodoItem const& existing) { return existing.id == *id; }))
+      return std::nullopt;
+    todos.push_back(TodoItem{.id = *id, .content = *content, .status = *status});
+  }
+  return todos;
+}
+
+void apply_todowrite_result(TuiEventState& state, ToolTimelineItem const& item)
+{
+  if (item.status != ToolTimelineStatus::Success || item.name != "todowrite")
+    return;
+  auto parsed = parse_todowrite_result_todos(item.result_json);
+  if (!parsed)
+    return;
+  state.todos = std::move(*parsed);
+}
+
 std::string take_pending_reasoning_text(TuiEventState& state)
 {
   auto thinking = std::move(state.pending_reasoning_text);
@@ -970,6 +1042,7 @@ void apply_tool_result(TuiEventState& state, ava::event::ToolPayload const& payl
   attach_permission_audits(state, item);
   upsert_activity(state, item.call_id, item);
   record_modified_file(state, item);
+  apply_todowrite_result(state, item);
   state.transcript.push_back(TranscriptItem{.tool = std::move(item)});
 }
 

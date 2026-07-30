@@ -28,6 +28,8 @@ add_library(ava_agent
   "tool_dispatch_search.cpp"
   "tool_dispatch_skill.cpp"
   "tool_dispatch_task.cpp"
+  "tool_dispatch_todo.cpp"
+  "todo.cpp"
   "tool_dispatch_web.cpp"
   "tool_dispatcher.cpp"
   "tool_registration.cpp"

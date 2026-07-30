@@ -46,6 +46,7 @@ void run_provider_live_smoke_tests();
 void run_agent_loop_resilience_tests();
 void run_agent_loop_tests();
 void run_agent_tool_dispatcher_tests();
+void run_agent_todo_tests();
 void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
@@ -98,6 +99,7 @@ constexpr std::array kTestSuites{
     TestSuite{"agent_loop_resilience", run_agent_loop_resilience_tests},
     TestSuite{"agent_loop", run_agent_loop_tests},
     TestSuite{"agent_tool_dispatcher", run_agent_tool_dispatcher_tests},
+    TestSuite{"agent_todo", run_agent_todo_tests},
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},

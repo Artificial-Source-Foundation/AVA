@@ -126,7 +126,8 @@ int run_tui(ShellState state)
         .file_references = std::move(delivery.file_references),
         .workspace_catalog_generation = delivery.workspace_catalog_generation,
         .custom_themes = custom_theme_options(),
-        .project_trust = project_trust_snapshot(state.session.project_trust())};
+        .project_trust = project_trust_snapshot(state.session.project_trust()),
+        .todos = todos_for_session(state.session)};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
   bool session_selector_named_only = false;
@@ -207,6 +208,7 @@ int run_tui(ShellState state)
       .workspace_catalog_generation = initial_catalog_snapshot.workspace_catalog_generation,
       .custom_themes = custom_theme_options(),
       .project_trust = project_trust_snapshot(state.session.project_trust()),
+      .initial_todos = todos_for_session(state.session),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
       .active_context_status_provider = [&state]() { return active_context_status_for_session(state.session); },

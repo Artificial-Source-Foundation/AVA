@@ -46,6 +46,7 @@ ToolVisibilityOptions subagent_tool_visibility(ToolVisibilityOptions parent, Sub
 {
   add_excluded_tool(parent, "task");
   add_excluded_tool(parent, "job");
+  add_excluded_tool(parent, "todowrite");
   if (tool_preset != SubagentToolPreset::ReadOnly)
     return parent;
 

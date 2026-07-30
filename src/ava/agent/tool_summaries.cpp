@@ -196,6 +196,11 @@ std::string summarize_tool_arguments(ProviderToolCall const& call)
   }
   if (call.name == "question")
     return string_arg_summary(arguments, "question");
+  if (call.name == "todowrite")
+  {
+    auto const todos = ava::core::json::objects_in_array_field(arguments, "todos");
+    return todos.empty() ? std::string("clear") : (std::to_string(todos.size()) + (todos.size() == 1 ? " item" : " items"));
+  }
   return call.arguments_json.empty() ? std::string{} : "arguments provided";
 }
 
@@ -317,6 +322,15 @@ std::string summarize_tool_result(ToolDispatchResult const& result)
   }
   if (result.name == "question")
     return "question recorded";
+  if (result.name == "todowrite")
+  {
+    auto const todos = ava::core::json::objects_in_array_field(result.result_text, "todos");
+    if (todos.empty())
+      return "todos cleared";
+    auto const counts = ava::core::json::object_field(result.result_text, "counts").value_or("{}");
+    auto const completed = ava::core::json::integer_field(counts, "completed").value_or(0);
+    return std::to_string(completed) + "/" + std::to_string(todos.size()) + " completed";
+  }
   return "ok";
 }
 

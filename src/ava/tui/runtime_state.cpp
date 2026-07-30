@@ -69,7 +69,8 @@ RuntimePresentationState::RuntimePresentationState(TuiRuntimeOptions& options)
     : snapshot(initial_snapshot(options)),
       applied_slash_catalog_generation_(options.slash_catalog_generation),
       applied_workspace_catalog_generation_(options.workspace_catalog_generation),
-      sidebar{.session_id = options.session_id,
+      sidebar{.todos = std::move(options.initial_todos),
+              .session_id = options.session_id,
               .mode = options.mode,
               .provider = options.provider,
               .model = options.model,
@@ -139,6 +140,7 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   sidebar.workspace = std::move(state.workspace);
   sidebar.git_branch = std::move(state.git_branch);
   sidebar.context_source_count = state.context_source_count;
+  sidebar.todos = std::move(state.todos);
   refresh_token_status(options);
   refresh_active_context_status(options);
   refresh_reasoning_status(options);

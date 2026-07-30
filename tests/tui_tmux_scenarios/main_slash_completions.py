@@ -279,7 +279,11 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         raise RuntimeError(f"file reference completion retained duplicated metadata\nscreen:\n{reference_palette}")
     save_evidence(root, "frontend-f3-file-reference-quiet", reference_palette)
     reference_row = next(
-        ((index + 1, line) for index, line in enumerate(reference_palette.splitlines()) if "@src/main.cpp" in line),
+        (
+            (index + 1, line)
+            for index, line in enumerate(reference_palette.splitlines())
+            if line.startswith("│") and "@src/main.cpp" in line and not line.startswith("│  review ")
+        ),
         None,
     )
     if reference_row is None:
@@ -336,8 +340,14 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     if "[Files]" in prompt_path_palette or "directory" in prompt_path_palette or re.search(r"file [0-9]+ bytes", prompt_path_palette):
         raise RuntimeError(f"normal path completion retained duplicated metadata\nscreen:\n{prompt_path_palette}")
     save_evidence(root, "frontend-f3-natural-path-quiet", prompt_path_palette)
+    # Prefer live palette chrome rows so earlier transcript receipts that mention the same path
+    # (for example permission summaries) cannot steal the mouse hit target.
     path_row = next(
-        ((index + 1, line) for index, line in enumerate(prompt_path_palette.splitlines()) if "src/main.cpp" in line),
+        (
+            (index + 1, line)
+            for index, line in enumerate(prompt_path_palette.splitlines())
+            if line.startswith("│") and "src/main.cpp" in line and not line.startswith("│  inspect ")
+        ),
         None,
     )
     if path_row is None:
@@ -489,5 +499,65 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     if "Permission required" in bang_shell or "PERMISSION REQUIRED" in bang_shell:
         raise RuntimeError(f"allowed ! shell helper left its permission prompt open\nscreen:\n{bang_shell}")
 
+    # After path/reference proofs, seed one durable rule and prove explain completions lead with the
+    # human summary while selection still drafts the exact permrule id (no raw id / [complete] chrome).
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(
+        tmux_exe,
+        session,
+        '/permissions add action=allow operation=read path=src/main.cpp reason="tmux completion fixture"',
+    )
+    send_keys(tmux_exe, session, "Enter")
+    permission_add = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)added permission rule.*Allow file reads · src/main\.cpp · Workspace.*Rule ID: permrule_",
+        "permission rule add receipt for completion fixture",
+    )
+    rule_id_match = re.search(r"Rule ID: (permrule_\S+)", permission_add)
+    if rule_id_match is None:
+        raise RuntimeError(f"permission add receipt did not expose a Rule ID\nscreen:\n{permission_add}")
+    permission_rule_id = rule_id_match.group(1)
+
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/permissions explain ")
+    permission_rule_palette = wait_for(
+        tmux_exe,
+        session,
+        r"Allow file reads · src/main\.cpp · Workspace",
+        "permission explain human completion row",
+    )
+    # Bound checks to the live draft/completion chrome so earlier Rule ID receipts do not false-fail.
+    completion_region_lines = []
+    for line in permission_rule_palette.splitlines():
+        if line.startswith("│") or "Allow file reads · src/main.cpp · Workspace" in line or "[complete]" in line:
+            completion_region_lines.append(line)
+    completion_region = "\n".join(completion_region_lines)
+    if (
+        "Allow file reads · src/main.cpp · Workspace" not in completion_region
+        or "permrule_" in completion_region
+        or "[complete]" in completion_region
+    ):
+        raise RuntimeError(
+            "permission explain completion did not render a human summary without raw rule id or [complete]\n"
+            f"completion region:\n{completion_region}\nscreen:\n{permission_rule_palette}"
+        )
+    send_keys(tmux_exe, session, "Tab")
+    selected_permission_rule = wait_for(
+        tmux_exe,
+        session,
+        rf"│  /permissions explain {re.escape(permission_rule_id)}",
+        "permission explain completion selection drafts exact rule id",
+    )
+    selected_permission_input = next(
+        (line for line in selected_permission_rule.splitlines() if line.startswith("│  /permissions explain ")),
+        "",
+    )
+    if permission_rule_id not in selected_permission_input:
+        raise RuntimeError(
+            "permission explain completion selection did not draft the exact rule id\n"
+            f"screen:\n{selected_permission_rule}"
+        )
+    send_keys(tmux_exe, session, "C-u")
 
     _finish_main(tmux_exe, session)

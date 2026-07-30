@@ -12,7 +12,9 @@
 #include "ava/app/runtime_model.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/mode.h"
+#include "ava/agent/subagent_coordinator.h"
 #include "ava/tools/file_tools.h"
+#include "ava/tui/composer.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_branch.h"
@@ -20,6 +22,7 @@
 #include "ava/permissions/permission.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -382,33 +385,31 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   expect(!permission_rule_id.empty() && permission_rule_id.starts_with("permrule_"),
          "command dispatcher /permissions add exposes the created rule id on a secondary line");
 
-  auto add_explore_deny = ava::app::run_command(
-      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
-                                                    "reason=\"no explore subagents\""});
+  auto add_explore_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
+                                                                          "reason=\"no explore subagents\""});
   expect(add_explore_deny && add_explore_deny->handled && !add_explore_deny->output.empty() &&
              add_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
          "command dispatcher /permissions add claims Explore only for command=explore with default tool=task");
   auto const explore_rule_id = add_explore_deny ? extract_rule_id(add_explore_deny->output[0]) : std::string{};
   expect(!explore_rule_id.empty(), "command dispatcher /permissions add exposes Explore rule id secondarily");
 
-  auto add_skill_deny = ava::app::run_command(
-      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
+  auto add_skill_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
   expect(add_skill_deny && add_skill_deny->handled && !add_skill_deny->output.empty() &&
              add_skill_deny->output[0].find("Block skills · Workspace") != std::string::npos,
          "command dispatcher /permissions add summarizes skill blocks in human form");
   auto const skill_rule_id = add_skill_deny ? extract_rule_id(add_skill_deny->output[0]) : std::string{};
 
-  auto add_global_read =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
-                                                                          "path=/etc/hosts reason=\"global reads\""});
+  auto add_global_read = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
+                                                                                             "path=/etc/hosts reason=\"global reads\""});
   expect(add_global_read && add_global_read->handled && !add_global_read->output.empty() &&
              add_global_read->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos,
          "command dispatcher /permissions add summarizes global file-read allows");
   auto const global_read_rule_id = add_global_read ? extract_rule_id(add_global_read->output[0]) : std::string{};
 
-  auto add_exact_command_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
-                                                                          "command=\"git push origin main\" reason=\"block push\""});
+  auto add_exact_command_deny = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
+                                                                                                    "command=\"git push origin main\" reason=\"block push\""});
   expect(add_exact_command_deny && add_exact_command_deny->handled && !add_exact_command_deny->output.empty() &&
              add_exact_command_deny->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              add_exact_command_deny->output[0].find("git push origin main") == std::string::npos,
@@ -416,9 +417,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const exact_command_rule_id = add_exact_command_deny ? extract_rule_id(add_exact_command_deny->output[0]) : std::string{};
   expect(!exact_command_rule_id.empty(), "command dispatcher /permissions add exposes exact-command rule id secondarily");
 
-  auto add_path_command_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
-                                                                          "command=\"git status\" reason=\"path qualified bash\""});
+  auto add_path_command_deny = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
+                                                                                                   "command=\"git status\" reason=\"path qualified bash\""});
   expect(add_path_command_deny && add_path_command_deny->handled && !add_path_command_deny->output.empty() &&
              add_path_command_deny->output[0].find("Block Exact command · scripts · Workspace") != std::string::npos &&
              add_path_command_deny->output[0].find("git status") == std::string::npos,
@@ -438,8 +438,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                                                           "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
   expect(add_forged_task_deny && add_forged_task_deny->handled && !add_forged_task_deny->output.empty() &&
              add_forged_task_deny->output[0].find("Block subagents · Workspace") != std::string::npos &&
-             add_forged_task_deny->output[0].find("rm -rf") == std::string::npos &&
-             add_forged_task_deny->output[0].find("/tmp/forged") == std::string::npos,
+             add_forged_task_deny->output[0].find("rm -rf") == std::string::npos && add_forged_task_deny->output[0].find("/tmp/forged") == std::string::npos,
          "command dispatcher /permissions add never prints free-form TaskRun command bodies");
   auto const forged_task_rule_id = add_forged_task_deny ? extract_rule_id(add_forged_task_deny->output[0]) : std::string{};
 
@@ -468,9 +467,9 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "command dispatcher /permissions add keeps subagents class for tool-only explore identity");
   auto const tool_only_explore_rule_id = add_tool_only_explore_deny ? extract_rule_id(add_tool_only_explore_deny->output[0]) : std::string{};
 
-  auto add_freeform_explore_tool_deny = ava::app::run_command(
-      *session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
-                                                    "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
+  auto add_freeform_explore_tool_deny =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
+                                                                          "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
   expect(add_freeform_explore_tool_deny && add_freeform_explore_tool_deny->handled && !add_freeform_explore_tool_deny->output.empty() &&
              add_freeform_explore_tool_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_freeform_explore_tool_deny->output[0].find("Block Explore subagents") == std::string::npos &&
@@ -478,8 +477,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              add_freeform_explore_tool_deny->output[0].find("rm-secret") == std::string::npos &&
              add_freeform_explore_tool_deny->output[0].find("/tmp/") == std::string::npos,
          "command dispatcher /permissions add keeps subagents class for free-form command with explore tool and omits body");
-  auto const freeform_explore_tool_rule_id =
-      add_freeform_explore_tool_deny ? extract_rule_id(add_freeform_explore_tool_deny->output[0]) : std::string{};
+  auto const freeform_explore_tool_rule_id = add_freeform_explore_tool_deny ? extract_rule_id(add_freeform_explore_tool_deny->output[0]) : std::string{};
 
   auto add_mixed_coder_explore_deny =
       ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=coder "
@@ -543,10 +541,10 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const plugin_bash_rule_id = add_plugin_bash_collision ? extract_rule_id(add_plugin_bash_collision->output[0]) : std::string{};
 
   auto add_forged_recipe_allow = ava::app::run_command(
-      *session, ava::app::CommandRequest{
-                    .command = "/permissions add action=allow operation=bash "
-                               "recipe_key=sha256:ava-command-workspace-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
-                               "recipe_display=\"shell commands\" reason=\"forged recipe subject\""});
+      *session,
+      ava::app::CommandRequest{.command = "/permissions add action=allow operation=bash "
+                                          "recipe_key=sha256:ava-command-workspace-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+                                          "recipe_display=\"shell commands\" reason=\"forged recipe subject\""});
   expect(add_forged_recipe_allow && add_forged_recipe_allow->handled && !add_forged_recipe_allow->output.empty() &&
              add_forged_recipe_allow->output[0].find("Allow recipe · shell commands · Workspace") != std::string::npos &&
              add_forged_recipe_allow->output[0].find("Allow shell commands · Workspace") == std::string::npos &&
@@ -558,8 +556,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   {
     std::string long_unicode_display;
     long_unicode_display.reserve(80 * 3);
-    for (int index = 0; index < 80; ++index)
-      long_unicode_display += "你";
+    for (int index = 0; index < 80; ++index) long_unicode_display += "你";
     ava::permissions::PersistentPermissionRule long_recipe_rule{
         .rule_id = "permrule_display_only",
         .scope = ava::permissions::PermissionRuleScope::Workspace,
@@ -626,8 +623,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_list_human->output[0].find("Block Explore subagents") == std::string::npos,
          "command dispatcher /permissions list filters by human summary words");
 
-  auto permissions_list_command_private =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
+  auto permissions_list_command_private = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
   expect(permissions_list_command_private && permissions_list_command_private->handled && !permissions_list_command_private->output.empty() &&
              permissions_list_command_private->output[0].find("filter: git push origin main") != std::string::npos &&
              permissions_list_command_private->output[0].find("1. Block Exact command · Workspace") != std::string::npos &&
@@ -661,8 +657,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_explain->output[0].find("precedence: built-in hard denies run first") != std::string::npos,
          "command dispatcher /permissions explain leads with human summary and retains authority details");
 
-  auto permissions_explain_command =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
+  auto permissions_explain_command = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
   expect(permissions_explain_command && permissions_explain_command->handled && !permissions_explain_command->output.empty() &&
              permissions_explain_command->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              permissions_explain_command->output[0].find("command: git push origin main") != std::string::npos &&
@@ -762,11 +757,164 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_audit_empty->output[0].find("No permission audit entries match") != std::string::npos,
          "command dispatcher /permissions audit reports empty filtered results");
   auto slash_items_after_permission_rule = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
-  auto const permission_completion_available = std::ranges::any_of(slash_items_after_permission_rule, [&](auto const& item) {
-    return item.command == "/permissions" && tui_test_support::has_slash_argument_completion(&item, 1, permission_rule_id, {"explain"}) &&
-           tui_test_support::has_slash_argument_completion(&item, 1, permission_rule_id, {"remove"});
-  });
-  expect(permission_completion_available, "command catalog argument completions expose persistent permission rule ids for explain and remove");
+  auto const* permissions_completion_item = tui_test_support::find_slash_command_item(slash_items_after_permission_rule, "/permissions");
+  auto const* hotkeys_completion_item = tui_test_support::find_slash_command_item(slash_items_after_permission_rule, "/hotkeys");
+  auto find_argument_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
+                                     std::vector<std::string> const& previous_args) -> ava::tui::SlashCommandArgumentCompletion const* {
+    if (item == nullptr)
+      return nullptr;
+    for (auto const& completion : item->argument_completions)
+    {
+      if (tui_test_support::slash_argument_completion_matches(completion, argument_index, value, previous_args))
+        return &completion;
+    }
+    return nullptr;
+  };
+  auto const* permission_explain = find_argument_completion(permissions_completion_item, 1, permission_rule_id, {"explain"});
+  auto const* permission_remove = find_argument_completion(permissions_completion_item, 1, permission_rule_id, {"remove"});
+  constexpr char kPermissionSummary[] = "Allow file reads · src/main.cpp · Workspace";
+  auto const permission_matches = ava::tui::filter_slash_commands("/permissions explain ", slash_items_after_permission_rule);
+  std::size_t permission_match_index = 0;
+  bool found_permission_match = false;
+  for (std::size_t index = 0; index < permission_matches.size(); ++index)
+  {
+    if (permission_matches[index].command == permission_rule_id)
+    {
+      permission_match_index = index;
+      found_permission_match = true;
+      break;
+    }
+  }
+  auto const permission_selection = ava::tui::slash_command_selection_text("/permissions explain ", slash_items_after_permission_rule, permission_match_index);
+  auto const permission_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                       .provider = "openai",
+                                                                                       .model = "gpt-5.5",
+                                                                                       .session_id = "session_test",
+                                                                                       .input = "/permissions explain ",
+                                                                                       .status = "ready",
+                                                                                       .transcript = {},
+                                                                                       .slash_commands = slash_items_after_permission_rule,
+                                                                                       .selected_slash_command_index = permission_match_index,
+                                                                                       .width = 96,
+                                                                                       .height = 14});
+  expect(permission_explain != nullptr && permission_remove != nullptr && permission_explain->value == permission_rule_id &&
+             permission_remove->value == permission_rule_id && permission_explain->display_label == kPermissionSummary &&
+             permission_remove->display_label == kPermissionSummary && permission_explain->display_label.find("permrule_") == std::string::npos &&
+             permission_remove->display_label.find("permrule_") == std::string::npos &&
+             permission_explain->description.find("permrule_") == std::string::npos && permission_remove->description.find("permrule_") == std::string::npos &&
+             found_permission_match && permission_matches[permission_match_index].display_label == kPermissionSummary &&
+             permission_matches[permission_match_index].display_label.find("permrule_") == std::string::npos &&
+             permission_selection == "/permissions explain " + permission_rule_id &&
+             std::ranges::none_of(permission_palette,
+                                  [](std::string const& line) {
+                                    auto const visible = strip_sgr(line);
+                                    return visible.find("[complete]") != std::string::npos || visible.find("permrule_") != std::string::npos;
+                                  }) &&
+             std::ranges::any_of(permission_palette, [](std::string const& line) { return strip_sgr(line).find("Allow file reads") != std::string::npos; }),
+         "permission explain/remove completions keep exact rule ids as values while rendering human summaries without raw ids or [complete]");
+
+  auto const* submit_set = find_argument_completion(hotkeys_completion_item, 1, "submit", {"set"});
+  auto const* submit_reset = find_argument_completion(hotkeys_completion_item, 1, "submit", {"reset"});
+  auto const* submit_unset = find_argument_completion(hotkeys_completion_item, 1, "submit", {"unset"});
+  auto const keybinding_matches = ava::tui::filter_slash_commands("/hotkeys set sub", slash_items_after_permission_rule);
+  auto const keybinding_selection = ava::tui::slash_command_selection_text("/hotkeys set sub", slash_items_after_permission_rule, 0);
+  expect(submit_set != nullptr && submit_reset != nullptr && submit_unset != nullptr && submit_set->display_label == "Submit custom" &&
+             submit_reset->display_label == "Submit custom" && submit_unset->display_label == "Submit custom" &&
+             submit_set->description.find("Ctrl+M") != std::string::npos && submit_set->description.find("submit") != std::string::npos &&
+             submit_set->description.find("Submit custom (") == std::string::npos && !keybinding_matches.empty() &&
+             keybinding_matches.front().display_label == "Submit custom" && keybinding_selection == "/hotkeys set submit " &&
+             keybinding_selection.find("Submit custom") == std::string::npos,
+         "keybinding set/reset/unset completions show human labels with keys-first descriptions while drafting canonical action ids");
+
+  auto coordinator = session->subagent_coordinator();
+  expect(coordinator != nullptr, "catalog human completion tests require a subagent coordinator");
+  if (coordinator)
+  {
+    auto started = coordinator->start_background(session->store.session_id(),
+                                                 ava::agent::BackgroundJobStartOptions{
+                                                     .title = "Review pull request",
+                                                     .description = "SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION",
+                                                     .subagent_type = "general",
+                                                     .child_session_id = "child_catalog_completion_job",
+                                                 },
+                                                 [](ava::agent::BackgroundJobContext const&) {
+                                                   return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
+                                                                                              .final_text = "SECRET_SUMMARY_MUST_NOT_APPEAR",
+                                                                                              .stop_reason = "completed"};
+                                                 });
+    expect(started.has_value(), started ? "catalog completion job starts" : "catalog completion job starts: " + started.error().format());
+    if (started)
+    {
+      auto waited = coordinator->wait(session->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2));
+      expect(waited && !waited->timed_out,
+             waited ? "catalog completion job reaches terminal state" : "catalog completion job reaches terminal state: " + waited.error().format());
+      auto const job_id = started->job.identity.job_id;
+      auto const slash_items_with_job = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+      auto const* jobs_item = tui_test_support::find_slash_command_item(slash_items_with_job, "/jobs");
+      auto const* job_show = find_argument_completion(jobs_item, 1, job_id, {"show"});
+      auto const* job_wait = find_argument_completion(jobs_item, 1, job_id, {"wait"});
+      auto const* job_result = find_argument_completion(jobs_item, 1, job_id, {"result"});
+      auto const* job_cancel = find_argument_completion(jobs_item, 1, job_id, {"cancel"});
+      auto const job_matches = ava::tui::filter_slash_commands("/jobs show ", slash_items_with_job);
+      auto const job_selection = ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, 0);
+      auto const job_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                    .provider = "openai",
+                                                                                    .model = "gpt-5.5",
+                                                                                    .session_id = "session_test",
+                                                                                    .input = "/jobs show ",
+                                                                                    .status = "ready",
+                                                                                    .transcript = {},
+                                                                                    .slash_commands = slash_items_with_job,
+                                                                                    .selected_slash_command_index = 0,
+                                                                                    .width = 96,
+                                                                                    .height = 12});
+      expect(job_show != nullptr && job_wait != nullptr && job_result != nullptr && job_cancel != nullptr && job_show->value == job_id &&
+                 job_show->display_label == "Review pull request" && job_wait->display_label == "Review pull request" &&
+                 job_result->display_label == "Review pull request" && job_cancel->display_label == "Review pull request" &&
+                 job_show->display_label.find(job_id) == std::string::npos && job_show->description.find("Completed") != std::string::npos &&
+                 job_show->description.find("Background") != std::string::npos && job_show->description.find("general") != std::string::npos &&
+                 job_show->description.find(job_id) == std::string::npos &&
+                 job_show->description.find("SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION") == std::string::npos &&
+                 job_show->description.find("SECRET_SUMMARY_MUST_NOT_APPEAR") == std::string::npos && !job_matches.empty() &&
+                 job_matches.front().display_label == "Review pull request" && job_matches.front().display_label.find(job_id) == std::string::npos &&
+                 job_selection == "/jobs show " + job_id &&
+                 std::ranges::none_of(job_palette,
+                                      [&](std::string const& line) {
+                                        auto const visible = strip_sgr(line);
+                                        return visible.find("[complete]") != std::string::npos || visible.find(job_id) != std::string::npos ||
+                                               visible.find("SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION") != std::string::npos ||
+                                               visible.find("SECRET_SUMMARY_MUST_NOT_APPEAR") != std::string::npos;
+                                      }) &&
+                 std::ranges::any_of(job_palette, [](std::string const& line) { return strip_sgr(line).find("Review pull request") != std::string::npos; }),
+             "job show/wait/result/cancel completions keep exact job ids as values while rendering process-local titles without prompts, summaries, raw ids, "
+             "or [complete]");
+
+      // Empty-title fallback stays human (Background job / Job N) and never promotes the raw id.
+      auto untitled = coordinator->start_background(session->store.session_id(),
+                                                    ava::agent::BackgroundJobStartOptions{
+                                                        .title = {},
+                                                        .description = "another secret prompt",
+                                                        .subagent_type = "explore",
+                                                        .child_session_id = "child_catalog_completion_untitled",
+                                                    },
+                                                    [](ava::agent::BackgroundJobContext const&) {
+                                                      return ava::agent::BackgroundJobCompletion{
+                                                          .state = ava::agent::BackgroundJobState::Completed, .final_text = "done", .stop_reason = "completed"};
+                                                    });
+      expect(untitled.has_value(),
+             untitled ? "untitled catalog completion job starts" : "untitled catalog completion job starts: " + untitled.error().format());
+      if (untitled)
+      {
+        auto const untitled_id = untitled->job.identity.job_id;
+        auto const slash_items_untitled = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+        auto const* jobs_untitled_item = tui_test_support::find_slash_command_item(slash_items_untitled, "/jobs");
+        auto const* untitled_show = find_argument_completion(jobs_untitled_item, 1, untitled_id, {"show"});
+        expect(untitled_show != nullptr && untitled_show->value == untitled_id && untitled_show->display_label == "Background job" &&
+                   untitled_show->display_label.find(untitled_id) == std::string::npos && untitled_show->description.find("explore") != std::string::npos,
+               "job completions fall back to Background job rather than raw ids when process-local title is empty");
+      }
+    }
+  }
   auto remove_permission_rule = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + permission_rule_id});
   expect(remove_permission_rule && remove_permission_rule->handled && !remove_permission_rule->output.empty() &&
              remove_permission_rule->output[0].find("removed permission rule") != std::string::npos &&

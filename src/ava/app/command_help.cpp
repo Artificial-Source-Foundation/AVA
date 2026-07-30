@@ -12,7 +12,8 @@ std::vector<CommandHotkey> default_command_hotkeys()
   std::vector<CommandHotkey> hotkeys;
   for (auto const& item : ava::tui::key_binding_help_items(ava::tui::default_key_bindings()))
   {
-    hotkeys.push_back(CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
+    // description carries the concise human action label for help/palette surfaces.
+    hotkeys.push_back(CommandHotkey{.action = item.action, .description = item.label.empty() ? item.action : item.label, .keys = item.keys});
   }
   return hotkeys;
 }
@@ -131,7 +132,9 @@ std::string command_help_text(std::vector<CommandHotkey> const& hotkeys)
   output += command_rows(true);
   output += "\nShell helpers:\n";
   output += "  !<command>   Run a permissioned shell command through /bash\n";
-  output += "  !!<command>  Run the same permissioned shell command as a hidden-output helper; AVA keeps shell output out of provider context unless you paste it into a later prompt\n";
+  output +=
+      "  !!<command>  Run the same permissioned shell command as a hidden-output helper; AVA keeps shell output out of provider context unless you paste it "
+      "into a later prompt\n";
   output += "\nUnavailable commands:\n";
   output += command_rows(false);
   output += '\n';

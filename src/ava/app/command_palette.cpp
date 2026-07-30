@@ -1,12 +1,15 @@
 #include "sys.h"
+#include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_permissions.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/session_user_turns.h"
+#include "ava/tui/keybindings.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -42,6 +45,87 @@ std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::s
       return hotkey.keys;
   }
   return "";
+}
+
+// CommandHotkey.description carries the concise human action label for palette rows.
+std::string keybinding_action_display_label(CommandHotkey const& hotkey)
+{
+  if (!hotkey.description.empty())
+    return hotkey.description;
+  if (auto const action = ava::tui::key_binding_action_from_name(hotkey.action))
+  {
+    auto label = ava::tui::action_label(*action);
+    if (!label.empty())
+      return label;
+  }
+  return hotkey.action;
+}
+
+// Completion secondary text prioritizes effective keys, then the canonical machine id.
+std::string keybinding_action_completion_description(CommandHotkey const& hotkey)
+{
+  if (!hotkey.keys.empty() && !hotkey.action.empty() && hotkey.keys != hotkey.action)
+    return hotkey.keys + " · " + hotkey.action;
+  if (!hotkey.keys.empty())
+    return hotkey.keys;
+  return hotkey.action;
+}
+
+std::string_view human_job_execution_label(ava::agent::SubagentExecutionState state) noexcept
+{
+  switch (state)
+  {
+    case ava::agent::SubagentExecutionState::Starting:
+      return "Starting";
+    case ava::agent::SubagentExecutionState::Running:
+      return "Running";
+    case ava::agent::SubagentExecutionState::Completed:
+      return "Completed";
+    case ava::agent::SubagentExecutionState::Failed:
+      return "Failed";
+    case ava::agent::SubagentExecutionState::Canceled:
+      return "Canceled";
+    case ava::agent::SubagentExecutionState::Interrupted:
+      return "Interrupted";
+  }
+  return "Unknown";
+}
+
+std::string_view human_job_mode_label(ava::agent::SubagentJobMode mode) noexcept
+{
+  switch (mode)
+  {
+    case ava::agent::SubagentJobMode::Foreground:
+      return "Foreground";
+    case ava::agent::SubagentJobMode::Background:
+      return "Background";
+  }
+  return "Unknown";
+}
+
+// Process-local title first; never surface raw job ids as the primary completion label.
+std::string job_completion_display_label(ava::agent::SubagentJobSnapshot const& job, std::size_t display_ordinal)
+{
+  if (!job.display_title.empty())
+    return sanitize_inline_text(job.display_title);
+  if (job.mode == ava::agent::SubagentJobMode::Background)
+    return "Background job";
+  return "Job " + std::to_string(display_ordinal);
+}
+
+// Concise human status/mode/type only — no prompts, summaries, or authority ids.
+std::string job_completion_description(ava::agent::SubagentJobSnapshot const& job)
+{
+  std::string description;
+  description += human_job_execution_label(job.execution);
+  description += " · ";
+  description += human_job_mode_label(job.mode);
+  if (!job.display_subagent_type.empty())
+  {
+    description += " · ";
+    description += sanitize_inline_text(job.display_subagent_type);
+  }
+  return description;
 }
 
 bool completion_exists(std::vector<tui::SlashCommandArgumentCompletion> const& completions, std::size_t argument_index,
@@ -604,9 +688,11 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "validate", "Validate $XDG_CONFIG_HOME/ava/keybinds.json without reloading", "General", {}, false);
     for (auto const& hotkey : hotkeys)
     {
-      add_completion(item, 1, hotkey.action, hotkey.description + " (" + hotkey.keys + ")", "Keybindings", {"set"}, true);
-      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"reset"}, true);
-      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"unset"}, true);
+      auto const label = keybinding_action_display_label(hotkey);
+      auto const description = keybinding_action_completion_description(hotkey);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"set"}, true, true, {}, label);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"reset"}, true, true, {}, label);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"unset"}, true, true, {}, label);
     }
     add_completion(item, 1, "--force", "Replace an existing keybinds.json starter file", "General", {"init"}, false);
     add_completion(item, 2, "--force", "Replace the existing keybinds.json with the imported file", "General", {"import"}, false);
@@ -700,11 +786,14 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
     if (session.subagent_coordinator())
     {
-      for (auto const& job : session.subagent_coordinator()->list(session.store.session_id()))
+      auto const jobs = session.subagent_coordinator()->list(session.store.session_id());
+      for (std::size_t job_index = 0; job_index < jobs.size(); ++job_index)
       {
-        auto const description = std::string(ava::agent::to_string(job.job.execution)) + " · " + std::string(ava::agent::to_string(job.job.mode));
+        auto const& snapshot = jobs[job_index];
+        auto const label = job_completion_display_label(snapshot.job, job_index + 1);
+        auto const description = job_completion_description(snapshot.job);
         for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
-          add_completion(item, 1, job.job.identity.job_id, description, "Jobs", {action}, false);
+          add_completion(item, 1, snapshot.job.identity.job_id, description, "Jobs", {action}, false, true, {}, label);
       }
     }
   }
@@ -746,10 +835,10 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       for (auto const& rule : *rules)
       {
-        auto description =
-            ava::permissions::to_string(rule.action) + " " + ava::permissions::to_string(rule.operation) + " " + ava::permissions::to_string(rule.scope);
-        add_completion(item, 1, rule.rule_id, description, "Safety", {"explain"}, false);
-        add_completion(item, 1, rule.rule_id, description, "Safety", {"remove"}, false);
+        // Keep .value as the exact permrule id for authority; surface only the human summary in the UI.
+        auto const summary = format_permission_rule_summary(rule, session.workspace_dir());
+        add_completion(item, 1, rule.rule_id, "Explain rule", "Rules", {"explain"}, false, true, {}, summary);
+        add_completion(item, 1, rule.rule_id, "Remove rule", "Rules", {"remove"}, false, true, {}, summary);
       }
     }
   }

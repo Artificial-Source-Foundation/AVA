@@ -306,8 +306,21 @@ void run_tui_completion_tests()
                                auto const visible = strip_sgr(line);
                                return visible.find("openai/gpt-5.5") != std::string::npos && visible.find("GPT-5.5") != std::string::npos &&
                                       visible.find("Models") == std::string::npos;
-                             }),
-         "tui slash palette prioritizes argument value and description while suppressing the redundant category");
+                             }) &&
+             std::ranges::none_of(argument_palette, [](std::string const& line) { return strip_sgr(line).find("[complete]") != std::string::npos; }),
+         "tui slash palette prioritizes argument value and description while suppressing the redundant category and the old [complete] hint");
+  // append_space=false argument rows must not show a visual [complete] marker; bare /copy and /thinking exact-submit remain catalog-driven.
+  auto const terminal_argument_matches = ava::tui::filter_slash_commands("/models open", argument_slash_commands);
+  expect(!terminal_argument_matches.empty() && terminal_argument_matches.front().argument_completion && terminal_argument_matches.front().hint.empty() &&
+             ava::tui::slash_command_selection_text("/models open", argument_slash_commands, 0) == "/models openai/gpt-5.5",
+         "argument completion rows omit [complete] while still inserting exact values without a forced trailing space");
+  std::vector<ava::tui::SlashCommandItem> const bare_exact_commands = {
+      ava::tui::SlashCommandItem{
+          .command = "/copy", .description = "Copy the latest AVA message, user turn, tool, or permission details", .category = "Session"},
+      ava::tui::SlashCommandItem{
+          .command = "/thinking", .description = "Toggle thinking visibility; /thinking details inspects the latest block", .category = "Session"}};
+  expect(!ava::tui::slash_palette_visible("/copy", bare_exact_commands) && !ava::tui::slash_palette_visible("/thinking", bare_exact_commands),
+         "bare /copy and /thinking remain exact one-Enter submissions without a completion palette");
   auto const cursor_scoped_argument_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                    .provider = "openai",
                                                                                                    .model = "gpt-5.5",

@@ -57,7 +57,8 @@ std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui:
   std::vector<ava::app::CommandHotkey> hotkeys;
   for (auto const& item : ava::tui::key_binding_help_items(key_bindings))
   {
-    hotkeys.push_back(ava::app::CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
+    // description carries the concise human action label for palette completions.
+    hotkeys.push_back(ava::app::CommandHotkey{.action = item.action, .description = item.label.empty() ? item.action : item.label, .keys = item.keys});
   }
   return hotkeys;
 }

@@ -38,6 +38,7 @@ void test_incomplete_assistant_output_suffix_recovery();
 void test_lease_bound_session_reads_hold_exact_authority();
 void test_session_read_authority_binding_and_descriptor_lifetime();
 void test_session_read_authority_retains_runtime_policy();
+void test_session_read_authority_identity_fingerprint_and_clamp();
 void test_session_append_authority_and_commit_state();
 void test_logical_session_projection_v4_public_privacy_and_compatibility();
 void test_provider_base64_encoding();

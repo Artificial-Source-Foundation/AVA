@@ -1,11 +1,13 @@
 #include "sys.h"
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/subagent_inspector.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <limits>
 #include <utility>
@@ -349,6 +351,11 @@ struct SubagentCoordinator::JobState
   mutable std::mutex mutex;
   std::condition_variable changed;
   std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr;
+  std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr;
+  std::shared_ptr<SubagentInspectorFrame const> frozen_inspection = nullptr;
+  std::optional<ava::session::SessionContentFingerprint> last_inspection_fingerprint = std::nullopt;
+  std::uint64_t inspect_epoch = 1;
+  bool freeze_pending = false;
   bool published = false;
   bool terminal_notification_pending = false;
   bool terminal_notification_emitted = false;
@@ -420,6 +427,13 @@ bool SubagentCoordinator::erase_oldest_eligible_locked()
   }
   if (oldest == jobs_.end())
     return false;
+  {
+    std::lock_guard state_lock(oldest->second->mutex);
+    // Eviction drops any residual inspection source; frozen frames may remain
+    // only while the JobState shared_ptr is still held elsewhere.
+    oldest->second->inspection_source = nullptr;
+    oldest->second->freeze_pending = false;
+  }
   jobs_.erase(oldest);
   return true;
 }
@@ -440,7 +454,8 @@ void SubagentCoordinator::prune_eligible_locked()
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
                                                                              BackgroundJobStartOptions options, BackgroundJobWorker worker,
-                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate)
+                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate,
+                                                                             std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
   if (!worker)
   {
@@ -459,6 +474,21 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
     auto error = std::move(valid.error());
     mark_unpublished(error);
     return std::unexpected(std::move(error));
+  }
+  // Coordinated sources must be persistent and bound to the exact child session
+  // identity before any worker launch or process-local publication.
+  if (inspection_source)
+  {
+    if (inspection_source->is_ephemeral() || inspection_source->session_id() != options.child_session_id)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent inspection source does not match the child session");
+      error.with_context("child_session_id", options.child_session_id);
+      if (!inspection_source->session_id().empty())
+        error.with_context("source_session_id", inspection_source->session_id());
+      error.with_context("source_ephemeral", inspection_source->is_ephemeral() ? "true" : "false");
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
   }
 
   std::shared_ptr<JobState> state;
@@ -531,6 +561,9 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
                            .display_title = make_display_field(options.title, kMaxDisplayTitleBytes),
                            .display_subagent_type = make_display_field(options.subagent_type, kMaxDisplaySubagentTypeBytes)};
     candidate->interaction_gate = interaction_gate;
+    // Store the source before registry start/publication so inspect can observe
+    // the child as soon as the job becomes visible.
+    candidate->inspection_source = inspection_source;
 
     std::lock_guard lock(mutex_);
     if (auto capacity = require_capacity_locked(); !capacity)
@@ -621,9 +654,10 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_background(std::string parent_session_id, BackgroundJobStartOptions options,
-                                                                                        BackgroundJobWorker worker)
+                                                                                        BackgroundJobWorker worker,
+                                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
-  return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker));
+  return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker), nullptr, std::move(inspection_source));
 }
 
 BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> const& state, BackgroundJobCompletion completion)
@@ -635,6 +669,8 @@ BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> 
   }
   completion = normalize_completion(job_id, std::move(completion));
   auto const now = ava::session::now_timestamp();
+  std::shared_ptr<SubagentLiveInspectionSource> freeze_source;
+  std::uint64_t freeze_epoch = 0;
   {
     std::lock_guard state_lock(state->mutex);
     if (terminal(state->snapshot.execution))
@@ -671,9 +707,43 @@ BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> 
       state->snapshot.delivery_pending_at = now;
       state->terminal_notification_pending = true;
     }
+    // Exact terminal inspection handoff: move the source local, bump epoch,
+    // clear any live frozen frame, and mark freeze_pending only when a source
+    // exists. Never reacquire by path after this point.
+    freeze_source = std::move(state->inspection_source);
+    state->inspection_source = nullptr;
+    ++state->inspect_epoch;
+    if (state->inspect_epoch == 0)
+      state->inspect_epoch = 1;
+    freeze_epoch = state->inspect_epoch;
+    state->frozen_inspection = nullptr;
+    state->last_inspection_fingerprint = std::nullopt;
+    state->freeze_pending = static_cast<bool>(freeze_source);
     state->changed.notify_all();
   }
   publish_terminal_notification(state);
+
+  if (freeze_source)
+  {
+    auto projected = freeze_source->project(freeze_epoch, true, false);
+    auto fingerprint = freeze_source->content_fingerprint();
+    freeze_source.reset();
+    {
+      std::lock_guard state_lock(state->mutex);
+      if (state->freeze_pending && state->inspect_epoch == freeze_epoch)
+      {
+        if (projected)
+        {
+          state->frozen_inspection = std::move(*projected);
+          if (fingerprint)
+            state->last_inspection_fingerprint = std::move(*fingerprint);
+        }
+        state->freeze_pending = false;
+        state->changed.notify_all();
+      }
+    }
+  }
+
   {
     std::lock_guard lock(mutex_);
     prune_eligible_locked();
@@ -838,6 +908,74 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::cancel(st
   }
   std::lock_guard state_lock(state->mutex);
   return public_snapshot_locked(*state);
+}
+
+ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordinator::inspect(std::string_view parent_session_id, std::string_view job_id,
+                                                                                              std::optional<std::uint64_t> known_generation)
+{
+  std::shared_ptr<JobState> state;
+  {
+    std::lock_guard lock(mutex_);
+    state = find_owned_locked(parent_session_id, job_id);
+  }
+  if (!state)
+    return std::unexpected(not_found(job_id));
+
+  std::shared_ptr<SubagentLiveInspectionSource> source;
+  std::shared_ptr<SubagentInspectorFrame const> frozen;
+  std::optional<ava::session::SessionContentFingerprint> last_fingerprint;
+  std::uint64_t epoch = 0;
+  bool freeze_pending = false;
+  bool is_terminal = false;
+  {
+    std::lock_guard state_lock(state->mutex);
+    source = state->inspection_source;
+    frozen = state->frozen_inspection;
+    last_fingerprint = state->last_inspection_fingerprint;
+    epoch = state->inspect_epoch;
+    freeze_pending = state->freeze_pending;
+    is_terminal = terminal(state->snapshot.execution);
+  }
+
+  if (frozen)
+  {
+    if (known_generation && *known_generation == frozen->generation)
+      return make_not_modified_inspection_frame(frozen->generation, true, false);
+    return frozen;
+  }
+
+  if (!source)
+  {
+    // Missing source is a stable unavailable frame for legacy/test jobs and
+    // for terminal jobs whose freeze already dropped the source without a frame.
+    return make_unavailable_inspection_frame(epoch, is_terminal, freeze_pending);
+  }
+
+  auto fingerprint = source->content_fingerprint();
+  if (!fingerprint)
+  {
+    source.reset();
+    return std::unexpected(std::move(fingerprint.error()));
+  }
+  if (known_generation && *known_generation == epoch && last_fingerprint && *last_fingerprint == *fingerprint)
+  {
+    source.reset();
+    return make_not_modified_inspection_frame(epoch, is_terminal, freeze_pending);
+  }
+
+  auto projected = source->project(epoch, is_terminal, freeze_pending);
+  source.reset();
+  if (!projected)
+    return std::unexpected(std::move(projected.error()));
+
+  {
+    std::lock_guard state_lock(state->mutex);
+    // Only refresh the short-circuit fingerprint while this epoch still owns the
+    // live source slot (or freeze is still pending for the same epoch).
+    if (state->inspect_epoch == epoch && (state->inspection_source || state->freeze_pending || terminal(state->snapshot.execution)))
+      state->last_inspection_fingerprint = std::move(*fingerprint);
+  }
+  return std::move(*projected);
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::promote(std::string_view parent_session_id, std::string_view job_id)
@@ -1057,6 +1195,10 @@ void SubagentCoordinator::shutdown()
     for (auto const& [job_id, state] : jobs_)
     {
       std::lock_guard state_lock(state->mutex);
+      // Shutdown must not retain live inspection sources. In-flight inspect may
+      // finish once from its local copy; later inspect sees unavailable/frozen.
+      state->inspection_source = nullptr;
+      state->freeze_pending = false;
       if (!terminal(state->snapshot.execution))
       {
         state->snapshot.cancel_requested = true;
@@ -1065,6 +1207,7 @@ void SubagentCoordinator::shutdown()
         state->snapshot.updated_at = *state->snapshot.cancel_requested_at;
         jobs.push_back(job_id);
       }
+      state->changed.notify_all();
     }
   }
   for (auto const& job_id : jobs) static_cast<void>(registry_.cancel(job_id));
@@ -1073,6 +1216,12 @@ void SubagentCoordinator::shutdown()
   {
     std::lock_guard lock(mutex_);
     shutdown_complete_ = true;
+    for (auto const& [_, state] : jobs_)
+    {
+      std::lock_guard state_lock(state->mutex);
+      state->inspection_source = nullptr;
+      state->freeze_pending = false;
+    }
     released.swap(jobs_);
   }
 }

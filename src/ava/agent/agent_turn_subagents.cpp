@@ -2,6 +2,7 @@
 #include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/job_control.h"
+#include "ava/agent/subagent_inspector.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
@@ -304,6 +305,16 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
                                             .subagent_type = request.subagent_type,
                                             .child_session_id = task_id,
                                             .child_session_path = session_path};
+    // Build the inspection source from an exact copy of the child authority
+    // before coordinator start/publication. No raw authority escapes start().
+    auto inspection_source = SubagentLiveInspectionSource::create(*run_state->child_options.session_read_authority);
+    if (!inspection_source)
+    {
+      auto error = std::move(inspection_source.error());
+      if (!request.task_id)
+        ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+      return std::unexpected(std::move(error));
+    }
     BackgroundJobWorker worker = [run_state](BackgroundJobContext const& context) mutable {
       struct FinishInteractionGate final
       {
@@ -334,7 +345,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     };
 
     auto coordinated = options_.subagent_coordinator->start(store_.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
-                                                            std::move(start_options), std::move(worker), interaction_gate);
+                                                            std::move(start_options), std::move(worker), interaction_gate, std::move(*inspection_source));
     if (!coordinated)
     {
       auto error = std::move(coordinated.error());

@@ -5,6 +5,7 @@
 #include "ava/session/assistant_output.h"
 #include "ava/core/result.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -293,11 +294,32 @@ class SessionStore
   std::function<void()> after_created_file_rollback_detach_for_test_;
 };
 
+// Lease-bound or ephemeral content identity used to skip redundant history
+// loads when a caller already holds a fresh projection. Equality means no
+// observable content change on the exact authority target.
+struct SessionContentFingerprint
+{
+  bool ephemeral = false;
+  std::uint64_t dev = 0;
+  std::uint64_t ino = 0;
+  std::uint64_t size = 0;
+  std::int64_t mtime_sec = 0;
+  std::int64_t mtime_nsec = 0;
+  std::uint64_t entry_count = 0;
+  std::uint64_t tip_hash = 0;
+
+  [[nodiscard]] friend bool operator==(SessionContentFingerprint const&, SessionContentFingerprint const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 // Narrow copyable history authority for one runtime session. Persistent
 // authorities share an owned F_DUPFD_CLOEXEC duplicate of the exact active
 // lease; ephemeral authorities retain only the shared in-memory store state.
 // Each authority also owns the read policy selected when its runtime session
 // was opened, so ordinary load() calls cannot silently bypass that policy.
+// Caller-supplied load_bounded/inspect_bounded limits are clamped per field to
+// min(authority policy, request) and never widen the embedded policy.
 class SessionReadAuthority
 {
  public:
@@ -312,7 +334,19 @@ class SessionReadAuthority
   [[nodiscard]] static ava::core::Result<SessionReadAuthority> create_ephemeral(SessionStore const& store,
                                                                                 SessionReadLimits limits = legacy_unbounded_session_read_limits());
 
+  [[nodiscard]] std::string const& session_id() const noexcept;
+  [[nodiscard]] bool is_ephemeral() const noexcept;
+  [[nodiscard]] bool active() const noexcept;
+  // Persistent fingerprints are fstat(2) of the owned lease descriptor only.
+  // Ephemeral fingerprints summarize the shared in-memory tip under the store
+  // entries lock. Neither path reopens by pathname.
+  [[nodiscard]] ava::core::Result<SessionContentFingerprint> content_fingerprint() const;
+  [[nodiscard]] SessionReadLimits read_limits() const noexcept;
+
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load() const;
+  // Effective limits are per-field min(authority embedded policy, request).
+  // Strict classification only; never repairs torn tails or tolerates invalid
+  // final suffixes.
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
 
@@ -321,6 +355,7 @@ class SessionReadAuthority
  private:
   struct State;
   explicit SessionReadAuthority(std::shared_ptr<State const> state);
+  [[nodiscard]] SessionReadLimits clamp_limits(SessionReadLimits request) const noexcept;
 
   std::shared_ptr<State const> state_;
 };

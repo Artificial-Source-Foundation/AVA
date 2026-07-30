@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -19,6 +20,11 @@
 #include <vector>
 
 namespace ava::agent {
+
+// Opaque path-free live inspection types. Complete definitions live in
+// subagent_inspector.h so public coordinator fanout never pulls session types.
+class SubagentLiveInspectionSource;
+struct SubagentInspectorFrame;
 
 // Error context exposed by failed start() calls. Process-local publication is
 // atomic, so coordinator failures are always ProvenUnpublished. The uncertain
@@ -102,9 +108,11 @@ class SubagentCoordinator final
 
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start(std::string parent_session_id, SubagentJobMode mode, BackgroundJobStartOptions options,
                                                                         BackgroundJobWorker worker,
-                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr);
+                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr,
+                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start_background(std::string parent_session_id, BackgroundJobStartOptions options,
-                                                                                   BackgroundJobWorker worker);
+                                                                                   BackgroundJobWorker worker,
+                                                                                   std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
   [[nodiscard]] std::vector<SubagentCoordinatorJobSnapshot> list(std::string_view parent_session_id) const;
   [[nodiscard]] ava::core::Result<std::vector<SubagentCoordinatorJobSnapshot>> pending_deliveries(std::string_view parent_session_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> snapshot(std::string_view parent_session_id, std::string_view job_id);
@@ -113,6 +121,10 @@ class SubagentCoordinator final
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> result(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> cancel(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> promote(std::string_view parent_session_id, std::string_view job_id);
+  // Owner-bound path-free live inspection. known_generation skips reload when
+  // the lease-bound fingerprint is unchanged for that generation.
+  [[nodiscard]] ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> inspect(std::string_view parent_session_id, std::string_view job_id,
+                                                                                         std::optional<std::uint64_t> known_generation = std::nullopt);
 
   void set_terminal_sink(SubagentTerminalSink sink);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> record_delivery_attempt(std::string_view parent_session_id, std::string_view job_id,

@@ -38,7 +38,7 @@ Common operations include:
 | Shell | `bash` | Parsed and classified before execution; unknown commands ask, high-risk commands deny. |
 | Network | `network.fetch`, `network.search` | Explicit approval required. |
 | LSP | `lsp.query`, `lsp.server.launch` | Queries are permissioned; server launch asks because it starts a process. |
-| Resources | `skill`, `task` | Skill loading requires approval. Task/subagent launch is prompt-free and audited by policy; exact persisted task denies still win, and child sensitive actions remain independently permissioned. |
+| Resources | `skill`, `task` | Skill loading requires approval. Task/subagent launch is prompt-free and audited unless an exact persisted task deny matches; only sensitive nested or child actions prompt, and those remain independently permissioned. |
 | Plugins | `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe` | Launches and contributed operations require approval. |
 | MCP | `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, `mcp.resource.read` | Server process/session/tool/resource actions require approval. |
 
@@ -52,7 +52,9 @@ with `/permissions` or the RPC permission-rule commands.
 Useful commands and docs:
 
 - `/permissions audit`, `/permissions diagnose`, and `/permissions list` show
-  recent decisions and durable rules.
+  recent decisions and durable rules. Interactive list/receipt/explain text
+  leads with human summaries and display-only ordinals; exact rule ids remain
+  required for explain/remove and never yield to ordinals or labels.
 - `/diff` and expanded tool cards show file diffs when AVA can compute them
   safely.
 - See [USAGE.md](USAGE.md) for TUI/headless permission flows and

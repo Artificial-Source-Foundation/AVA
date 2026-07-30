@@ -217,7 +217,7 @@ At idle, the composer has one quiet input surface and at most one visual
 boundary or gutter: no nested frame/card, duplicate composer title, persistent
 help row, empty attachment/queue/status row, or open menu. Only the
 draft/placeholder and settled one-line footer persist; that footer may show the
-active model, active conversation-context usage (`ctx count (percent)`, or estimated `ctx ~count` when model-window metadata is unavailable), and the active spinner only. Contextual rows appear
+active model, active conversation-context usage (`ctx count (percent)`, or estimated `ctx ~count` when model-window metadata is unavailable), and a fixed four-cell signal meter while processing. Ordinary draft/status/footer rows inherit terminal-default/`screenBg`; elevated `composerBg` remains for palettes and selectors. Contextual rows appear
 only while populated or relevant and release their rows when empty. These are
 terminal-native layout rules, not a pixel-look requirement.
 
@@ -229,12 +229,12 @@ OpenCode-style convergence:
 1. Plain **Up/Down** scroll transcript history only. They never move or
    replace the composer draft. History and cursor-vertical actions remain
    configurable but are unbound by default.
-2. The composer footer remains minimal: active model, active conversation-context usage, and the
-   active spinner while processing. Do not reintroduce cwd, git, AVA branding,
-   mode, provider, session metadata, cumulative session token usage, instruction-source counts, or reasoning metadata there.
-3. The frontend consumes semantic backend events. It does not create
+2. The composer footer remains minimal: active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and a fixed four-cell signal meter while processing. Do not reintroduce cwd, git, AVA branding,
+   mode, provider, session metadata, cumulative session token usage, instruction-source counts, reasoning metadata, or a spinner glyph there.
+3. Transcript mouse-wheel steps are three rendered rows per accepted event with 40ms same-direction coalescing and immediate reverse; selectors, questions, the sidebar drawer, and selection-edge autoscroll stay one row.
+4. The frontend consumes semantic backend events. It does not create
    renderer-specific backend contracts or reconstruct path/session state.
-4. No broad reusable-component rewrite or heavy terminal dependency is in
+5. No broad reusable-component rewrite or heavy terminal dependency is in
    scope without approval.
 
 ## 5. Priority categories
@@ -1491,7 +1491,9 @@ The following are not implied by this roadmap:
 | OpenCode is a behavior/quality reference, not source or architecture | Preserved | Compare outcomes only; do not port implementation patterns wholesale |
 | Native C++23/ncursesw and narrow semantic seams | Preserved | Keep rendering out of backend contracts |
 | Plain Up/Down scroll transcript only | Preserved | Do not move or replace drafts; vertical/history actions stay configurable and unbound by default |
-| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and active spinner only |
+| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and a fixed four-cell signal meter while active; ordinary draft/status/footer rows inherit `screenBg`, while palettes/selectors keep elevated `composerBg` |
+| Transcript wheel step | Preserved | Three rendered rows per accepted transcript wheel event; same-direction 40ms coalescing; immediate reverse; selectors/questions/drawer/selection-edge stay one row |
+| Human labels without authority swap | Preserved | Permission summaries, keybinding help labels, and completion display labels are human-primary; exact `permrule_…`/job/action ids remain hidden insertion/control authority and never yield to ordinals or labels |
 | Ordinary Space completion policy | Preserved | Ordinary Space never opens file/reference completion; explicit Tab may force empty-token path suggestions, while real `@` and path-like prefixes remain valid triggers |
 | Renderer tests plus PTY smokes as current evidence strategy | Preserved | Add a screen model only after demonstrated evidence failure or approval |
 | Responsive sidebar/shell policy | Refreshed by visual dogfood | Disclose actionable activity/modified files from `144x16`, idle metadata from `176x16`, suppress the rail for prompts/selectors, and keep complete `/sidebar` disclosure |
@@ -1529,15 +1531,16 @@ cards retain an actionable human reason, and explicit `/permissions` plus `/copy
 permission` remain the audit surfaces.
 
 Active questions use a distinct configurable background and wrap their full text.
-Routine idle and active-run key, wheel, provider, and spinner repaint requests are
+Routine idle and active-run key, wheel, provider, and signal-meter repaint requests are
 coalesced into 16 ms frames; input state still mutates immediately, full-frame
 requests supersede footer-only requests, draw failures latch, and immediate
-lifecycle/terminal barriers remain synchronous. Same-direction wheel runs mutate
-once per completed frame, reversals remain immediate, detached transcript layouts
-stay frozen during draft-only repaint, and pending assistant/reasoning Markdown is
-not cumulatively parsed before the incremental tail renderer. Nested permission
-and question prompts drain same-direction wheel bursts without swallowing the
-following confirmation input.
+lifecycle/terminal barriers remain synchronous. Transcript wheel accepts three
+rendered rows per event, same-direction bursts coalesce at 40 ms, reversals remain
+immediate, selectors/questions/drawer/selection-edge stay one row, detached
+transcript layouts stay frozen during draft-only repaint, and pending
+assistant/reasoning Markdown is not cumulatively parsed before the incremental tail
+renderer. Nested permission and question prompts drain same-direction wheel bursts
+without swallowing the following confirmation input.
 
 Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,

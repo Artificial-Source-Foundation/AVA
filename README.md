@@ -131,7 +131,7 @@ The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5
 ## Interactive Commands
 
 - `/help`: show commands and hotkeys
-- `/hotkeys` or `/keybindings`: show effective TUI hotkeys
+- `/hotkeys` or `/keybindings`: show effective TUI hotkeys with human primary labels
 - `/keybindings init [--force]`: create or explicitly replace a validated keybindings starter file
 - `/keybindings import <path> [--force]`: validate and install a keybindings JSON file
 - `/keybindings set <action> <key>[,<key>...]`: validate and edit one keybinding action
@@ -168,7 +168,8 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or sanitized portable AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path, omitting provider-private reasoning replay metadata
 - `/import <path.jsonl> --confirm`: validate an AVA JSONL session archive, create a new local session, and switch to it; without `--confirm`, AVA only previews the entry count
 - `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
-- `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; `/permission-rules` and `/perms` are aliases
+- `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; list/receipt/explain lead with human summaries while exact rule ids remain authority; `/permission-rules` and `/perms` are aliases
+- `/jobs [list|show|wait|result|cancel|promote] ...`: human-readable owner-bound job controls; display ordinals are visual only, exact `job_id` values remain authority, and only `result` includes terminal content (public model/RPC JSON is unchanged; see [`docs/rpc-protocol.md`](docs/rpc-protocol.md))
 - `/read <path>`: read a file through permissions
 - `/write <path> <text>`: write a file through permissions using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files

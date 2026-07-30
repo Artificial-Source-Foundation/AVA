@@ -157,7 +157,7 @@ compatibility with existing custom themes.
 | `error` | Error or denial status. |
 | `accent` | Focus, selection, and brand accents. |
 | `screenBg` | Main screen background. Built-in dark/light inherit the terminal default; custom themes may set an explicit color. |
-| `composerBg` | Elevated palette/select-list panel background. Ordinary draft/footer dock rows inherit `screenBg` like transcript chat. |
+| `composerBg` | Elevated palette/select-list panel background. Ordinary draft, status, and footer dock rows inherit terminal-default/`screenBg` like transcript chat; only palettes, selectors, and other elevated panels use `composerBg`. |
 | `toolBg` | Optional low-contrast tool-card background. |
 | `questionBg` | Optional distinct question dock/modal background. |
 
@@ -262,8 +262,12 @@ Common user-facing action groups:
 | Sessions and trees | `app.session.new/tree/fork/resume/togglePath/toggleSort/toggleNamedFilter/rename/delete/deleteNoninvasive`, `app.tree.foldOrUp/unfoldOrDown/editLabel/toggleLabelTimestamp/filter.labeledOnly/filter.all` |
 
 Run `/keybindings` to see the exact effective actions and keys for your build.
-Some actions intentionally have no default key until a modal or feature makes
-them useful. Defaults include `message_prev`=Alt+K, `message_next`=Alt+J, and
+`/help`, `/hotkeys`, and the keybindings selector lead with concise human
+labels and bound keys; machine action ids remain secondary for config JSON and
+`/keybindings set` drafts and are the insertion authority when completing an
+action argument. Human labels never replace that authority. Some actions
+intentionally have no default key until a modal or feature makes them useful.
+Defaults include `message_prev`=Alt+K, `message_next`=Alt+J, and
 `jump_to_bottom`=Ctrl+End. Plain Up/Down remain transcript scroll only.
 Alt+J/Alt+K can be rebound as editor aliases only by overriding `message_next` /
 `message_prev`; until then those keys jump between transcript messages rather

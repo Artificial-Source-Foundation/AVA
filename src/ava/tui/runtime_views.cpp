@@ -259,29 +259,24 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
   view.items.reserve(help_items.size());
   for (auto const& item : help_items)
   {
-    auto badge = std::string("active");
+    // Prefer human label, then bound keys (+ shared marker), then machine id so keys stay visible at narrow widths.
+    auto badge = item.keys;
     for (auto const& key : split_key_display(item.keys))
     {
       if (shared_key_count(help_items, key) > 1)
       {
-        badge = "shared key";
+        if (!badge.empty())
+          badge += " · ";
+        badge += "shared";
         break;
       }
     }
     auto const human_label = item.label.empty() ? item.action : item.label;
-    // Keep the machine id in description so snake_case queries still match while the row leads with the human label.
-    auto description = item.action;
-    if (!item.description.empty())
-    {
-      if (!description.empty())
-        description += " · ";
-      description += item.description;
-    }
     view.items.push_back(SelectListItemView{.value = item.action,
                                             .label = human_label,
-                                            .description = std::move(description),
+                                            .description = item.action,
                                             .group = "Hotkeys",
-                                            .detail = item.keys,
+                                            .detail = {},
                                             .badge = std::move(badge),
                                             .current = false,
                                             .enabled = true,

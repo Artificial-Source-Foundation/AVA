@@ -1907,11 +1907,11 @@ std::string action_label(TuiAction action)
     case TuiAction::SessionArchive:
       return "Archive session";
     case TuiAction::SessionArchiveNoninvasive:
-      return "Archive session quietly";
+      return "Archive/restore (empty search)";
     case TuiAction::TreeFoldOrUp:
-      return "Fold tree or up";
+      return "Go to parent session";
     case TuiAction::TreeUnfoldOrDown:
-      return "Unfold tree or down";
+      return "Go to child session";
     case TuiAction::TreeEditLabel:
       return "Edit tree label";
     case TuiAction::TreeToggleLabelTimestamp:
@@ -1919,7 +1919,7 @@ std::string action_label(TuiAction action)
     case TuiAction::TreeFilterLabeledOnly:
       return "Filter labeled only";
     case TuiAction::TreeFilterAll:
-      return "Show all sessions";
+      return "Toggle archived sessions";
   }
   return "Unknown action";
 }

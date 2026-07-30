@@ -312,13 +312,43 @@ void run_tui_selector_tests()
              hotkeys_view.subtitle.find("Enter drafts /keybindings set") != std::string::npos &&
              hotkeys_view.subtitle.find("/reload keybindings") != std::string::npos && hotkeys_view.footer_hint.find("Enter draft edit") != std::string::npos &&
              mode_toggle_item != hotkeys_view.items.end() && mode_toggle_item->label == "Toggle build/plan mode" && mode_toggle_item->value == "mode_toggle" &&
-             mode_toggle_item->description.find("mode_toggle") != std::string::npos && mode_toggle_item->detail.find("Tab") != std::string::npos &&
-             mode_toggle_item->badge == "shared key" &&
+             mode_toggle_item->description == "mode_toggle" && mode_toggle_item->detail.empty() && mode_toggle_item->badge.find("Tab") != std::string::npos &&
+             mode_toggle_item->badge.find("shared") != std::string::npos &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Keybindings") != std::string::npos; }) &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Toggle build/plan mode") != std::string::npos; }) &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }) &&
              std::ranges::none_of(hotkeys_frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),
-         "keybindings view exposes human labels, machine draft values, edit drafting, config/reload guidance, and context-shared keys");
+         "keybindings view exposes human labels, bound keys before machine ids, edit drafting, config/reload guidance, and context-shared keys");
+
+  auto mode_toggle_render_view = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  mode_toggle_render_view.query = "mode_toggle";
+  auto const mode_toggle_matches = ava::tui::filter_select_list_items(mode_toggle_render_view);
+  expect(!mode_toggle_matches.empty() && mode_toggle_render_view.items[mode_toggle_matches.front()].value == "mode_toggle",
+         "keybindings selector can focus mode_toggle by machine id for width-sensitive render checks");
+  if (!mode_toggle_matches.empty())
+    mode_toggle_render_view.selected_item_index = mode_toggle_matches.front();
+  auto const render_mode_toggle_width = [&](std::size_t width) {
+    return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                               .provider = "openai",
+                                                               .model = "gpt-5.5",
+                                                               .session_id = "session_test",
+                                                               .input = "composer behind hotkeys",
+                                                               .status = "hotkeys opened",
+                                                               .transcript = {},
+                                                               .select_list = mode_toggle_render_view,
+                                                               .width = width,
+                                                               .height = 18});
+  };
+  auto const mode_toggle_frame_80 = render_mode_toggle_width(80);
+  auto const mode_toggle_frame_92 = render_mode_toggle_width(92);
+  auto const mode_toggle_row_visible = [](std::vector<std::string> const& frame) {
+    return std::ranges::any_of(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("Toggle build/plan mode") != std::string::npos && visible.find("Tab") != std::string::npos;
+    });
+  };
+  expect(mode_toggle_row_visible(mode_toggle_frame_80) && mode_toggle_row_visible(mode_toggle_frame_92),
+         "keybindings selector keeps mode-toggle human label and Tab keys visible at widths 80 and 92");
 
   auto cursor_left_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
   cursor_left_filter.query = "cursor_left";
@@ -326,6 +356,8 @@ void run_tui_selector_tests()
   auto live_tail_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
   live_tail_filter.query = "live tail";
   auto const live_tail_matches = ava::tui::filter_select_list_items(live_tail_filter);
+  auto const cursor_left_item =
+      std::ranges::find_if(cursor_left_filter.items, [](ava::tui::SelectListItemView const& item) { return item.value == "cursor_left"; });
   expect(!cursor_left_matches.empty() &&
              std::ranges::any_of(cursor_left_matches,
                                  [&](std::size_t index) {
@@ -335,8 +367,11 @@ void run_tui_selector_tests()
              std::ranges::any_of(live_tail_matches,
                                  [&](std::size_t index) {
                                    return live_tail_filter.items[index].value == "jump_to_bottom" && live_tail_filter.items[index].label == "Jump to live tail";
-                                 }),
-         "keybindings selector filters on both snake_case machine ids and human label words");
+                                 }) &&
+             mode_toggle_item != hotkeys_view.items.end() && mode_toggle_item->value == "mode_toggle" &&
+             ("/keybindings set " + mode_toggle_item->value + " ") == "/keybindings set mode_toggle " && cursor_left_item != cursor_left_filter.items.end() &&
+             ("/keybindings set " + cursor_left_item->value + " ") == "/keybindings set cursor_left ",
+         "keybindings selector filters on snake_case ids and human labels while Enter drafts canonical machine action ids");
 
   ava::tui::set_tui_config_theme(std::nullopt);
   auto settings_key_bindings = ava::tui::default_key_bindings();

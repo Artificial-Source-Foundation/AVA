@@ -117,11 +117,9 @@ std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys)
     output += "  " + item.keys;
     if (item.keys.size() < keys_width)
       output += std::string(keys_width - item.keys.size(), ' ');
-    // Machine id stays secondary detail after the human label and bound keys.
+    // Machine id stays secondary after the human label and bound keys; drop long action_description text.
     if (!item.action.empty() && item.action != primary)
       output += "  " + item.action;
-    if (!item.description.empty())
-      output += "  " + item.description;
     output += '\n';
   }
   return output;

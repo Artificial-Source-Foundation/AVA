@@ -537,7 +537,11 @@ void run_tui_keybinding_tests()
     }
     expect(labels_ok && ava::tui::action_label(ava::tui::TuiAction::CursorLeft) == "Move cursor left" &&
                ava::tui::action_label(ava::tui::TuiAction::ModelCycleForward) == "Next model" &&
-               ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom",
+               ava::tui::action_name(ava::tui::TuiAction::JumpToBottom) == "jump_to_bottom" &&
+               ava::tui::action_label(ava::tui::TuiAction::TreeFoldOrUp) == "Go to parent session" &&
+               ava::tui::action_label(ava::tui::TuiAction::TreeUnfoldOrDown) == "Go to child session" &&
+               ava::tui::action_label(ava::tui::TuiAction::SessionArchiveNoninvasive) == "Archive/restore (empty search)" &&
+               ava::tui::action_label(ava::tui::TuiAction::TreeFilterAll) == "Toggle archived sessions",
            "tui action_label covers every TuiAction with nonempty bounded human text while action_name stays machine-stable");
   }
   expect(!ava::tui::parse_key_bindings_json("{\"submit\":\"Hyper+Enter\"}"), "tui keybind parser rejects unknown key names");

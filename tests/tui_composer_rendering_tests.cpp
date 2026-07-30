@@ -970,7 +970,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                 .session_id = "session_test",
                                                                 .input = "",
                                                                 .status = "ready",
-                                                                .active_context_status = "3.2%",
+                                                                .active_context_status = "870 (3.2%)",
                                                                 .context_source_count = 2,
                                                                 .transcript = {},
                                                                 .width = 80,
@@ -980,7 +980,7 @@ void run_tui_composer_rendering_tests_part_1()
   auto idle_footer = strip_sgr(idle_two_row_lines[9]);
   while (!idle_input.empty() && idle_input.back() == ' ') idle_input.pop_back();
   while (!idle_footer.empty() && idle_footer.back() == ' ') idle_footer.pop_back();
-  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 3.2%" &&
+  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 870 (3.2%)" &&
              idle_two_row_lines[8].find("\x1b[49m") != std::string::npos && idle_two_row_lines[9].find("\x1b[49m") != std::string::npos &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
@@ -1240,6 +1240,37 @@ void run_tui_composer_rendering_tests_part_1()
                                       visible_columns(line) == 20;
                              }),
          "tui preserves multi-digit context metadata and the four-cell signal meter at the supported minimum width");
+
+  auto combined_narrow_footer = narrow_footer_snapshot;
+  combined_narrow_footer.model = "gpt-5.6-terra";
+  combined_narrow_footer.active_context_status = "150.3k (55.3%)";
+  combined_narrow_footer.width = 28;
+  combined_narrow_footer.height = 8;
+  combined_narrow_footer.processing = true;
+  combined_narrow_footer.spinner_frame = 1;
+  auto const combined_narrow_lines = ava::tui::render_composer(combined_narrow_footer);
+  expect(std::ranges::any_of(combined_narrow_lines,
+                             [&](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("ctx 150.3k (55.3%)") != std::string::npos && visible.find(narrow_meter_raw) != std::string::npos &&
+                                      line.find(narrow_muted_outer) != std::string::npos && line.find(narrow_accent_inner) != std::string::npos &&
+                                      visible_columns(line) == 28;
+                             }) &&
+             std::ranges::all_of(combined_narrow_lines, [](std::string const& line) { return visible_columns(line) <= 28; }),
+         "tui keeps combined count/percent context and the four-cell meter width-bounded on a narrow canvas");
+
+  auto normal_combined_footer = combined_narrow_footer;
+  normal_combined_footer.model = "gpt-5.5";
+  normal_combined_footer.width = 80;
+  normal_combined_footer.height = 10;
+  auto const normal_combined_lines = ava::tui::render_composer(normal_combined_footer);
+  expect(std::ranges::any_of(normal_combined_lines,
+                             [&](std::string const& line) {
+                               auto const visible = strip_sgr(line);
+                               return visible.find("GPT-5.5 · ctx 150.3k (55.3%)") != std::string::npos &&
+                                      visible.find(narrow_meter_raw) != std::string::npos && visible_columns(line) == 80;
+                             }),
+         "tui shows count plus percent with the four-cell meter at normal width without overflow");
   {
     ScopedEnvVar no_color_guard("NO_COLOR", "1");
     auto plain_processing = narrow_footer_snapshot;
@@ -1446,7 +1477,7 @@ void run_tui_composer_rendering_tests_part_1()
                                                                                          .input = "",
                                                                                          .status = "ready",
                                                                                          .token_status = "1.3k (0.7%)",
-                                                                                         .active_context_status = "3.2%",
+                                                                                         .active_context_status = "870 (3.2%)",
                                                                                          .transcript = {},
                                                                                          .width = 110,
                                                                                          .height = 10,
@@ -1462,7 +1493,7 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(compact_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5 · ctx 3.2%") != std::string::npos && visible.find("ctx 2") == std::string::npos &&
+                               return visible.find("GPT-5.5 · ctx 870 (3.2%)") != std::string::npos && visible.find("ctx 2") == std::string::npos &&
                                       visible.find("Build") == std::string::npos && visible.find("OpenAI") == std::string::npos &&
                                       visible.find("cwd") == std::string::npos && visible.find("git") == std::string::npos &&
                                       visible.find("entries") == std::string::npos && visible.find("1.3k (0.7%)") == std::string::npos;
@@ -2678,7 +2709,7 @@ void run_tui_composer_rendering_tests_part_4()
                                                 .input = "",
                                                 .status = "ready",
                                                 .active_run_hint = ava::tui::ActiveRunHint{.interrupt = "Esc", .jump_to_bottom = "Ctrl+End"},
-                                                .active_context_status = "3.2%",
+                                                .active_context_status = "870 (3.2%)",
                                                 .transcript = {},
                                                 .width = 80,
                                                 .height = 24};
@@ -2727,7 +2758,7 @@ void run_tui_composer_rendering_tests_part_4()
                !find_visible(transcript_discovery_lines, "/ commands") && !find_visible(processing_discovery_lines, "/ commands") &&
                !find_visible(prompt_discovery_lines, "/ commands") && !find_visible(question_discovery_lines, "/ commands") &&
                !find_visible(select_discovery_lines, "/ commands") && !find_visible(attachment_discovery_lines, "/ commands") &&
-               strip_sgr(idle_discovery_80x24.back()).find("GPT-5.5 · ctx 3.2%") != std::string::npos &&
+               strip_sgr(idle_discovery_80x24.back()).find("GPT-5.5 · ctx 870 (3.2%)") != std::string::npos &&
                strip_sgr(idle_discovery_80x24.back()).find("build") == std::string::npos &&
                strip_sgr(idle_discovery_80x24.back()).find("session") == std::string::npos &&
                std::ranges::none_of(idle_discovery_80x24, [](std::string const& line) { return strip_sgr(line).find("AVA") != std::string::npos; }) &&
@@ -2782,7 +2813,7 @@ void run_tui_composer_rendering_tests_part_4()
              find_visible(completed_lifecycle_lines, "Esc stop · type a follow-up") && !find_visible(completed_lifecycle_lines, "retry attempt") &&
              !find_visible(completed_lifecycle_lines, "compaction") && find_visible(custom_interrupt_lines, "F9 stop · type a follow-up") &&
              find_visible(unbound_interrupt_lines, "stop unbound") && !find_visible(unbound_interrupt_lines, "Esc stop") &&
-             strip_sgr(retry_lines.back()).find("GPT-5.5") != std::string::npos && strip_sgr(retry_lines.back()).find("ctx 3.2%") != std::string::npos &&
+             strip_sgr(retry_lines.back()).find("GPT-5.5") != std::string::npos && strip_sgr(retry_lines.back()).find("ctx 870 (3.2%)") != std::string::npos &&
              !find_visible(retry_lines, "1.3k (0.7%)"),
          "Wave A active-run contextual row prioritizes newest allowlisted RUNNING retry/compaction status, keeps configured Cancel stop (or stop unbound), "
          "ignores completed/generic activity, and never leaks provider body text into chrome or footer");

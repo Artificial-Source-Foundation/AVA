@@ -258,6 +258,14 @@ std::optional<std::string> format_context_window_percent(long long tokens, std::
   return output.str();
 }
 
+std::string format_active_context_status_value(long long tokens, std::optional<long long> context_window_tokens)
+{
+  auto const count = format_compact_token_count(tokens);
+  if (auto const percent = format_context_window_percent(tokens, context_window_tokens))
+    return count + " (" + *percent + ')';
+  return "~" + count;
+}
+
 std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats, std::optional<long long> context_window_tokens)
 {
   auto const tokens = compact_token_total(stats);
@@ -304,9 +312,7 @@ ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime
   auto const total_tokens = *active_tokens > maximum - system_prompt_tokens ? maximum : *active_tokens + system_prompt_tokens;
   auto const display_tokens = total_tokens > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max()
                                                                                                              : static_cast<long long>(total_tokens);
-  if (auto const percent = format_context_window_percent(display_tokens, session.model().context_window_tokens))
-    return *percent;
-  return "~" + format_compact_token_count(display_tokens);
+  return format_active_context_status_value(display_tokens, session.model().context_window_tokens);
 }
 
 std::optional<std::string> active_context_status_for_session(ava::app::runtime::Session const& session)

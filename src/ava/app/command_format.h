@@ -23,10 +23,10 @@ void add_output(CommandResult& result, std::string text);
 // Used to derive stable short completion refs without surfacing full authority ids.
 [[nodiscard]] std::string_view id_payload_after_family_prefix(std::string_view id) noexcept;
 
-// Deterministic short unique refs for a displayed completion set. Each ref is a
-// prefix of id_payload_after_family_prefix(id), starting at min_length (default 6)
-// and extending only until unique within `ids`. Same id always yields the same
-// ref for a given set; distinct ids never share a ref. Parallel to `ids`.
+// Deterministic short unique refs for one family of valid completion ids. Refs
+// start as payload prefixes at min_length (default 6) and extend until unique.
+// Degenerate or mixed-family inputs with indistinguishable payloads may fall
+// back to full ids so distinct authorities never share a ref. Parallel to `ids`.
 [[nodiscard]] std::vector<std::string> unique_short_id_refs(std::vector<std::string> const& ids, std::size_t min_length = 6);
 
 }  // namespace ava::app

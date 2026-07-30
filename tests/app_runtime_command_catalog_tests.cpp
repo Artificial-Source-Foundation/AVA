@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/app/command_catalog.h"
+#include "ava/app/command_format.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/command_permissions.h"
 #include "ava/app/command_sessions.h"
@@ -770,22 +771,41 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
     }
     return nullptr;
   };
+  // Production seam: short refs start at 6 payload chars and extend only on collision.
+  {
+    auto const collision_refs = ava::app::unique_short_id_refs({"permrule_abcdef111111", "permrule_abcdef222222", "permrule_zzzzzz999999"});
+    expect(collision_refs.size() == 3 && collision_refs[0] == "abcdef1" && collision_refs[1] == "abcdef2" && collision_refs[2] == "zzzzzz" &&
+               ava::app::id_payload_after_family_prefix("permrule_abcdef111111") == "abcdef111111" &&
+               ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"}).size() == 2 &&
+               ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[0] ==
+                   ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[1],
+           "unique_short_id_refs extends past six chars only until the displayed set is unique and stays stable for identical ids");
+  }
+
+  auto extract_completion_ref = [](std::string_view description) -> std::string {
+    constexpr std::string_view kMarker = "ref ";
+    auto const pos = description.rfind(kMarker);
+    if (pos == std::string_view::npos)
+      return {};
+    return std::string(description.substr(pos + kMarker.size()));
+  };
+  auto match_index_for_value = [](std::vector<ava::tui::SlashCommandItem> const& matches, std::string_view value) -> std::optional<std::size_t> {
+    for (std::size_t index = 0; index < matches.size(); ++index)
+    {
+      if (matches[index].command == value)
+        return index;
+    }
+    return std::nullopt;
+  };
+
   auto const* permission_explain = find_argument_completion(permissions_completion_item, 1, permission_rule_id, {"explain"});
   auto const* permission_remove = find_argument_completion(permissions_completion_item, 1, permission_rule_id, {"remove"});
   constexpr char kPermissionSummary[] = "Allow file reads · src/main.cpp · Workspace";
   auto const permission_matches = ava::tui::filter_slash_commands("/permissions explain ", slash_items_after_permission_rule);
-  std::size_t permission_match_index = 0;
-  bool found_permission_match = false;
-  for (std::size_t index = 0; index < permission_matches.size(); ++index)
-  {
-    if (permission_matches[index].command == permission_rule_id)
-    {
-      permission_match_index = index;
-      found_permission_match = true;
-      break;
-    }
-  }
-  auto const permission_selection = ava::tui::slash_command_selection_text("/permissions explain ", slash_items_after_permission_rule, permission_match_index);
+  auto const permission_match_index = match_index_for_value(permission_matches, permission_rule_id);
+  auto const permission_selection =
+      permission_match_index ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_after_permission_rule, *permission_match_index)
+                             : std::string{};
   auto const permission_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                        .provider = "openai",
                                                                                        .model = "gpt-5.5",
@@ -794,24 +814,90 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                                                                        .status = "ready",
                                                                                        .transcript = {},
                                                                                        .slash_commands = slash_items_after_permission_rule,
-                                                                                       .selected_slash_command_index = permission_match_index,
+                                                                                       .selected_slash_command_index = permission_match_index.value_or(0),
                                                                                        .width = 96,
                                                                                        .height = 14});
+  auto const permission_ref = permission_explain ? extract_completion_ref(permission_explain->description) : std::string{};
   expect(permission_explain != nullptr && permission_remove != nullptr && permission_explain->value == permission_rule_id &&
              permission_remove->value == permission_rule_id && permission_explain->display_label == kPermissionSummary &&
              permission_remove->display_label == kPermissionSummary && permission_explain->display_label.find("permrule_") == std::string::npos &&
              permission_remove->display_label.find("permrule_") == std::string::npos &&
              permission_explain->description.find("permrule_") == std::string::npos && permission_remove->description.find("permrule_") == std::string::npos &&
-             found_permission_match && permission_matches[permission_match_index].display_label == kPermissionSummary &&
-             permission_matches[permission_match_index].display_label.find("permrule_") == std::string::npos &&
+             permission_explain->description.starts_with("Explain rule · ref ") && permission_remove->description.starts_with("Remove rule · ref ") &&
+             !permission_ref.empty() && permission_ref.size() >= 6 && permission_explain->description.find(permission_rule_id) == std::string::npos &&
+             permission_match_index.has_value() && permission_matches[*permission_match_index].display_label == kPermissionSummary &&
+             permission_matches[*permission_match_index].display_label.find("permrule_") == std::string::npos &&
              permission_selection == "/permissions explain " + permission_rule_id &&
              std::ranges::none_of(permission_palette,
                                   [](std::string const& line) {
                                     auto const visible = strip_sgr(line);
                                     return visible.find("[complete]") != std::string::npos || visible.find("permrule_") != std::string::npos;
                                   }) &&
-             std::ranges::any_of(permission_palette, [](std::string const& line) { return strip_sgr(line).find("Allow file reads") != std::string::npos; }),
-         "permission explain/remove completions keep exact rule ids as values while rendering human summaries without raw ids or [complete]");
+             std::ranges::any_of(permission_palette, [](std::string const& line) { return strip_sgr(line).find("Allow file reads") != std::string::npos; }) &&
+             std::ranges::any_of(permission_palette,
+                                 [&](std::string const& line) { return strip_sgr(line).find("ref " + permission_ref) != std::string::npos; }),
+         "permission explain/remove completions keep exact rule ids as values while rendering human summaries plus short refs without raw ids or [complete]");
+
+  // Two same-summary rules must stay visually distinct via short refs and still draft separate exact ids.
+  auto add_duplicate_permission_rule =
+      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
+                                                                          "reason=\"duplicate summary completion fixture\""});
+  expect(add_duplicate_permission_rule && add_duplicate_permission_rule->handled && !add_duplicate_permission_rule->output.empty() &&
+             add_duplicate_permission_rule->output[0].find(kPermissionSummary) != std::string::npos,
+         "duplicate-summary permission rule fixture adds with the same human summary");
+  auto const duplicate_permission_rule_id = add_duplicate_permission_rule ? extract_rule_id(add_duplicate_permission_rule->output[0]) : std::string{};
+  expect(!duplicate_permission_rule_id.empty() && duplicate_permission_rule_id != permission_rule_id,
+         "duplicate-summary permission rule fixture exposes a distinct authority id");
+  auto const slash_items_duplicate_rules = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+  auto const* permissions_duplicate_item = tui_test_support::find_slash_command_item(slash_items_duplicate_rules, "/permissions");
+  auto const* permission_explain_a = find_argument_completion(permissions_duplicate_item, 1, permission_rule_id, {"explain"});
+  auto const* permission_explain_b = find_argument_completion(permissions_duplicate_item, 1, duplicate_permission_rule_id, {"explain"});
+  auto const* permission_remove_a = find_argument_completion(permissions_duplicate_item, 1, permission_rule_id, {"remove"});
+  auto const* permission_remove_b = find_argument_completion(permissions_duplicate_item, 1, duplicate_permission_rule_id, {"remove"});
+  auto const duplicate_permission_matches = ava::tui::filter_slash_commands("/permissions explain ", slash_items_duplicate_rules);
+  auto const match_a = match_index_for_value(duplicate_permission_matches, permission_rule_id);
+  auto const match_b = match_index_for_value(duplicate_permission_matches, duplicate_permission_rule_id);
+  auto const selection_a =
+      match_a ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_a) : std::string{};
+  auto const selection_b =
+      match_b ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_b) : std::string{};
+  auto render_permission_palette = [&](std::size_t selected_index) {
+    return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                               .provider = "openai",
+                                                               .model = "gpt-5.5",
+                                                               .session_id = "session_test",
+                                                               .input = "/permissions explain ",
+                                                               .status = "ready",
+                                                               .transcript = {},
+                                                               .slash_commands = slash_items_duplicate_rules,
+                                                               .selected_slash_command_index = selected_index,
+                                                               .width = 96,
+                                                               .height = 16});
+  };
+  auto const duplicate_permission_palette_a = render_permission_palette(match_a.value_or(0));
+  auto const duplicate_permission_palette_b = render_permission_palette(match_b.value_or(0));
+  auto const ref_a = permission_explain_a ? extract_completion_ref(permission_explain_a->description) : std::string{};
+  auto const ref_b = permission_explain_b ? extract_completion_ref(permission_explain_b->description) : std::string{};
+  auto palette_hides_authority = [](std::vector<std::string> const& palette) {
+    return std::ranges::none_of(palette, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("[complete]") != std::string::npos || visible.find("permrule_") != std::string::npos;
+    });
+  };
+  expect(permission_explain_a != nullptr && permission_explain_b != nullptr && permission_remove_a != nullptr && permission_remove_b != nullptr &&
+             permission_explain_a->display_label == kPermissionSummary && permission_explain_b->display_label == kPermissionSummary &&
+             permission_explain_a->value == permission_rule_id && permission_explain_b->value == duplicate_permission_rule_id &&
+             permission_remove_a->description == "Remove rule · ref " + ref_a && permission_remove_b->description == "Remove rule · ref " + ref_b &&
+             permission_explain_a->description == "Explain rule · ref " + ref_a && permission_explain_b->description == "Explain rule · ref " + ref_b &&
+             !ref_a.empty() && !ref_b.empty() && ref_a != ref_b && permission_explain_a->description.find(permission_rule_id) == std::string::npos &&
+             permission_explain_b->description.find(duplicate_permission_rule_id) == std::string::npos && match_a.has_value() && match_b.has_value() &&
+             selection_a == "/permissions explain " + permission_rule_id && selection_b == "/permissions explain " + duplicate_permission_rule_id &&
+             palette_hides_authority(duplicate_permission_palette_a) && palette_hides_authority(duplicate_permission_palette_b) &&
+             std::ranges::any_of(duplicate_permission_palette_a,
+                                 [&](std::string const& line) { return strip_sgr(line).find("ref " + ref_a) != std::string::npos; }) &&
+             std::ranges::any_of(duplicate_permission_palette_b,
+                                 [&](std::string const& line) { return strip_sgr(line).find("ref " + ref_b) != std::string::npos; }),
+         "same-summary permission completions stay visually distinct via short refs and draft exact separate rule ids");
 
   auto const* submit_set = find_argument_completion(hotkeys_completion_item, 1, "submit", {"set"});
   auto const* submit_reset = find_argument_completion(hotkeys_completion_item, 1, "submit", {"reset"});
@@ -830,33 +916,48 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   expect(coordinator != nullptr, "catalog human completion tests require a subagent coordinator");
   if (coordinator)
   {
-    auto started = coordinator->start_background(session->store.session_id(),
-                                                 ava::agent::BackgroundJobStartOptions{
-                                                     .title = "Review pull request",
-                                                     .description = "SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION",
-                                                     .subagent_type = "general",
-                                                     .child_session_id = "child_catalog_completion_job",
-                                                 },
-                                                 [](ava::agent::BackgroundJobContext const&) {
-                                                   return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
-                                                                                              .final_text = "SECRET_SUMMARY_MUST_NOT_APPEAR",
-                                                                                              .stop_reason = "completed"};
-                                                 });
+    auto start_completed_job = [&](std::string title, std::string child_session_id, std::string subagent_type = "general") {
+      return coordinator->start_background(session->store.session_id(),
+                                           ava::agent::BackgroundJobStartOptions{
+                                               .title = std::move(title),
+                                               .description = "SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION",
+                                               .subagent_type = std::move(subagent_type),
+                                               .child_session_id = std::move(child_session_id),
+                                           },
+                                           [](ava::agent::BackgroundJobContext const&) {
+                                             return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
+                                                                                        .final_text = "SECRET_SUMMARY_MUST_NOT_APPEAR",
+                                                                                        .stop_reason = "completed"};
+                                           });
+    };
+
+    auto started = start_completed_job("Review pull request", "child_catalog_completion_job");
     expect(started.has_value(), started ? "catalog completion job starts" : "catalog completion job starts: " + started.error().format());
-    if (started)
+    auto started_twin = start_completed_job("Review pull request", "child_catalog_completion_job_twin");
+    expect(started_twin.has_value(),
+           started_twin ? "catalog completion twin job starts" : "catalog completion twin job starts: " + started_twin.error().format());
+    if (started && started_twin)
     {
       auto waited = coordinator->wait(session->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2));
-      expect(waited && !waited->timed_out,
-             waited ? "catalog completion job reaches terminal state" : "catalog completion job reaches terminal state: " + waited.error().format());
+      auto waited_twin = coordinator->wait(session->store.session_id(), started_twin->job.identity.job_id, std::chrono::seconds(2));
+      expect(waited && !waited->timed_out && waited_twin && !waited_twin->timed_out,
+             "catalog completion jobs reach terminal state");
       auto const job_id = started->job.identity.job_id;
+      auto const job_id_twin = started_twin->job.identity.job_id;
       auto const slash_items_with_job = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
       auto const* jobs_item = tui_test_support::find_slash_command_item(slash_items_with_job, "/jobs");
       auto const* job_show = find_argument_completion(jobs_item, 1, job_id, {"show"});
+      auto const* job_show_twin = find_argument_completion(jobs_item, 1, job_id_twin, {"show"});
       auto const* job_wait = find_argument_completion(jobs_item, 1, job_id, {"wait"});
       auto const* job_result = find_argument_completion(jobs_item, 1, job_id, {"result"});
       auto const* job_cancel = find_argument_completion(jobs_item, 1, job_id, {"cancel"});
       auto const job_matches = ava::tui::filter_slash_commands("/jobs show ", slash_items_with_job);
-      auto const job_selection = ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, 0);
+      auto const job_match = match_index_for_value(job_matches, job_id);
+      auto const job_match_twin = match_index_for_value(job_matches, job_id_twin);
+      auto const job_selection =
+          job_match ? ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, *job_match) : std::string{};
+      auto const job_selection_twin =
+          job_match_twin ? ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, *job_match_twin) : std::string{};
       auto const job_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                     .provider = "openai",
                                                                                     .model = "gpt-5.5",
@@ -865,42 +966,40 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                                                                     .status = "ready",
                                                                                     .transcript = {},
                                                                                     .slash_commands = slash_items_with_job,
-                                                                                    .selected_slash_command_index = 0,
+                                                                                    .selected_slash_command_index = job_match.value_or(0),
                                                                                     .width = 96,
-                                                                                    .height = 12});
-      expect(job_show != nullptr && job_wait != nullptr && job_result != nullptr && job_cancel != nullptr && job_show->value == job_id &&
-                 job_show->display_label == "Review pull request" && job_wait->display_label == "Review pull request" &&
+                                                                                    .height = 14});
+      auto const job_ref = job_show ? extract_completion_ref(job_show->description) : std::string{};
+      auto const job_ref_twin = job_show_twin ? extract_completion_ref(job_show_twin->description) : std::string{};
+      expect(job_show != nullptr && job_show_twin != nullptr && job_wait != nullptr && job_result != nullptr && job_cancel != nullptr &&
+                 job_show->value == job_id && job_show_twin->value == job_id_twin && job_show->display_label == "Review pull request" &&
+                 job_show_twin->display_label == "Review pull request" && job_wait->display_label == "Review pull request" &&
                  job_result->display_label == "Review pull request" && job_cancel->display_label == "Review pull request" &&
                  job_show->display_label.find(job_id) == std::string::npos && job_show->description.find("Completed") != std::string::npos &&
                  job_show->description.find("Background") != std::string::npos && job_show->description.find("general") != std::string::npos &&
-                 job_show->description.find(job_id) == std::string::npos &&
+                 job_show->description.find(" · ref ") != std::string::npos && !job_ref.empty() && !job_ref_twin.empty() && job_ref != job_ref_twin &&
+                 job_show->description.find(job_id) == std::string::npos && job_show_twin->description.find(job_id_twin) == std::string::npos &&
                  job_show->description.find("SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION") == std::string::npos &&
-                 job_show->description.find("SECRET_SUMMARY_MUST_NOT_APPEAR") == std::string::npos && !job_matches.empty() &&
-                 job_matches.front().display_label == "Review pull request" && job_matches.front().display_label.find(job_id) == std::string::npos &&
-                 job_selection == "/jobs show " + job_id &&
+                 job_show->description.find("SECRET_SUMMARY_MUST_NOT_APPEAR") == std::string::npos && job_match.has_value() && job_match_twin.has_value() &&
+                 job_matches[*job_match].display_label == "Review pull request" && job_matches[*job_match_twin].display_label == "Review pull request" &&
+                 job_selection == "/jobs show " + job_id && job_selection_twin == "/jobs show " + job_id_twin &&
                  std::ranges::none_of(job_palette,
                                       [&](std::string const& line) {
                                         auto const visible = strip_sgr(line);
                                         return visible.find("[complete]") != std::string::npos || visible.find(job_id) != std::string::npos ||
+                                               visible.find(job_id_twin) != std::string::npos ||
                                                visible.find("SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION") != std::string::npos ||
                                                visible.find("SECRET_SUMMARY_MUST_NOT_APPEAR") != std::string::npos;
                                       }) &&
-                 std::ranges::any_of(job_palette, [](std::string const& line) { return strip_sgr(line).find("Review pull request") != std::string::npos; }),
-             "job show/wait/result/cancel completions keep exact job ids as values while rendering process-local titles without prompts, summaries, raw ids, "
-             "or [complete]");
+                 std::ranges::any_of(job_palette, [](std::string const& line) { return strip_sgr(line).find("Review pull request") != std::string::npos; }) &&
+                 std::ranges::any_of(job_palette, [&](std::string const& line) { return strip_sgr(line).find("ref " + job_ref) != std::string::npos; }) &&
+                 std::ranges::any_of(job_palette,
+                                     [&](std::string const& line) { return strip_sgr(line).find("ref " + job_ref_twin) != std::string::npos; }),
+             "same-title job completions keep exact job ids as values while rendering titles plus distinct short refs without prompts, summaries, raw ids, or "
+             "[complete]");
 
-      // Empty-title fallback stays human (Background job / Job N) and never promotes the raw id.
-      auto untitled = coordinator->start_background(session->store.session_id(),
-                                                    ava::agent::BackgroundJobStartOptions{
-                                                        .title = {},
-                                                        .description = "another secret prompt",
-                                                        .subagent_type = "explore",
-                                                        .child_session_id = "child_catalog_completion_untitled",
-                                                    },
-                                                    [](ava::agent::BackgroundJobContext const&) {
-                                                      return ava::agent::BackgroundJobCompletion{
-                                                          .state = ava::agent::BackgroundJobState::Completed, .final_text = "done", .stop_reason = "completed"};
-                                                    });
+      // Empty-title fallback stays human (Background job / Foreground job) and never promotes the raw id.
+      auto untitled = start_completed_job({}, "child_catalog_completion_untitled", "explore");
       expect(untitled.has_value(),
              untitled ? "untitled catalog completion job starts" : "untitled catalog completion job starts: " + untitled.error().format());
       if (untitled)
@@ -909,9 +1008,12 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
         auto const slash_items_untitled = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
         auto const* jobs_untitled_item = tui_test_support::find_slash_command_item(slash_items_untitled, "/jobs");
         auto const* untitled_show = find_argument_completion(jobs_untitled_item, 1, untitled_id, {"show"});
+        auto const untitled_ref = untitled_show ? extract_completion_ref(untitled_show->description) : std::string{};
         expect(untitled_show != nullptr && untitled_show->value == untitled_id && untitled_show->display_label == "Background job" &&
-                   untitled_show->display_label.find(untitled_id) == std::string::npos && untitled_show->description.find("explore") != std::string::npos,
-               "job completions fall back to Background job rather than raw ids when process-local title is empty");
+                   untitled_show->display_label.find(untitled_id) == std::string::npos && untitled_show->description.find("explore") != std::string::npos &&
+                   untitled_show->description.find(" · ref ") != std::string::npos && !untitled_ref.empty() &&
+                   untitled_show->description.find(untitled_id) == std::string::npos,
+               "job completions fall back to Background job plus short ref rather than raw ids when process-local title is empty");
       }
     }
   }
@@ -922,9 +1024,10 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              remove_permission_rule->output[0].find("Rule ID: " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions remove deletes persistent rules by exact id with human receipt");
 
-  for (auto const& rule_id : {explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id, path_explore_rule_id,
-                              forged_task_rule_id, typed_task_rule_id, explore_explore_rule_id, tool_only_explore_rule_id, freeform_explore_tool_rule_id,
-                              mixed_coder_explore_rule_id, mixed_explore_coder_rule_id, mcp_read_rule_id, plugin_bash_rule_id, forged_recipe_rule_id})
+  for (auto const& rule_id : {duplicate_permission_rule_id, explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id,
+                              path_explore_rule_id, forged_task_rule_id, typed_task_rule_id, explore_explore_rule_id, tool_only_explore_rule_id,
+                              freeform_explore_tool_rule_id, mixed_coder_explore_rule_id, mixed_explore_coder_rule_id, mcp_read_rule_id, plugin_bash_rule_id,
+                              forged_recipe_rule_id})
   {
     auto removed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
     expect(removed && removed->handled && !removed->output.empty() && removed->output[0].find("Rule ID: " + rule_id) != std::string::npos,

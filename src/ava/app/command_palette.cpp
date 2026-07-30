@@ -103,18 +103,18 @@ std::string_view human_job_mode_label(ava::agent::SubagentJobMode mode) noexcept
   return "Unknown";
 }
 
-// Process-local title first; never surface raw job ids as the primary completion label.
-std::string job_completion_display_label(ava::agent::SubagentJobSnapshot const& job, std::size_t display_ordinal)
+// Process-local title first; never surface raw job ids or ordinals as the primary completion label.
+std::string job_completion_display_label(ava::agent::SubagentJobSnapshot const& job)
 {
   if (!job.display_title.empty())
     return sanitize_inline_text(job.display_title);
   if (job.mode == ava::agent::SubagentJobMode::Background)
     return "Background job";
-  return "Job " + std::to_string(display_ordinal);
+  return "Foreground job";
 }
 
-// Concise human status/mode/type only — no prompts, summaries, or authority ids.
-std::string job_completion_description(ava::agent::SubagentJobSnapshot const& job)
+// Concise human status/mode/type plus a short unique ref — no prompts, summaries, or full authority ids.
+std::string job_completion_description(ava::agent::SubagentJobSnapshot const& job, std::string_view short_ref)
 {
   std::string description;
   description += human_job_execution_label(job.execution);
@@ -124,6 +124,11 @@ std::string job_completion_description(ava::agent::SubagentJobSnapshot const& jo
   {
     description += " · ";
     description += sanitize_inline_text(job.display_subagent_type);
+  }
+  if (!short_ref.empty())
+  {
+    description += " · ref ";
+    description += short_ref;
   }
   return description;
 }
@@ -787,11 +792,16 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     if (session.subagent_coordinator())
     {
       auto const jobs = session.subagent_coordinator()->list(session.store.session_id());
+      std::vector<std::string> job_ids;
+      job_ids.reserve(jobs.size());
+      for (auto const& snapshot : jobs)
+        job_ids.push_back(snapshot.job.identity.job_id);
+      auto const job_refs = unique_short_id_refs(job_ids);
       for (std::size_t job_index = 0; job_index < jobs.size(); ++job_index)
       {
         auto const& snapshot = jobs[job_index];
-        auto const label = job_completion_display_label(snapshot.job, job_index + 1);
-        auto const description = job_completion_description(snapshot.job);
+        auto const label = job_completion_display_label(snapshot.job);
+        auto const description = job_completion_description(snapshot.job, job_refs[job_index]);
         for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
           add_completion(item, 1, snapshot.job.identity.job_id, description, "Jobs", {action}, false, true, {}, label);
       }
@@ -833,12 +843,19 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     };
     if (auto rules = ava::permissions::load_persistent_permission_rules(store))
     {
+      std::vector<std::string> rule_ids;
+      rule_ids.reserve(rules->size());
       for (auto const& rule : *rules)
+        rule_ids.push_back(rule.rule_id);
+      auto const rule_refs = unique_short_id_refs(rule_ids);
+      for (std::size_t rule_index = 0; rule_index < rules->size(); ++rule_index)
       {
-        // Keep .value as the exact permrule id for authority; surface only the human summary in the UI.
+        auto const& rule = (*rules)[rule_index];
+        // Keep .value as the exact permrule id for authority; surface human summary + short unique ref only.
         auto const summary = format_permission_rule_summary(rule, session.workspace_dir());
-        add_completion(item, 1, rule.rule_id, "Explain rule", "Rules", {"explain"}, false, true, {}, summary);
-        add_completion(item, 1, rule.rule_id, "Remove rule", "Rules", {"remove"}, false, true, {}, summary);
+        auto const ref_suffix = std::string(" · ref ") + rule_refs[rule_index];
+        add_completion(item, 1, rule.rule_id, "Explain rule" + ref_suffix, "Rules", {"explain"}, false, true, {}, summary);
+        add_completion(item, 1, rule.rule_id, "Remove rule" + ref_suffix, "Rules", {"remove"}, false, true, {}, summary);
       }
     }
   }

@@ -2,7 +2,7 @@
 #include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/job_control.h"
-#include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 

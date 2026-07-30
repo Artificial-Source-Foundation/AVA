@@ -87,6 +87,11 @@ struct SubagentCoordinatorOptions
   // Deterministic test seam for process-local identity collision coverage.
   // Production leaves this empty and uses ava::core::make_id.
   std::function<std::string(std::string_view)> id_generator = nullptr;
+  // Deterministic test-only seam: after inspect captures the live source and
+  // source epoch, and before fingerprint/project work, invoke this hook so a
+  // test can complete/freeze the job while the inspector is paused. Production
+  // leaves this empty. Must not perform coordinator I/O under JobState locks.
+  std::function<void()> inspect_after_source_capture_for_test = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -121,8 +126,10 @@ class SubagentCoordinator final
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> result(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> cancel(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> promote(std::string_view parent_session_id, std::string_view job_id);
-  // Owner-bound path-free live inspection. known_generation skips reload when
-  // the lease-bound fingerprint is unchanged for that generation.
+  // Owner-bound path-free live inspection. known_generation yields not_modified
+  // only when it equals the current published content generation after a fresh
+  // fingerprint check (or a stable terminal frame). Never returns raw session
+  // path/load errors; refresh failures become path-free frame flags.
   [[nodiscard]] ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> inspect(std::string_view parent_session_id, std::string_view job_id,
                                                                                          std::optional<std::uint64_t> known_generation = std::nullopt);
 

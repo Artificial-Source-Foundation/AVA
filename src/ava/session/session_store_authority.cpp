@@ -198,7 +198,9 @@ std::uint64_t hash_tip(std::string_view id, std::string_view timestamp, std::siz
   mix(0);
   for (char const ch : timestamp) mix(static_cast<unsigned char>(ch));
   mix(0);
-  for (int shift = 0; shift < 64; shift += 8) mix(static_cast<unsigned char>((data_bytes >> shift) & 0xffU));
+  // Cast before shifting so 32-bit size_t never hits UB on shifts >= 32.
+  auto const bytes = static_cast<std::uint64_t>(data_bytes);
+  for (int shift = 0; shift < 64; shift += 8) mix(static_cast<unsigned char>((bytes >> shift) & 0xffU));
   return hash;
 }
 
@@ -243,6 +245,9 @@ ava::core::Result<SessionContentFingerprint> SessionReadAuthority::content_finge
   SessionContentFingerprint fingerprint;
   if (!state_->lease)
   {
+    // Append-only summary of the shared in-memory tip. This is not a durable
+    // content identity and is insufficient for live inspection; coordinated
+    // subagent inspection rejects ephemeral sources before publication.
     fingerprint.ephemeral = true;
     if (!state_->store.ephemeral_state_)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral read authority is missing shared state"));

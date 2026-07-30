@@ -2,6 +2,7 @@
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -181,6 +182,37 @@ BackgroundJobCompletion exception_completion(std::string const& job_id, std::sto
           .error = std::move(error)};
 }
 
+std::uint64_t advance_content_generation(std::uint64_t current) noexcept
+{
+  auto next = current + 1;
+  if (next == 0)
+    next = 1;
+  return next;
+}
+
+std::shared_ptr<SubagentInspectorFrame const> stamp_inspection_frame(std::uint64_t generation, bool terminal, bool freeze_pending, bool unavailable,
+                                                                     bool refresh_unavailable, std::vector<SubagentLiveMessage> messages)
+{
+  auto frame = std::make_shared<SubagentInspectorFrame>();
+  frame->generation = generation;
+  frame->terminal = terminal;
+  frame->freeze_pending = freeze_pending;
+  frame->unavailable = unavailable;
+  frame->refresh_unavailable = refresh_unavailable;
+  frame->messages = std::move(messages);
+  return std::shared_ptr<SubagentInspectorFrame const>(std::move(frame));
+}
+
+std::shared_ptr<SubagentInspectorFrame const> view_published_frame(std::shared_ptr<SubagentInspectorFrame const> const& published, bool terminal,
+                                                                   bool freeze_pending)
+{
+  if (!published)
+    return nullptr;
+  if (published->terminal == terminal && published->freeze_pending == freeze_pending && !published->not_modified)
+    return published;
+  return stamp_inspection_frame(published->generation, terminal, freeze_pending, published->unavailable, published->refresh_unavailable, published->messages);
+}
+
 BackgroundJobCompletion normalize_completion(std::string const& job_id, BackgroundJobCompletion completion)
 {
   if (completion.state == BackgroundJobState::Completed)
@@ -352,9 +384,16 @@ struct SubagentCoordinator::JobState
   std::condition_variable changed;
   std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr;
   std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr;
-  std::shared_ptr<SubagentInspectorFrame const> frozen_inspection = nullptr;
-  std::optional<ava::session::SessionContentFingerprint> last_inspection_fingerprint = std::nullopt;
-  std::uint64_t inspect_epoch = 1;
+  // Latest successfully published path-free frame + the fingerprint it was
+  // projected from. Survives freeze_pending so racing inspect never sees a gap.
+  std::shared_ptr<SubagentInspectorFrame const> published_inspection = nullptr;
+  std::optional<ava::session::SessionContentFingerprint> published_fingerprint = std::nullopt;
+  // Source/freeze identity. Bumped on complete/shutdown/eviction so late live
+  // projections cannot publish after a newer terminal handoff.
+  std::uint64_t source_epoch = 1;
+  // Published content generation. Distinct from source_epoch; never zero once
+  // any frame has been successfully published for this job.
+  std::uint64_t content_generation = 0;
   bool freeze_pending = false;
   bool published = false;
   bool terminal_notification_pending = false;
@@ -429,8 +468,11 @@ bool SubagentCoordinator::erase_oldest_eligible_locked()
     return false;
   {
     std::lock_guard state_lock(oldest->second->mutex);
-    // Eviction drops any residual inspection source; frozen frames may remain
-    // only while the JobState shared_ptr is still held elsewhere.
+    // Eviction invalidates the source epoch so late live/freeze results cannot
+    // store. Published frames may remain only while JobState is still held.
+    ++oldest->second->source_epoch;
+    if (oldest->second->source_epoch == 0)
+      oldest->second->source_epoch = 1;
     oldest->second->inspection_source = nullptr;
     oldest->second->freeze_pending = false;
   }
@@ -707,42 +749,59 @@ BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> 
       state->snapshot.delivery_pending_at = now;
       state->terminal_notification_pending = true;
     }
-    // Exact terminal inspection handoff: move the source local, bump epoch,
-    // clear any live frozen frame, and mark freeze_pending only when a source
-    // exists. Never reacquire by path after this point.
+    // Terminal inspection handoff: move the source local, bump source epoch so
+    // late live publishes cannot store, preserve the latest successful live
+    // frame through freeze_pending, and never reacquire by path.
     freeze_source = std::move(state->inspection_source);
     state->inspection_source = nullptr;
-    ++state->inspect_epoch;
-    if (state->inspect_epoch == 0)
-      state->inspect_epoch = 1;
-    freeze_epoch = state->inspect_epoch;
-    state->frozen_inspection = nullptr;
-    state->last_inspection_fingerprint = std::nullopt;
+    ++state->source_epoch;
+    if (state->source_epoch == 0)
+      state->source_epoch = 1;
+    freeze_epoch = state->source_epoch;
     state->freeze_pending = static_cast<bool>(freeze_source);
     state->changed.notify_all();
   }
-  publish_terminal_notification(state);
 
   if (freeze_source)
   {
-    auto projected = freeze_source->project(freeze_epoch, true, false);
+    // Bounded final projection outside locks. No I/O or callbacks under locks.
+    auto projected = freeze_source->project_messages();
     auto fingerprint = freeze_source->content_fingerprint();
     freeze_source.reset();
     {
       std::lock_guard state_lock(state->mutex);
-      if (state->freeze_pending && state->inspect_epoch == freeze_epoch)
+      if (state->freeze_pending && state->source_epoch == freeze_epoch)
       {
         if (projected)
         {
-          state->frozen_inspection = std::move(*projected);
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection =
+              stamp_inspection_frame(state->content_generation, true, false, false, false, std::move(*projected));
           if (fingerprint)
-            state->last_inspection_fingerprint = std::move(*fingerprint);
+            state->published_fingerprint = std::move(*fingerprint);
+        }
+        else if (state->published_inspection)
+        {
+          // Retain prior messages and mark a truthful path-free final-unavailable flag.
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection = stamp_inspection_frame(state->content_generation, true, false, false, true,
+                                                              state->published_inspection->messages);
+        }
+        else
+        {
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection = make_unavailable_inspection_frame(state->content_generation, true, false);
+          state->published_fingerprint = std::nullopt;
         }
         state->freeze_pending = false;
         state->changed.notify_all();
       }
     }
   }
+
+  // Delay terminal sink until the freeze attempt is stable so observers never
+  // race an empty gap between terminal job state and published inspection.
+  publish_terminal_notification(state);
 
   {
     std::lock_guard lock(mutex_);
@@ -922,60 +981,136 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordin
     return std::unexpected(not_found(job_id));
 
   std::shared_ptr<SubagentLiveInspectionSource> source;
-  std::shared_ptr<SubagentInspectorFrame const> frozen;
-  std::optional<ava::session::SessionContentFingerprint> last_fingerprint;
-  std::uint64_t epoch = 0;
+  std::shared_ptr<SubagentInspectorFrame const> published;
+  std::optional<ava::session::SessionContentFingerprint> published_fingerprint;
+  std::uint64_t source_epoch = 0;
+  std::uint64_t content_generation = 0;
   bool freeze_pending = false;
   bool is_terminal = false;
+  std::function<void()> after_capture_hook;
   {
     std::lock_guard state_lock(state->mutex);
     source = state->inspection_source;
-    frozen = state->frozen_inspection;
-    last_fingerprint = state->last_inspection_fingerprint;
-    epoch = state->inspect_epoch;
+    published = state->published_inspection;
+    published_fingerprint = state->published_fingerprint;
+    source_epoch = state->source_epoch;
+    content_generation = state->content_generation;
     freeze_pending = state->freeze_pending;
     is_terminal = terminal(state->snapshot.execution);
+    after_capture_hook = options_.inspect_after_source_capture_for_test;
+  }
+  SubagentLiveInspectionSource* const captured_source = source.get();
+
+  auto current_frame_locked = [&]() -> std::shared_ptr<SubagentInspectorFrame const> {
+    auto const current_published = state->published_inspection;
+    auto const current_terminal = terminal(state->snapshot.execution);
+    auto const current_freeze_pending = state->freeze_pending;
+    auto const current_generation = state->content_generation;
+    if (current_published)
+      return view_published_frame(current_published, current_terminal, current_freeze_pending);
+    return make_unavailable_inspection_frame(current_generation, current_terminal, current_freeze_pending);
+  };
+
+  // Stable terminal publication: no live source and freeze is complete.
+  if (!source && is_terminal && !freeze_pending)
+  {
+    if (published)
+    {
+      if (known_generation && *known_generation == published->generation)
+        return make_not_modified_inspection_frame(published->generation, true, false);
+      return view_published_frame(published, true, false);
+    }
+    return make_unavailable_inspection_frame(content_generation, true, false);
   }
 
-  if (frozen)
+  // Freeze in progress: preserve latest successful live content + terminal metadata.
+  if (!source && freeze_pending)
   {
-    if (known_generation && *known_generation == frozen->generation)
-      return make_not_modified_inspection_frame(frozen->generation, true, false);
-    return frozen;
+    if (published)
+      return view_published_frame(published, true, true);
+    return make_unavailable_inspection_frame(content_generation, true, true);
   }
 
   if (!source)
   {
-    // Missing source is a stable unavailable frame for legacy/test jobs and
-    // for terminal jobs whose freeze already dropped the source without a frame.
-    return make_unavailable_inspection_frame(epoch, is_terminal, freeze_pending);
+    // Missing source without terminal freeze (legacy/test jobs or shutdown mid-run).
+    if (published)
+      return view_published_frame(published, is_terminal, freeze_pending);
+    return make_unavailable_inspection_frame(content_generation, is_terminal, freeze_pending);
+  }
+
+  // Deterministic race seam: pause after live source/epoch capture before project.
+  if (after_capture_hook)
+    after_capture_hook();
+
+  // Re-check after the test seam: complete/shutdown may have invalidated the source.
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    is_terminal = terminal(state->snapshot.execution);
+    freeze_pending = state->freeze_pending;
+    published = state->published_inspection;
+    published_fingerprint = state->published_fingerprint;
+    content_generation = state->content_generation;
   }
 
   auto fingerprint = source->content_fingerprint();
   if (!fingerprint)
   {
-    source.reset();
-    return std::unexpected(std::move(fingerprint.error()));
-  }
-  if (known_generation && *known_generation == epoch && last_fingerprint && *last_fingerprint == *fingerprint)
-  {
-    source.reset();
-    return make_not_modified_inspection_frame(epoch, is_terminal, freeze_pending);
+    // Path-free: never surface raw fingerprint/session errors to inspect callers.
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection)
+      return make_refresh_unavailable_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution),
+                                                       state->freeze_pending, state->published_inspection->messages);
+    return make_refresh_unavailable_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending);
   }
 
-  auto projected = source->project(epoch, is_terminal, freeze_pending);
-  source.reset();
+  if (known_generation && published && *known_generation == published->generation && published_fingerprint && *published_fingerprint == *fingerprint)
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection && state->published_fingerprint && *state->published_fingerprint == *fingerprint &&
+        known_generation && *known_generation == state->published_inspection->generation)
+      return make_not_modified_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution), state->freeze_pending);
+    if (state->published_inspection)
+      return view_published_frame(state->published_inspection, terminal(state->snapshot.execution), state->freeze_pending);
+    return current_frame_locked();
+  }
+
+  auto projected = source->project_messages();
   if (!projected)
-    return std::unexpected(std::move(projected.error()));
+  {
+    // Corrupt/over-cap/load failures become path-free flags only.
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection)
+      return make_refresh_unavailable_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution),
+                                                       state->freeze_pending, state->published_inspection->messages);
+    return make_refresh_unavailable_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending);
+  }
 
   {
     std::lock_guard state_lock(state->mutex);
-    // Only refresh the short-circuit fingerprint while this epoch still owns the
-    // live source slot (or freeze is still pending for the same epoch).
-    if (state->inspect_epoch == epoch && (state->inspection_source || state->freeze_pending || terminal(state->snapshot.execution)))
-      state->last_inspection_fingerprint = std::move(*fingerprint);
+    // ARCH-INS-06: discard stale live results after complete/shutdown publication.
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+
+    // Another concurrent inspector may already have published this fingerprint.
+    if (state->published_fingerprint && *state->published_fingerprint == *fingerprint && state->published_inspection)
+      return view_published_frame(state->published_inspection, terminal(state->snapshot.execution), state->freeze_pending);
+
+    state->content_generation = advance_content_generation(state->content_generation);
+    auto frame = stamp_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending, false, false,
+                                        std::move(*projected));
+    state->published_inspection = frame;
+    state->published_fingerprint = std::move(*fingerprint);
+    return frame;
   }
-  return std::move(*projected);
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::promote(std::string_view parent_session_id, std::string_view job_id)
@@ -1195,8 +1330,11 @@ void SubagentCoordinator::shutdown()
     for (auto const& [job_id, state] : jobs_)
     {
       std::lock_guard state_lock(state->mutex);
-      // Shutdown must not retain live inspection sources. In-flight inspect may
-      // finish once from its local copy; later inspect sees unavailable/frozen.
+      // Invalidate source epoch so late live/freeze results cannot store after
+      // shutdown. Published frames remain only while JobState is still held.
+      ++state->source_epoch;
+      if (state->source_epoch == 0)
+        state->source_epoch = 1;
       state->inspection_source = nullptr;
       state->freeze_pending = false;
       if (!terminal(state->snapshot.execution))
@@ -1219,6 +1357,9 @@ void SubagentCoordinator::shutdown()
     for (auto const& [_, state] : jobs_)
     {
       std::lock_guard state_lock(state->mutex);
+      ++state->source_epoch;
+      if (state->source_epoch == 0)
+        state->source_epoch = 1;
       state->inspection_source = nullptr;
       state->freeze_pending = false;
     }

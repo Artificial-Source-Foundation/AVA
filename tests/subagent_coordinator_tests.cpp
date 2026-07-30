@@ -3,6 +3,7 @@
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/session_store.h"
 
 #include <array>
@@ -827,25 +828,17 @@ void test_live_inspection_generation_freeze_and_lifecycle()
     return;
 
   auto worker = std::make_shared<BlockingWorker>();
-  std::mutex project_mutex;
-  std::condition_variable project_cv;
-  bool allow_complete = false;
   auto started = coordinator->start_background(
       "parent_freeze", {.child_session_id = child->store.session_id()},
-      [&](auto const& context) {
-        auto completion = worker->run(context, "final summary");
-        std::unique_lock lock(project_mutex);
-        project_cv.wait_for(lock, std::chrono::seconds(2), [&] { return allow_complete || context.stop_token.stop_requested(); });
-        return completion;
-      },
-      child->source);
+      [worker](auto const& context) { return worker->run(context, "final summary"); }, child->source);
   expect(started && worker->wait_started(), "freeze fixture starts running job");
   if (!started)
     return;
 
   auto first = coordinator->inspect("parent_freeze", started->job.identity.job_id);
-  expect(first && (*first)->generation == 1 && (*first)->messages.size() == 1 && (*first)->messages.front().text == "prefix",
-         "live inspect projects committed prefix under generation 1");
+  expect(first && (*first)->generation == 1 && !(*first)->refresh_unavailable && (*first)->messages.size() == 1 &&
+             (*first)->messages.front().text == "prefix",
+         "live inspect projects committed prefix under content generation 1");
   if (!first)
     return;
   auto not_modified = coordinator->inspect("parent_freeze", started->job.identity.job_id, (*first)->generation);
@@ -859,40 +852,25 @@ void test_live_inspection_generation_freeze_and_lifecycle()
                                               .data_json = "{\"text\":\"live update\"}"};
   expect(child->store.append(child->lease, assistant).has_value(), "freeze fixture appends assistant message");
   auto updated = coordinator->inspect("parent_freeze", started->job.identity.job_id, (*first)->generation);
-  expect(updated && !(*updated)->not_modified && (*updated)->messages.size() == 2 && (*updated)->messages.back().text == "live update",
-         "fingerprint change forces reload despite known_generation");
+  expect(updated && !(*updated)->not_modified && (*updated)->generation == 2 && (*updated)->messages.size() == 2 &&
+             (*updated)->messages.back().text == "live update",
+         "fingerprint change advances content generation and forces reload");
 
-  // In-flight inspect vs complete: hold a long inspect while completion freezes.
-  std::promise<void> inspect_started;
-  std::promise<void> release_inspect;
-  auto inspect_started_future = inspect_started.get_future();
-  auto release_future = release_inspect.get_future();
-  auto in_flight = std::async(std::launch::async, [&] {
-    inspect_started.set_value();
-    release_future.wait_for(std::chrono::seconds(2));
-    return coordinator->inspect("parent_freeze", started->job.identity.job_id);
-  });
-  expect(inspect_started_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready, "in-flight inspect begins");
-  {
-    std::lock_guard lock(project_mutex);
-    allow_complete = true;
-    worker->finish();
-    project_cv.notify_all();
-  }
+  worker->finish();
   auto terminal = coordinator->wait("parent_freeze", started->job.identity.job_id, std::chrono::seconds(2));
   expect(terminal && !terminal->timed_out && terminal->job.execution == ava::agent::SubagentExecutionState::Completed, "freeze fixture completes");
-  release_inspect.set_value();
-  auto in_flight_result = in_flight.get();
-  expect(in_flight_result.has_value(), "in-flight inspect may finish once across completion");
 
   auto frozen = coordinator->inspect("parent_freeze", started->job.identity.job_id);
-  expect(frozen && (*frozen)->terminal && !(*frozen)->unavailable && !(*frozen)->freeze_pending && (*frozen)->generation == 2 &&
-             (*frozen)->messages.size() == 2,
-         "terminal freeze stores a path-free frame and bumps inspect epoch");
+  expect(frozen && (*frozen)->terminal && !(*frozen)->unavailable && !(*frozen)->freeze_pending && !(*frozen)->refresh_unavailable &&
+             (*frozen)->generation == 3 && (*frozen)->messages.size() == 2,
+         "terminal freeze stores a path-free frame and advances content generation for terminal metadata");
   if (!frozen)
     return;
   auto frozen_not_modified = coordinator->inspect("parent_freeze", started->job.identity.job_id, (*frozen)->generation);
   expect(frozen_not_modified && (*frozen_not_modified)->not_modified, "frozen generation returns not_modified");
+  auto stale_known = coordinator->inspect("parent_freeze", started->job.identity.job_id, (*updated)->generation);
+  expect(stale_known && !(*stale_known)->not_modified && (*stale_known)->generation == (*frozen)->generation,
+         "stale known_generation after terminal publish returns the newer frozen frame");
 
   // Immediate terminal completion still freezes when a source is present.
   auto immediate_child = make_child_fixture("child_immediate", "immediate");
@@ -914,7 +892,7 @@ void test_live_inspection_generation_freeze_and_lifecycle()
   if (!immediate)
     return;
   auto immediate_frame = immediate_coordinator->inspect("parent_immediate", immediate->job.identity.job_id);
-  expect(immediate_frame && (*immediate_frame)->terminal && (*immediate_frame)->messages.size() == 1 &&
+  expect(immediate_frame && (*immediate_frame)->terminal && (*immediate_frame)->generation >= 1 && (*immediate_frame)->messages.size() == 1 &&
              (*immediate_frame)->messages.front().text == "immediate",
          "immediate terminal completion freezes the committed prefix");
 
@@ -940,7 +918,7 @@ void test_live_inspection_generation_freeze_and_lifecycle()
   auto canceled_frame = coordinator->inspect("parent_promote", promoted_start->job.identity.job_id);
   expect(canceled && canceled_wait && canceled_frame && (*canceled_frame)->terminal, "cancel reaches terminal frozen/unavailable inspection");
 
-  // Shutdown drops residual sources.
+  // Shutdown drops residual sources and owner visibility.
   auto shutdown_child = make_child_fixture("child_shutdown_src");
   expect(static_cast<bool>(shutdown_child), "shutdown source fixture builds child");
   if (!shutdown_child)
@@ -955,6 +933,233 @@ void test_live_inspection_generation_freeze_and_lifecycle()
   coordinator->shutdown();
   auto after_shutdown = coordinator->inspect("parent_shutdown_src", shutdown_start->job.identity.job_id);
   expect(!after_shutdown, "shutdown removes jobs from owner inspection");
+}
+
+void test_live_inspection_deterministic_stale_inflight_race()
+{
+  std::mutex hook_mutex;
+  std::condition_variable hook_cv;
+  bool arm_hook = false;
+  bool hook_entered = false;
+  bool release_hook = false;
+
+  ava::agent::SubagentCoordinatorOptions options;
+  options.inspect_after_source_capture_for_test = [&] {
+    std::unique_lock lock(hook_mutex);
+    if (!arm_hook)
+      return;
+    hook_entered = true;
+    hook_cv.notify_all();
+    expect(hook_cv.wait_for(lock, std::chrono::seconds(2), [&] { return release_hook; }),
+           "inspect_after_source_capture_for_test waits with a finite deadline");
+  };
+  auto coordinator = coordinator_with(std::move(options));
+  if (!coordinator)
+    return;
+
+  auto child = make_child_fixture("child_race", "race-prefix");
+  expect(static_cast<bool>(child), "deterministic race fixture builds child");
+  if (!child)
+    return;
+  auto worker = std::make_shared<BlockingWorker>();
+  auto started = coordinator->start_background("parent_race", {.child_session_id = child->store.session_id()},
+                                               [worker](auto const& context) { return worker->run(context, "race-done"); }, child->source);
+  expect(started && worker->wait_started(), "deterministic race fixture starts");
+  if (!started)
+    return;
+
+  auto live = coordinator->inspect("parent_race", started->job.identity.job_id);
+  expect(live && (*live)->generation == 1 && !(*live)->terminal, "race fixture publishes an initial live generation");
+  if (!live)
+    return;
+
+  auto assistant = ava::session::SessionEntry{.id = "a_race",
+                                              .parent_id = "",
+                                              .type = ava::session::EntryType::AssistantMessage,
+                                              .timestamp = ava::session::now_timestamp(),
+                                              .data_json = "{\"text\":\"stale-live\"}"};
+  expect(child->store.append(child->lease, assistant).has_value(), "race fixture appends before paused inspect");
+
+  {
+    std::lock_guard lock(hook_mutex);
+    arm_hook = true;
+  }
+  auto in_flight = std::async(std::launch::async, [&] { return coordinator->inspect("parent_race", started->job.identity.job_id, (*live)->generation); });
+  {
+    std::unique_lock lock(hook_mutex);
+    expect(hook_cv.wait_for(lock, std::chrono::seconds(2), [&] { return hook_entered; }), "paused inspect reaches source-capture seam");
+  }
+
+  worker->finish();
+  auto terminal = coordinator->wait("parent_race", started->job.identity.job_id, std::chrono::seconds(2));
+  expect(terminal && !terminal->timed_out && terminal->job.execution == ava::agent::SubagentExecutionState::Completed,
+         "complete/freeze runs while inspect is paused at the source-capture seam");
+
+  // Terminal freeze inspect must not re-enter the armed live-source seam.
+  auto frozen = coordinator->inspect("parent_race", started->job.identity.job_id);
+  expect(frozen && (*frozen)->terminal && !(*frozen)->freeze_pending && (*frozen)->generation >= 2,
+         "terminal freeze publishes before the paused inspect resumes");
+
+  {
+    std::lock_guard lock(hook_mutex);
+    release_hook = true;
+    hook_cv.notify_all();
+  }
+  auto in_flight_result = in_flight.get();
+  expect(in_flight_result && (*in_flight_result)->terminal && !(*in_flight_result)->freeze_pending &&
+             (*in_flight_result)->generation == (*frozen)->generation && !(*in_flight_result)->not_modified,
+         "stale in-flight inspect returns the current terminal generation, not a stale live frame");
+}
+
+void test_live_inspection_two_client_lost_response_and_sink()
+{
+  std::mutex sink_mutex;
+  std::condition_variable sink_cv;
+  bool sink_seen = false;
+  bool sink_frame_stable = false;
+  std::uint64_t sink_generation = 0;
+
+  auto coordinator = coordinator_with();
+  if (!coordinator)
+    return;
+  coordinator->set_terminal_sink([&](ava::agent::SubagentCoordinatorJobSnapshot const& snapshot) {
+    auto frame = coordinator->inspect(snapshot.job.identity.parent_session_id, snapshot.job.identity.job_id);
+    std::lock_guard lock(sink_mutex);
+    sink_seen = true;
+    sink_frame_stable = frame && (*frame)->terminal && !(*frame)->freeze_pending && !(*frame)->unavailable;
+    if (frame)
+      sink_generation = (*frame)->generation;
+    sink_cv.notify_all();
+  });
+
+  auto child = make_child_fixture("child_two_client", "c1");
+  expect(static_cast<bool>(child), "two-client fixture builds child");
+  if (!child)
+    return;
+  auto worker = std::make_shared<BlockingWorker>();
+  auto started = coordinator->start_background("parent_two_client", {.child_session_id = child->store.session_id()},
+                                               [worker](auto const& context) { return worker->run(context, "done"); }, child->source);
+  expect(started && worker->wait_started(), "two-client fixture starts");
+  if (!started)
+    return;
+
+  auto client_a = coordinator->inspect("parent_two_client", started->job.identity.job_id);
+  expect(client_a && (*client_a)->generation == 1, "client A observes generation 1");
+  if (!client_a)
+    return;
+
+  auto assistant = ava::session::SessionEntry{.id = "a_two",
+                                              .parent_id = "",
+                                              .type = ava::session::EntryType::AssistantMessage,
+                                              .timestamp = ava::session::now_timestamp(),
+                                              .data_json = "{\"text\":\"second\"}"};
+  expect(child->store.append(child->lease, assistant).has_value(), "two-client fixture appends");
+
+  auto client_b = coordinator->inspect("parent_two_client", started->job.identity.job_id);
+  expect(client_b && (*client_b)->generation == 2 && (*client_b)->messages.size() == 2, "client B observes generation 2");
+  if (!client_b)
+    return;
+
+  // Lost response: client A retries with stale known_generation and must receive
+  // the cached newer frame rather than not_modified.
+  auto lost = coordinator->inspect("parent_two_client", started->job.identity.job_id, (*client_a)->generation);
+  expect(lost && !(*lost)->not_modified && (*lost)->generation == 2 && (*lost)->messages.size() == 2,
+         "lost-response retry with stale generation returns the newer cached frame");
+  auto lost_again = coordinator->inspect("parent_two_client", started->job.identity.job_id, (*client_a)->generation);
+  expect(lost_again && !(*lost_again)->not_modified && (*lost_again)->generation == 2,
+         "second lost-response retry still returns the newer cached frame");
+  auto current = coordinator->inspect("parent_two_client", started->job.identity.job_id, (*client_b)->generation);
+  expect(current && (*current)->not_modified && (*current)->generation == 2, "current generation still short-circuits");
+
+  worker->finish();
+  auto terminal = coordinator->wait("parent_two_client", started->job.identity.job_id, std::chrono::seconds(2));
+  expect(terminal && !terminal->timed_out, "two-client fixture completes");
+  {
+    std::unique_lock lock(sink_mutex);
+    expect(sink_cv.wait_for(lock, std::chrono::seconds(2), [&] { return sink_seen; }), "terminal sink fires after freeze");
+    expect(sink_frame_stable && sink_generation >= 3, "terminal sink observes a stable freeze, not freeze_pending/gap");
+  }
+}
+
+void test_live_inspection_path_free_refresh_failures()
+{
+  auto coordinator = coordinator_with();
+  if (!coordinator)
+    return;
+
+  auto child = make_child_fixture("child_path_free", "seed");
+  expect(static_cast<bool>(child), "path-free fixture builds child");
+  if (!child)
+    return;
+  auto worker = std::make_shared<BlockingWorker>();
+  auto started = coordinator->start_background("parent_path_free", {.child_session_id = child->store.session_id()},
+                                               [worker](auto const& context) { return worker->run(context, "x"); }, child->source);
+  expect(started && worker->wait_started(), "path-free fixture starts");
+  if (!started)
+    return;
+
+  auto first = coordinator->inspect("parent_path_free", started->job.identity.job_id);
+  expect(first && (*first)->generation == 1 && (*first)->messages.size() == 1, "path-free fixture publishes live frame");
+  if (!first)
+    return;
+
+  {
+    std::ofstream corrupt(child->store.session_path(), std::ios::app | std::ios::binary);
+    corrupt << "{this is not a session record}\n";
+  }
+  auto corrupted = coordinator->inspect("parent_path_free", started->job.identity.job_id, (*first)->generation);
+  expect(corrupted.has_value(), "corrupt live inspect returns a path-free frame, not a raw error");
+  if (corrupted)
+  {
+    expect((*corrupted)->refresh_unavailable && !(*corrupted)->not_modified && (*corrupted)->messages.size() == 1 &&
+               (*corrupted)->messages.front().text == "seed",
+           "corrupt live inspect retains prior messages and sets refresh_unavailable");
+    auto const rendered = (*corrupted)->messages.front().text;
+    expect(rendered.find(child->store.session_path().string()) == std::string::npos, "path-free frame omits session path text");
+    expect(!(*corrupted)->unavailable || !(*corrupted)->messages.empty() || (*corrupted)->refresh_unavailable,
+           "refresh failure is flagged without leaking load diagnostics");
+  }
+
+  // Over-cap: append enough valid entries to exceed the inspector max_entries.
+  auto over_child = make_child_fixture("child_over_cap", "cap-seed");
+  expect(static_cast<bool>(over_child), "over-cap fixture builds child");
+  if (!over_child)
+    return;
+  auto over_worker = std::make_shared<BlockingWorker>();
+  auto over_started = coordinator->start_background("parent_over_cap", {.child_session_id = over_child->store.session_id()},
+                                                    [over_worker](auto const& context) { return over_worker->run(context, "x"); }, over_child->source);
+  expect(over_started && over_worker->wait_started(), "over-cap fixture starts");
+  if (!over_started)
+    return;
+  auto over_first = coordinator->inspect("parent_over_cap", over_started->job.identity.job_id);
+  expect(over_first && (*over_first)->generation == 1, "over-cap fixture has an initial frame");
+  for (std::size_t index = 0; index < ava::agent::kSubagentInspectorMaxEntries + 2; ++index)
+  {
+    auto entry = ava::session::SessionEntry{.id = "u_over_" + std::to_string(index),
+                                            .parent_id = "",
+                                            .type = ava::session::EntryType::UserMessage,
+                                            .timestamp = ava::session::now_timestamp(),
+                                            .data_json = "{\"text\":\"x\"}"};
+    expect(over_child->store.append(over_child->lease, entry).has_value(), "over-cap fixture appends");
+  }
+  auto over = coordinator->inspect("parent_over_cap", over_started->job.identity.job_id, (*over_first)->generation);
+  expect(over && (*over)->refresh_unavailable && (*over)->messages.size() == 1,
+         "over-cap live inspect is path-free refresh_unavailable with prior messages");
+  if (over)
+  {
+    expect(!(*over)->not_modified, "over-cap does not claim not_modified");
+    // Ensure no raw session error strings leaked into message text.
+    for (auto const& message : (*over)->messages)
+    {
+      expect(message.text.find("exceeds bounded read limit") == std::string::npos, "path-free frame omits raw load error text");
+      expect(message.text.find(over_child->store.session_path().string()) == std::string::npos, "path-free frame omits path context");
+    }
+  }
+
+  worker->finish();
+  over_worker->finish();
+  static_cast<void>(coordinator->wait("parent_path_free", started->job.identity.job_id, std::chrono::seconds(2)));
+  static_cast<void>(coordinator->wait("parent_over_cap", over_started->job.identity.job_id, std::chrono::seconds(2)));
 }
 
 void test_live_inspection_eviction_and_freeze_failure()
@@ -1003,9 +1208,8 @@ void test_live_inspection_eviction_and_freeze_failure()
   auto gone = coordinator->inspect("parent_evict", id1);
   expect(!gone, "evicted job is no longer owner-visible to inspect");
 
-  // Freeze failure: corrupt the leased inode so the best-effort terminal project
-  // fails. freeze_pending must clear without storing a frame or reacquiring paths.
-  auto fail_child = make_child_fixture("child_freeze_fail");
+  // Freeze failure with a prior live frame: retain messages and mark refresh_unavailable.
+  auto fail_child = make_child_fixture("child_freeze_fail", "keep-me");
   expect(static_cast<bool>(fail_child), "freeze-failure fixture builds child");
   if (!fail_child)
     return;
@@ -1019,6 +1223,8 @@ void test_live_inspection_eviction_and_freeze_failure()
   expect(fail_started && fail_worker->wait_started(), "freeze-failure fixture starts");
   if (!fail_started)
     return;
+  auto prior = failure_coordinator->inspect("parent_fail", fail_started->job.identity.job_id);
+  expect(prior && (*prior)->generation == 1 && (*prior)->messages.front().text == "keep-me", "freeze-failure fixture caches a live frame");
   {
     std::ofstream corrupt(fail_child->store.session_path(), std::ios::app | std::ios::binary);
     corrupt << "{this is not a session record}\n";
@@ -1027,8 +1233,37 @@ void test_live_inspection_eviction_and_freeze_failure()
   auto fail_terminal = failure_coordinator->wait("parent_fail", fail_started->job.identity.job_id, std::chrono::seconds(2));
   expect(fail_terminal && !fail_terminal->timed_out, "freeze-failure fixture reaches terminal");
   auto fail_frame = failure_coordinator->inspect("parent_fail", fail_started->job.identity.job_id);
-  expect(fail_frame && (*fail_frame)->terminal && (*fail_frame)->unavailable && !(*fail_frame)->freeze_pending,
-         "failed terminal freeze clears pending, drops the source, and surfaces stable unavailable");
+  expect(fail_frame && (*fail_frame)->terminal && !(*fail_frame)->freeze_pending && (*fail_frame)->refresh_unavailable &&
+             !(*fail_frame)->unavailable && (*fail_frame)->generation > (*prior)->generation && (*fail_frame)->messages.size() == 1 &&
+             (*fail_frame)->messages.front().text == "keep-me",
+         "failed terminal freeze retains the last live frame and marks refresh_unavailable");
+
+  // Freeze failure with no prior frame: stable unavailable.
+  auto bare_child = make_child_fixture("child_freeze_bare", "ignored");
+  expect(static_cast<bool>(bare_child), "bare freeze-failure fixture builds child");
+  if (!bare_child)
+    return;
+  auto bare_coordinator = coordinator_with();
+  if (!bare_coordinator)
+    return;
+  {
+    std::ofstream corrupt(bare_child->store.session_path(), std::ios::app | std::ios::binary);
+    corrupt << "{this is not a session record}\n";
+  }
+  auto bare_started = bare_coordinator->start_background(
+      "parent_bare", {.child_session_id = bare_child->store.session_id()},
+      [](auto const&) {
+        return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "x", .stop_reason = "completed"};
+      },
+      bare_child->source);
+  expect(bare_started.has_value(), "bare freeze-failure starts");
+  if (!bare_started)
+    return;
+  auto bare_wait = bare_coordinator->wait("parent_bare", bare_started->job.identity.job_id, std::chrono::seconds(2));
+  expect(bare_wait && !bare_wait->timed_out, "bare freeze-failure reaches terminal");
+  auto bare_frame = bare_coordinator->inspect("parent_bare", bare_started->job.identity.job_id);
+  expect(bare_frame && (*bare_frame)->terminal && (*bare_frame)->unavailable && !(*bare_frame)->freeze_pending,
+         "failed terminal freeze with no prior frame surfaces stable unavailable");
 }
 
 void test_safe_bounds_attempt_validation_and_shutdown()
@@ -1085,6 +1320,9 @@ void run_subagent_coordinator_tests()
   test_all_start_error_families_are_proven_unpublished();
   test_live_inspection_missing_mismatch_owner_and_prepublication();
   test_live_inspection_generation_freeze_and_lifecycle();
+  test_live_inspection_deterministic_stale_inflight_race();
+  test_live_inspection_two_client_lost_response_and_sink();
+  test_live_inspection_path_free_refresh_failures();
   test_live_inspection_eviction_and_freeze_failure();
   test_safe_bounds_attempt_validation_and_shutdown();
 }

@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/transcript.h"
 
 #include <utility>
@@ -76,8 +76,7 @@ ava::core::Result<std::vector<ava::session::SessionEntry>> SubagentLiveInspectio
   return impl_->authority.load_bounded(subagent_inspector_read_limits());
 }
 
-ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentLiveInspectionSource::project(std::uint64_t generation, bool terminal,
-                                                                                                      bool freeze_pending) const
+ava::core::Result<std::vector<SubagentLiveMessage>> SubagentLiveInspectionSource::project_messages() const
 {
   auto entries = load_strict_capped();
   if (!entries)
@@ -89,22 +88,16 @@ ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentLiveIns
   if (!transcript)
     return std::unexpected(std::move(transcript.error()));
 
-  auto frame = std::make_shared<SubagentInspectorFrame>();
-  frame->generation = generation;
-  frame->terminal = terminal;
-  frame->freeze_pending = freeze_pending;
-  frame->unavailable = false;
-  frame->not_modified = false;
-  frame->truncated = false;
-  frame->messages.reserve(transcript->size());
+  std::vector<SubagentLiveMessage> messages;
+  messages.reserve(transcript->size());
   for (auto const& item : *transcript)
   {
-    frame->messages.push_back(SubagentLiveMessage{
+    messages.push_back(SubagentLiveMessage{
         .role = item.role == ava::session::TranscriptRole::User ? SubagentLiveMessageRole::User : SubagentLiveMessageRole::Assistant,
         .text = item.text,
     });
   }
-  return std::shared_ptr<SubagentInspectorFrame const>(std::move(frame));
+  return messages;
 }
 
 std::shared_ptr<SubagentInspectorFrame const> make_unavailable_inspection_frame(std::uint64_t generation, bool terminal, bool freeze_pending)
@@ -124,6 +117,19 @@ std::shared_ptr<SubagentInspectorFrame const> make_not_modified_inspection_frame
   frame->terminal = terminal;
   frame->freeze_pending = freeze_pending;
   frame->not_modified = true;
+  return std::shared_ptr<SubagentInspectorFrame const>(std::move(frame));
+}
+
+std::shared_ptr<SubagentInspectorFrame const> make_refresh_unavailable_inspection_frame(std::uint64_t generation, bool terminal, bool freeze_pending,
+                                                                                        std::vector<SubagentLiveMessage> messages)
+{
+  auto frame = std::make_shared<SubagentInspectorFrame>();
+  frame->generation = generation;
+  frame->terminal = terminal;
+  frame->freeze_pending = freeze_pending;
+  frame->refresh_unavailable = true;
+  frame->unavailable = messages.empty();
+  frame->messages = std::move(messages);
   return std::shared_ptr<SubagentInspectorFrame const>(std::move(frame));
 }
 

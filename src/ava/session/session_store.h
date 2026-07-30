@@ -338,8 +338,8 @@ class SessionReadAuthority
   [[nodiscard]] bool is_ephemeral() const noexcept;
   [[nodiscard]] bool active() const noexcept;
   // Persistent fingerprints are fstat(2) of the owned lease descriptor only.
-  // Ephemeral fingerprints summarize the shared in-memory tip under the store
-  // entries lock. Neither path reopens by pathname.
+  // Ephemeral fingerprints are an append-only in-memory tip summary under the
+  // store entries lock (not durable identity). Neither path reopens by pathname.
   [[nodiscard]] ava::core::Result<SessionContentFingerprint> content_fingerprint() const;
   [[nodiscard]] SessionReadLimits read_limits() const noexcept;
 

@@ -43,6 +43,7 @@ add_library(ava_tui
   "theme.cpp"
   "text.cpp"
   "text_wrap.cpp"
+  "tool_card_task_job.cpp"
   "tool_cards.cpp"
 )
 

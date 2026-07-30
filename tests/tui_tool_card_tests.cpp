@@ -1656,6 +1656,349 @@ void test_tui_diff_intraline_emphasis()
            "tui NO_COLOR/plain fallback strips intra-line emphasis and retains readable diff text");
   }
 }
+
+void test_tui_task_job_tool_card_presentation()
+{
+  using tui_test_support::join_visible_lines;
+  using tui_test_support::plain_lines;
+
+  // Realistic frozen task payload containing every production field plus model-facing XML.
+  constexpr std::string_view kTaskId = "task_7f3a91c2e8b04d15";
+  constexpr std::string_view kJobId = "job_c0ffee1234abcd56";
+  constexpr std::string_view kSessionPath = "/home/user/.local/share/ava/sessions/child_explore_auth.jsonl";
+  constexpr std::string_view kPrompt = "Inspect authentication entry points and report handler names only.";
+  constexpr std::string_view kDescription = "scan auth handlers";
+  constexpr std::string_view kTaskResult = "Found 3 auth handlers in src/auth.";
+  auto const xml_content = std::string("<task id=\"") + std::string(kTaskId) + "\" job_id=\"" + std::string(kJobId) +
+                           "\" state=\"completed\"><summary>Subagent task completed: " + std::string(kDescription) +
+                           "</summary><task_result>" + std::string(kTaskResult) + "</task_result></task>";
+  auto const j = [](std::string_view value) { return ava::core::json::escape(value); };
+
+  auto const task_arguments = std::string("{\"description\":\"") + j(kDescription) + "\",\"prompt\":\"" + j(kPrompt) +
+                              "\",\"subagent_type\":\"explore\",\"mode\":\"foreground\",\"task_id\":\"" + j(kTaskId) + "\"}";
+  auto const task_result_json =
+      std::string("{\"tool\":\"task\",\"ok\":true,\"task_id\":\"") + j(kTaskId) + "\",\"subagent_type\":\"explore\",\"description\":\"" +
+      j(kDescription) + "\",\"session_path\":\"" + j(kSessionPath) + "\",\"state\":\"completed\",\"job_id\":\"" + j(kJobId) +
+      "\",\"stop_reason\":\"completed\",\"provider_iterations\":2,\"tool_calls\":4,\"tool_iterations\":4,\"task_result\":\"" + j(kTaskResult) +
+      "\",\"content\":\"" + j(xml_content) + "\",\"duration_ms\":2400}";
+
+  auto completed_task = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                   .name = "task",
+                                                   .argument_summary = "arguments provided",
+                                                   .result_summary = "ok",
+                                                   .arguments_json = task_arguments,
+                                                   .result_json = task_result_json,
+                                                   .call_id = "call_task_completed",
+                                                   .lifecycle = ava::tui::ToolLifecycleState::Complete};
+
+  auto running_fg = completed_task;
+  running_fg.status = ava::tui::ToolTimelineStatus::Running;
+  running_fg.lifecycle = ava::tui::ToolLifecycleState::Progress;
+  running_fg.result_summary.clear();
+  running_fg.result_json.clear();
+
+  auto background_started = completed_task;
+  background_started.arguments_json = std::string("{\"description\":\"") + j(kDescription) + "\",\"prompt\":\"" + j(kPrompt) +
+                                      "\",\"subagent_type\":\"explore\",\"mode\":\"background\"}";
+  auto const bg_xml = std::string("<task id=\"") + std::string(kTaskId) + "\" job_id=\"" + std::string(kJobId) +
+                      "\" state=\"running\"><summary>Background subagent task started: " + std::string(kDescription) +
+                      "</summary><task_result></task_result></task>";
+  background_started.result_json =
+      std::string("{\"tool\":\"task\",\"ok\":true,\"task_id\":\"") + j(kTaskId) + "\",\"subagent_type\":\"explore\",\"description\":\"" +
+      j(kDescription) + "\",\"session_path\":\"" + j(kSessionPath) + "\",\"state\":\"running\",\"job_id\":\"" + j(kJobId) +
+      "\",\"stop_reason\":\"\",\"provider_iterations\":0,\"tool_calls\":0,\"tool_iterations\":0,\"task_result\":\"\",\"content\":\"" + j(bg_xml) +
+      "\"}";
+
+  auto canceled_task = completed_task;
+  canceled_task.status = ava::tui::ToolTimelineStatus::Canceled;
+  canceled_task.lifecycle = ava::tui::ToolLifecycleState::Canceled;
+  canceled_task.result_json = std::string("{\"tool\":\"task\",\"ok\":false,\"task_id\":\"") + j(kTaskId) +
+                              "\",\"subagent_type\":\"explore\",\"description\":\"" + j(kDescription) + "\",\"session_path\":\"" + j(kSessionPath) +
+                              "\",\"state\":\"canceled\"}";
+
+  auto error_task = completed_task;
+  error_task.status = ava::tui::ToolTimelineStatus::Error;
+  error_task.lifecycle = ava::tui::ToolLifecycleState::Error;
+  error_task.result_summary = "task failed";
+  error_task.result_json = std::string("{\"tool\":\"task\",\"ok\":false,\"error\":{\"message\":\"boom\",\"task_id\":\"") + j(kTaskId) +
+                           "\"},\"description\":\"" + j(kDescription) + "\",\"subagent_type\":\"explore\"}";
+
+  auto malformed_task = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                   .name = "task",
+                                                   .argument_summary = "arguments provided",
+                                                   .result_summary = xml_content,
+                                                   .arguments_json = "{not-json",
+                                                   .result_json = "<task id=\"raw\">not json</task>",
+                                                   .call_id = "call_task_malformed",
+                                                   .lifecycle = ava::tui::ToolLifecycleState::Complete};
+
+  auto unicode_task = completed_task;
+  unicode_task.arguments_json =
+      "{\"description\":\"caf\\u00e9 \\ud83c\\udf0d auth\\u0007\",\"prompt\":\"secret prompt path=/tmp/x\",\"subagent_type\":\"explore\"}";
+  unicode_task.result_json =
+      std::string("{\"tool\":\"task\",\"ok\":true,\"task_id\":\"") + j(kTaskId) +
+      "\",\"subagent_type\":\"explore\",\"description\":\"caf\\u00e9 \\ud83c\\udf0d auth\\u0007\",\"session_path\":\"" + j(kSessionPath) +
+      "\",\"state\":\"completed\",\"tool_calls\":1,\"task_result\":\"ok \\u0001<xml>tag</xml> plain \\u4e2d\\u6587\",\"content\":\"" + j(xml_content) +
+      "\",\"duration_ms\":500}";
+
+  auto long_result_task = completed_task;
+  {
+    std::string long_body(6000, 'R');
+    long_result_task.result_json = std::string("{\"tool\":\"task\",\"ok\":true,\"task_id\":\"") + j(kTaskId) +
+                                   "\",\"subagent_type\":\"explore\",\"description\":\"" + j(kDescription) + "\",\"session_path\":\"" +
+                                   j(kSessionPath) + "\",\"state\":\"completed\",\"tool_calls\":2,\"task_result\":\"" + j(long_body) +
+                                   "\",\"content\":\"" + j(xml_content) + "\",\"duration_ms\":900}";
+  }
+
+  auto duplicate_description_task = completed_task;
+  // description already appears in args; result summary echoes it — card must not double it via raw summaries.
+  duplicate_description_task.argument_summary = std::string("description=") + std::string(kDescription);
+  duplicate_description_task.result_summary = std::string("Subagent task completed: ") + std::string(kDescription);
+
+  auto job_status_running = ava::tui::ToolTimelineItem{
+      .status = ava::tui::ToolTimelineStatus::Success,
+      .name = "job",
+      .argument_summary = "arguments provided",
+      .result_summary = "ok",
+      .arguments_json = std::string("{\"action\":\"status\",\"job_id\":\"") + j(kJobId) + "\"}",
+      .result_json =
+          std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
+          "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
+          "\"mode\":\"background\",\"state\":\"running\",\"delivery_state\":\"none\",\"was_promoted\":false,"
+          "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t1\","
+          "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
+          "\"provider_iterations\":1,\"tool_calls\":2,\"tool_iterations\":2}",
+      .call_id = "call_job_status",
+      .lifecycle = ava::tui::ToolLifecycleState::Complete};
+
+  auto job_result_completed = job_status_running;
+  job_result_completed.arguments_json = std::string("{\"action\":\"result\",\"job_id\":\"") + j(kJobId) + "\"}";
+  job_result_completed.result_json =
+      std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
+      "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
+      "\"mode\":\"background\",\"state\":\"completed\",\"delivery_state\":\"pending\",\"was_promoted\":true,"
+      "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t2\","
+      "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
+      "\"provider_iterations\":3,\"tool_calls\":5,\"tool_iterations\":5,"
+      "\"result\":{\"status\":\"completed\",\"summary\":\"auth scan finished\"}}";
+
+  auto job_list = job_status_running;
+  job_list.arguments_json = "{\"action\":\"list\"}";
+  job_list.result_json = std::string("{\"schema_version\":1,\"jobs\":[{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" +
+                         j(kTaskId) + "\",\"mode\":\"background\",\"state\":\"running\",\"was_promoted\":false,\"tool_calls\":1}],"
+                                      "\"total_jobs\":1,\"truncated\":false}";
+
+  auto job_failed = job_status_running;
+  job_failed.status = ava::tui::ToolTimelineStatus::Error;
+  job_failed.lifecycle = ava::tui::ToolLifecycleState::Error;
+  job_failed.arguments_json = std::string("{\"action\":\"result\",\"job_id\":\"") + j(kJobId) + "\"}";
+  job_failed.result_json = "{\"tool\":\"job\",\"ok\":false,\"error\":{\"category\":\"tool\",\"code\":\"job_error\",\"message\":\"missing\"}}";
+
+  auto job_malformed = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                  .name = "job",
+                                                  .argument_summary = "arguments provided",
+                                                  .result_summary = std::string(kJobId),
+                                                  .arguments_json = "not-json",
+                                                  .result_json = "{bad",
+                                                  .call_id = "call_job_bad",
+                                                  .lifecycle = ava::tui::ToolLifecycleState::Complete};
+
+  auto const forbidden = std::vector<std::string_view>{kTaskId,
+                                                       kJobId,
+                                                       kSessionPath,
+                                                       kPrompt,
+                                                       "session_path",
+                                                       "task_id",
+                                                       "job_id",
+                                                       "schema_version",
+                                                       "parent_session_id",
+                                                       "child_session_id",
+                                                       "delivery_id",
+                                                       "<task",
+                                                       "</task>",
+                                                       "<summary>",
+                                                       "<task_result>",
+                                                       "arguments provided",
+                                                       "call_task_completed",
+                                                       "call_job_status",
+                                                       "/home/user",
+                                                       "secret prompt"};
+
+  auto assert_no_forbidden = [&](std::string const& text, std::string_view label) {
+    for (auto const needle : forbidden)
+    {
+      expect(text.find(needle) == std::string::npos,
+             std::string("tui task/job ") + std::string(label) + " must not contain forbidden token: " + std::string(needle));
+    }
+  };
+
+  auto render_all = [](ava::tui::ToolTimelineItem const& item, ava::tui::ToolPresentation presentation) {
+    std::vector<std::string> combined;
+    for (auto const width : {std::size_t{32}, std::size_t{40}, std::size_t{80}, std::size_t{120}})
+    {
+      auto lines = ava::tui::detail::render_tool_card(item, width, presentation);
+      expect(std::ranges::all_of(lines, [&](std::string const& line) { return visible_columns(line) <= width; }),
+             "tui task/job cards stay within requested width");
+      combined.insert(combined.end(), lines.begin(), lines.end());
+    }
+    return combined;
+  };
+
+  auto check_item = [&](ava::tui::ToolTimelineItem const& item, std::string_view label, auto const& header_check) {
+    for (auto const presentation : {ava::tui::ToolPresentation::Compact, ava::tui::ToolPresentation::Rich, ava::tui::ToolPresentation::Expanded})
+    {
+      auto const lines = render_all(item, presentation);
+      auto const visible = join_visible_lines(lines);
+      auto const plain = tui_test_support::join_plain_lines(plain_lines(lines));
+      assert_no_forbidden(visible, std::string(label) + " render");
+      assert_no_forbidden(plain, std::string(label) + " plain render");
+      if (presentation == ava::tui::ToolPresentation::Compact)
+      {
+        // Compact remains one logical card line per width (4 widths exercised).
+        expect(lines.size() == 4, std::string("tui task/job compact cards stay one line per width for ") + std::string(label));
+      }
+      if (presentation == ava::tui::ToolPresentation::Rich && item.name == "task")
+      {
+        // Rich task cards must not grow call/output/result bodies.
+        expect(lines.size() == 4, std::string("tui rich task cards stay single-line for ") + std::string(label));
+        expect(plain.find("result:") == std::string::npos,
+               std::string("tui rich task cards omit task_result body for ") + std::string(label));
+      }
+      header_check(plain, presentation);
+    }
+    auto const copy = ava::tui::detail::tool_card_copy_text(item);
+    assert_no_forbidden(copy, std::string(label) + " copy");
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, std::string(kPrompt)),
+           std::string("tui task/job search must not match prompt for ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, std::string(kTaskId)),
+           std::string("tui task/job search must not match task_id for ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, std::string(kJobId)),
+           std::string("tui task/job search must not match job_id for ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, std::string(kSessionPath)),
+           std::string("tui task/job search must not match session_path for ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, "<task"),
+           std::string("tui task/job search must not match XML for ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, "schema_version"),
+           std::string("tui task/job search must not match schema keys for ") + std::string(label));
+  };
+
+  check_item(running_fg, "running foreground task", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("Explore") != std::string::npos && plain.find(std::string(kDescription)) != std::string::npos &&
+               plain.find("running") != std::string::npos && plain.find("~") != std::string::npos,
+           "tui running foreground task cards show human type, description, and running");
+    expect(plain.find("running in background") == std::string::npos, "tui foreground running task is not labeled background");
+  });
+
+  check_item(background_started, "background started task", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("Explore") != std::string::npos && plain.find(std::string(kDescription)) != std::string::npos &&
+               plain.find("running in background") != std::string::npos && plain.find("+") != std::string::npos,
+           "tui background task start cards show human type, description, and background running");
+  });
+
+  check_item(completed_task, "completed task", [&](std::string const& plain, ava::tui::ToolPresentation presentation) {
+    expect(plain.find("Explore") != std::string::npos && plain.find(std::string(kDescription)) != std::string::npos &&
+               plain.find("4 tools") != std::string::npos && plain.find("2.4s") != std::string::npos,
+           "tui completed task cards show type, description, tool count, and duration");
+    for (auto const& line : plain_lines(ava::tui::detail::render_tool_card(completed_task, 120, presentation)))
+    {
+      auto const pos = line.find(std::string(kDescription));
+      if (pos == std::string::npos)
+        continue;
+      expect(line.find(std::string(kDescription), pos + 1) == std::string::npos, "tui completed task card lines do not duplicate description");
+    }
+    if (presentation == ava::tui::ToolPresentation::Expanded)
+    {
+      expect(plain.find(std::string(kTaskResult)) != std::string::npos, "tui expanded completed task may show plain task_result");
+    }
+    else if (presentation == ava::tui::ToolPresentation::Rich)
+    {
+      expect(plain.find(std::string(kTaskResult)) == std::string::npos, "tui rich completed task omits task_result body");
+    }
+  });
+
+  check_item(canceled_task, "canceled task", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("Explore") != std::string::npos && plain.find("canceled") != std::string::npos && plain.find("-") != std::string::npos,
+           "tui canceled task cards retain truthful canceled status with human type");
+  });
+
+  check_item(error_task, "failed task", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("Explore") != std::string::npos && plain.find("failed") != std::string::npos && plain.find("x") != std::string::npos,
+           "tui failed task cards retain truthful failed status with human type");
+  });
+
+  check_item(malformed_task, "malformed task", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("task") != std::string::npos, "tui malformed task falls back to safe generic task card");
+    expect(plain.find("arguments provided") == std::string::npos && plain.find("{not-json") == std::string::npos,
+           "tui malformed task never falls back to raw JSON or generic argument placeholders");
+  });
+
+  check_item(unicode_task, "unicode task", [&](std::string const& plain, ava::tui::ToolPresentation presentation) {
+    expect(plain.find("Explore") != std::string::npos, "tui unicode task keeps humanized type");
+    expect(plain.find('\x07') == std::string::npos && plain.find('\x01') == std::string::npos, "tui unicode/control task cards strip control bytes");
+    if (presentation == ava::tui::ToolPresentation::Expanded)
+    {
+      expect(plain.find("<xml>") == std::string::npos && plain.find("plain") != std::string::npos,
+             "tui expanded unicode task_result is sanitized plain text without markup");
+    }
+  });
+
+  check_item(long_result_task, "long result task", [&](std::string const& plain, ava::tui::ToolPresentation presentation) {
+    if (presentation == ava::tui::ToolPresentation::Expanded)
+    {
+      expect(plain.find(std::string(5000, 'R')) == std::string::npos, "tui expanded task_result is bounded for long bodies");
+      expect(plain.find("result:") != std::string::npos, "tui expanded long task still exposes a bounded result body");
+    }
+  });
+
+  check_item(duplicate_description_task, "duplicate description task", [&](std::string const& plain, ava::tui::ToolPresentation presentation) {
+    (void)plain;
+    for (auto const& line : plain_lines(ava::tui::detail::render_tool_card(duplicate_description_task, 120, presentation)))
+    {
+      auto const pos = line.find(std::string(kDescription));
+      if (pos == std::string::npos)
+        continue;
+      expect(line.find(std::string(kDescription), pos + 1) == std::string::npos,
+             "tui task cards do not duplicate description on one line when summaries echo it");
+    }
+  });
+
+  check_item(job_status_running, "job status running", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("job") != std::string::npos && plain.find("status") != std::string::npos && plain.find("running") != std::string::npos,
+           "tui job status cards show human action and state");
+  });
+
+  check_item(job_result_completed, "job result completed", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("job") != std::string::npos && plain.find("result") != std::string::npos && plain.find("completed") != std::string::npos &&
+               plain.find("promoted") != std::string::npos && plain.find("auth scan finished") != std::string::npos,
+           "tui job result cards show action, state, promotion, and stable summary");
+  });
+
+  check_item(job_list, "job list", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("job") != std::string::npos && plain.find("list") != std::string::npos,
+           "tui job list cards show human list action without raw public JSON");
+  });
+
+  check_item(job_failed, "job failed", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("job") != std::string::npos && plain.find("failed") != std::string::npos, "tui failed job cards retain truthful failed status");
+  });
+
+  check_item(job_malformed, "job malformed", [&](std::string const& plain, ava::tui::ToolPresentation) {
+    expect(plain.find("job") != std::string::npos, "tui malformed job falls back to safe generic job card");
+    expect(plain.find("not-json") == std::string::npos, "tui malformed job never falls back to raw JSON");
+  });
+
+  // Expanded copy still excludes IDs/XML/path/prompt while allowing plain task_result.
+  auto expanded_copy_item = completed_task;
+  expanded_copy_item.details_visible = true;
+  auto const expanded_copy = ava::tui::detail::tool_card_copy_text(expanded_copy_item);
+  assert_no_forbidden(expanded_copy, "expanded copy");
+  expect(expanded_copy.find(std::string(kTaskResult)) != std::string::npos && expanded_copy.find(std::string(kDescription)) != std::string::npos,
+         "tui task copy includes allowlisted description and plain task_result only");
+  expect(ava::tui::detail::tool_card_matches_copy_query(completed_task, std::string(kDescription)) &&
+             ava::tui::detail::tool_card_matches_copy_query(completed_task, "Explore") &&
+             ava::tui::detail::tool_card_matches_copy_query(job_result_completed, "auth scan finished"),
+         "tui task/job search matches allowlisted presentation fields");
+}
 }  // namespace
 
 void test_tui_todowrite_tool_card_checklist()
@@ -1708,5 +2051,6 @@ void run_tui_tool_card_detail_tests()
   test_tui_large_tool_output_preview_is_bounded();
   test_tui_f5_progressive_tool_details();
   test_tui_diff_intraline_emphasis();
+  test_tui_task_job_tool_card_presentation();
   test_tui_todowrite_tool_card_checklist();
 }

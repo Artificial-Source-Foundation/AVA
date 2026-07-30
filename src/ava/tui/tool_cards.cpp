@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/tool_card_task_job.h"
 #include "ava/tui/tool_cards.h"
 #include "ava/core/json.h"
 
@@ -1143,6 +1144,9 @@ bool tool_card_matches_copy_query(ToolTimelineItem const& item, std::string_view
 {
   if (query.empty())
     return true;
+  if (is_task_or_job_tool(item))
+    return task_job_card_matches_query(task_job_card_presentation(item), query);
+
   auto const needle = lower_ascii(query);
   auto const matches = [&needle](std::string_view value) { return !value.empty() && lower_ascii(value).find(needle) != std::string::npos; };
 
@@ -1201,6 +1205,12 @@ std::string tool_card_permission_copy_text(ToolTimelineItem const& item, std::st
 
 std::string tool_card_copy_text(ToolTimelineItem const& item)
 {
+  if (is_task_or_job_tool(item))
+  {
+    auto const presentation = task_job_card_presentation(item);
+    return task_job_card_copy_text(item, presentation);
+  }
+
   std::string output;
   append_copy_block(output, "tool", item.name.empty() ? std::string("unknown") : item.name);
   append_copy_block(output, "status", ava::tui::to_string(item.status));
@@ -1521,15 +1531,21 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   std::vector<std::string> lines;
   auto const presentation = tool_card_presentation(item, inherited);
   auto const marker = status_marker(item.status);
-  auto name_raw = sanitize_terminal_text(item.name.empty() ? "unknown" : item.name);
+  auto const task_job = task_job_card_presentation(item);
+  auto const is_task_job = task_job.kind != TaskJobToolKind::None;
+  auto name_raw = sanitize_terminal_text(is_task_job ? task_job.display_name : (item.name.empty() ? "unknown" : item.name));
   auto const is_shell = shell_tool(item);
   auto const command = command_text(item);
   auto const shell_status = is_shell ? exit_status_text(item) : std::optional<std::string>{};
   auto const duration = duration_text(item);
   auto const truncation = truncation_summary(item);
-  auto primary = tool_primary_summary(item, suppress_result_summary, is_shell, command, shell_status, duration, truncation);
-  if (auto denied = denied_reason(item); !denied.empty())
-    primary = std::move(denied);
+  auto primary = is_task_job ? task_job.primary
+                             : tool_primary_summary(item, suppress_result_summary, is_shell, command, shell_status, duration, truncation);
+  if (!is_task_job)
+  {
+    if (auto denied = denied_reason(item); !denied.empty())
+      primary = std::move(denied);
+  }
 
   auto const prefix_text = wide_blocks(width) ? std::string("  │ ") : std::string("  ");
   auto const complete_primary_raw = sanitize_terminal_text(primary);
@@ -1556,7 +1572,13 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
 
   if (presentation != ToolPresentation::Compact)
   {
-    if (name_is(item, {"todowrite"}) && item.status == ToolTimelineStatus::Success)
+    if (is_task_job)
+    {
+      // Task/job Rich cards stay single-line. Expanded may show bounded plain task_result only.
+      if (presentation == ToolPresentation::Expanded && !task_job.expanded_detail.empty() && !suppress_result_summary)
+        append_tool_detail_lines(lines, "result", task_job.expanded_detail, width);
+    }
+    else if (name_is(item, {"todowrite"}) && item.status == ToolTimelineStatus::Success)
     {
       append_todowrite_checklist(lines, item, width, presentation);
     }
@@ -1616,7 +1638,7 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
         if (!item.diff.empty())
           append_diff_lines(lines, item, width, kRichFilePreviewLines);
       }
-    }  // non-todowrite detail body
+    }  // non-task/job, non-todowrite detail body
   }
 
   for (auto& line : lines)

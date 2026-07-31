@@ -1,5 +1,7 @@
 # AVA Contributing
 
+For the complete CMake option reference, see [build-configuration.md](build-configuration.md). Documentation changes follow [documentation.md](documentation.md), including the offline source-link gate.
+
 For the community entry point and project policies, see the root [`CONTRIBUTING.md`](../CONTRIBUTING.md). Please read the [`Code of Conduct`](../CODE_OF_CONDUCT.md), [`Governance`](../GOVERNANCE.md), [`Security`](../SECURITY.md), and [`Support`](../SUPPORT.md) guidance before participating. Use private security reporting for suspected vulnerabilities; do not open public issues with exploit details or secrets.
 
 ## Prerequisites
@@ -131,6 +133,12 @@ Run clang-tidy against files you changed after configuring the build:
 
 ```sh
 clang-tidy <changed-cpp-files> -p build
+```
+
+For Markdown changes, also run the repository-owned relative-target check:
+
+```sh
+python3 scripts/verify-markdown-links.py . --source-tree
 ```
 
 Always finish with:

@@ -26,6 +26,10 @@ share/doc/ava/PROVENANCE.json
 share/doc/ava/docs/USAGE.md
 share/doc/ava/docs/CONFIG.md
 share/doc/ava/docs/TESTING.md
+share/doc/ava/docs/environment-variables.md
+share/doc/ava/docs/lsp.md
+share/doc/ava/docs/tools.md
+share/doc/ava/docs/troubleshooting.md
 share/doc/ava/docs/diagnostics.md
 share/doc/ava/docs/headless-protocol.md
 share/doc/ava/docs/rpc-protocol.md
@@ -35,6 +39,7 @@ share/doc/ava/docs/session-format.md
 share/doc/ava/docs/plugin-system.md
 share/doc/ava/docs/plugin-compatibility-policy.md
 share/doc/ava/docs/release-checklist.md
+share/doc/ava/docs/security/containment.md
 share/doc/ava/docs/engineering/session-versioning.md
 share/doc/ava/docs/engineering/side-effect-safety-checklist.md
 share/doc/ava/docs/interop/evidence/README.md

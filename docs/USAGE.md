@@ -1,5 +1,7 @@
 # AVA Usage
 
+This is the current interface guide. Use [tools.md](tools.md) for the complete built-in model-tool catalog (distinct from slash commands), [environment-variables.md](environment-variables.md) for process inputs, and [troubleshooting.md](troubleshooting.md) when a workflow fails.
+
 ## Starting AVA
 
 ```sh

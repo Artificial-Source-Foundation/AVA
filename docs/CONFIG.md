@@ -1,6 +1,6 @@
 # AVA Configuration
 
-AVA uses XDG paths on Linux.
+AVA uses XDG paths on Linux. Process environment inputs and script-only controls are cataloged in [environment-variables.md](environment-variables.md); optional language-server configuration has a focused reference in [lsp.md](lsp.md). For model-visible operations versus permission authority, see [tools.md](tools.md).
 
 | Kind | Path |
 | --- | --- |

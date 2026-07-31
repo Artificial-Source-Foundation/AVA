@@ -1,5 +1,7 @@
 # AVA Testing
 
+Supported runtime, smoke, dogfood, and provider-matrix environment controls are cataloged in [environment-variables.md](environment-variables.md). For failure diagnosis before collecting evidence, use [troubleshooting.md](troubleshooting.md).
+
 ## Normal Test Run
 
 ```sh
@@ -75,7 +77,7 @@ Recommended coverage:
 - `./build/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
 - `./build/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
 
-`lsp_diagnostics` is capability-gated in normal headless runtime. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of unsupported built-in server ids, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an explicitly opt-in offline real-server smoke. By default it returns CTest skip code 77 even when `clangd` is installed. When opted in, it discovers an already-installed safe `clangd`, uses no credentials or network access, runs against a private finite fixture, proves initialization plus definition, and cleans up; it also skips when `clangd` is absent or unsafe. It never installs or downloads clangd.
+LSP model tools are capability-gated in normal headless runtime; see [lsp.md](lsp.md) for their current contract. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of unsupported built-in server ids, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an explicitly opt-in offline real-server smoke. By default it returns CTest skip code 77 even when `clangd` is installed. When opted in, it discovers an already-installed safe `clangd`, uses no credentials or network access, runs against a private finite fixture, proves initialization plus definition, and cleans up; it also skips when `clangd` is absent or unsafe. It never installs or downloads clangd.
 
 ```sh
 scripts/run-tests.sh --build-dir build -R '^ava_tests\.lsp$'
@@ -144,6 +146,14 @@ Run clang-tidy against changed implementation files after configuring the build:
 
 ```sh
 clang-tidy <changed-cpp-files> -p build
+```
+
+For Markdown changes, run the focused checker tests and first-party source-tree gate:
+
+```sh
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.markdown_(link_verifier|links_source)$' --output-on-failure
+python3 scripts/verify-markdown-links.py . --source-tree
 ```
 
 Before handing work off, check for whitespace and patch-format issues:

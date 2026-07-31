@@ -199,6 +199,10 @@ install(
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/USAGE.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIG.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/TESTING.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/environment-variables.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/lsp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/tools.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/troubleshooting.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/headless-protocol.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/rpc-protocol.md"
@@ -210,6 +214,11 @@ install(
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/release-checklist.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp-support.json"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs"
+  COMPONENT ava
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/security/containment.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/security"
   COMPONENT ava
 )
 install(

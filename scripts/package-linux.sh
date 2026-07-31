@@ -208,6 +208,10 @@ doc_sources=(
   docs/USAGE.md
   docs/CONFIG.md
   docs/TESTING.md
+  docs/environment-variables.md
+  docs/lsp.md
+  docs/tools.md
+  docs/troubleshooting.md
   docs/diagnostics.md
   docs/headless-protocol.md
   docs/rpc-protocol.md
@@ -217,6 +221,7 @@ doc_sources=(
   docs/plugin-system.md
   docs/plugin-compatibility-policy.md
   docs/release-checklist.md
+  docs/security/containment.md
   docs/engineering/session-versioning.md
   docs/engineering/side-effect-safety-checklist.md
   docs/interop/evidence/README.md

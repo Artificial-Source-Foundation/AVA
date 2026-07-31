@@ -4,6 +4,8 @@
 
 AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
 
+**Choose a path:** [use AVA](docs/USAGE.md), [configure AVA](docs/CONFIG.md), [understand model tools](docs/tools.md), [troubleshoot](docs/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the audience/task-oriented [documentation index](docs/README.md).
+
 ## Clone and Build
 
 Clone all submodules before configuring:
@@ -183,11 +185,22 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 
 ## Documentation
 
-- Start with [`docs/README.md`](docs/README.md) for the full docs map.
-- Community and project policies: [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Support](SUPPORT.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md).
-- Use [`docs/USAGE.md`](docs/USAGE.md) for TUI commands, headless modes, tool visibility, and current limits.
-- Use [`docs/CONFIG.md`](docs/CONFIG.md) for XDG paths, auth, models, prompts, subagents, project trust, and local resource layout.
-- Use [`docs/TESTING.md`](docs/TESTING.md) for CTest, opt-in live smokes, terminal smokes, and release evidence.
-- Use [`docs/rpc-protocol.md`](docs/rpc-protocol.md) for proprietary AVA RPC v1; use [`docs/acp.md`](docs/acp.md) and [`docs/interop/evidence/README.md`](docs/interop/evidence/README.md) for ACP client setup and evidence; [`docs/headless-protocol.md`](docs/headless-protocol.md) summarizes shared print/RPC headless behavior.
-- Use [`docs/release-checklist.md`](docs/release-checklist.md) for the implemented local Linux host artifact and release-gate scope.
-- Product and parity status lives under [`docs/product/`](docs/product/), [`docs/roadmap/`](docs/roadmap/), and [`docs/goals/`](docs/goals/); historical release ledgers live under [`docs/versions/`](docs/versions/).
+The [documentation index](docs/README.md) is organized by audience and task.
+
+### Users and operators
+
+- [Usage](docs/USAGE.md), [configuration](docs/CONFIG.md), [environment variables](docs/environment-variables.md), and [provider status](docs/providers.md)
+- [Built-in model tools](docs/tools.md), [LSP](docs/lsp.md), [terminal setup](docs/terminal-setup.md), and [troubleshooting](docs/troubleshooting.md)
+- [Diagnostics and support exports](docs/diagnostics.md), [security/sandboxing](docs/security-sandboxing.md), and [support](SUPPORT.md)
+
+### Automation and extension authors
+
+- [Proprietary AVA RPC v1](docs/rpc-protocol.md), [ACP](docs/acp.md), its [evidence policy](docs/interop/evidence/README.md), and [shared headless behavior](docs/headless-protocol.md)
+- [Plugins](docs/plugin-system.md), [MCP](docs/mcp.md), and [session format](docs/session-format.md)
+
+### Contributors and maintainers
+
+- [Contributing](CONTRIBUTING.md), [development guide](docs/CONTRIBUTING.md), [build configuration](docs/build-configuration.md), [testing](docs/TESTING.md), [architecture](docs/architecture.md), [codebase guide](docs/engineering/codebase-guide.md), and [documentation policy](docs/documentation.md)
+- [Release checklist](docs/release-checklist.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
+
+Product/parity status and future work live under [product](docs/product/), [roadmap](docs/roadmap/), and [goals](docs/goals/); historical release-position ledgers live under [versions](docs/versions/). Plans and runtime version numbers are not evidence that a tag, artifact, package, or external release has been published.

@@ -211,35 +211,30 @@ remain truthful.
 
 ## Link-validation workflow
 
-The repository does not currently declare a single normative Markdown link
-checker. Until one is selected, maintainers must perform these steps:
-
-1. Review every changed relative link from the directory containing the source
-   Markdown file; verify the destination exists with exact case.
-2. For changed same-page or cross-page fragments, render with GitHub-compatible
-   heading rules and click the fragment in a preview when possible.
-3. Search renamed/deleted documentation paths for inbound references.
-4. Review absolute external links manually when they are material to setup or a
-   compatibility claim; record the review date only for evidence that needs it.
-5. Run any documentation-link CTest present in the configured tree. If no such
-   test is listed, record that automated link validation was unavailable rather
-   than claiming it passed.
-6. Always run `git --no-pager diff --check`.
-
-Reserved workflow placeholders for future automation:
+AVA owns an offline relative-target checker. Run it from the repository root after documentation changes:
 
 ```sh
-# TODO(docs-tooling): configure a repository-owned Markdown relative-link and
-# fragment checker, then place its exact local command here.
-
-# TODO(ci-docs): add the same checker as a required credential-free CI/CTest
-# job and document its CTest name here.
-
-# TODO(external-links): decide whether scheduled external-link checking is
-# useful; keep it non-release-blocking unless ownership and retry policy exist.
+python3 scripts/verify-markdown-links.py . --source-tree
 ```
 
-A future checker must ignore build trees and local `docs/reference-code/`, avoid
-network access for the required local gate, understand GitHub heading fragments,
-and report source file/line plus destination. Tool adoption is incomplete until
-the command, version/pin, exclusions, and CI behavior are documented here.
+The configured-tree CTest coverage is:
+
+```sh
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.markdown_(link_verifier|links_source)$' --output-on-failure
+```
+
+The exact test names are `ava_tests.markdown_link_verifier` (focused checker behavior) and `ava_tests.markdown_links_source` (the first-party source-tree gate). Python 3 is optional at CMake configuration time; these tests are registered when its interpreter is found.
+
+In `--source-tree` mode the checker walks first-party Markdown while excluding Git metadata, build trees (`build`, `build-*`, and `cmake-build-*`), generated/cache/package directories, dependency trees (`cmake/aicxx`, `cwds`, `enchantum`, `src/json`, `threadsafe`, and `utils`), and local `docs/reference-code/`. It also excludes `docs/release-artifact-readme.md` because that file is relocated to the artifact documentation root before its links become valid. Exact exclusions live in [`scripts/verify-markdown-links.py`](../scripts/verify-markdown-links.py) and focused behavior is covered by [`tests/verify_markdown_links_test.py`](../tests/verify_markdown_links_test.py).
+
+Without `--source-tree`, the same program is in **artifact mode**: it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
+
+The checker validates local relative target paths, percent-decodes paths, rejects links that escape the checked root, and ignores fenced-code examples. It deliberately does **not** validate heading fragments/anchors, external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
+
+1. review changed same-page/cross-page fragments with GitHub-compatible heading behavior;
+2. review material external links manually (the required gate makes no network request);
+3. search renamed/deleted paths for inbound references; and
+4. run `git --no-pager diff --check`.
+
+A successful source-tree run proves only that checked local relative target paths exist within the documented scope. It is not evidence that anchors, external sites, examples, or historical claims are current.

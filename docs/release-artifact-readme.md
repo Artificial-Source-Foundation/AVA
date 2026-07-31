@@ -24,7 +24,10 @@ AVA stores user configuration and state under the XDG paths documented in [`docs
 ## Included documentation
 
 - [`docs/USAGE.md`](docs/USAGE.md): CLI, TUI, print, RPC, and ACP usage.
-- [`docs/CONFIG.md`](docs/CONFIG.md): dependencies, configuration, credentials, and XDG paths.
+- [`docs/CONFIG.md`](docs/CONFIG.md) and [`docs/environment-variables.md`](docs/environment-variables.md): configuration, credentials, XDG paths, and process inputs.
+- [`docs/tools.md`](docs/tools.md): built-in model-visible tools, bounds, aliases, and permission separation.
+- [`docs/lsp.md`](docs/lsp.md) and [`docs/security/containment.md`](docs/security/containment.md): optional local language-server support and the verified command-containment contract.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) and [`docs/diagnostics.md`](docs/diagnostics.md): symptom-first recovery, passive doctor, and sanitized support exports.
 - [`docs/rpc-protocol.md`](docs/rpc-protocol.md), [`docs/acp.md`](docs/acp.md), and [`docs/mcp.md`](docs/mcp.md): protocol and extension contracts.
 - [`docs/session-format.md`](docs/session-format.md): append-only session format and recovery boundary.
 - [`docs/TESTING.md`](docs/TESTING.md): deterministic and optional verification surfaces.

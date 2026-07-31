@@ -1,6 +1,6 @@
 # Environment variables
 
-This is the reference for environment input read by AVA and its repository scripts. Configuration files and command-line options are documented in [CONFIG.md](CONFIG.md); provider behavior is summarized in [providers.md](providers.md). Values described as secrets must not be put in project files, shell history, logs, or command lines.
+This is the reference for environment input read by AVA and its repository scripts. Configuration files and command-line options are documented in [CONFIG.md](CONFIG.md); provider behavior is summarized in [providers.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/providers.md). Values described as secrets must not be put in project files, shell history, logs, or command lines.
 
 ## Resolution and secret handling
 
@@ -33,7 +33,7 @@ These values are credentials; export them only into the AVA process that needs t
 | Moonshot | `MOONSHOT_API_KEY` | `MOONSHOT_BASE_URL` |
 | OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` |
 
-Future provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` lookup only if a runtime provider is added. Do not infer support from that convention. Defaults, OAuth details, and implemented-provider boundaries are in [providers.md](providers.md).
+Future provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` lookup only if a runtime provider is added. Do not infer support from that convention. Defaults, OAuth details, and implemented-provider boundaries are in [providers.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/providers.md).
 
 ## Standard desktop and shell inputs
 
@@ -59,7 +59,7 @@ Future provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` lookup onl
 | `LIBCWD_NO_STARTUP_MSGS` | libcwd compatibility switch used to suppress its startup message. |
 | `LIBCWD_RCFILE_NAME`, `LIBCWD_RCFILE_OVERRIDE_NAME` | libcwd configuration inputs, not AVA product settings. |
 
-`AVA_DEBUG_MAXLEN` is a **CMake cache variable**, not an environment variable; see [build configuration](build-configuration.md).
+`AVA_DEBUG_MAXLEN` is a **CMake cache variable**, not an environment variable; see [build configuration](https://github.com/Artificial-Source/AVA/blob/develop/docs/build-configuration.md).
 
 ## Child-process inheritance
 
@@ -69,16 +69,50 @@ Child programs do **not** receive AVA's ambient environment as a product contrac
 * LSP servers receive only `HOME`, `USER`, `LOGNAME`, `TMPDIR`/`TMP`/`TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `TERM`, and `COLORTERM`, plus a fixed trusted `PATH`. In particular all `AVA_*`, provider/cloud/API/token/secret variables, and arbitrary inherited values are not forwarded.
 * MCP has its own explicit configuration/environment contract; see [mcp.md](mcp.md). Project/session MCP launches use a clean environment, while legacy global/project behavior is separately documented there.
 
-## Test, smoke, and harness-only variables
+## Supported maintainer and script inputs
 
-The following are not user-facing product API. They gate tests, point harnesses at fake executables, inject canaries, or test runner behavior. Do not set them in a normal AVA shell profile.
+These variables are supported by the named repository scripts; they are not AVA runtime configuration. Prefer the script's command-line option where one exists.
 
-| Group | Variables |
+| Variable | Script and meaning |
 | --- | --- |
-| Live provider smoke | `AVA_LIVE_PROVIDER_SMOKE`; model overrides `AVA_LIVE_OPENAI_MODEL`, `AVA_LIVE_ANTHROPIC_MODEL`, `AVA_LIVE_DEEPSEEK_MODEL`, `AVA_LIVE_GEMINI_MODEL`, `AVA_LIVE_KIMI_MODEL`, `AVA_LIVE_MOONSHOT_MODEL`, `AVA_LIVE_OPENROUTER_MODEL` |
-| Optional UI/LSP smokes | `AVA_TUI_TMUX_SMOKE`, `AVA_TUI_OSC8_SMOKE`, `AVA_TUI_KITTY_IMAGE_SMOKE`, `AVA_TUI_ITERM2_IMAGE_SMOKE`, `AVA_TUI_TERMINAL_LIFECYCLE_SMOKE`, `AVA_LSP_REAL_CLANGD_SMOKE` |
-| Build/test wrapper seams | `AVA_CMAKE_COMMAND`, `AVA_CTEST_COMMAND`, `AVA_PACKAGE_CLEANUP_CLOSE_PIPES`, and the `AVA_PACKAGE_TEST_*` namespace |
-| ACP/Zed harnesses | `AVA_ACP_STDERR`, `AVA_ACP_SUBPROCESS_PARENT_SECRET`, `AVA_ACP_WRAPPER_PROOF`, `AVA_ZED_DOGFOOD_PHASE_ROOT`, and fake-key markers such as `AVA_ACP_INTEROP_FAKE_KEY_NOT_A_SECRET`, `AVA_ACPX_FAKE_KEY_NOT_A_SECRET`, and `AVA_ZED_DOGFOOD_FAKE_KEY_NOT_A_SECRET` |
-| Test sentinels | `AVA_TEST_MOONSHOT_KEY`, `AVA_LSP_TEST_SECRET`, and `AVA_*_SECRET_SENTINEL`/canary values used only to prove non-disclosure |
+| `AVA_CMAKE_COMMAND` | `scripts/build.sh`: CMake executable/wrapper; defaults to `cmake`. Primarily a runner test seam. |
+| `AVA_CTEST_COMMAND` | `scripts/run-tests.sh`: CTest executable/wrapper; defaults to `ctest`. Primarily a runner test seam. |
+| `AVA_LIVE_PROVIDER_SMOKE` | Explicit opt-in gate for credentialed live-provider CTests, dogfood scripts, and `live-provider-matrix.sh`; use `1`. No live provider runs by default. |
+| `AVA_EXE` | `live-model-dogfood.sh`, `live-coding-dogfood.sh`, and `live-provider-matrix.sh`: AVA executable path. The dogfood scripts default to `./build/ava`; the matrix derives it from its build directory unless set. |
+| `AVA_BUILD_DIR` | `live-provider-matrix.sh`: configured build tree, default `build`; used to derive executables for matrix targets. |
+| `AVA_TESTS_EXE` | `live-provider-matrix.sh`: `ava_tests` executable override for the `provider-live-smoke` target; otherwise derived from `AVA_BUILD_DIR`. |
+| `AVA_LIVE_DOGFOOD_ROOT` | `live-model-dogfood.sh`: explicit evidence/work root instead of a temporary directory. The script recursively removes and recreates this path before use, so it must name a dedicated disposable directory. |
+| `AVA_LIVE_DOGFOOD_KEEP` | Any nonempty value keeps model-dogfood logs/root after the run; otherwise cleanup removes it. It does not prevent the initial removal of an explicit root. |
+| `AVA_LIVE_CODING_DOGFOOD_ROOT` | `live-coding-dogfood.sh`: explicit coding-dogfood evidence/work root. It has the same remove-and-recreate requirement as `AVA_LIVE_DOGFOOD_ROOT`. |
+| `AVA_LIVE_CODING_DOGFOOD_KEEP` | Any nonempty value keeps coding-dogfood logs/root; otherwise cleanup removes it. |
+| `AVA_LIVE_PROVIDER_MATRIX_TARGET` | `live-provider-matrix.sh`: `provider-live-smoke` (default), `model-dogfood`, or `coding-dogfood`. The older `AVA_LIVE_MATRIX_TARGET` is a compatibility fallback only when this variable is unset. |
+| `AVA_LIVE_PROVIDER_MATRIX_SUMMARY` | `live-provider-matrix.sh`: aggregate TSV path, defaulting beneath `${TMPDIR:-/tmp}`; a relative value resolves from the caller's starting directory. The script creates or truncates this file. |
+| `AVA_LIVE_PROVIDER_MATRIX_KEEP` | Any nonempty value retains the matrix temporary root and child logs and propagates the matching dogfood keep control. |
+| `AVA_LIVE_<PROVIDER>_MODEL` | Optional model override used by live selection/matrix code: `<PROVIDER>` is `OPENAI`, `ANTHROPIC`, `DEEPSEEK`, `GEMINI`, `KIMI`, `MOONSHOT`, or `OPENROUTER`. Defaults and result classification are in [TESTING.md](TESTING.md#provider-live-smoke-matrix). |
 
-CTest also sets `AVA_SESSION_TITLES=off` and normally `AVA_NO_DEBUG_OUTPUT=1` for deterministic test behavior. Optional ACP settings are CMake options, not runtime environment settings. See [TESTING.md](TESTING.md) and [acp.md](acp.md).
+`AVA_EXE`, dogfood roots, and keep flags affect evidence execution/storage only; they do not enable the credential gate. Live runs can consume credentials and make paid/network provider calls, so opt in deliberately and review retained logs as private material.
+
+## Optional smoke gates
+
+These are stable opt-in test controls, not normal AVA settings:
+
+| Variable | Opt-in coverage |
+| --- | --- |
+| `AVA_TUI_TMUX_SMOKE` | Isolated tmux TUI scenarios. |
+| `AVA_TUI_OSC8_SMOKE` | Direct PTY OSC 8 hyperlink smoke. |
+| `AVA_TUI_KITTY_IMAGE_SMOKE`, `AVA_TUI_ITERM2_IMAGE_SMOKE` | Direct PTY inline-image protocol smokes. |
+| `AVA_TUI_TERMINAL_LIFECYCLE_SMOKE` | Direct PTY terminal lifecycle smoke. |
+| `AVA_LSP_REAL_CLANGD_SMOKE` | Offline smoke against an already-installed safe `clangd`; never installs/downloads it. |
+
+See [TESTING.md](TESTING.md) for exact commands, prerequisites, skip-77 behavior, and release classification. Optional ACP SDK/acpx interop is selected by CMake options rather than runtime environment variables.
+
+## Implementation-only test namespaces
+
+The test harnesses also create private coordination variables. They are deliberately **not** supported user or maintainer controls and should not be copied into shell profiles or external automation:
+
+- `AVA_PACKAGE_TEST_*` and `AVA_PACKAGE_CLEANUP_CLOSE_PIPES` coordinate package fixtures, snapshots, mutation markers, and process-cleanup regressions.
+- `AVA_PARALLEL_*` is internal state owned by `parallel-runner-common.sh` for its build-tree lock, child process group, and signal escalation. Setting these externally can break fail-closed cleanup.
+- ACP/Zed fixture variables such as `AVA_ACP_STDERR`, `AVA_ACP_WRAPPER_PROOF`, `AVA_ACP_SUBPROCESS_PARENT_SECRET`, and `AVA_ZED_DOGFOOD_PHASE_ROOT` are harness-to-child channels, not ACP configuration.
+- Fixture/canary names such as `AVA_*_FAKE_KEY_NOT_A_SECRET`, `AVA_*_SECRET_SENTINEL`, `AVA_LSP_TEST_SECRET`, and one-off marker/gate variables exist only to prove isolation or non-disclosure. Their exact inventory may change with tests.
+
+CTest sets controls such as `AVA_SESSION_TITLES=off`, `AVA_NO_DEBUG_OUTPUT=1`, and fake executable/root definitions for deterministic cases. Treat all undocumented `AVA_*` values observed only in fixtures as implementation detail unless this page or the owning current test guide explicitly declares them supported.

@@ -532,7 +532,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
                                                                                  .timestamp = ava::session::now_timestamp(),
                                                                                  .data_json = "{\"call_id\":\"call_1\","
                                                                                               "\"name\":\"read_file\","
-                                                                                              "\"arguments\":{}"});
+                                                                                              "\"arguments\":{}}"});
     auto appended_tool_result = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                    .parent_id = "",
                                                                                    .type = ava::session::EntryType::ToolResult,

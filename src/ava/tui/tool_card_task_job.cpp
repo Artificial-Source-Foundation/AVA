@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "ava/tui/tool_card_task_job.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/tool_card_task_job.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -494,6 +494,31 @@ bool is_task_or_job_tool(ToolTimelineItem const& item) noexcept
   return task_job_tool_kind(item) != TaskJobToolKind::None;
 }
 
+bool task_job_card_is_quiet_poll(ToolTimelineItem const& item)
+{
+  if (item.name != "job" || item.status == ToolTimelineStatus::Error || item.status == ToolTimelineStatus::Canceled)
+    return false;
+
+  auto const action = allowlisted_string(item.arguments_json, "action");
+  if (!action || (*action != "list" && *action != "status" && *action != "wait"))
+    return false;
+
+  if (item.status == ToolTimelineStatus::Running)
+    return true;
+  if (item.status != ToolTimelineStatus::Success || !looks_like_json_object(item.result_json))
+    return false;
+
+  if (*action == "list")
+  {
+    auto const jobs = ava::core::json::strict_objects_in_array_field(item.result_json, "jobs");
+    auto const total_jobs = allowlisted_integer(item.result_json, "total_jobs");
+    return jobs && total_jobs && *total_jobs >= 0;
+  }
+
+  auto const state = allowlisted_string(item.result_json, "state");
+  return state && (*state == "starting" || *state == "running");
+}
+
 bool task_job_explicitly_expanded(ToolTimelineItem const& item) noexcept
 {
   return item.details_visible.has_value() && *item.details_visible;
@@ -534,7 +559,7 @@ bool task_job_card_matches_query(ToolTimelineItem const& item, TaskJobCardPresen
 
 std::string task_job_card_copy_text(ToolTimelineItem const& item, TaskJobCardPresentation const& presentation)
 {
-  if (presentation.kind == TaskJobToolKind::None)
+  if (presentation.kind == TaskJobToolKind::None || task_job_card_is_quiet_poll(item))
     return {};
 
   std::string output;

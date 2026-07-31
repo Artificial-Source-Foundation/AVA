@@ -1142,6 +1142,8 @@ bool permission_matches_copy_query(ToolPermissionAuditItem const& permission, st
 
 bool tool_card_matches_copy_query(ToolTimelineItem const& item, std::string_view query)
 {
+  if (task_job_card_is_quiet_poll(item))
+    return false;
   if (query.empty())
     return true;
   if (is_task_or_job_tool(item))
@@ -1523,6 +1525,9 @@ std::string tool_primary_summary(ToolTimelineItem const& item, bool suppress_res
 
 std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, ToolPresentation inherited, bool suppress_result_summary)
 {
+  if (task_job_card_is_quiet_poll(item))
+    return {};
+
   auto const outer_width = width;
   auto const has_outer_margins = width >= 4;
   if (has_outer_margins)
@@ -1539,8 +1544,7 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   auto const shell_status = is_shell ? exit_status_text(item) : std::optional<std::string>{};
   auto const duration = duration_text(item);
   auto const truncation = truncation_summary(item);
-  auto primary = is_task_job ? task_job.primary
-                             : tool_primary_summary(item, suppress_result_summary, is_shell, command, shell_status, duration, truncation);
+  auto primary = is_task_job ? task_job.primary : tool_primary_summary(item, suppress_result_summary, is_shell, command, shell_status, duration, truncation);
   if (!is_task_job)
   {
     if (auto denied = denied_reason(item); !denied.empty())

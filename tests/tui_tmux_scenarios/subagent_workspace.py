@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from tui_smoke_helpers import (
     SmokeContext,
@@ -97,6 +98,15 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
         "committed child assistant update and terminal freeze",
         timeout=12.0,
     )
+    deadline = time.monotonic() + 12.0
+    requests = ""
+    while time.monotonic() < deadline:
+        requests = provider.request_log.read_text(encoding="utf-8", errors="replace")
+        if "Tool call (job): arguments_json=" in requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError(f"parent did not issue the expected model job-list poll\nrequests:\n{requests}")
     if "Completed" not in terminal or "Parent continued after background start" in terminal:
         raise RuntimeError(f"terminal child workspace was not frozen independently of parent output\nscreen:\n{terminal}")
     _assert_workspace_safe(terminal, "terminal child workspace")
@@ -112,6 +122,8 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
         raise RuntimeError(f"restored parent view omitted specialized task card title\nscreen:\n{restored}")
     if not re.search(r"\bGeneral\b", restored):
         raise RuntimeError(f"restored parent view omitted specialized task card type\nscreen:\n{restored}")
+    if re.search(r"[~+]\s+job\s+·\s+(?:list|status|wait|running)|job\s+·\s+(?:list|status|wait|running)", restored, re.IGNORECASE):
+        raise RuntimeError(f"restored parent view exposed routine job polling plumbing\nscreen:\n{restored}")
     _assert_workspace_safe(restored, "restored parent view", parent_card=True)
     send_keys(tmux_exe, session, "C-d")
     wait_for_session_exit(tmux_exe, session)

@@ -309,6 +309,11 @@ std::string subagent_workspace_task_body()
                    R"({"description":"Live workspace audit","prompt":"Inspect delegated fixture.","subagent_type":"general","background":true})");
 }
 
+std::string subagent_workspace_job_list_body()
+{
+  return tool_body("call_job_list_poll", "job", R"({"action":"list"})");
+}
+
 std::string question_tool_body()
 {
   std::string const arguments =
@@ -650,7 +655,7 @@ int main(int argc, char** argv)
       : scenario == "end-to-end-workflow" ? 6
       : scenario == "read-tool-twice"     ? 4
       : scenario == "read-tool-thrice"    ? 6
-      : scenario == "subagent-workspace"  ? 3
+      : scenario == "subagent-workspace"  ? 4
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
          scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
          scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "terminal-tool" || scenario == "compact" || scenario == "compact-delayed")
@@ -727,8 +732,12 @@ int main(int argc, char** argv)
     auto provider_response = response_for(scenario, request_index, target_path);
     if (scenario == "subagent-workspace" && request_index > 0)
     {
-      provider_response.body = text_body(request.find("You are AVA's general subagent") != std::string::npos ? "Committed child answer."
-                                                                                                             : "Parent continued after background start.");
+      if (request.find("You are AVA's general subagent") != std::string::npos)
+        provider_response.body = text_body("Committed child answer.");
+      else if (request.find("Tool call (job): arguments_json=") == std::string::npos)
+        provider_response.body = subagent_workspace_job_list_body();
+      else
+        provider_response.body = text_body("Parent continued after background start.");
     }
     std::string const response = "HTTP/1.1 " + std::to_string(provider_response.status_code) + " " + provider_response.reason +
                                  "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(provider_response.body.size()) +

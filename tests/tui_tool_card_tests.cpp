@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/tool_card_task_job.h"
 #include "ava/tui/tool_cards.h"
 #include "ava/core/json.h"
 
@@ -1783,38 +1784,72 @@ void test_tui_task_job_tool_card_presentation()
   auto spoofed_task_name = completed_task;
   spoofed_task_name.name = "TASK";
 
-  auto job_status_running = ava::tui::ToolTimelineItem{
-      .status = ava::tui::ToolTimelineStatus::Success,
-      .name = "job",
-      .argument_summary = "arguments provided",
-      .result_summary = "ok",
-      .arguments_json = std::string("{\"action\":\"status\",\"job_id\":\"") + j(kJobId) + "\"}",
-      .result_json =
-          std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
-          "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
-          "\"mode\":\"background\",\"state\":\"running\",\"delivery_state\":\"none\",\"was_promoted\":false,"
-          "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t1\","
-          "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
-          "\"provider_iterations\":1,\"tool_calls\":2,\"tool_iterations\":2}",
-      .call_id = "call_job_status",
-      .lifecycle = ava::tui::ToolLifecycleState::Complete};
+  auto job_status_running =
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                 .name = "job",
+                                 .argument_summary = "arguments provided",
+                                 .result_summary = "ok",
+                                 .arguments_json = std::string("{\"action\":\"status\",\"job_id\":\"") + j(kJobId) + "\"}",
+                                 .result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
+                                                "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
+                                                "\"mode\":\"background\",\"state\":\"running\",\"delivery_state\":\"none\",\"was_promoted\":false,"
+                                                "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t1\","
+                                                "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
+                                                "\"provider_iterations\":1,\"tool_calls\":2,\"tool_iterations\":2}",
+                                 .call_id = "call_job_status",
+                                 .lifecycle = ava::tui::ToolLifecycleState::Complete};
 
   auto job_result_completed = job_status_running;
   job_result_completed.arguments_json = std::string("{\"action\":\"result\",\"job_id\":\"") + j(kJobId) + "\"}";
-  job_result_completed.result_json =
-      std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
-      "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
-      "\"mode\":\"background\",\"state\":\"completed\",\"delivery_state\":\"pending\",\"was_promoted\":true,"
-      "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t2\","
-      "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
-      "\"provider_iterations\":3,\"tool_calls\":5,\"tool_iterations\":5,"
-      "\"result\":{\"status\":\"completed\",\"summary\":\"auth scan finished\"}}";
+  job_result_completed.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
+                                     "\",\"parent_session_id\":\"parent_sess\",\"child_session_id\":\"child_sess\",\"delivery_id\":\"deliv_1\","
+                                     "\"mode\":\"background\",\"state\":\"completed\",\"delivery_state\":\"pending\",\"was_promoted\":true,"
+                                     "\"cancel_requested\":false,\"timed_out\":false,\"started_at\":\"t0\",\"updated_at\":\"t2\","
+                                     "\"delivery_attempts\":0,\"summary_truncated\":false,\"error_truncated\":false,\"stop_reason_truncated\":false,"
+                                     "\"provider_iterations\":3,\"tool_calls\":5,\"tool_iterations\":5,"
+                                     "\"result\":{\"status\":\"completed\",\"summary\":\"auth scan finished\"}}";
 
   auto job_list = job_status_running;
   job_list.arguments_json = "{\"action\":\"list\"}";
-  job_list.result_json = std::string("{\"schema_version\":1,\"jobs\":[{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" +
-                         j(kTaskId) + "\",\"mode\":\"background\",\"state\":\"running\",\"was_promoted\":false,\"tool_calls\":1}],"
-                                      "\"total_jobs\":1,\"truncated\":false}";
+  job_list.result_json = std::string("{\"schema_version\":1,\"jobs\":[{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"task_id\":\"" + j(kTaskId) +
+                         "\",\"mode\":\"background\",\"state\":\"running\",\"was_promoted\":false,\"tool_calls\":1}],"
+                         "\"total_jobs\":1,\"truncated\":false}";
+
+  auto running_job_list = job_list;
+  running_job_list.status = ava::tui::ToolTimelineStatus::Running;
+  running_job_list.lifecycle = ava::tui::ToolLifecycleState::ExecutionStarted;
+  running_job_list.result_summary.clear();
+  running_job_list.result_json.clear();
+
+  auto running_job_status = running_job_list;
+  running_job_status.arguments_json = std::string("{\"action\":\"status\",\"job_id\":\"") + j(kJobId) + "\"}";
+  auto running_job_wait = running_job_list;
+  running_job_wait.arguments_json = std::string("{\"action\":\"wait\",\"job_id\":\"") + j(kJobId) + "\",\"timeout_ms\":1000}";
+
+  auto job_status_starting = job_status_running;
+  job_status_starting.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"starting\"}";
+  auto job_wait_timed_out = job_status_running;
+  job_wait_timed_out.arguments_json = std::string("{\"action\":\"wait\",\"job_id\":\"") + j(kJobId) + "\",\"timeout_ms\":1000}";
+  job_wait_timed_out.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"running\",\"timed_out\":true}";
+
+  auto job_status_completed = job_status_running;
+  job_status_completed.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"completed\"}";
+  auto job_wait_failed = job_wait_timed_out;
+  job_wait_failed.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"failed\",\"timed_out\":false}";
+  auto job_status_canceled = job_status_running;
+  job_status_canceled.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"canceled\"}";
+  auto job_status_unknown = job_status_running;
+  job_status_unknown.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"queued\"}";
+  auto job_unknown_action = job_status_running;
+  job_unknown_action.arguments_json = "{\"action\":\"inspect\"}";
+  auto job_cancel = job_status_running;
+  job_cancel.arguments_json = std::string("{\"action\":\"cancel\",\"job_id\":\"") + j(kJobId) + "\"}";
+  job_cancel.result_json = std::string("{\"schema_version\":1,\"job_id\":\"") + j(kJobId) + "\",\"state\":\"running\",\"cancel_requested\":true}";
+  auto canceled_job_poll = job_status_running;
+  canceled_job_poll.status = ava::tui::ToolTimelineStatus::Canceled;
+  canceled_job_poll.lifecycle = ava::tui::ToolLifecycleState::Canceled;
+  auto malformed_job_list = job_list;
+  malformed_job_list.result_json = "{\"total_jobs\":1}";
 
   auto job_failed = job_status_running;
   job_failed.status = ava::tui::ToolTimelineStatus::Error;
@@ -2006,20 +2041,45 @@ void test_tui_task_job_tool_card_presentation()
     }
   });
 
-  check_item(job_status_running, "job status running", [&](std::string const& plain, ava::tui::ToolPresentation) {
-    expect(plain.find("job") != std::string::npos && plain.find("status") != std::string::npos && plain.find("running") != std::string::npos,
-           "tui job status cards show human action and state");
-  });
+  auto assert_quiet_poll = [&](ava::tui::ToolTimelineItem const& item, std::string_view label) {
+    expect(ava::tui::detail::task_job_card_is_quiet_poll(item), std::string("tui recognizes quiet job poll: ") + std::string(label));
+    expect(ava::tui::detail::render_tool_card(item, 120, ava::tui::ToolPresentation::Expanded).empty(),
+           std::string("tui quiet job poll renders no transcript rows: ") + std::string(label));
+    expect(!ava::tui::detail::tool_card_matches_copy_query(item, {}) && !ava::tui::detail::tool_card_matches_copy_query(item, "job") &&
+               !ava::tui::detail::tool_card_matches_copy_query(item, "running") && ava::tui::detail::tool_card_copy_text(item).empty() &&
+               ava::tui::detail::task_job_card_copy_text(item, ava::tui::detail::task_job_card_presentation(item)).empty(),
+           std::string("tui quiet job poll is not a search, copy, or details-toggle candidate: ") + std::string(label));
+  };
+  assert_quiet_poll(running_job_list, "running list start");
+  assert_quiet_poll(running_job_status, "running status start");
+  assert_quiet_poll(running_job_wait, "running wait start");
+  assert_quiet_poll(job_list, "successful list");
+  assert_quiet_poll(job_status_starting, "starting status result");
+  assert_quiet_poll(job_status_running, "running status result");
+  assert_quiet_poll(job_wait_timed_out, "timed-out running wait result");
+
+  auto assert_visible_job = [&](ava::tui::ToolTimelineItem const& item, std::string_view label) {
+    expect(!ava::tui::detail::task_job_card_is_quiet_poll(item), std::string("tui retains visible job outcome: ") + std::string(label));
+    expect(!ava::tui::detail::render_tool_card(item, 120, ava::tui::ToolPresentation::Compact).empty() &&
+               ava::tui::detail::tool_card_matches_copy_query(item, {}) && !ava::tui::detail::tool_card_copy_text(item).empty(),
+           std::string("tui visible job outcome remains renderable, copyable, and toggleable: ") + std::string(label));
+  };
+  assert_visible_job(malformed_job_list, "malformed list result");
+  assert_visible_job(job_malformed, "malformed payload");
+  assert_visible_job(job_failed, "error result");
+  assert_visible_job(canceled_job_poll, "canceled status poll");
+  assert_visible_job(job_status_completed, "completed status");
+  assert_visible_job(job_wait_failed, "failed wait");
+  assert_visible_job(job_status_canceled, "terminal canceled status");
+  assert_visible_job(job_status_unknown, "unknown state");
+  assert_visible_job(job_unknown_action, "unknown action");
+  assert_visible_job(job_result_completed, "result retrieval");
+  assert_visible_job(job_cancel, "cancel request");
 
   check_item(job_result_completed, "job result completed", [&](std::string const& plain, ava::tui::ToolPresentation) {
     expect(plain.find("job") != std::string::npos && plain.find("result") != std::string::npos && plain.find("completed") != std::string::npos &&
                plain.find("promoted") != std::string::npos && plain.find("auth scan finished") != std::string::npos,
            "tui job result cards show action, state, promotion, and stable summary");
-  });
-
-  check_item(job_list, "job list", [&](std::string const& plain, ava::tui::ToolPresentation) {
-    expect(plain.find("job") != std::string::npos && plain.find("list") != std::string::npos && plain.find("1 job") != std::string::npos,
-           "tui job list cards show human list action and total_jobs without raw public JSON");
   });
 
   check_item(job_failed, "job failed", [&](std::string const& plain, ava::tui::ToolPresentation) {

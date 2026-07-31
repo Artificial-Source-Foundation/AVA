@@ -37,6 +37,7 @@ struct TaskJobCardPresentation
 
 [[nodiscard]] TaskJobToolKind task_job_tool_kind(ToolTimelineItem const& item) noexcept;
 [[nodiscard]] bool is_task_or_job_tool(ToolTimelineItem const& item) noexcept;
+[[nodiscard]] bool task_job_card_is_quiet_poll(ToolTimelineItem const& item);
 [[nodiscard]] bool task_job_explicitly_expanded(ToolTimelineItem const& item) noexcept;
 [[nodiscard]] TaskJobCardPresentation task_job_card_presentation(ToolTimelineItem const& item);
 [[nodiscard]] bool task_job_card_matches_query(ToolTimelineItem const& item, TaskJobCardPresentation const& presentation, std::string_view query);

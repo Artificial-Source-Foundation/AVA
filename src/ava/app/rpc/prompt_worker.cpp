@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "output.h"
 #include "prompt_worker.h"
 #include "resolvers.h"
@@ -17,7 +18,7 @@ namespace ava::app::rpc {
 
 std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 {
-  return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+  return ava::core::make_jthread("rpc_prompt", [options = std::move(options)](std::stop_token stop_token) mutable {
     auto publish_terminal = [&](std::string const& request_id, ava::core::Result<std::string> result, bool allow_follow_up,
                                 std::string_view terminal_reason) -> ava::core::Result<RpcFollowUpTransition> {
       RpcFollowUpTransition transition;

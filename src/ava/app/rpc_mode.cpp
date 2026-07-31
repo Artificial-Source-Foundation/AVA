@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/command_registry.h"
@@ -180,7 +181,7 @@ struct RpcCompactionWorkerOptions
 
 std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions options)
 {
-  return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+  return ava::core::make_jthread("rpc_direct_command", [options = std::move(options)](std::stop_token stop_token) mutable {
     auto finish = [&](ava::core::Result<std::string> result) {
       auto const reason = (stop_token.stop_requested() || rpc::cancel_requested(options.run_state)) ? std::string_view("canceled")
                                                                                                     : std::string_view("run_completed_before_safe_point");
@@ -234,7 +235,7 @@ std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions option
 
 std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 {
-  return std::jthread([options = std::move(options)](std::stop_token stop_token) mutable {
+  return ava::core::make_jthread("rpc_compaction", [options = std::move(options)](std::stop_token stop_token) mutable {
     auto finish = [&](ava::core::Result<std::string> result) {
       static_cast<void>(rpc::begin_terminal_publication(options.run_state));
       ava::core::VoidResult written;
@@ -352,9 +353,6 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
                                    ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
                                    runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out)
 {
-  // This function is called first-thing after creating a thread.
-  Debug(NAMESPACE_DEBUG::init_thread("run_rpc_loop"));
-
 #ifdef CWDEBUG
   {
     runtime::session_ts::rat session_r(unlocked_session);

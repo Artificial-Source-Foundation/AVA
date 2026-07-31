@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
@@ -626,7 +627,8 @@ void SessionTitleCoordinator::start()
   if (!options_.config.enabled)
     return;
   workers_.reserve(options_.worker_count);
-  for (std::size_t index = 0; index < options_.worker_count; ++index) workers_.emplace_back([this](std::stop_token token) { worker_loop(token); });
+  for (std::size_t index = 0; index < options_.worker_count; ++index)
+    workers_.emplace_back(ava::core::make_jthread("session_title", [this](std::stop_token token) { worker_loop(token); }));
 }
 
 void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,

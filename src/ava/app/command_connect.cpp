@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/command_connect.h"
@@ -338,7 +339,7 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::Session const& 
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
   auto credential_future =
-      std::async(std::launch::async, [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
+      ava::core::make_async("openai_browser_oauth", [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
 
   auto const browser_opened = open_url_in_browser(oauth_session->authorization_url);
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (browser)",
@@ -370,7 +371,7 @@ ava::core::Result<std::string> run_openai_headless_oauth(runtime::Session const&
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
   auto credential_future =
-      std::async(std::launch::async, [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
+      ava::core::make_async("openai_device_oauth", [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
 
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (headless)",
                                   authorization->verification_url + "\n\nEnter code: " + authorization->user_code + "\n\nWaiting for authorization...",

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
@@ -219,7 +220,7 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
   try
   {
     std::lock_guard thread_lock(record->thread_mutex);
-    record->thread = std::jthread([this, job_id, worker = std::move(worker)](std::stop_token stop_token) mutable {
+    record->thread = ava::core::make_jthread("background_job", [this, job_id, worker = std::move(worker)](std::stop_token stop_token) mutable {
       BackgroundJobCompletion completion;
       try
       {

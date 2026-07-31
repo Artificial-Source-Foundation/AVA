@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
@@ -243,7 +244,7 @@ void SubagentDeliveryManager::start()
     if (auto manager = weak.lock())
       manager->enqueue(snapshot);
   });
-  worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
+  worker_ = ava::core::make_jthread("SA_delivery", [this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
 SubagentDeliveryManager::~SubagentDeliveryManager()

@@ -21,7 +21,7 @@ from tui_smoke_helpers import (
     wait_for_selected_modal_change,
     wait_for_session_exit,
 )
-from .common import _finish_main, _main_session
+from .common import _finish_main, _main_session, _wait_for_normal_turn_request_count
 
 
 def scenario_main_models_selectors(ctx: SmokeContext) -> None:
@@ -145,6 +145,54 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     model_selector = wait_for(tmux_exe, session, r"Select model|Search models", "ctrl-l model selector")
     if "Select model" not in model_selector and "Search models" not in model_selector:
         raise RuntimeError(f"Ctrl+L did not open the model selector\nscreen:\n{model_selector}")
+    send_literal(tmux_exe, session, "5.5")
+    configurable_model = wait_for(
+        tmux_exe, session, r"(?s)filter\s+5\.5█.*›\s+GPT-5\.5", "configurable model selector row"
+    )
+    send_keys(tmux_exe, session, "Enter")
+    chained_thinking = wait_for(tmux_exe, session, r"Select thinking mode", "staged thinking-mode selector")
+    chained_row = selected_modal_row(chained_thinking)
+    if not chained_row or "Default" not in chained_row or "Esc keep default" not in chained_thinking:
+        raise RuntimeError(
+            "Selecting a reasoning-capable model did not stage a Default thinking-mode selector\n"
+            f"model selector:\n{configurable_model}\nthinking selector:\n{chained_thinking}"
+        )
+    if any(secret in chained_thinking for secret in ("budget_tokens", "provider_level", "reasoning.effort")):
+        raise RuntimeError(f"Thinking-mode selector exposed provider controls\nscreen:\n{chained_thinking}")
+    send_keys(tmux_exe, session, "Escape")
+    escaped_thinking = wait_for_absent(tmux_exe, session, r"Select thinking mode", "staged thinking selector escaped")
+    if "GPT-5.5" not in escaped_thinking:
+        raise RuntimeError(f"Esc from staged thinking selector rolled back the selected model\nscreen:\n{escaped_thinking}")
+    send_keys(tmux_exe, session, "C-t")
+    direct_thinking = wait_for(tmux_exe, session, r"Select thinking mode", "direct thinking-mode selector")
+    direct_row = selected_modal_row(direct_thinking)
+    if not direct_row or "Default" not in direct_row or "Esc cancel" not in direct_thinking:
+        raise RuntimeError(f"Ctrl+T did not reopen the same selector with Default current\nscreen:\n{direct_thinking}")
+    send_keys(tmux_exe, session, "Down")
+    low_row, low_selection = wait_for_selected_modal_change(
+        tmux_exe, session, direct_row, "thinking-mode concrete selection"
+    )
+    if "Low" not in low_row:
+        raise RuntimeError(f"First configurable thinking mode was not the concise Low row\nscreen:\n{low_selection}")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for_absent(tmux_exe, session, r"Select thinking mode", "thinking-mode Low selection closed")
+    send_keys(tmux_exe, session, "C-t")
+    reopened_low = wait_for(tmux_exe, session, r"Select thinking mode", "thinking-mode explicit current reopen")
+    reopened_low_row = selected_modal_row(reopened_low)
+    if not reopened_low_row or "Low" not in reopened_low_row:
+        raise RuntimeError(f"Concrete thinking-mode selection was not authoritative on reopen\nscreen:\n{reopened_low}")
+    send_keys(tmux_exe, session, "Up", "Enter")
+    wait_for_absent(tmux_exe, session, r"Select thinking mode", "thinking-mode Default selection closed")
+    send_keys(tmux_exe, session, "C-t")
+    reopened_default = wait_for(tmux_exe, session, r"Select thinking mode", "thinking-mode Default current reopen")
+    reopened_default_row = selected_modal_row(reopened_default)
+    if not reopened_default_row or "Default" not in reopened_default_row:
+        raise RuntimeError(f"Default thinking-mode selection was not authoritative on reopen\nscreen:\n{reopened_default}")
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"Select thinking mode", "Default thinking-mode verification closed")
+
+    send_keys(tmux_exe, session, "C-l")
+    wait_for(tmux_exe, session, r"Select model|Search models", "model selector before unsupported model")
     send_literal(tmux_exe, session, "Diagnostic")
     diagnostic_model_selector = wait_for(
         tmux_exe, session, r"(?s)filter\s+Diagnostic█.*›\s+Diagnostic Local", "quiet filtered model selector"
@@ -188,7 +236,33 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
         "restored and settled 120x32 quiet model selector",
     )
     send_keys(tmux_exe, session, "Escape")
-    wait_for_absent(tmux_exe, session, r"Select model|Search models", "model selector canceled")
+    wait_for_absent(tmux_exe, session, r"Select model|Search models", "diagnostic model selector canceled")
+    send_keys(tmux_exe, session, "C-l")
+    wait_for(tmux_exe, session, r"Select model|Search models", "model selector before non-reasoning model")
+    send_literal(tmux_exe, session, "4.1 mini")
+    wait_for(
+        tmux_exe,
+        session,
+        r"(?s)filter\s+4\.1 mini█.*›\s+GPT-4\.1 mini",
+        "non-reasoning model selector row",
+    )
+    send_keys(tmux_exe, session, "Enter")
+    wait_for_absent(tmux_exe, session, r"Select model|Search models", "non-configurable model selection")
+    unsupported_model_selected = wait_for(tmux_exe, session, r"GPT-4\.1 mini", "non-configurable model applied snapshot")
+    if "Select thinking mode" in unsupported_model_selected:
+        raise RuntimeError(
+            "Model without configurable policy-resolved levels opened a thinking selector\n"
+            f"screen:\n{unsupported_model_selected}"
+        )
+    send_keys(tmux_exe, session, "C-t")
+    unavailable_thinking = wait_for(
+        tmux_exe,
+        session,
+        r"thinking mode unavailable for current model",
+        "non-configurable thinking-mode direct status",
+    )
+    if "Select thinking mode" in unavailable_thinking:
+        raise RuntimeError(f"Ctrl+T opened an empty thinking selector\nscreen:\n{unavailable_thinking}")
     send_literal(tmux_exe, session, "/scoped-models")
     wait_for(tmux_exe, session, r"/scoped-models", "scoped model selector draft")
     send_keys(tmux_exe, session, "Enter")
@@ -337,5 +411,48 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     )
     if not any(value in restored_model_cycle for value in restored_cycle_markers):
         raise RuntimeError(f"Ctrl+P did not cycle after restoring scoped models\nscreen:\n{restored_model_cycle}")
+
+    active_provider = ctx.start_fake_provider("models-thinking-active", delay_ms=12000)
+    active_session = ctx.session_name("models-thinking-active")
+    active_env_prefix = ctx.fake_provider_command(
+        active_provider,
+        home=ctx.active_home,
+        config=ctx.active_config,
+        state=ctx.active_state,
+        data=ctx.active_data,
+    )
+    tmux(
+        tmux_exe,
+        "new-session",
+        "-d",
+        "-s",
+        active_session,
+        "-x",
+        "100",
+        "-y",
+        "24",
+        "-c",
+        str(ctx.active_workspace),
+        active_env_prefix,
+    )
+    wait_for(tmux_exe, active_session, r"Type a message|live session", "thinking active-run initial frame")
+    send_literal(tmux_exe, active_session, "thinking selector active-run guard")
+    send_keys(tmux_exe, active_session, "Enter")
+    _wait_for_normal_turn_request_count(active_provider.request_log, 1, "thinking active-run provider request")
+    wait_for(tmux_exe, active_session, r"Esc stop", "thinking active-run streaming state")
+    send_keys(tmux_exe, active_session, "C-t")
+    active_rejection = wait_for(
+        tmux_exe,
+        active_session,
+        r"thinking mode can be changed between turns",
+        "thinking-mode active-run rejection",
+    )
+    if "Select thinking mode" in active_rejection:
+        raise RuntimeError(f"Ctrl+T opened or persisted a thinking selector during an active run\nscreen:\n{active_rejection}")
+    send_keys(tmux_exe, active_session, "Escape")
+    wait_for(tmux_exe, active_session, r"stop requested|stopped|submit a new prompt", "thinking active-run stop")
+    send_keys(tmux_exe, active_session, "C-d")
+    wait_for_session_exit(tmux_exe, active_session)
+    tmux(tmux_exe, "kill-session", "-t", active_session, check=False)
 
     _finish_main(tmux_exe, session)

@@ -88,9 +88,10 @@ Current built-in support:
 `/thinking` is a display toggle, not a provider reasoning command. In the TUI it
 hides or shows inline thinking/reasoning blocks already present in the transcript
 and updates the status text. Outside the interactive TUI, the command returns an
-explanation that thinking visibility is a TUI display toggle. The default
-Pi-style action id `app.thinking.toggle` maps to Ctrl+T in AVA keybindings; the
-reasoning-cycle shortcut is Shift+Tab.
+explanation that thinking visibility is a TUI display toggle. The configurable
+Pi-style action id `app.thinking.toggle` remains available but is unbound by
+default. Ctrl+T opens the thinking-mode selector between turns, while the
+reasoning-cycle shortcut remains Shift+Tab.
 
 Hiding thinking blocks does not remove session entries, does not affect provider
 replay, and does not change the active `reasoning_level`.
@@ -152,19 +153,19 @@ Useful reasoning checks include:
   `reasoning_delta`, and `reasoning_end` only when that provider exposes visible
   reasoning. Providers may still reason internally without streaming visible
   blocks.
-- TUI thinking visibility can be checked with `/thinking` or Ctrl+T; TUI
-  reasoning cycling can be checked with Shift+Tab when the terminal reports
-  BackTab/Shift+Tab correctly. Gated tmux/PTY smoke coverage is referenced in
+- TUI thinking visibility can be checked with `/thinking`; TUI reasoning
+  selection can be checked with Ctrl+T between turns, and cycling with Shift+Tab
+  when the terminal reports BackTab/Shift+Tab correctly. Gated tmux/PTY smoke coverage is referenced in
   [product/mvp-baseline.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/mvp-baseline.md#testing-release-and-quality-bar).
 
 ## Pi parity and divergence
 
 AVA tracks Pi-facing ergonomics where they fit AVA's safety boundaries:
 
-- AVA accepts the Pi-style `app.thinking.toggle` action id and binds it to Ctrl+T
-  for thinking-block visibility.
-- AVA documents Shift+Tab as the reasoning-cycle shortcut and keeps it separate
-  from Ctrl+T.
+- AVA accepts the Pi-style `app.thinking.toggle` action id for configurable
+  thinking-block visibility, but leaves it unbound by default.
+- AVA uses Ctrl+T for the staged thinking-mode selector and keeps Shift+Tab as
+  the separate reasoning-cycle shortcut.
 - AVA accepts Pi-style CLI `--thinking off|<level>` as a startup alias for the
   existing reasoning controls. `off` clears explicit reasoning; other values use
   the active model's `reasoning_levels` and provider/API-family validation.

@@ -271,6 +271,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   // Extract unlocked_session from unlocked_session_result.
   ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
 
+  std::string replacement;
   bool replaced = false;
   {
     ava::app::runtime::session_ts::wat session_w(unlocked_session);
@@ -283,22 +284,23 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
                .has_value(),
            "replacement-safe current-session RPC test seeds original history");
 
-    auto replacement = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_rpc_history",
+    auto replacement_result = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_rpc_history",
                                                                                              .parent_id = "",
                                                                                              .type = ava::session::EntryType::UserMessage,
                                                                                              .timestamp = "2026-05-02T00:00:01Z",
                                                                                              .data_json = "{\"text\":\"RPC_REPLACEMENT_CANARY\"}"});
-    expect(replacement.has_value(), "replacement-safe current-session RPC test serializes replacement history");
-    if (!replacement)
+    expect(replacement_result.has_value(), "replacement-safe current-session RPC test serializes replacement history");
+    if (!replacement_result)
       return;
+    replacement = *replacement_result;
     auto const session_path = session_w->store.session_path();
-    session_w->store.set_after_lease_bound_read_for_test([&, session_path] {
+    session_w->store.set_after_lease_bound_read_for_test([&replacement, &replaced, session_path] {
       if (replaced)
         return;
       replaced = true;
       std::filesystem::rename(session_path, session_path.string() + ".parked");
       std::ofstream file(session_path, std::ios::binary | std::ios::trunc);
-      file << *replacement << '\n';
+      file << replacement << '\n';
     });
   }
 

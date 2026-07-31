@@ -10,17 +10,17 @@ This package is the planning surface for pushing the Pi parity score toward 100 
 
 Read these before starting any area goal:
 
-1. `docs/product/mvp-baseline.md`
-2. `docs/product/mvp-coverage-ledger.md`
-3. `goals/ava-mvp-baseline-pi-tui/plan.md`
-4. `goals/ava-mvp-baseline-pi-tui/mvp-work-ledger.md`
+1. [Product MVP baseline](../../product/mvp-baseline.md)
+2. [Product MVP coverage ledger](../../product/mvp-coverage-ledger.md)
+3. [Repository goal plan](../../../goals/ava-mvp-baseline-pi-tui/plan.md)
+4. [Repository goal work ledger](../../../goals/ava-mvp-baseline-pi-tui/mvp-work-ledger.md)
 5. This file, then the specific area file for the goal.
 
-If the area file conflicts with `docs/product/mvp-baseline.md`, update the area file or ask for a product decision before implementation.
+If the area file conflicts with the product MVP baseline, update the area file or ask for a product decision before implementation.
 
 ## Codex Goal Rules
 
-Use `codex-goal-workflow.md` for the goal command contract. The short version:
+Use the [Codex goal workflow](codex-goal-workflow.md) for the goal command contract. The short version:
 
 - Use `/goal <objective>` only for one durable area objective with clear evidence.
 - Use `/goal` to inspect the active goal.
@@ -32,19 +32,22 @@ Use `codex-goal-workflow.md` for the goal command contract. The short version:
 
 | Area | File | Why It Matters |
 | --- | --- | --- |
-| Provider, model, auth, image generation | `providers-models-auth.md` | Largest gap. Pi has broad provider/model coverage; AVA has strong foundations but narrower breadth. |
-| CLI, slash commands, sessions, import/share/export | `cli-commands-sessions-share-import.md` | Pi's product workflow depends on command completeness and session mobility. |
-| TUI/editor/terminal product UX | `tui-editor-terminal.md` | Pi has a reusable TUI library and polished coding-agent UX; AVA has strong runtime behavior but needs product closure. |
-| Settings, packages, resources, startup | `settings-packages-resources.md` | Pi's settings and package/resource manager are a major product surface. |
-| Agent loop, tools, permissions, safety | `agent-tools-permissions.md` | AVA is already strong here; the goal is consistency, UX closure, and no regressions while adding Pi parity. |
-| Context, prompts, extensions, MCP, LSP | `context-extensions-mcp-lsp.md` | Pi's extensibility and prompt resources need AVA-native equivalents without weakening isolation. |
-| Testing, release, documentation evidence | `testing-release-quality.md` | 100 percent parity needs mechanical evidence, not just feature claims. |
+| Provider, model, auth, image generation | [providers-models-auth.md](providers-models-auth.md) | Largest gap. Pi has broad provider/model coverage; AVA has strong foundations but narrower breadth. |
+| CLI, slash commands, sessions, import/share/export | [cli-commands-sessions-share-import.md](cli-commands-sessions-share-import.md) | Pi's product workflow depends on command completeness and session mobility. |
+| TUI/editor/terminal product UX | [tui-editor-terminal.md](tui-editor-terminal.md) | Pi has a reusable TUI library and polished coding-agent UX; AVA has strong runtime behavior but needs product closure. |
+| Settings, packages, resources, startup | [settings-packages-resources.md](settings-packages-resources.md) | Pi's settings and package/resource manager are a major product surface. |
+| Agent loop, tools, permissions, safety | [agent-tools-permissions.md](agent-tools-permissions.md) | AVA is already strong here; the goal is consistency, UX closure, and no regressions while adding Pi parity. |
+| Context, prompts, extensions, MCP, LSP | [context-extensions-mcp-lsp.md](context-extensions-mcp-lsp.md) | Pi's extensibility and prompt resources need AVA-native equivalents without weakening isolation. |
+| Testing, release, documentation evidence | [testing-release-quality.md](testing-release-quality.md) | 100 percent parity needs mechanical evidence, not just feature claims. |
 
 ## Follow-Up Goal Files
 
 | Goal | File | Why It Matters |
 | --- | --- | --- |
-| End-to-end AVA tool smoke | `end-to-end-ava-tool-smoke-goal.md` | Adds a dedicated full-binary, provider-backed dogfood smoke so release evidence proves AVA works as one complete coding-agent tool, not only as subsystem slices. |
+| End-to-end AVA tool smoke | [end-to-end-ava-tool-smoke-goal.md](end-to-end-ava-tool-smoke-goal.md) | Adds a dedicated full-binary, provider-backed dogfood smoke so release evidence proves AVA works as one complete coding-agent tool, not only as subsystem slices. |
+| Agent tools and permissions execution goal | [agent-tools-permissions-goal.md](agent-tools-permissions-goal.md) | Wraps the area plan as one bounded durable execution objective. |
+| Backend pending goals | [backend-pending-goals-goal.md](backend-pending-goals-goal.md) | Tracks bounded closure of remaining approved backend goals. |
+| Full parity closure | [full-parity-all-goals-goal.md](full-parity-all-goals-goal.md) | Coordinates the complete package without replacing area-specific acceptance criteria. |
 
 ## Definition Of 100 Percent
 

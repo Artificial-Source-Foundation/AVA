@@ -162,9 +162,9 @@ git --no-pager diff --check
 
 #### Completed Work
 
-- Documented AVA's agent-control vocabulary in `docs/USAGE.md`: cancel/interrupt, steer-now, queue-next/follow-up, restore draft, and resume-later now have explicit cross-mode semantics.
-- Added a Pi-to-AVA tool parity matrix and AVA-only tool safety constraints in `docs/USAGE.md`; public/default parallel/configurable tool execution remained deferred at that checkpoint pending replay-safe ordering, permission-audit ordering, and cancellation semantics.
-- Expanded permission-rule documentation in `docs/CONFIG.md` with the real enforceable global and workspace-keyed paths, the authoritative `/permissions list`/RPC discovery path, protected-file rationale, command-rule matching, and hard-deny behavior.
+- Documented AVA's agent-control vocabulary in `docs/core/usage.md`: cancel/interrupt, steer-now, queue-next/follow-up, restore draft, and resume-later now have explicit cross-mode semantics.
+- Added a Pi-to-AVA tool parity matrix and AVA-only tool safety constraints in `docs/core/usage.md`; public/default parallel/configurable tool execution remained deferred at that checkpoint pending replay-safe ordering, permission-audit ordering, and cancellation semantics.
+- Expanded permission-rule documentation in `docs/core/configuration.md` with the real enforceable global and workspace-keyed paths, the authoritative `/permissions list`/RPC discovery path, protected-file rationale, command-rule matching, and hard-deny behavior.
 - Expanded `docs/headless-protocol.md` permission resolver docs to show `permission_request_id`, `risk`, and `structured_result.permission_request_ids` linkage used by TUI/headless/RPC diagnostics.
 - Added regression coverage:
   - `tests/tools_process_network_tests.cpp`: explicit resolver-deny checks for `webfetch` and `websearch`, asserting no transport use after denial.
@@ -176,8 +176,8 @@ git --no-pager diff --check
 
 #### Changed Files
 
-- `docs/USAGE.md`
-- `docs/CONFIG.md`
+- `docs/core/usage.md`
+- `docs/core/configuration.md`
 - `docs/headless-protocol.md`
 - `docs/product/mvp-baseline.md`
 - `docs/product/mvp-coverage-ledger.md`
@@ -203,7 +203,7 @@ git --no-pager diff --check
 #### Material Review Findings
 
 - Correctness/DX review found `ava_tests.app_rpc` failed because the new DeepSeek model changed the built-in model-cycle order while `tests/app_rpc_tests.cpp` still expected Kimi after Anthropic. Fixed by updating the expectation to DeepSeek and verified `ava_tests.app_rpc` plus full CTest.
-- Security review found `docs/CONFIG.md` documented the wrong workspace permission-rule directory (`workspaces/<hash>` instead of `workspace-permission-rules/<hash>`), which could lead operators to place unenforced deny rules. Fixed the path and pointed users to `/permissions list`/RPC `permission_rules` as authoritative.
+- Security review found `docs/core/configuration.md` documented the wrong workspace permission-rule directory (`workspaces/<hash>` instead of `workspace-permission-rules/<hash>`), which could lead operators to place unenforced deny rules. Fixed the path and pointed users to `/permissions list`/RPC `permission_rules` as authoritative.
 - No remaining material findings after fixes.
 
 #### Residual Risks / Pending Questions
@@ -266,7 +266,7 @@ Tool and permission category mapping:
 - Added OpenCode-style external-directory summary wording for outside-workspace permission prompts without changing backend permission decisions or RPC reason strings.
 - Updated `tests/tui_composer_tests.cpp` with deterministic assertions for prompt title/action wording, request-id visibility, external-directory wording, remembered `Always`/reject choices, and narrow-width reject controls.
 - Updated `tests/tui_tmux_smoke.py` so the required real-terminal smoke asserts the current OpenCode-aligned `Permission required`, `[Reject rule]`, and `[Always]` wording instead of the pre-change all-caps/allow-rule labels.
-- Updated `docs/USAGE.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` to record the OpenCode-aligned prompt wording, request-id visibility, reject-message disposition, external-directory wording, and current evidence.
+- Updated `docs/core/usage.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` to record the OpenCode-aligned prompt wording, request-id visibility, reject-message disposition, external-directory wording, and current evidence.
 
 #### Changed Files In This Pass
 
@@ -275,7 +275,7 @@ Tool and permission category mapping:
 - `src/ava/tui/runtime.cpp`
 - `tests/tui_composer_tests.cpp`
 - `tests/tui_tmux_smoke.py`
-- `docs/USAGE.md`
+- `docs/core/usage.md`
 - `docs/product/mvp-baseline.md`
 - `docs/product/mvp-coverage-ledger.md`
 - `docs/goals/pi-mvp-parity/agent-tools-permissions.md`

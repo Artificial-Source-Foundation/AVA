@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Reorganized the repository and documentation entry points around user, automation/extension-author, and maintainer tasks.
+- Reorganized first-party documentation into explicit core, interfaces, extensions, operations, development, security, product, plans, roadmap, and history categories while preserving fixed normative contract and evidence paths.
+- Added one task-ordered human documentation spine, concise category indexes, nested documentation-maintenance instructions, and a root `llms.txt` map for automated readers.
 - Refreshed build, testing, Docker, release, support, and Linux host-artifact documentation; packaged end-user references now include context resources, providers, security, subagents, terminal setup, themes/keybindings, thinking modes, environment, LSP, tools, and troubleshooting guides.
 
 ## Historical release-position documentation

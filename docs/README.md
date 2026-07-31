@@ -1,65 +1,65 @@
 # AVA Documentation
 
-Use this task- and audience-oriented index for current AVA documentation. Historical release-position ledgers and plans are clearly separated from current user and maintainer references.
+This is the human documentation spine for AVA. Follow it in task order, or use the category indexes to browse a subject.
 
-## Use and operate AVA
+## How to read these docs
 
-| Task | Start here | Related current references |
-| --- | --- | --- |
-| Install, run, and choose an interface | [USAGE.md](USAGE.md) | [features.md](features.md), [headless-protocol.md](headless-protocol.md), [Docker](docker/README.md) |
-| Configure auth, models, resources, and permissions | [CONFIG.md](CONFIG.md) | [environment-variables.md](environment-variables.md), [providers.md](providers.md), [context-resources.md](context-resources.md) |
-| Delegate work and manage jobs | [subagents.md](subagents.md) | [tools.md](tools.md), [USAGE.md](USAGE.md#commands), [rpc-protocol.md](rpc-protocol.md#subagent-job-snapshot) |
-| Understand model-visible operations | [tools.md](tools.md) | [security-sandboxing.md](security-sandboxing.md), [LSP](lsp.md), [MCP](mcp.md), [plugins](plugin-system.md) |
-| Fix a failure | [troubleshooting.md](troubleshooting.md) | [diagnostics.md](diagnostics.md), [terminal setup](terminal-setup.md), [SUPPORT.md](../SUPPORT.md) |
-| Customize the terminal UI | [themes-keybindings.md](themes-keybindings.md) | [terminal-setup.md](terminal-setup.md), [thinking-modes.md](thinking-modes.md) |
-| Work with sessions | [session-format.md](session-format.md) | [USAGE.md](USAGE.md), [session versioning](engineering/session-versioning.md) |
-| Run in a container | [docker/README.md](docker/README.md) | [security-sandboxing.md](security-sandboxing.md) |
+- **Current** pages describe the implemented product or source tree and must change with the behavior they describe.
+- **Normative** contracts define compatibility or verified guarantees; their fixed paths and conformance coverage change together.
+- **Plans**, roadmaps, and goals describe intended work, not shipped behavior.
+- **History and evidence** preserve dated claims and observations; they are not proof of current behavior by themselves.
 
-The optional Qt Quick interface is an experimental prototype; see [desktop-qml.md](desktop-qml.md).
+## Start, configure, and use AVA
 
-## Automate or extend AVA
+Start with [usage](core/usage.md), then [configuration](core/configuration.md), [providers](core/providers.md), and [environment variables](core/environment-variables.md). The [core index](core/README.md) also covers context resources, model-visible tools, subagents, and thinking modes.
 
-Choose the contract that matches the client:
+## Interfaces and contracts
 
-- [rpc-protocol.md](rpc-protocol.md): normative proprietary AVA RPC v1 for automation and custom clients. It is not generic JSON-RPC, ACP, or Pi RPC.
-- [acp.md](acp.md): stable ACP v1 JSON-RPC 2.0 editor endpoint and client setup; [acp-support.json](acp-support.json) is the machine-checked support profile, and [interop/evidence/README.md](interop/evidence/README.md) defines evidence labels.
-- [headless-protocol.md](headless-protocol.md): behavior shared by print and RPC headless modes.
-- [plugin-system.md](plugin-system.md): local plugin authoring; [plugin-compatibility-policy.md](plugin-compatibility-policy.md) defines compatibility and golden-fixture policy.
-- [mcp.md](mcp.md): local stdio MCP configuration and safety boundaries.
-- [lsp.md](lsp.md): optional local language-server configuration, model tools, permissions, bounds, and cleanup.
-- [context-resources.md](context-resources.md): context files, prompts, skills, subagents, plugins, MCP, LSP, and project trust.
+- [Interface index](interfaces/README.md): the terminal customization guide and experimental Qt/QML prototype.
+- [RPC protocol](rpc-protocol.md): normative proprietary AVA RPC v1 contract.
+- [ACP endpoint](acp.md) and [machine-readable support profile](acp-support.json): stable ACP integration contract and support declaration.
+- [Headless protocol](headless-protocol.md): normative behavior shared by print and RPC modes.
+- [Session format](session-format.md): normative append-only persisted-session contract.
+- [Plugin compatibility policy](plugin-compatibility-policy.md): normative plugin and MCP compatibility rules.
+- [Theme schema](schema/README.md): machine-readable theme contract.
 
-## Contribute and maintain
+These fixed contract paths remain at the `docs/` root (or their established schema/security locations) so external consumers do not need to follow taxonomy changes.
 
-| Task | Current reference |
-| --- | --- |
-| Join the project | Root [CONTRIBUTING.md](../CONTRIBUTING.md), [Code of Conduct](../CODE_OF_CONDUCT.md), [Governance](../GOVERNANCE.md), [Security](../SECURITY.md), and [Support](../SUPPORT.md) |
-| Build and configure a checkout | [CONTRIBUTING.md](CONTRIBUTING.md) and [build-configuration.md](build-configuration.md) |
-| Navigate the implementation | [architecture.md](architecture.md), [engineering/codebase-guide.md](engineering/codebase-guide.md), and [AGENTS.md](../AGENTS.md) |
-| Run and classify tests | [TESTING.md](TESTING.md) |
-| Write and review documentation | [documentation.md](documentation.md) |
-| Apply C++ safety rules | [engineering/cpp-safety-rules.md](engineering/cpp-safety-rules.md) |
-| Add a side effect | [engineering/side-effect-safety-checklist.md](engineering/side-effect-safety-checklist.md) |
-| Change persisted sessions | [engineering/session-versioning.md](engineering/session-versioning.md) and [session-format.md](session-format.md) |
-| Prepare the Linux host artifact | [release-checklist.md](release-checklist.md) |
+## Extensions
 
-The architecture, codebase guide, build-configuration reference, and documentation policy describe the source checkout and are intentionally not installed in the end-user host artifact.
+Use the [extensions index](extensions/README.md) for local plugins, MCP servers, and optional LSP integration. Extension guides are current descriptive or authoring references; the fixed compatibility and protocol documents above own normative promises.
 
-## Security and privacy
+## Operations
 
-- [security-sandboxing.md](security-sandboxing.md): practical trust, permission, plugin/MCP, and external sandbox guidance.
-- [security/containment.md](security/containment.md): normative verified command-containment scope and limitations.
-- [diagnostics.md](diagnostics.md): passive doctor, private traces, typed last-failure state, sanitized support exports, and privacy exclusions.
-- [engineering/side-effect-safety-checklist.md](engineering/side-effect-safety-checklist.md): maintainer review questions for new side effects.
+The [operations index](operations/README.md) covers builds, tests, Docker, terminals, diagnostics, troubleshooting, and release artifacts. Start with the symptom-first [troubleshooting guide](operations/troubleshooting.md) when AVA or its build fails.
 
-## Product status, roadmap, and history
+## Security
 
-These pages are useful for planning and evidence, but they do not replace the current references above and do not prove publication by themselves:
+Read the [security index](security/README.md). [Sandboxing and trust guidance](security/sandboxing.md) is practical current guidance; [containment](security/containment.md) is the fixed normative statement of verified command-containment scope and limitations.
 
-- Current capability views: [product/mvp-baseline.md](product/mvp-baseline.md), [product/mvp-coverage-ledger.md](product/mvp-coverage-ledger.md), and [product/backend-capabilities-1.0.md](product/backend-capabilities-1.0.md).
-- Forward plans: [product/capabilities-1.1.md](product/capabilities-1.1.md), [product/tooling-plan.md](product/tooling-plan.md), [product/package-manager-plan.md](product/package-manager-plan.md), and [product/parallel-tools-plan.md](product/parallel-tools-plan.md).
-- Roadmaps: [roadmap/backend.md](roadmap/backend.md), [roadmap/frontend.md](roadmap/frontend.md), [roadmap/frontend-evidence-baseline.md](roadmap/frontend-evidence-baseline.md), [roadmap/backend-usability.md](roadmap/backend-usability.md), and [roadmap/backend-maturity-baseline.md](roadmap/backend-maturity-baseline.md).
-- Goal packages: [goals/README.md](goals/README.md).
-- Historical release-position ledgers: [versions/README.md](versions/README.md), including [versions/1.0.md](versions/1.0.md) and the current 1.1 planning journal in [versions/1.1.md](versions/1.1.md).
+## Development
 
-Local `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` trees are comparative behavior references only. They are not AVA architecture, implementation, documentation authority, or build input.
+The [development index](development/README.md) links contribution, architecture, codebase, C++ safety, side-effect, session-versioning, and internal runtime references. Documentation maintainers must also follow [`docs/AGENTS.md`](AGENTS.md) and the [documentation policy](development/documentation-policy.md).
+
+## Product and current status
+
+The [product index](product/README.md) contains the current feature overview, MVP baseline, backend baseline, and capability-to-evidence ledger. These pages describe current status; release readiness still requires the relevant tests and [release checklist](operations/release-checklist.md).
+
+## Plans
+
+The [plans index](plans/README.md) contains proposed or staged work for 1.1 capabilities, tooling, packages, and parallel tool execution. Plans do not establish current product behavior.
+
+## Roadmap and goals
+
+- [Roadmap index](roadmap/README.md): sequencing, approval ledgers, maturity targets, and dated frontend/backend qualification state.
+- [Goal packages](goals/README.md): bounded execution packages with acceptance criteria.
+
+Roadmaps and goals are planning surfaces even when they record completed slices; use current docs and tests to determine present behavior.
+
+## History and evidence
+
+- [History index](history/README.md): historical implementation ledgers.
+- [Version index](versions/README.md): release-position journals and historical capability claims.
+- [ACP evidence policy and reports](interop/evidence/README.md): dated, scoped interoperability observations.
+
+Local `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` trees are comparative behavior references only. They are not AVA architecture, implementation, documentation authority, build input, or part of documentation verification.

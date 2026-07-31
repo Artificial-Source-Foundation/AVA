@@ -1,20 +1,16 @@
 # AVA Goals
 
-This directory contains goal packages for long-running AVA product work. A goal package is a docs-first execution surface that can be handed to Codex `/goal` or another agent as a bounded objective.
+This directory contains docs-first execution packages for long-running AVA product work. Goals decompose desired outcomes into bounded areas with reference paths, acceptance criteria, and validation commands; they do not replace current product documentation or prove implementation.
 
-Goal packages do not replace the live product baseline in `docs/product/`. They decompose that baseline into independently executable areas with reference paths, acceptance criteria, and validation commands.
+## Active packages
 
-## Active Packages
+- [Pi MVP parity](pi-mvp-parity/index.md): build a Pi-style native C++ coding-agent experience while preserving AVA's safety, MCP, LSP, and tool boundaries.
 
-| Package | Purpose |
-| --- | --- |
-| `pi-mvp-parity/` | Make AVA a Pi-style native C++ coding agent with AVA's stronger safety, MCP, LSP, and tool features. |
+## Related authority
 
-## Related State
+- [Current product baseline](../product/mvp-baseline.md)
+- [Current coverage ledger](../product/mvp-coverage-ledger.md)
+- [Plans](../plans/README.md)
+- [Roadmaps](../roadmap/README.md)
 
-- Product baseline: `docs/product/mvp-baseline.md`
-- Coverage ledger: `docs/product/mvp-coverage-ledger.md`
-- Existing execution ledger: `goals/ava-mvp-baseline-pi-tui/`
-- Pi reference repo: `docs/reference-code/pi/`
-
-Reference repositories are behavior references only. Do not copy Pi source or architecture into AVA.
+The repository-level execution ledger under `goals/ava-mvp-baseline-pi-tui/` is separate historical working material. Local repositories under `docs/reference-code/` are behavior references only; do not copy their source or architecture into AVA.

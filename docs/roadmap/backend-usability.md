@@ -410,7 +410,7 @@ The final implementation retains these responsibilities across `src/ava/command/
 | `src/ava/tui/composer_permission.cpp` | Present backend-provided choices and recipe details |
 | `src/ava/tui/runtime.cpp` | Submit typed choices; stop owning scope eligibility |
 | `src/main.cpp` and CLI parsing owner | New command-policy/headless controls without growing unrelated main logic |
-| `docs/CONFIG.md`, `docs/USAGE.md`, `docs/rpc-protocol.md` | Config, behavior, protocol, security and operational documentation |
+| `docs/core/configuration.md`, `docs/core/usage.md`, `docs/rpc-protocol.md` | Config, behavior, protocol, security and operational documentation |
 
 ### Proposed Test Areas
 
@@ -645,7 +645,7 @@ AVA adopts the useful behavior shape, not either project's architecture, source,
 2. Introduce one active-context projection and token-accounting path shared by manual, automatic, and overflow compaction.
 3. Persist the configured recent tail for every compaction mode using complete turn/tool boundaries and safe oversized-turn handling.
 4. Add bounded additive compaction reason/model/threshold/pre/post/retry metadata to session/runtime/RPC surfaces.
-5. Update `docs/CONFIG.md`, `docs/USAGE.md`, protocol notes where fields are public, and focused deterministic tests.
+5. Update `docs/core/configuration.md`, `docs/core/usage.md`, protocol notes where fields are public, and focused deterministic tests.
 
 ## Acceptance Criteria
 

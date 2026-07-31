@@ -63,7 +63,7 @@ AVA has strong context, skills, plugin, MCP, and LSP foundations, including stat
 | E3. Plugin capability closure | Document model exposure decisions for plugin commands/prompts/skills, including static-resource autoload and process-per-call tradeoffs. |
 | E4. MCP prompt/resource closure | Decide and implement or defer MCP prompt exposure as model tools. Keep blob/binary safeguards. |
 | E5. LSP maturity | Product approval covers only globally exact-opt-in installed-only `clangd`; keep it as the sole automatic LSP recipe and require explicit configuration for every other server. |
-| E6. Trust docs | Make project trust implications visible in `docs/CONFIG.md`, `docs/plugin-system.md`, and product baseline. |
+| E6. Trust docs | Make project trust implications visible in `docs/core/configuration.md`, `docs/extensions/plugin-system.md`, and product baseline. |
 
 ## Non-Goals Unless Approved
 
@@ -117,9 +117,9 @@ git --no-pager diff --check
   - `src/ava/lsp/configured_provider.cpp` rejects workspace-relative executable/script argv entries from global LSP config; project LSP config can still use them after project trust gates the config.
   - `src/ava/mcp/config.cpp` rejects workspace-relative executable/script command or arg entries from global MCP config; project MCP config can still use them after project trust gates the config.
   - Added LSP/MCP tests for those global-reject/project-allowed paths.
-- Added `docs/mcp.md` as a standalone MCP support/safety summary covering config, supported stdio/tool/resource/prompt surface, permission categories, text-only resource reads, and advanced deferred scope.
-- Updated `docs/plugin-system.md` with a Pi extension capability disposition matrix: tools, commands, prompts, skills, events implemented; UI slots, plugin keybindings, plugin themes, custom providers/request interception, packages/remote install deferred.
-- Updated `docs/CONFIG.md`, `docs/USAGE.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` for `AGENTS.md`/`CLAUDE.md` context behavior, MCP docs evidence, and LSP/MCP global-vs-project executable path rules.
+- Added `docs/extensions/mcp.md` as a standalone MCP support/safety summary covering config, supported stdio/tool/resource/prompt surface, permission categories, text-only resource reads, and advanced deferred scope.
+- Updated `docs/extensions/plugin-system.md` with a Pi extension capability disposition matrix: tools, commands, prompts, skills, events implemented; UI slots, plugin keybindings, plugin themes, custom providers/request interception, packages/remote install deferred.
+- Updated `docs/core/configuration.md`, `docs/core/usage.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` for `AGENTS.md`/`CLAUDE.md` context behavior, MCP docs evidence, and LSP/MCP global-vs-project executable path rules.
 
 #### Changed Files
 
@@ -129,10 +129,10 @@ git --no-pager diff --check
 - `tests/config_context_auth_oauth_tests.cpp`
 - `tests/lsp_tests.cpp`
 - `tests/mcp_tests.cpp`
-- `docs/CONFIG.md`
-- `docs/USAGE.md`
-- `docs/mcp.md`
-- `docs/plugin-system.md`
+- `docs/core/configuration.md`
+- `docs/core/usage.md`
+- `docs/extensions/mcp.md`
+- `docs/extensions/plugin-system.md`
 - `docs/product/mvp-baseline.md`
 - `docs/product/mvp-coverage-ledger.md`
 
@@ -167,7 +167,7 @@ git --no-pager diff --check
 
 - Re-audited this area against the backend aggregate goal after the CLI/session and settings/package areas were closed. Every 100 percent criterion above is either implemented/AVA-superior with evidence or explicitly deferred/excluded with rationale; no frontend/TUI/editor implementation is required for this backend-only closure.
 - Current aggregate verification rerun before material-review fixes: `cmake --preset dev`, `cmake --build --preset dev`, the context/plugin/MCP/LSP targeted CTest command, `ctest --preset dev --output-on-failure`, and `git --no-pager diff --check` all passed locally. Default-gated live-provider and opt-in TUI/PTY smokes remained skipped, which is acceptable for this non-visual backend area.
-- Aggregate material review found two blocking backend safety gaps and both were fixed before closure: MCP/LSP global process launch now shares the workspace-relative argv detector and runs global servers from a safe non-workspace config CWD, with project-scoped servers still allowed to use trusted workspace CWD; LSP project-relative coverage was added to mirror MCP. The same review exposed a real file-read DoS risk in the already closed tools area; the smallest fix rejects symlink/non-regular/oversized read paths before opening and is recorded in `agent-tools-permissions.md`. Fix files: `src/ava/core/process_args.*`, `src/ava/mcp/stdio_client*`, `src/ava/lsp/*`, `src/ava/tools/file_io.cpp`, matching fake servers/tests, `docs/CONFIG.md`, and `docs/mcp.md`.
+- Aggregate material review found two blocking backend safety gaps and both were fixed before closure: MCP/LSP global process launch now shares the workspace-relative argv detector and runs global servers from a safe non-workspace config CWD, with project-scoped servers still allowed to use trusted workspace CWD; LSP project-relative coverage was added to mirror MCP. The same review exposed a real file-read DoS risk in the already closed tools area; the smallest fix rejects symlink/non-regular/oversized read paths before opening and is recorded in `agent-tools-permissions.md`. Fix files: `src/ava/core/process_args.*`, `src/ava/mcp/stdio_client*`, `src/ava/lsp/*`, `src/ava/tools/file_io.cpp`, matching fake servers/tests, `docs/core/configuration.md`, and `docs/extensions/mcp.md`.
 - Final verification after material-review fixes: `cmake --preset dev`, `cmake --build --preset dev`, all three backend-area targeted CTest commands, the focused safety regression CTest command, `ctest --preset dev --output-on-failure`, and `git --no-pager diff --check` passed locally.
 
 ### 2026-07-08 M6/M7 And Carlo Follow-Up

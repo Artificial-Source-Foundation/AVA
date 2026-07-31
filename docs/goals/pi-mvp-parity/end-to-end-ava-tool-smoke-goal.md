@@ -17,7 +17,7 @@ Suggested Codex command:
 | Topic | Paths |
 | --- | --- |
 | Goal package rules | `docs/goals/pi-mvp-parity/index.md`, `docs/goals/pi-mvp-parity/codex-goal-workflow.md` |
-| Release evidence | `docs/goals/pi-mvp-parity/testing-release-quality.md`, `docs/product/mvp-coverage-ledger.md`, `docs/TESTING.md` |
+| Release evidence | `docs/goals/pi-mvp-parity/testing-release-quality.md`, `docs/product/mvp-coverage-ledger.md`, `docs/operations/testing.md` |
 | Headless protocol | `docs/headless-protocol.md` |
 | Existing headless smokes | `tests/cli_headless_rpc_*.cmake`, `tests/cli_headless_print_*.cmake`, `tests/cli_headless_performance_smoke.cmake` |
 | Fake provider | `tests/support/fake_provider_server.cpp` |
@@ -51,7 +51,7 @@ The missing proof is a single realistic smoke that starts `ava`, drives a provid
 | Provider continuation | Provider request logs must prove tool results are included in follow-up provider requests before the final assistant answer. RPC/session messages may supplement this evidence, but they cannot replace the provider-log assertion. |
 | Replay | A second run using `--continue`, `--session`, or RPC session reopen must load the created session and validate it. |
 | Live-model dogfood | A credential-gated full-binary live smoke or documented manual command must run a safe temporary-workspace prompt against at least one configured provider and classify the result as pass/skip/auth-blocked/rate-limited/network-blocked/AVA regression. Existing provider transport live smokes remain useful connectivity checks, not substitutes for the full-binary dogfood path. |
-| Evidence docs | `docs/TESTING.md`, `docs/product/mvp-coverage-ledger.md`, and this file record the command, latest local result, skip conditions, and any residual risks. |
+| Evidence docs | `docs/operations/testing.md`, `docs/product/mvp-coverage-ledger.md`, and this file record the command, latest local result, skip conditions, and any residual risks. |
 | Release command integration | The new fake-provider E2E is part of the normal release verification command set or an explicitly named release-candidate subset. |
 
 ## Deterministic Fake-Provider Scenario
@@ -109,7 +109,7 @@ The primary live dogfood evidence should start the `ava` binary through a CMake-
 - Do not print credentials or auth files.
 - If the selected model does not call tools reliably, classify as inconclusive/provider-behavior and keep the deterministic fake-provider E2E as the release gate.
 
-If code-level live E2E is too flaky or too provider-dependent, document a manual dogfood command in `docs/TESTING.md` with exact setup, expected evidence, and classification rules.
+If code-level live E2E is too flaky or too provider-dependent, document a manual dogfood command in `docs/operations/testing.md` with exact setup, expected evidence, and classification rules.
 
 ## Optional Manual/TUI Evidence
 

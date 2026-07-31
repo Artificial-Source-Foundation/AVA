@@ -482,7 +482,7 @@ green. `git diff --check` and explicit no-index whitespace checks for both new
 roadmap documents also passed.
 
 The F1 review found a task-caused packaged-documentation link mistake:
-`docs/TESTING.md` linked to the historical baseline roadmap document, but
+`docs/operations/testing.md` linked to the historical baseline roadmap document, but
 roadmap documents are not in the package payload. This was not an
 untracked/index condition, and committing would not correct it. The link is
 now an inline source reference to
@@ -1223,11 +1223,11 @@ No optional surface expands the footer or changes default Up/Down behavior.
 **Status: complete — 2026-07-23**
 
 F8 closes the frontend documentation audit. Updated: this roadmap,
-`docs/roadmap/dogfood.md`, `docs/TESTING.md`, `docs/product/mvp-baseline.md`,
-`docs/features.md`,
-`docs/providers.md`, `docs/product/backend-capabilities-1.0.md`,
-`docs/USAGE.md`, and `docs/CONFIG.md`. Verified current with no edit:
-`docs/terminal-setup.md`, `docs/README.md`, and the historical
+`docs/roadmap/dogfood.md`, `docs/operations/testing.md`, `docs/product/mvp-baseline.md`,
+`docs/product/features.md`,
+`docs/core/providers.md`, `docs/product/backend-capabilities-1.0.md`,
+`docs/core/usage.md`, and `docs/core/configuration.md`. Verified current with no edit:
+`docs/operations/terminal-setup.md`, `docs/README.md`, and the historical
 `docs/roadmap/frontend-evidence-baseline.md`.
 
 Present behavior is marked shipped; standalone/deeper diff navigation,
@@ -1238,7 +1238,7 @@ excluded. No live-provider calls were made for this documentation closure.
 
 | Evidence area | Closure record |
 | --- | --- |
-| Renderer/performance | Deterministic `ava_tests.tui_composer` budgets recorded in F6 and `docs/TESTING.md` |
+| Renderer/performance | Deterministic `ava_tests.tui_composer` budgets recorded in F6 and `docs/operations/testing.md` |
 | Real terminal | 14 isolated tmux scenarios with private roots, deadlines, and cleanup |
 | Direct PTY | Kitty transmit/delete, iTerm2 OSC 1337, lifecycle/termios, and OSC8/OSC52 CTests |
 | Manual limits | External pixel quality, fixed 9x18 fallback, and broad screen-reader certification remain explicitly unclaimed |
@@ -1262,7 +1262,7 @@ still below each scenario's 60-second CTest deadline; the final 14-way wave
 passed. Documentation review findings `F8-DOC-001` through `F8-DOC-003` are
 closed: current summaries now state the malformed-v4 and unresolved-tool-pair
 fail-closed boundary, the capability matrix records shipped RPC/TUI attachment
-input, and `docs/TESTING.md` labels the current closure rather than the old
+input, and `docs/operations/testing.md` labels the current closure rather than the old
 59-test checkpoint as latest evidence.
 
 A post-roadmap offline dogfood pass then closed `DGF-001` and `DGF-002`:

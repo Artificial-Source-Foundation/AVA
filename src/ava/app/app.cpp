@@ -433,7 +433,7 @@ int run(int argc, char** argv)
     if (arg == "packages" || arg == "package")
     {
       std::cout << "AVA package manager is deferred pending local-source, provenance, trust, rollback, and compatibility policy.\n"
-                   "Install resources manually under $XDG_CONFIG_HOME/ava or trusted project .ava directories; see docs/CONFIG.md and docs/plugin-system.md.\n";
+                   "Install resources manually under $XDG_CONFIG_HOME/ava or trusted project .ava directories; see docs/core/configuration.md and docs/extensions/plugin-system.md.\n";
       return 0;
     }
     if (arg == "--help" || arg == "-h")

@@ -4,7 +4,7 @@
 
 AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
 
-**Choose a path:** [use AVA](docs/USAGE.md), [configure AVA](docs/CONFIG.md), [delegate work](docs/subagents.md), [understand model tools](docs/tools.md), [troubleshoot](docs/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the audience/task-oriented [documentation index](docs/README.md).
+**Choose a path:** [use AVA](docs/core/usage.md), [configure AVA](docs/core/configuration.md), [delegate work](docs/core/subagents.md), [understand model tools](docs/core/tools.md), [troubleshoot](docs/operations/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the audience/task-oriented [documentation index](docs/README.md).
 
 ## Clone and Build
 
@@ -31,7 +31,7 @@ Build-only requirements:
 - `ncursesw` development headers/library
 - Git and configuration-time access to required dependency sources
 
-The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/desktop-qml.md`.
+The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/interfaces/desktop-qml.md`.
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
@@ -67,7 +67,7 @@ scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 
-**For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/CONTRIBUTING.md).**
+**For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/development/contributing.md).**
 
 ### Linux host artifact
 
@@ -118,13 +118,13 @@ AVA follows XDG paths on Linux:
 - Sessions: `$XDG_STATE_HOME/ava/sessions/`, fallback `~/.local/state/ava/sessions/`
 - Project trust: `$XDG_STATE_HOME/ava/project-trust.json`, fallback `~/.local/state/ava/project-trust.json`
 
-Use `ava connect` to choose a provider and supported login method. Provider credentials can also be configured in `auth.json`; see [configuration and authentication](docs/CONFIG.md#auth) for formats and secret-handling rules. Use `/providers` to inspect provider availability and credential status without revealing secrets, and `/models` to inspect or select configured models. See [provider and model status](docs/providers.md) for the current concise matrix rather than treating this README as a provider catalog.
+Use `ava connect` to choose a provider and supported login method. Provider credentials can also be configured in `auth.json`; see [configuration and authentication](docs/core/configuration.md#auth) for formats and secret-handling rules. Use `/providers` to inspect provider availability and credential status without revealing secrets, and `/models` to inspect or select configured models. See [provider and model status](docs/core/providers.md) for the current concise matrix rather than treating this README as a provider catalog.
 
 The default model is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
 
 ## Common interactive commands
 
-This is a curated set of common commands, not an exhaustive catalog. See [the current command reference](docs/USAGE.md#commands) for the complete list.
+This is a curated set of common commands, not an exhaustive catalog. See [the current command reference](docs/core/usage.md#commands) for the complete list.
 
 - `/help`: show commands and hotkeys
 - `/hotkeys` or `/keybindings`: show effective TUI hotkeys with human primary labels
@@ -183,18 +183,18 @@ The [documentation index](docs/README.md) is organized by audience and task.
 
 ### Users and operators
 
-- [Usage](docs/USAGE.md), [configuration](docs/CONFIG.md), [environment variables](docs/environment-variables.md), and [provider status](docs/providers.md)
-- [Subagents and background jobs](docs/subagents.md), [built-in model tools](docs/tools.md), [LSP](docs/lsp.md), [terminal setup](docs/terminal-setup.md), and [troubleshooting](docs/troubleshooting.md)
-- [Diagnostics and support exports](docs/diagnostics.md), [security/sandboxing](docs/security-sandboxing.md), and [support](SUPPORT.md)
+- [Usage](docs/core/usage.md), [configuration](docs/core/configuration.md), [environment variables](docs/core/environment-variables.md), and [provider status](docs/core/providers.md)
+- [Subagents and background jobs](docs/core/subagents.md), [built-in model tools](docs/core/tools.md), [LSP](docs/extensions/lsp.md), [terminal setup](docs/operations/terminal-setup.md), and [troubleshooting](docs/operations/troubleshooting.md)
+- [Diagnostics and support exports](docs/operations/diagnostics.md), [security/sandboxing](docs/security/sandboxing.md), and [support](SUPPORT.md)
 
 ### Automation and extension authors
 
 - [Proprietary AVA RPC v1](docs/rpc-protocol.md), [ACP](docs/acp.md), its [evidence policy](docs/interop/evidence/README.md), and [shared headless behavior](docs/headless-protocol.md)
-- [Plugins](docs/plugin-system.md), [MCP](docs/mcp.md), and [session format](docs/session-format.md)
+- [Plugins](docs/extensions/plugin-system.md), [MCP](docs/extensions/mcp.md), and [session format](docs/session-format.md)
 
 ### Contributors and maintainers
 
-- [Contributing](CONTRIBUTING.md), [development guide](docs/CONTRIBUTING.md), [build configuration](docs/build-configuration.md), [testing](docs/TESTING.md), [architecture](docs/architecture.md), [codebase guide](docs/engineering/codebase-guide.md), and [documentation policy](docs/documentation.md)
-- [Release checklist](docs/release-checklist.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md), [development guide](docs/development/contributing.md), [build configuration](docs/operations/build-configuration.md), [testing](docs/operations/testing.md), [architecture](docs/development/architecture.md), [codebase guide](docs/development/codebase-guide.md), and [documentation policy](docs/development/documentation-policy.md)
+- [Release checklist](docs/operations/release-checklist.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
 
-Product/parity status and future work live under [product](docs/product/), [roadmap](docs/roadmap/), and [goals](docs/goals/); historical release-position ledgers live under [versions](docs/versions/). Plans and runtime version numbers are not evidence that a tag, artifact, package, or external release has been published.
+Product status and future work live in the [product](docs/product/README.md), [plans](docs/plans/README.md), [roadmap](docs/roadmap/README.md), and [goals](docs/goals/README.md) indexes; historical release-position ledgers live under [versions](docs/versions/README.md). Plans and runtime version numbers are not evidence that a tag, artifact, package, or external release has been published.

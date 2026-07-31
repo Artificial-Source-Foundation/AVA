@@ -1,6 +1,6 @@
 # Contributing to AVA
 
-Thank you for improving AVA. The full development guide—prerequisites, clone and build workflow, formatting, static checks, and review expectations—is in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+Thank you for improving AVA. The full development guide—prerequisites, clone and build workflow, formatting, static checks, and review expectations—is in [`docs/development/contributing.md`](docs/development/contributing.md).
 
 Before contributing, please read:
 

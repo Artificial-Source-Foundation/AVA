@@ -62,7 +62,7 @@ AVA already has strong session tree/fork/clone/name/label/archive/export/copy be
 | C3. `/share` | Product decision first: local-only export link, `gh gist` private upload, or defer. If accepted, make dependency and privacy explicit. |
 | C4. `/copy` and `/logout` | Close low-risk UX gaps with focused command handlers and tests. |
 | C5. CLI flag parity | Add or verify `--session-id`, `--models`, `--thinking`, `--export`, and `--resume` semantics only where they fit AVA. Do not add ambiguous aliases that conflict with existing `--mode build|plan`. |
-| C6. Docs and smokes | Update `README.md`, `docs/USAGE.md`, `docs/headless-protocol.md`, and terminal smoke scripts for user-visible flows. |
+| C6. Docs and smokes | Update `README.md`, `docs/core/usage.md`, `docs/headless-protocol.md`, and terminal smoke scripts for user-visible flows. |
 
 ## Design Constraints
 
@@ -109,7 +109,7 @@ git --no-pager diff --check
   - Changed `src/ava/app/app.cpp`: accepts Pi-compatible `--session-id` as `--session` and `--resume`/`-r` as `--continue`, with updated help/conflict wording.
   - Changed `tests/app_runtime_tests.cpp`: covers `/export jsonl`, `/import` preview/confirm, legacy missing-version normalization, command completions, disabled-command catalog surface, and command outputs.
   - Changed `tests/cli_headless_print_session_startup_options.cmake`: covers `--session-id` and `--resume` in the built CLI against the fake provider while preserving custom session-dir behavior.
-  - Changed docs: `README.md`, `docs/USAGE.md`, `docs/headless-protocol.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` describe JSONL export/import, aliases, and deferrals.
+  - Changed docs: `README.md`, `docs/core/usage.md`, `docs/headless-protocol.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` describe JSONL export/import, aliases, and deferrals.
 
 ## Command And Flag Disposition Matrix
 
@@ -179,7 +179,7 @@ printf '/import valid-import.jsonl\n/import valid-import.jsonl --confirm\n/expor
 
 - Reviewer finding (medium): command-layer import rejection paths lacked coverage. Fixed with `ava_tests.app_runtime` cases for empty archives, malformed JSONL, future session entry versions, and symlink sources, each asserting no session switch.
 - Reviewer finding (low): reopening failure after an otherwise successful import would leave the newly written session file. Fixed by removing the just-created session path on reopen failure, matching append-failure cleanup.
-- Reviewer finding (low): `/import` directly reads the user-selected archive rather than the model-visible permissioned `/read` tool. Accepted as an explicit UX/security decision because import is a slash/local archive load with regular-file checks and strict replay validation; documented in `docs/USAGE.md` and above.
+- Reviewer finding (low): `/import` directly reads the user-selected archive rather than the model-visible permissioned `/read` tool. Accepted as an explicit UX/security decision because import is a slash/local archive load with regular-file checks and strict replay validation; documented in `docs/core/usage.md` and above.
 - Security-auditor result: no material security/safety findings for `/import`, `/export`, session aliases, or disabled `/share`/`/logout` after the above fixes and documentation.
 
 ## 2026-07-04 Backend Aggregate Closure Audit

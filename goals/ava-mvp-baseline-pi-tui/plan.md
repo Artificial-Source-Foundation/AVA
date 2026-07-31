@@ -85,7 +85,7 @@ Reference code is behavior input only. Do not copy Pi source or architecture int
 
 6. Keep docs and checklist evidence synchronized after every slice.
 
-   Touches: `docs/product/mvp-baseline.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/headless-protocol.md`, version/roadmap docs as applicable.
+   Touches: `docs/product/mvp-baseline.md`, `docs/core/usage.md`, `docs/core/configuration.md`, `docs/headless-protocol.md`, version/roadmap docs as applicable.
 
    Work:
    - Mark checklist items complete only when implementation, tests, and smoke evidence agree.

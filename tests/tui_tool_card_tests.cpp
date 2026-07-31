@@ -743,14 +743,14 @@ void run_tui_tool_card_tests_part_1()
                                                                                    .operation = "read",
                                                                                    .tool_name = "read_file",
                                                                                    .risk = "low",
-                                                                                   .target = "docs/USAGE.md"}}},
+                                                                                   .target = "docs/core/usage.md"}}},
       "git push");
   auto const missing_permission_copy_text = ava::tui::detail::tool_card_permission_copy_text(
       ava::tui::ToolTimelineItem{
           .status = ava::tui::ToolTimelineStatus::Success,
           .name = "read",
           .permissions = {ava::tui::ToolPermissionAuditItem{
-              .permission_request_id = "permreq_read", .decision = "allow", .operation = "read", .tool_name = "read_file", .target = "docs/USAGE.md"}}},
+              .permission_request_id = "permreq_read", .decision = "allow", .operation = "read", .tool_name = "read_file", .target = "docs/core/usage.md"}}},
       "git push");
   expect(permission_copy_text.find("permission: deny") != std::string::npos && permission_copy_text.find("id permreq_push") != std::string::npos &&
              permission_copy_text.find("risk high") != std::string::npos &&

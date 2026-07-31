@@ -33,7 +33,7 @@ OpenAI continuation now persists each assistant turn as one ordered session-v4 t
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 18 -R '^ava_tui\.tmux_smoke_'
 ```
 
-Four additional gated direct PTY/protocol CTests cover Kitty, iTerm2, terminal lifecycle, and OSC 8/OSC 52. See [TESTING.md](../TESTING.md) for the current commands and prerequisite behavior.
+Four additional gated direct PTY/protocol CTests cover Kitty, iTerm2, terminal lifecycle, and OSC 8/OSC 52. See [TESTING.md](../operations/testing.md) for the current commands and prerequisite behavior.
 
 ## Defects found while dogfooding
 

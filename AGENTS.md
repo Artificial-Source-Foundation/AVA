@@ -88,7 +88,7 @@ git --no-pager diff --check
 
 ## Engineering Rules
 
-- Follow `docs/engineering/cpp-safety-rules.md` for C++ work.
+- Follow `docs/development/cpp-safety-rules.md` for C++ work.
 - Use C++23 and CMake.
 - Prefer small modules, narrow interfaces, and explicit ownership.
 - No raw owning pointers, manual `new`, or manual `delete` in application code.

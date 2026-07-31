@@ -55,7 +55,7 @@ AVA already has OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, and OpenRou
 | Auth parity | API-key env/storage works for selected providers. OAuth is implemented only where supported and documented; unsupported third-party OAuth flows are not faked. |
 | Reasoning mapping | Provider-specific reasoning/thinking formats are validated before model switch and documented in model metadata. |
 | Provider/model UX | `/providers`, `/models`, `/model`, `/scoped-models`, Ctrl+P, and settings entries expose status, capabilities, auth source without secrets, compatibility quirks, pricing, context, modalities, and live-smoke status where known. |
-| Live smoke matrix | `docs/TESTING.md` or this file records per-provider smoke env vars, expected model, command, latest result, and skip reason when credentials are absent. |
+| Live smoke matrix | `docs/operations/testing.md` or this file records per-provider smoke env vars, expected model, command, latest result, and skip reason when credentials are absent. |
 | Tests | Provider request/parse tests, auth tests, model config tests, and credential-gated live smoke coverage exist for every implemented provider family. |
 
 ## Provider Disposition Matrix
@@ -160,9 +160,9 @@ git --no-pager diff --check
 - `tests/provider_gemini_tests.cpp`
 - `tests/provider_live_smoke_tests.cpp`
 - `tests/app_runtime_tests.cpp`
-- `docs/CONFIG.md`
-- `docs/USAGE.md`
-- `docs/TESTING.md`
+- `docs/core/configuration.md`
+- `docs/core/usage.md`
+- `docs/operations/testing.md`
 - `README.md`
 - `docs/product/mvp-baseline.md`
 - `docs/product/mvp-coverage-ledger.md`

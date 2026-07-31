@@ -327,6 +327,17 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_inline_code_text_participates_in_heading_slug(self) -> None:
+        self.write("README.md", "[code](docs/guide.md#parse-tag-not)\n")
+        self.write(
+            "docs/guide.md",
+            "# Parse `<tag>` not <br>\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_percent_decoded_fragment_is_validated(self) -> None:
         self.write("README.md", "[encoded](docs/guide.md#caf%C3%A9)\n")
         self.write("docs/guide.md", "# Café\n")
@@ -349,11 +360,68 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
             result.stderr,
         )
 
+    def test_inline_code_html_anchor_does_not_count(self) -> None:
+        self.write(
+            "README.md",
+            '`<a id="not-an-anchor"></a>`\n\n[broken](#not-an-anchor)\n',
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: README.md#not-an-anchor",
+            result.stderr,
+        )
+
+    def test_multibacktick_code_span_html_anchor_does_not_count(self) -> None:
+        self.write(
+            "README.md",
+            '`` `<a id="also-not-an-anchor"></a>` ``\n\n'
+            "[broken](#also-not-an-anchor)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: README.md#also-not-an-anchor",
+            result.stderr,
+        )
+
+    def test_html_comment_anchors_and_headings_do_not_count(self) -> None:
+        self.write(
+            "README.md",
+            "<!--\n# Comment heading\n<a id=comment-anchor></a>\n-->\n\n"
+            "[heading](#comment-heading) [anchor](#comment-anchor)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("README.md#comment-heading", result.stderr)
+        self.assertIn("README.md#comment-anchor", result.stderr)
+
     def test_explicit_html_id_and_name_anchors_are_validated(self) -> None:
         self.write(
             "README.md",
+            '`<a id="code-only"></a>`\n<!-- <a id="comment-only"></a> -->\n'
             '<a id="stable-id"></a>\n<span name=legacy-name></span>\n\n'
             "[id](#stable-id) [name](#legacy-name)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unclosed_and_escaped_backticks_do_not_hide_real_anchors(self) -> None:
+        self.write(
+            "README.md",
+            "``unclosed code span\n"
+            '<a id="after-unclosed"></a>\n'
+            "\\`escaped opener\n"
+            '<a id="after-escaped"></a>\n\n'
+            "[unclosed](#after-unclosed) [escaped](#after-escaped)\n",
         )
 
         result = self.run_verifier("--source-tree")

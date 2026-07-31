@@ -35,6 +35,7 @@ HTML_ANCHOR_ATTRIBUTE_RE = re.compile(
     re.IGNORECASE,
 )
 SLUG_REMOVED_ASCII = frozenset("!\"#$%&'()*+,./:;<=>?@[\\]^`{|}~")
+BACKTICK_RUN_RE = re.compile(r"`+")
 
 # These trees are dependencies, generated output, or caches rather than AVA's
 # first-party source documentation. Exact repository-relative exclusions avoid
@@ -141,8 +142,98 @@ def normalize_reference_label(label: str) -> str:
     return " ".join(label.split()).casefold()
 
 
+def is_backslash_escaped(text: str, offset: int) -> bool:
+    backslash_count = 0
+    offset -= 1
+    while offset >= 0 and text[offset] == "\\":
+        backslash_count += 1
+        offset -= 1
+    return backslash_count % 2 == 1
+
+
+def markdown_inline_regions(
+    text: str,
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Return non-overlapping code-span and HTML-comment regions."""
+    backtick_runs = list(BACKTICK_RUN_RE.finditer(text))
+    next_run_of_length: list[int | None] = [None] * len(backtick_runs)
+    latest_run_of_length: dict[int, int] = {}
+    for run_index in range(len(backtick_runs) - 1, -1, -1):
+        run_length = len(backtick_runs[run_index].group(0))
+        next_run_of_length[run_index] = latest_run_of_length.get(run_length)
+        latest_run_of_length[run_length] = run_index
+
+    run_by_start = {run.start(): index for index, run in enumerate(backtick_runs)}
+    code_spans: list[tuple[int, int]] = []
+    comments: list[tuple[int, int]] = []
+    offset = 0
+    while offset < len(text):
+        if text.startswith("<!--", offset):
+            comment_end = text.find("-->", offset + 4)
+            comment_end = len(text) if comment_end == -1 else comment_end + 3
+            comments.append((offset, comment_end))
+            offset = comment_end
+            continue
+
+        run_index = run_by_start.get(offset)
+        if run_index is None:
+            offset += 1
+            continue
+        opener = backtick_runs[run_index]
+        if is_backslash_escaped(text, opener.start()):
+            offset = opener.end()
+            continue
+        closer_index = next_run_of_length[run_index]
+        if closer_index is None:
+            # An unmatched run is literal text and must not hide later HTML.
+            offset = opener.end()
+            continue
+        closer = backtick_runs[closer_index]
+        code_spans.append((opener.start(), closer.end()))
+        offset = closer.end()
+
+    return code_spans, comments
+
+
+def mask_regions(text: str, regions: list[tuple[int, int]]) -> str:
+    characters = list(text)
+    for start, end in regions:
+        for offset in range(start, end):
+            if characters[offset] not in "\r\n":
+                characters[offset] = " "
+    return "".join(characters)
+
+
+def rendered_code_span_text(code_span: str) -> str:
+    delimiter_length = len(code_span) - len(code_span.lstrip("`"))
+    content = code_span[delimiter_length:-delimiter_length]
+    content = re.sub(r"\r\n|\r|\n", " ", content)
+    if content.startswith(" ") and content.endswith(" ") and content.strip(" "):
+        content = content[1:-1]
+    return content
+
+
+def protect_heading_code_spans(raw_heading: str) -> tuple[str, dict[str, str]]:
+    code_spans, _ = markdown_inline_regions(raw_heading)
+    if not code_spans:
+        return raw_heading, {}
+
+    pieces: list[str] = []
+    protected: dict[str, str] = {}
+    previous_end = 0
+    for index, (start, end) in enumerate(code_spans):
+        placeholder = f"\ufdd0{index}\ufdd1"
+        pieces.append(raw_heading[previous_end:start])
+        pieces.append(placeholder)
+        protected[placeholder] = rendered_code_span_text(raw_heading[start:end])
+        previous_end = end
+    pieces.append(raw_heading[previous_end:])
+    return "".join(pieces), protected
+
+
 def github_heading_slug(raw_heading: str) -> str:
-    heading = HEADING_INLINE_LINK_RE.sub(r"\1", raw_heading)
+    heading, protected_code = protect_heading_code_spans(raw_heading)
+    heading = HEADING_INLINE_LINK_RE.sub(r"\1", heading)
     heading = HEADING_REFERENCE_LINK_RE.sub(r"\1", heading)
     heading = HTML_TAG_RE.sub("", heading)
     heading = html.unescape(heading)
@@ -151,6 +242,9 @@ def github_heading_slug(raw_heading: str) -> str:
     while heading != previous:
         previous = heading
         heading = UNDERSCORE_EMPHASIS_RE.sub(r"\2", heading)
+
+    for placeholder, rendered_text in protected_code.items():
+        heading = heading.replace(placeholder, rendered_text)
 
     heading = heading.lower().strip()
     heading = "".join(
@@ -167,9 +261,12 @@ def github_heading_slug(raw_heading: str) -> str:
 
 def markdown_anchors(text: str) -> frozenset[str]:
     text = markdown_without_fenced_code(text)
+    code_spans, comments = markdown_inline_regions(text)
+    text_without_comments = mask_regions(text, comments)
+    text_without_code_or_comments = mask_regions(text_without_comments, code_spans)
     anchors: set[str] = set()
 
-    for tag_match in HTML_TAG_RE.finditer(text):
+    for tag_match in HTML_TAG_RE.finditer(text_without_code_or_comments):
         tag = tag_match.group(0)
         for attribute_match in HTML_ANCHOR_ATTRIBUTE_RE.finditer(tag):
             anchor = next(
@@ -179,7 +276,7 @@ def markdown_anchors(text: str) -> frozenset[str]:
 
     slug_counts: dict[str, int] = {}
     generated_slugs: set[str] = set()
-    for line in text.splitlines():
+    for line in text_without_comments.splitlines():
         heading_match = ATX_HEADING_RE.match(line)
         if heading_match is None:
             continue

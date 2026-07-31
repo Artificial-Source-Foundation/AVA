@@ -416,38 +416,38 @@ RuntimeSubagentWorkspaceInputResult RuntimeSubagentWorkspaceController::handle_i
   }
   else if (character_text == "C")
   {
-    if (!options_.cancel_subagent)
+    auto const outcome = options_.cancel_subagent ? options_.cancel_subagent(job_id_) : SubagentWorkspaceCancelOutcome::CancelUnavailable;
+    switch (outcome)
     {
-      workspace_.notice = "Cancel unavailable";
-      result.beep = true;
-    }
-    else if (auto canceled = options_.cancel_subagent(job_id_); !canceled)
-    {
-      workspace_.notice = "Cancel unavailable";
-      result.beep = true;
-    }
-    else
-    {
-      workspace_.notice = "Cancel requested";
+      case SubagentWorkspaceCancelOutcome::CancellationRequested:
+        workspace_.notice = "Cancellation requested";
+        break;
+      case SubagentWorkspaceCancelOutcome::AlreadyFinished:
+        workspace_.notice = "Already finished";
+        break;
+      case SubagentWorkspaceCancelOutcome::CancelUnavailable:
+        workspace_.notice = "Cancel unavailable";
+        result.beep = true;
+        break;
     }
     publish();
     result.changed = true;
   }
   else if (character_text == "P")
   {
-    if (!options_.promote_subagent)
+    auto const outcome = options_.promote_subagent ? options_.promote_subagent(job_id_) : SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+    switch (outcome)
     {
-      workspace_.notice = "Promotion unavailable";
-      result.beep = true;
-    }
-    else if (auto promoted = options_.promote_subagent(job_id_); !promoted)
-    {
-      workspace_.notice = "Promotion unavailable";
-      result.beep = true;
-    }
-    else
-    {
-      workspace_.notice = "Promoted to background";
+      case SubagentWorkspacePromoteOutcome::CurrentlyBackground:
+        workspace_.notice = "Currently background";
+        break;
+      case SubagentWorkspacePromoteOutcome::AlreadyFinished:
+        workspace_.notice = "Already finished";
+        break;
+      case SubagentWorkspacePromoteOutcome::PromotionUnavailable:
+        workspace_.notice = "Promotion unavailable";
+        result.beep = true;
+        break;
     }
     publish();
     result.changed = true;

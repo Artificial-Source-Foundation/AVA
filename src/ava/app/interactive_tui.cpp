@@ -445,24 +445,14 @@ int run_tui(ShellState state)
             }
             return coordinator->inspect(state.session.store.session_id(), job_id, known_generation);
           },
-      .cancel_subagent = [&state](std::string_view job_id) -> ava::core::VoidResult {
-        auto const coordinator = state.session.subagent_coordinator();
-        if (!coordinator)
-          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
-        auto canceled = coordinator->cancel(state.session.store.session_id(), job_id);
-        if (!canceled)
-          return std::unexpected(std::move(canceled.error()));
-        return {};
-      },
-      .promote_subagent = [&state](std::string_view job_id) -> ava::core::VoidResult {
-        auto const coordinator = state.session.subagent_coordinator();
-        if (!coordinator)
-          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
-        auto promoted = coordinator->promote(state.session.store.session_id(), job_id);
-        if (!promoted)
-          return std::unexpected(std::move(promoted.error()));
-        return {};
-      },
+      .cancel_subagent =
+          [&state](std::string_view job_id) {
+            return ava::app::cancel_subagent_for_workspace(state.session.subagent_coordinator(), state.session.store.session_id(), job_id);
+          },
+      .promote_subagent =
+          [&state](std::string_view job_id) {
+            return ava::app::promote_subagent_for_workspace(state.session.subagent_coordinator(), state.session.store.session_id(), job_id);
+          },
       .on_open_fork_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
         // F-001: refuse sessionless /fork-from before listing/selecting so a later
         // handled no-op cannot open a picker that wipes the live transcript.

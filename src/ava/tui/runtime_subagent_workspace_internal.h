@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <optional>
 #include <string>
-#include "debug.h"
 
 namespace ava::tui {
 

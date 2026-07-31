@@ -18,8 +18,10 @@ from tui_smoke_helpers import (
 )
 
 
-def _assert_workspace_safe(screen: str, label: str) -> None:
-    forbidden = ("job_", "session_", "/tmp/", "<task", "</task", "call_task_live")
+def _assert_workspace_safe(screen: str, label: str, *, parent_card: bool = False) -> None:
+    forbidden = ["job_", "session_", "/tmp/", "<task", "</task", "call_task_live"]
+    if parent_card:
+        forbidden.extend(["arguments provided", "Inspect delegated fixture"])
     leaked = [value for value in forbidden if value in screen]
     if leaked:
         raise RuntimeError(f"{label} leaked hidden backend data {leaked!r}\nscreen:\n{screen}")
@@ -61,7 +63,8 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     wait_for_request_count(provider.request_log, 2, "background task and parent continuation requests", timeout=12.0)
     wait_for(tmux_exe, session, r"Esc stop.*type a follow-up|type a follow-up", "active parent run before /jobs")
 
-    send_literal(tmux_exe, session, "/jobs")
+    # Trailing ASCII whitespace must still open the exact active /jobs selector.
+    send_literal(tmux_exe, session, "/jobs ")
     send_keys(tmux_exe, session, "Enter")
     selector = wait_for(tmux_exe, session, r"Search subagents", "live subagent selector during active parent run")
     if "Running" not in selector or "Background" not in selector:
@@ -105,6 +108,11 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     restored = wait_for_absent(tmux_exe, session, r"Search subagents", "parent view restored after workspace close", timeout=12.0)
     if "Parent continued after background start" not in restored:
         raise RuntimeError(f"restored parent view omitted its own assistant output\nscreen:\n{restored}")
+    if "Live workspace audit" not in restored:
+        raise RuntimeError(f"restored parent view omitted specialized task card title\nscreen:\n{restored}")
+    if not re.search(r"\bGeneral\b", restored):
+        raise RuntimeError(f"restored parent view omitted specialized task card type\nscreen:\n{restored}")
+    _assert_workspace_safe(restored, "restored parent view", parent_card=True)
     send_keys(tmux_exe, session, "C-d")
     wait_for_session_exit(tmux_exe, session)
     tmux(tmux_exe, "kill-session", "-t", session, check=False)

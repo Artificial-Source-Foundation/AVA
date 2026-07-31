@@ -6,6 +6,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_commands_internal.h"
 #include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/theme.h"
@@ -1011,19 +1012,57 @@ void run_tui_selector_tests()
          "soft post-fork catalog warnings attach as single-line status without replacing the opened snapshot");
 
   auto make_subagent_snapshot = [](std::string id, std::string owner, std::string title, std::string type, ava::agent::SubagentExecutionState execution,
-                                   std::size_t tools) {
+                                   std::size_t tools, ava::agent::SubagentJobMode mode = ava::agent::SubagentJobMode::Background, bool cancel_requested = false,
+                                   bool was_promoted = false) {
     ava::agent::SubagentCoordinatorJobSnapshot snapshot;
     snapshot.job.identity.job_id = std::move(id);
     snapshot.job.identity.parent_session_id = std::move(owner);
     snapshot.job.identity.child_session_id = "session_child_hidden";
     snapshot.job.identity.task_id = "task_hidden";
-    snapshot.job.mode = ava::agent::SubagentJobMode::Background;
+    snapshot.job.mode = mode;
     snapshot.job.execution = execution;
+    snapshot.job.cancel_requested = cancel_requested;
+    snapshot.job.was_promoted = was_promoted;
     snapshot.job.display_title = std::move(title);
     snapshot.job.display_subagent_type = std::move(type);
     snapshot.job.tool_calls = tools;
     return snapshot;
   };
+  auto running_cancel = make_subagent_snapshot("job_active", "owner-a", "Active", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                               ava::agent::SubagentJobMode::Foreground, true);
+  auto terminal_cancel = make_subagent_snapshot("job_done", "owner-a", "Done", "general", ava::agent::SubagentExecutionState::Completed, 0);
+  auto unexpected_cancel = make_subagent_snapshot("job_odd", "owner-a", "Odd", "general", ava::agent::SubagentExecutionState::Running, 0,
+                                                  ava::agent::SubagentJobMode::Foreground, false);
+  expect(ava::app::map_subagent_cancel_outcome(running_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested &&
+             ava::app::map_subagent_cancel_outcome(running_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested &&
+             ava::app::map_subagent_cancel_outcome(terminal_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::AlreadyFinished &&
+             ava::app::map_subagent_cancel_outcome(unexpected_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable &&
+             ava::app::map_subagent_cancel_outcome(std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "secret/job_path\\nleak"))) ==
+                 ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable,
+         "cancel mapper covers active/repeated, terminal, unexpected, and error states without backend text");
+  auto promoted_bg = make_subagent_snapshot("job_promoted", "owner-a", "Promoted", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                            ava::agent::SubagentJobMode::Background, false, true);
+  auto already_bg = make_subagent_snapshot("job_bg", "owner-a", "Background", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                           ava::agent::SubagentJobMode::Background);
+  auto terminal_promote =
+      make_subagent_snapshot("job_term", "owner-a", "Term", "general", ava::agent::SubagentExecutionState::Failed, 0, ava::agent::SubagentJobMode::Foreground);
+  auto foreground_running = make_subagent_snapshot("job_fg", "owner-a", "Foreground", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                                   ava::agent::SubagentJobMode::Foreground);
+  auto promote_error = ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "secret/path/job-old\nunsafe")));
+  expect(ava::app::map_subagent_promote_outcome(promoted_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(already_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(terminal_promote) == ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished &&
+             ava::app::map_subagent_promote_outcome(promote_error, already_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(promote_error, terminal_promote) == ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished &&
+             ava::app::map_subagent_promote_outcome(promote_error, foreground_running) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable &&
+             ava::app::map_subagent_promote_outcome(promote_error) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable &&
+             ava::app::map_subagent_promote_outcome(foreground_running) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable,
+         "promote mapper covers success/already/background, terminal, race-checked background/terminal failures, and plain errors");
+  expect(ava::tui::runtime_commands::exact_command("/jobs", "/jobs") && ava::tui::runtime_commands::exact_command(" /jobs ", "/jobs") &&
+             ava::tui::runtime_commands::exact_command("\t/jobs\n", "/jobs") && !ava::tui::runtime_commands::exact_command("/jobs promote x", "/jobs") &&
+             !ava::tui::runtime_commands::exact_command("/jobs-extra", "/jobs") && !ava::tui::runtime_commands::exact_command("/jobsx", "/jobs"),
+         "exact /jobs classification trims ASCII surrounding whitespace and rejects args or prefixed lookalikes");
   auto selector_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
       make_subagent_snapshot("job_0123456789abcdef_old", "owner-a", {}, "explore", ava::agent::SubagentExecutionState::Completed, 0),
       make_subagent_snapshot("job_0123456789abcdef_new", "owner-a", "Audit parser", "general", ava::agent::SubagentExecutionState::Running, 3)};
@@ -1105,8 +1144,15 @@ void run_tui_selector_tests()
   auto const live_screen = tui_test_support::join_visible_lines(live_lines);
   expect(live_lines.size() == 10 && live_screen.find("Audit parser") != std::string::npos && live_screen.find("User") != std::string::npos &&
              live_screen.find("Assistant") != std::string::npos && live_screen.find("Committed result line.") != std::string::npos &&
+             live_screen.find("C cancel") != std::string::npos && live_screen.find("P promote") != std::string::npos &&
              live_screen.find("Type a message") == std::string::npos,
          "read-only subagent workspace renders only its header, committed child messages, status, and controls");
+  auto terminal_controls_view = live_view;
+  terminal_controls_view.terminal = true;
+  auto const terminal_controls_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(terminal_controls_view, 64, 10));
+  expect(terminal_controls_screen.find("C cancel") == std::string::npos && terminal_controls_screen.find("P promote") == std::string::npos &&
+             terminal_controls_screen.find("Esc jobs") != std::string::npos,
+         "terminal workspace frames omit C/P controls from the footer");
   auto waiting_view = live_view;
   waiting_view.messages.clear();
   auto waiting_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(waiting_view, 20, 8));
@@ -1188,13 +1234,15 @@ void run_tui_selector_tests()
     }
     return std::shared_ptr<ava::agent::SubagentInspectorFrame const>(std::move(frame));
   };
+  auto cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested;
+  auto promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
   controller_options.cancel_subagent = [&](std::string_view id) {
     canceled_id = std::string(id);
-    return ava::core::VoidResult{};
+    return cancel_outcome;
   };
-  controller_options.promote_subagent = [&](std::string_view id) -> ava::core::VoidResult {
+  controller_options.promote_subagent = [&](std::string_view id) {
     promoted_id = std::string(id);
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "secret/path/job-old\nunsafe"));
+    return promote_outcome;
   };
   ava::tui::ComposerSnapshot controller_snapshot;
   controller_snapshot.input = "parent draft";
@@ -1274,20 +1322,51 @@ void run_tui_selector_tests()
   cancel_job.key = ava::tui::Key::Character;
   cancel_job.character = 'C';
   cancel_job.text = "C";
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested;
   auto canceled = workspace_controller.handle_input(cancel_job);
+  expect(canceled.changed && !canceled.beep && canceled_id == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancellation requested",
+         "active cancel publishes the fixed Cancellation requested notice without a beep");
+  auto canceled_again = workspace_controller.handle_input(cancel_job);
+  expect(canceled_again.changed && !canceled_again.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancellation requested",
+         "repeated cancel stays truthfully Cancellation requested");
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::AlreadyFinished;
+  auto canceled_terminal = workspace_controller.handle_input(cancel_job);
+  expect(canceled_terminal.changed && !canceled_terminal.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Already finished",
+         "terminal cancel publishes the fixed Already finished notice");
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable;
+  auto canceled_unavailable = workspace_controller.handle_input(cancel_job);
+  expect(canceled_unavailable.changed && canceled_unavailable.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancel unavailable",
+         "cancel errors map to Cancel unavailable with a beep");
   ava::tui::InputEvent promote_job;
   promote_job.key = ava::tui::Key::Character;
   promote_job.character = 'P';
   promote_job.text = "P";
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground;
   auto promoted = workspace_controller.handle_input(promote_job);
+  expect(promoted.changed && !promoted.beep && promoted_id == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Currently background",
+         "successful or already-background promote publishes Currently background without a beep");
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished;
+  auto promoted_terminal = workspace_controller.handle_input(promote_job);
+  expect(promoted_terminal.changed && !promoted_terminal.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Already finished",
+         "terminal promote publishes Already finished");
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+  auto promoted_unavailable = workspace_controller.handle_input(promote_job);
   auto const control_screen = controller_snapshot.subagent_workspace
                                   ? tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(*controller_snapshot.subagent_workspace, 40, 8))
                                   : std::string{};
-  expect(canceled.changed && canceled_id == "job-old" && promoted.changed && promoted.beep && promoted_id == "job-old",
-         "workspace controls invoke owner-bound hidden job ids and report failed controls with a beep");
+  expect(promoted_unavailable.changed && promoted_unavailable.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Promotion unavailable",
+         "promote errors map to Promotion unavailable with a beep");
   expect(control_screen.find("Promotion") != std::string::npos && control_screen.find("unavaila") != std::string::npos &&
-             control_screen.find("secret/path") == std::string::npos,
-         "workspace control failures stay sanitized and retain the view");
+             control_screen.find("secret/path") == std::string::npos && control_screen.find("job-old") == std::string::npos &&
+             control_screen.find("PermissionDenied") == std::string::npos && control_screen.find("Cancel requested") == std::string::npos,
+         "workspace control failures stay sanitized, use fixed notices, and never leak backend text or ids");
   static_cast<void>(workspace_controller.handle_input(escape_workspace));
   static_cast<void>(workspace_controller.handle_input(escape_workspace));
   expect(!workspace_controller.active() && controller_snapshot.input == "parent draft" && controller_snapshot.status == "parent status" &&

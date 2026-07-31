@@ -122,7 +122,16 @@ std::vector<std::string> render_subagent_workspace(SubagentWorkspaceView const& 
   }
 
   std::string footer;
-  if (width >= 72)
+  if (view.terminal)
+  {
+    if (width >= 56)
+      footer = "Esc jobs · Tab/Shift+Tab cycle · ↑↓ scroll";
+    else if (width >= 34)
+      footer = "Esc jobs · Tab cycle · ↑↓ scroll";
+    else
+      footer = "Esc · Tab · ↑↓";
+  }
+  else if (width >= 72)
     footer = "Esc jobs · Tab/Shift+Tab cycle · C cancel · P promote · ↑↓ scroll";
   else if (width >= 46)
     footer = "Esc jobs · Tab cycle · C cancel · P promote · ↑↓ scroll";

@@ -121,6 +121,22 @@ struct TuiSubmitContext
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Narrow TUI outcomes for live subagent workspace controls. Mappers and
+// callbacks must never surface Error::format, ids, paths, or backend text.
+enum class SubagentWorkspaceCancelOutcome
+{
+  CancellationRequested,
+  AlreadyFinished,
+  CancelUnavailable,
+};
+
+enum class SubagentWorkspacePromoteOutcome
+{
+  CurrentlyBackground,
+  AlreadyFinished,
+  PromotionUnavailable,
+};
+
 struct TuiRuntimeOptions
 {
   std::string mode;
@@ -162,11 +178,12 @@ struct TuiRuntimeOptions
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
   // Path-free, owner-bound live subagent workspace callbacks. Exact ids are
-  // accepted only as hidden selector values and callback authority.
+  // accepted only as hidden selector values and callback authority. Cancel and
+  // promote return narrow typed TUI outcomes only — never free-form backend text.
   std::function<ava::core::Result<SelectListView>()> list_subagents;
   std::function<ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>>(std::string_view, std::optional<std::uint64_t>)> inspect_subagent;
-  std::function<ava::core::VoidResult(std::string_view)> cancel_subagent;
-  std::function<ava::core::VoidResult(std::string_view)> promote_subagent;
+  std::function<SubagentWorkspaceCancelOutcome(std::string_view)> cancel_subagent;
+  std::function<SubagentWorkspacePromoteOutcome(std::string_view)> promote_subagent;
   // Open searchable public user-turn pickers. Fail closed with Result when the
   // bound session authority has no public user turns, is sessionless for fork-from,
   // or cannot list them. Optional initial_query seeds the picker filter.

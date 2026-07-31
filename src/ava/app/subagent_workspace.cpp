@@ -96,6 +96,26 @@ std::vector<std::string> short_hidden_refs(std::vector<std::string> const& ids)
   return refs;
 }
 
+bool terminal_execution(ava::agent::SubagentExecutionState state) noexcept
+{
+  return state == ava::agent::SubagentExecutionState::Completed || state == ava::agent::SubagentExecutionState::Failed ||
+         state == ava::agent::SubagentExecutionState::Canceled || state == ava::agent::SubagentExecutionState::Interrupted;
+}
+
+bool background_or_promoted(ava::agent::SubagentJobSnapshot const& job) noexcept
+{
+  return job.mode == ava::agent::SubagentJobMode::Background || job.was_promoted;
+}
+
+std::optional<ava::tui::SubagentWorkspacePromoteOutcome> classify_promote_snapshot(ava::agent::SubagentCoordinatorJobSnapshot const& snapshot)
+{
+  if (terminal_execution(snapshot.job.execution))
+    return ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished;
+  if (background_or_promoted(snapshot.job))
+    return ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground;
+  return std::nullopt;
+}
+
 }  // namespace
 
 ava::tui::SelectListView subagent_selector_view(std::vector<ava::agent::SubagentCoordinatorJobSnapshot> const& snapshots)
@@ -158,6 +178,57 @@ ava::core::Result<ava::tui::SelectListView> subagent_selector_view(std::shared_p
   if (!coordinator)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
   return subagent_selector_view(coordinator->list(parent_session_id));
+}
+
+ava::tui::SubagentWorkspaceCancelOutcome map_subagent_cancel_outcome(ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> const& result)
+{
+  if (!result)
+    return ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable;
+  if (terminal_execution(result->job.execution))
+    return ava::tui::SubagentWorkspaceCancelOutcome::AlreadyFinished;
+  if (result->job.cancel_requested)
+    return ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested;
+  return ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable;
+}
+
+ava::tui::SubagentWorkspacePromoteOutcome map_subagent_promote_outcome(ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot> const& promote_result,
+                                                                       std::optional<ava::agent::SubagentCoordinatorJobSnapshot> const& owner_bound_status)
+{
+  if (promote_result)
+  {
+    if (auto classified = classify_promote_snapshot(*promote_result))
+      return *classified;
+    return ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+  }
+  if (owner_bound_status)
+  {
+    if (auto classified = classify_promote_snapshot(*owner_bound_status))
+      return *classified;
+  }
+  return ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+}
+
+ava::tui::SubagentWorkspaceCancelOutcome cancel_subagent_for_workspace(std::shared_ptr<ava::agent::SubagentCoordinator> const& coordinator,
+                                                                       std::string_view parent_session_id, std::string_view job_id)
+{
+  if (!coordinator)
+    return ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable;
+  return map_subagent_cancel_outcome(coordinator->cancel(parent_session_id, job_id));
+}
+
+ava::tui::SubagentWorkspacePromoteOutcome promote_subagent_for_workspace(std::shared_ptr<ava::agent::SubagentCoordinator> const& coordinator,
+                                                                         std::string_view parent_session_id, std::string_view job_id)
+{
+  if (!coordinator)
+    return ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+  auto promoted = coordinator->promote(parent_session_id, job_id);
+  std::optional<ava::agent::SubagentCoordinatorJobSnapshot> owner_bound_status;
+  if (!promoted)
+  {
+    if (auto status = coordinator->snapshot(parent_session_id, job_id))
+      owner_bound_status = std::move(*status);
+  }
+  return map_subagent_promote_outcome(promoted, owner_bound_status);
 }
 
 }  // namespace ava::app

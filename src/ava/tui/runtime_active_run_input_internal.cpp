@@ -144,7 +144,7 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
-  if (submitted_command == "/jobs")
+  if (runtime_commands::exact_command(submitted_command, "/jobs"))
   {
     push_history(input_history, submitted_command);
     clear_local_command_draft();

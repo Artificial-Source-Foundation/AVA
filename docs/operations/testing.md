@@ -39,6 +39,8 @@ LIBCWD_NO_STARTUP_MSGS=1 AVA_NO_DEBUG_OUTPUT=1 \
 
 Treat these logs as private diagnostic artifacts because enabled channels may contain process or test details.
 
+## Release Package and Provenance Checks
+
 Focused release provenance/package tests are offline and deterministic:
 
 ```sh
@@ -148,13 +150,20 @@ Run clang-tidy against changed implementation files after configuring the build:
 clang-tidy <changed-cpp-files> -p build
 ```
 
-For Markdown changes, run the focused checker tests and first-party source-tree gate:
+For Markdown changes, run both direct repository gates and their four focused
+CTest cases:
 
 ```sh
-scripts/run-tests.sh --build-dir build \
-  -R '^ava_tests\.markdown_(link_verifier|links_source)$' --output-on-failure
 python3 scripts/verify-markdown-links.py . --source-tree
+python3 scripts/verify-documentation-structure.py .
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.(markdown_(link_verifier|links_source)|documentation_structure_(checker|source))$' \
+  --output-on-failure
 ```
+
+When documentation paths or release-artifact payloads change, also run the
+offline package, install, and provenance CTests in
+[Release Package and Provenance Checks](#release-package-and-provenance-checks).
 
 Before handing work off, check for whitespace and patch-format issues:
 

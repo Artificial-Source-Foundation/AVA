@@ -41,7 +41,7 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
         self.write("README.md", "root\n")
         self.write(
             "docs/guide.md",
-            "[root](../README.md) [web](https://example.test/nope) "
+            "# Section\n\n[root](../README.md) [web](https://example.test/nope) "
             "[fragment](#section) ![image](missing.png)\n",
         )
 
@@ -93,6 +93,15 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("verified (1 files)", result.stdout)
 
+    def test_source_tree_excludes_gitignored_local_plans(self) -> None:
+        self.write("README.md", "root\n")
+        self.write(".plans/local-plan.md", "[broken](missing.md)\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("source Markdown links: verified (1 files)", result.stdout)
+
     def test_source_tree_validates_percent_decoded_target(self) -> None:
         self.write("README.md", "[encoded](docs/space%20name.md)\n")
         self.write("docs/space name.md", "target\n")
@@ -106,11 +115,26 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
             "README.md",
             "[guide](https://github.com/Artificial-Source/AVA/blob/develop/docs/guide.md#part)\n",
         )
-        self.write("docs/guide.md", "guide\n")
+        self.write("docs/guide.md", "# Part\n")
 
         result = self.run_verifier("--source-tree")
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_tree_reports_missing_self_github_anchor(self) -> None:
+        self.write(
+            "README.md",
+            "[missing](https://github.com/Artificial-Source/AVA/blob/develop/docs/guide.md#missing)\n",
+        )
+        self.write("docs/guide.md", "# Present\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: docs/guide.md#missing",
+            result.stderr,
+        )
 
     def test_source_tree_reports_missing_self_github_target(self) -> None:
         self.write(
@@ -171,6 +195,19 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_reference_links_validate_local_markdown_anchors(self) -> None:
+        self.write(
+            "README.md",
+            "Read [full][guide] and [collapsed][].\n\n"
+            "[guide]: docs/guide.md#target\n"
+            "[collapsed]: docs/guide.md#target\n",
+        )
+        self.write("docs/guide.md", "# Target\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_reference_usage_reports_missing_definition(self) -> None:
         self.write("README.md", "Read the [missing guide][not defined].\n")
 
@@ -209,6 +246,150 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
         result = self.run_verifier("--source-tree")
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_same_page_anchor_is_validated(self) -> None:
+        self.write("README.md", "# Present section\n\n[valid](#present-section)\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_same_page_anchor_is_reported(self) -> None:
+        self.write("README.md", "# Present section\n\n[missing](#absent-section)\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: README.md#absent-section",
+            result.stderr,
+        )
+
+    def test_cross_page_anchor_is_validated(self) -> None:
+        self.write("README.md", "[valid](docs/guide.md#present-section)\n")
+        self.write("docs/guide.md", "# Present section\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_cross_page_anchor_is_reported(self) -> None:
+        self.write("README.md", "[missing](docs/guide.md#absent-section)\n")
+        self.write("docs/guide.md", "# Present section\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: docs/guide.md#absent-section",
+            result.stderr,
+        )
+
+    def test_duplicate_headings_receive_numeric_suffixes(self) -> None:
+        self.write(
+            "README.md",
+            "[first](docs/guide.md#repeat) [second](docs/guide.md#repeat-1) "
+            "[third](docs/guide.md#repeat-2)\n",
+        )
+        self.write("docs/guide.md", "# Repeat\n\n## Repeat\n\n### Repeat\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_duplicate_heading_suffixes_avoid_existing_slug_collisions(self) -> None:
+        self.write(
+            "README.md",
+            "[first](docs/guide.md#repeat) [second](docs/guide.md#repeat-1) "
+            "[collision](docs/guide.md#repeat-1-1) "
+            "[third](docs/guide.md#repeat-2)\n",
+        )
+        self.write(
+            "docs/guide.md",
+            "# Repeat\n\n## Repeat\n\n## Repeat-1\n\n### Repeat\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_heading_anchors_decode_entities_and_render_inline_formatting(self) -> None:
+        self.write(
+            "README.md",
+            "[formatted](docs/guide.md#use-bold-display-code--emphasis)\n",
+        )
+        self.write(
+            "docs/guide.md",
+            "# Use **Bold**, [display](https://example.test), `Code` &amp; _Emphasis_!\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_percent_decoded_fragment_is_validated(self) -> None:
+        self.write("README.md", "[encoded](docs/guide.md#caf%C3%A9)\n")
+        self.write("docs/guide.md", "# Café\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_fenced_heading_does_not_create_an_anchor(self) -> None:
+        self.write(
+            "README.md",
+            "# Visible\n\n```markdown\n# Hidden\n```\n\n[hidden](#hidden)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: README.md#hidden",
+            result.stderr,
+        )
+
+    def test_explicit_html_id_and_name_anchors_are_validated(self) -> None:
+        self.write(
+            "README.md",
+            '<a id="stable-id"></a>\n<span name=legacy-name></span>\n\n'
+            "[id](#stable-id) [name](#legacy-name)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_non_markdown_fragment_is_not_validated(self) -> None:
+        self.write("README.md", "[data](data.json#missing)\n")
+        self.write("data.json", "{}\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_external_fragment_is_not_validated(self) -> None:
+        self.write("README.md", "[external](https://example.test/missing#fragment)\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_artifact_mode_validates_local_markdown_anchors(self) -> None:
+        self.write("README.md", "[section](docs/guide.md#missing)\n")
+        guide = self.write("docs/guide.md", "# Present\n")
+
+        failed = self.run_verifier()
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn(
+            "README.md: missing local Markdown anchor: docs/guide.md#missing",
+            failed.stderr,
+        )
+
+        guide.write_text("# Missing\n", encoding="utf-8")
+        passed = self.run_verifier()
+        self.assertEqual(passed.returncode, 0, passed.stderr)
 
     def test_fenced_examples_are_ignored(self) -> None:
         self.write(

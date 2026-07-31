@@ -38,7 +38,7 @@ Current descriptive pages must follow implementation and tests. Normative contra
 
 Documentation path changes require all three layers:
 
-1. **Source links:** run `python3 scripts/verify-markdown-links.py . --source-tree`; focused CTests are `ava_tests.markdown_link_verifier` and `ava_tests.markdown_links_source`.
+1. **Source links and anchors:** run `python3 scripts/verify-markdown-links.py . --source-tree`; it checks local Markdown fragments (ATX headings and explicit HTML anchors) as well as targets, and focused CTests are `ava_tests.markdown_link_verifier` and `ava_tests.markdown_links_source`.
 2. **Structure:** run `python3 scripts/verify-documentation-structure.py .`; focused CTests are `ava_tests.documentation_structure_checker` and `ava_tests.documentation_structure_source`.
 3. **Package/install:** run CTests `ava_release.install_component` and, on supported Linux configurations, `ava_release.package_linux` after synchronizing CMake, packaging, and exact allowlists.
 

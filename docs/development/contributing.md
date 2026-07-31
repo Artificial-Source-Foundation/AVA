@@ -135,10 +135,24 @@ Run clang-tidy against files you changed after configuring the build:
 clang-tidy <changed-cpp-files> -p build
 ```
 
-For Markdown changes, also run the repository-owned relative-target check:
+For Markdown changes, run both direct repository gates and their four focused
+CTest cases:
 
 ```sh
 python3 scripts/verify-markdown-links.py . --source-tree
+python3 scripts/verify-documentation-structure.py .
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.(markdown_(link_verifier|links_source)|documentation_structure_(checker|source))$' \
+  --output-on-failure
+```
+
+When documentation paths or release-artifact payloads change, also run the
+offline package, install, and provenance checks:
+
+```sh
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_release\.(provenance|install_component|package_linux)$' \
+  --output-on-failure
 ```
 
 Always finish with:

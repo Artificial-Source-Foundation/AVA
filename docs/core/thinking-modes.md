@@ -40,8 +40,8 @@ Current behavior:
 Reasoning controls are available only when the active model declares
 `supports_reasoning` and non-empty `reasoning_levels`. Model metadata and
 custom model configuration are documented in [CONFIG.md](configuration.md#models), and
-the RPC contract is documented in
-[headless-protocol.md](../headless-protocol.md#commands).
+the RPC command catalog is documented in
+[rpc-protocol.md](../rpc-protocol.md#command-catalog).
 
 Ways to change provider reasoning:
 

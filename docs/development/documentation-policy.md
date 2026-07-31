@@ -228,18 +228,20 @@ scripts/run-tests.sh --build-dir build \
 
 The exact test names are `ava_tests.markdown_link_verifier` (focused checker behavior) and `ava_tests.markdown_links_source` (the first-party source-tree gate). Python 3 is optional at CMake configuration time; these tests are registered when its interpreter is found.
 
-In `--source-tree` mode the checker walks first-party Markdown while excluding Git metadata, build trees (`build`, `build-*`, and `cmake-build-*`), generated/cache/package directories, dependency trees (`cmake/aicxx`, `cwds`, `enchantum`, `src/json`, `threadsafe`, and `utils`), and local `docs/reference-code/`. The artifact template at `docs/operations/release-artifact-readme.md` is relocated to the artifact documentation root before its links become valid and remains source-tree-excluded. Exact exclusions live in [`scripts/verify-markdown-links.py`](../../scripts/verify-markdown-links.py).
+In `--source-tree` mode the checker walks first-party Markdown while excluding Git metadata, the gitignored local `.plans/` workspace, build trees (`build`, `build-*`, and `cmake-build-*`), generated/cache/package directories, dependency trees (`cmake/aicxx`, `cwds`, `enchantum`, `src/json`, `threadsafe`, and `utils`), and local `docs/reference-code/`. The artifact template at `docs/operations/release-artifact-readme.md` is relocated to the artifact documentation root before its links become valid and remains source-tree-excluded. Exact exclusions live in [`scripts/verify-markdown-links.py`](../../scripts/verify-markdown-links.py).
 
-Exact absolute `https://github.com/Artificial-Source/AVA/blob/develop/<path>[#fragment]` self-links are repository-local in source-tree mode: their percent-decoded targets must exist and remain root-confined even when they point into an otherwise excluded tree. Other absolute URLs remain external and no network request is made. Without `--source-tree`, the program is in **artifact mode**: all absolute URLs, including AVA self-links, remain external, and it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
+Exact absolute `https://github.com/Artificial-Source/AVA/blob/develop/<path>[#fragment]` self-links are repository-local in source-tree mode: their percent-decoded targets must exist and remain root-confined even when they point into an otherwise excluded tree, and fragments on Markdown targets must resolve. Other absolute URLs remain external and no network request is made. Without `--source-tree`, the program is in **artifact mode**: all absolute URLs, including AVA self-links, remain external, and it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. Local Markdown fragments are still checked in artifact mode. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
 
-The checker validates local relative target paths in inline links, full reference links, and collapsed reference links; percent-decodes paths; rejects links that escape the checked root; and ignores fenced-code examples. It deliberately does **not** validate shortcut reference links, heading fragments/anchors, ordinary external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
+The checker validates local relative target paths and Markdown fragments in inline links, full reference links, and collapsed reference links; percent-decodes paths and fragments; rejects links that escape the checked root; and ignores fenced-code examples. Its deterministic GitHub-compatible anchor inventory covers ATX headings (including entity decoding, inline link display text, formatting/punctuation removal, whitespace hyphenation, and duplicate suffixes) plus explicit HTML `id`/`name` anchors. Anchors are cached per target during a run.
 
-1. review shortcut references and changed same-page/cross-page fragments with GitHub-compatible heading behavior;
-2. review material external links manually (the required gate makes no network request);
+The checker deliberately does **not** validate shortcut reference links, ordinary external URLs, or images. It makes no network requests and currently reports the source file but not a source line number. Therefore maintainers must still:
+
+1. review shortcut reference links;
+2. review material external links manually;
 3. search renamed/deleted paths for inbound references; and
 4. run `git --no-pager diff --check`.
 
-A successful source-tree run proves only that checked local relative targets and exact AVA self-link targets exist within the documented scope. It is not evidence that anchors, external sites, examples, or historical claims are current.
+A successful source-tree run proves only that checked local relative targets, local Markdown anchors, and exact AVA self-link targets/Markdown anchors exist within the documented scope. It is not evidence that external sites, examples, or historical claims are current.
 
 ## Structure and reachability workflow
 

@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import html
 import os
 import pathlib
 import re
 import sys
+import unicodedata
 import urllib.parse
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)")
@@ -19,12 +21,27 @@ REFERENCE_USAGE_RE = re.compile(
     r"(?<!!)\[([^\]\n]{1,999})\]\[([^\]\n]{0,999})\]"
 )
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]+|$)(.*)$")
+HEADING_INLINE_LINK_RE = re.compile(
+    r"!?\[([^\]\n]*)\]\(\s*(?:<[^>\n]+>|[^)\n]*)\)"
+)
+HEADING_REFERENCE_LINK_RE = re.compile(r"!?\[([^\]\n]*)\]\[[^\]\n]*\]")
+UNDERSCORE_EMPHASIS_RE = re.compile(
+    r"(?<![\w\\])(_{1,3})(?=\S)(.+?\S)\1(?!\w)"
+)
+HTML_TAG_RE = re.compile(r"<[A-Za-z][^>\n]*>")
+HTML_ANCHOR_ATTRIBUTE_RE = re.compile(
+    r'''(?:^|\s)(?:id|name)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'=<>`]+))''',
+    re.IGNORECASE,
+)
+SLUG_REMOVED_ASCII = frozenset("!\"#$%&'()*+,./:;<=>?@[\\]^`{|}~")
 
 # These trees are dependencies, generated output, or caches rather than AVA's
 # first-party source documentation. Exact repository-relative exclusions avoid
 # accidentally hiding similarly named first-party directories elsewhere.
 SOURCE_EXCLUDED_PREFIXES = (
     (".git",),
+    (".plans",),
     ("cmake", "aicxx"),
     ("cwds",),
     ("docs", "reference-code"),
@@ -124,12 +141,71 @@ def normalize_reference_label(label: str) -> str:
     return " ".join(label.split()).casefold()
 
 
+def github_heading_slug(raw_heading: str) -> str:
+    heading = HEADING_INLINE_LINK_RE.sub(r"\1", raw_heading)
+    heading = HEADING_REFERENCE_LINK_RE.sub(r"\1", heading)
+    heading = HTML_TAG_RE.sub("", heading)
+    heading = html.unescape(heading)
+
+    previous = None
+    while heading != previous:
+        previous = heading
+        heading = UNDERSCORE_EMPHASIS_RE.sub(r"\2", heading)
+
+    heading = heading.lower().strip()
+    heading = "".join(
+        character
+        for character in heading
+        if character not in SLUG_REMOVED_ASCII
+        and not (
+            unicodedata.category(character).startswith("P")
+            and character not in "-_"
+        )
+    )
+    return re.sub(r"\s", "-", heading)
+
+
+def markdown_anchors(text: str) -> frozenset[str]:
+    text = markdown_without_fenced_code(text)
+    anchors: set[str] = set()
+
+    for tag_match in HTML_TAG_RE.finditer(text):
+        tag = tag_match.group(0)
+        for attribute_match in HTML_ANCHOR_ATTRIBUTE_RE.finditer(tag):
+            anchor = next(
+                value for value in attribute_match.groups() if value is not None
+            )
+            anchors.add(html.unescape(anchor))
+
+    slug_counts: dict[str, int] = {}
+    generated_slugs: set[str] = set()
+    for line in text.splitlines():
+        heading_match = ATX_HEADING_RE.match(line)
+        if heading_match is None:
+            continue
+        heading = re.sub(r"[ \t]+#+[ \t]*$", "", heading_match.group(1))
+        slug = github_heading_slug(heading)
+        if not slug:
+            continue
+        duplicate_count = slug_counts.get(slug, 0)
+        candidate = slug if duplicate_count == 0 else f"{slug}-{duplicate_count}"
+        while candidate in generated_slugs:
+            duplicate_count += 1
+            candidate = f"{slug}-{duplicate_count}"
+        slug_counts[slug] = duplicate_count + 1
+        generated_slugs.add(candidate)
+        anchors.add(candidate)
+
+    return frozenset(anchors)
+
+
 def validate_link(
     raw_target: str,
     markdown: pathlib.Path,
     root: pathlib.Path,
     *,
     source_tree: bool,
+    anchor_cache: dict[pathlib.Path, frozenset[str]],
     failures: list[str],
 ) -> None:
     parsed = urllib.parse.urlsplit(raw_target)
@@ -145,10 +221,15 @@ def validate_link(
         )
         candidate = (root / decoded_path).resolve(strict=False)
     else:
-        if parsed.scheme or parsed.netloc or raw_target.startswith("//") or not parsed.path:
+        if parsed.scheme or parsed.netloc or raw_target.startswith("//"):
             return
-        decoded_path = urllib.parse.unquote(parsed.path)
-        candidate = (markdown.parent / decoded_path).resolve(strict=False)
+        if parsed.path:
+            decoded_path = urllib.parse.unquote(parsed.path)
+            candidate = (markdown.parent / decoded_path).resolve(strict=False)
+        elif parsed.fragment:
+            candidate = markdown
+        else:
+            return
     try:
         relative_candidate = candidate.relative_to(root)
     except ValueError:
@@ -159,6 +240,18 @@ def validate_link(
         return
     if not candidate.exists():
         failures.append(f"{markdown.relative_to(root)}: missing local link target: {raw_target}")
+        return
+    if parsed.fragment and candidate.is_file() and candidate.suffix.lower() == ".md":
+        fragment = urllib.parse.unquote(parsed.fragment)
+        anchors = anchor_cache.get(candidate)
+        if anchors is None:
+            anchors = markdown_anchors(candidate.read_text(encoding="utf-8"))
+            anchor_cache[candidate] = anchors
+        if fragment not in anchors:
+            failures.append(
+                f"{markdown.relative_to(root)}: missing local Markdown anchor: "
+                f"{candidate.relative_to(root)}#{fragment}"
+            )
 
 
 def reference_definitions(text: str) -> tuple[dict[str, str], str]:
@@ -185,6 +278,7 @@ def reference_definitions(text: str) -> tuple[dict[str, str], str]:
 
 def verify(root: pathlib.Path, *, source_tree: bool) -> tuple[list[str], int]:
     failures: list[str] = []
+    anchor_cache: dict[pathlib.Path, frozenset[str]] = {}
     markdown_files = source_markdown_files(root) if source_tree else sorted(root.rglob("*.md"))
     if not markdown_files:
         tree_kind = "source" if source_tree else "artifact documentation"
@@ -198,6 +292,7 @@ def verify(root: pathlib.Path, *, source_tree: bool) -> tuple[list[str], int]:
                 markdown,
                 root,
                 source_tree=source_tree,
+                anchor_cache=anchor_cache,
                 failures=failures,
             )
 
@@ -216,6 +311,7 @@ def verify(root: pathlib.Path, *, source_tree: bool) -> tuple[list[str], int]:
                 markdown,
                 root,
                 source_tree=source_tree,
+                anchor_cache=anchor_cache,
                 failures=failures,
             )
 

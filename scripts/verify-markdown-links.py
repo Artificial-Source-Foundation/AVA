@@ -11,6 +11,13 @@ import sys
 import urllib.parse
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)")
+REFERENCE_DEFINITION_RE = re.compile(
+    r"^[ ]{0,3}\[([^\]\n]{1,999})\]:[ \t]*(?:<([^>\n]*)>|([^ \t\n]+))",
+    re.MULTILINE,
+)
+REFERENCE_USAGE_RE = re.compile(
+    r"(?<!!)\[([^\]\n]{1,999})\]\[([^\]\n]{0,999})\]"
+)
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 # These trees are dependencies, generated output, or caches rather than AVA's
@@ -107,6 +114,57 @@ def source_markdown_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(markdown_files)
 
 
+def normalize_reference_label(label: str) -> str:
+    return " ".join(label.split()).casefold()
+
+
+def validate_link(
+    raw_target: str,
+    markdown: pathlib.Path,
+    root: pathlib.Path,
+    *,
+    source_tree: bool,
+    failures: list[str],
+) -> None:
+    parsed = urllib.parse.urlsplit(raw_target)
+    if parsed.scheme or parsed.netloc or raw_target.startswith("//") or not parsed.path:
+        return
+    decoded_path = urllib.parse.unquote(parsed.path)
+    candidate = (markdown.parent / decoded_path).resolve(strict=False)
+    try:
+        relative_candidate = candidate.relative_to(root)
+    except ValueError:
+        tree_kind = "source tree" if source_tree else "artifact docs"
+        failures.append(f"{markdown.relative_to(root)}: link escapes {tree_kind}: {raw_target}")
+        return
+    if source_tree and source_path_is_excluded(relative_candidate):
+        return
+    if not candidate.exists():
+        failures.append(f"{markdown.relative_to(root)}: missing local link target: {raw_target}")
+
+
+def reference_definitions(text: str) -> tuple[dict[str, str], str]:
+    definitions: dict[str, str] = {}
+    definition_spans: list[tuple[int, int]] = []
+    for match in REFERENCE_DEFINITION_RE.finditer(text):
+        label = normalize_reference_label(match.group(1))
+        if label:
+            # CommonMark resolves duplicate labels using the first definition.
+            target = match.group(2) if match.group(2) is not None else match.group(3)
+            definitions.setdefault(label, target)
+        line_end = text.find("\n", match.end())
+        definition_spans.append((match.start(), len(text) if line_end == -1 else line_end))
+
+    # Do not mistake bracket pairs in a definition's destination or title for
+    # usages. Preserve newlines so later diagnostics still refer to the source.
+    characters = list(text)
+    for start, end in definition_spans:
+        for index in range(start, end):
+            if characters[index] != "\n":
+                characters[index] = " "
+    return definitions, "".join(characters)
+
+
 def verify(root: pathlib.Path, *, source_tree: bool) -> tuple[list[str], int]:
     failures: list[str] = []
     markdown_files = source_markdown_files(root) if source_tree else sorted(root.rglob("*.md"))
@@ -117,22 +175,31 @@ def verify(root: pathlib.Path, *, source_tree: bool) -> tuple[list[str], int]:
     for markdown in markdown_files:
         text = markdown_without_fenced_code(markdown.read_text(encoding="utf-8"))
         for match in LINK_RE.finditer(text):
-            raw_target = match.group(1).strip("<>")
-            parsed = urllib.parse.urlsplit(raw_target)
-            if parsed.scheme or parsed.netloc or raw_target.startswith("//") or not parsed.path:
+            validate_link(
+                match.group(1).strip("<>"),
+                markdown,
+                root,
+                source_tree=source_tree,
+                failures=failures,
+            )
+
+        definitions, text_without_definitions = reference_definitions(text)
+        for match in REFERENCE_USAGE_RE.finditer(text_without_definitions):
+            raw_label = match.group(2) or match.group(1)
+            label = normalize_reference_label(raw_label)
+            target = definitions.get(label)
+            if target is None:
+                failures.append(
+                    f"{markdown.relative_to(root)}: undefined reference link label: {raw_label}"
+                )
                 continue
-            decoded_path = urllib.parse.unquote(parsed.path)
-            candidate = (markdown.parent / decoded_path).resolve(strict=False)
-            try:
-                relative_candidate = candidate.relative_to(root)
-            except ValueError:
-                tree_kind = "source tree" if source_tree else "artifact docs"
-                failures.append(f"{markdown.relative_to(root)}: link escapes {tree_kind}: {raw_target}")
-                continue
-            if source_tree and source_path_is_excluded(relative_candidate):
-                continue
-            if not candidate.exists():
-                failures.append(f"{markdown.relative_to(root)}: missing local link target: {raw_target}")
+            validate_link(
+                target,
+                markdown,
+                root,
+                source_tree=source_tree,
+                failures=failures,
+            )
 
     return failures, len(markdown_files)
 

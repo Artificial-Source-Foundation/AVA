@@ -101,11 +101,67 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_reference_definition_reports_missing_local_target(self) -> None:
+        self.write("README.md", "Read the [guide][guide].\n\n[guide]: docs/missing.md\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("README.md: missing local link target: docs/missing.md", result.stderr)
+
+    def test_local_reference_resolves_definition_after_usage(self) -> None:
+        self.write("README.md", "Read the [guide][].\n\n[guide]: docs/guide.md\n")
+        self.write("docs/guide.md", "guide\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_reference_usage_reports_missing_definition(self) -> None:
+        self.write("README.md", "Read the [missing guide][not defined].\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "README.md: undefined reference link label: not defined",
+            result.stderr,
+        )
+
+    def test_reference_labels_ignore_case_and_collapse_whitespace(self) -> None:
+        self.write(
+            "README.md",
+            "Read the [guide][  MIXED   label ].\n\n[mixed label]: docs/guide.md\n",
+        )
+        self.write("docs/guide.md", "guide\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_external_reference_target_is_ignored(self) -> None:
+        self.write(
+            "README.md",
+            "Read the [website][site].\n\n[site]: https://example.test/missing\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_reference_style_image_is_ignored(self) -> None:
+        self.write("README.md", "![optional image][logo]\n\n[logo]: missing.png\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_fenced_examples_are_ignored(self) -> None:
         self.write(
             "README.md",
             "````markdown\n[example](missing-one.md)\n```\n````\n"
-            "~~~\n[other](missing-two.md)\n~~~\n",
+            "~~~\n[other](missing-two.md)\n[guide][missing]\n"
+            "[missing]: missing-three.md\n~~~\n",
         )
 
         result = self.run_verifier("--source-tree")

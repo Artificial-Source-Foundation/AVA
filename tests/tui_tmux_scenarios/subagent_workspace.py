@@ -74,8 +74,8 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     save_evidence(ctx.root, "subagent-workspace-selector", selector)
 
     send_keys(tmux_exe, session, "Enter")
-    live = wait_for(tmux_exe, session, r"Inspect delegated fixture", "committed child user message in workspace")
-    if "Live workspace audit" not in live or "Type a message" in live or "Esc stop" in live:
+    live = wait_for(tmux_exe, session, r"Esc jobs.*Tab", "complete live child workspace frame")
+    if "Live workspace audit" not in live or "Inspect delegated fixture" not in live or "Type a message" in live or "Esc stop" in live:
         raise RuntimeError(f"live child workspace retained parent composer chrome\nscreen:\n{live}")
     if "Parent continued after background start" in live:
         raise RuntimeError(f"live child workspace rendered parent transcript output\nscreen:\n{live}")
@@ -88,7 +88,7 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     if "stop requested" in escaped:
         raise RuntimeError(f"workspace Escape stopped the active parent run\nscreen:\n{escaped}")
     send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Inspect delegated fixture", "workspace reopened without stopping parent")
+    wait_for(tmux_exe, session, r"Esc jobs.*Tab", "complete reopened workspace frame without stopping parent")
 
     marker_directory.joinpath("release-live").write_text("release\n", encoding="utf-8")
     terminal = wait_for(

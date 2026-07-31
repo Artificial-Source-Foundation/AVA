@@ -111,51 +111,59 @@ void test_app_runtime_open_session_and_context_prompt()
   open_context.current_dir = current;
   open_context.mode = ava::agent::Mode::Plan;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "runtime session opens with selected model, prompt, and context");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime session opens with selected model, prompt, and context" : unlocked_session_result.error().format());
+  if (!unlocked_session_result)
     return;
 
-  expect(session->created && session->mode() == ava::agent::Mode::Plan && session->model().model_id == "gpt-5.5",
-         "runtime session records created state, mode, and model");
-  auto const resource_policy = ava::app::runtime::make_extension_resource_policy(*session);
-  expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
-             resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
-         "runtime session extension resource policy overload derives paths and the fail-closed trust decision");
-  expect(session->context_sources().size() == 3, "runtime session records workspace and global context metadata");
-  expect(!session->base_prompt().from_override && !session->base_prompt().source_path && session->base_prompt().byte_count > 0 &&
-             session->base_prompt().content_fingerprint != 0,
-         "runtime session records selected base prompt metadata without storing prompt text twice");
-  expect(session->system_prompt().find("Plan before changing files") != std::string::npos &&
-             session->system_prompt().find("workspace runtime instructions") != std::string::npos &&
-             session->system_prompt().find("nested runtime instructions") != std::string::npos &&
-             session->system_prompt().find("global runtime instructions") != std::string::npos,
-         "runtime session system prompt combines selected prompt and formatted context");
-  auto entries = session->store.load();
-  expect(entries && entries->size() == 1 && (*entries)[0].type == ava::session::EntryType::SessionStart &&
-             (*entries)[0].data_json.find("\"context_sources\":3") != std::string::npos,
-         "runtime session appends session_start on creation");
+  std::string session_id;
+  {
+    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
 
-  auto const session_id = session->store.session_id();
+    expect(session_r->created && session_r->mode() == ava::agent::Mode::Plan && session_r->model().model_id == "gpt-5.5",
+           "runtime session records created state, mode, and model");
+    auto const resource_policy = ava::app::runtime::make_extension_resource_policy(*session_r);
+    expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
+               resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
+           "runtime session extension resource policy overload derives paths and the fail-closed trust decision");
+    expect(session_r->context_sources().size() == 3, "runtime session records workspace and global context metadata");
+    expect(!session_r->base_prompt().from_override && !session_r->base_prompt().source_path && session_r->base_prompt().byte_count > 0 &&
+               session_r->base_prompt().content_fingerprint != 0,
+           "runtime session records selected base prompt metadata without storing prompt text twice");
+    expect(session_r->system_prompt().find("Plan before changing files") != std::string::npos &&
+               session_r->system_prompt().find("workspace runtime instructions") != std::string::npos &&
+               session_r->system_prompt().find("nested runtime instructions") != std::string::npos &&
+               session_r->system_prompt().find("global runtime instructions") != std::string::npos,
+           "runtime session system prompt combines selected prompt and formatted context");
+    auto entries = session_r->store.load();
+    expect(entries && entries->size() == 1 && (*entries)[0].type == ava::session::EntryType::SessionStart &&
+               (*entries)[0].data_json.find("\"context_sources\":3") != std::string::npos,
+           "runtime session appends session_start on creation");
+
+    session_id = session_r->store.session_id();
+  }
   ava::app::runtime::OpenContext reopen_context;
   reopen_context.workspace_dir = workspace;
   reopen_context.current_dir = current;
   reopen_context.mode = ava::agent::Mode::Plan;
   reopen_context.paths = paths;
-  session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before reopen"));
-  auto reopened = ava::app::runtime::Session::open(reopen_context, {.sessionless = false,
-                                                                  .requested_session_id = session_id.substr(0, 12),
-                                                                  .fork_session_id = std::nullopt,
-                                                                  .initial_session_name = std::nullopt,
-                                                                  .continue_last_session = false,
-                                                                  .initial_reasoning_level = std::nullopt,
-                                                                  .expected_original_cwd = std::nullopt});
-  expect(reopened && !reopened->created && reopened->store.session_id() == session_id,
-         "runtime session resolves requested session id prefixes without creating a new session");
-  if (reopened)
+  unlocked_session_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime before reopen"));
+  auto unlocked_reopened_result = ava::app::runtime::Session::open(reopen_context, {.sessionless = false,
+                                                                   .requested_session_id = session_id.substr(0, 12),
+                                                                   .fork_session_id = std::nullopt,
+                                                                   .initial_session_name = std::nullopt,
+                                                                   .continue_last_session = false,
+                                                                   .initial_reasoning_level = std::nullopt,
+                                                                   .expected_original_cwd = std::nullopt});
+  expect(unlocked_reopened_result.has_value(), unlocked_reopened_result ? "runtime reopens the existing session by id prefix" : unlocked_reopened_result.error().format());
+  if (unlocked_reopened_result)
   {
-    auto reopened_entries = reopened->store.load();
-    expect(reopened_entries && reopened_entries->size() == 1, "runtime reopened session does not append another session_start");
+    ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
+    expect(!reopened_r->created && reopened_r->store.session_id() == session_id,
+        "runtime session resolves requested session id prefixes without creating a new session");
+    auto reopened_entries = reopened_r->store.load();
+    expect(reopened_entries && reopened_entries->size() == 1,
+        "runtime reopened session does not append another session_start");
   }
 }
 
@@ -197,26 +205,28 @@ void test_app_runtime_preserves_legacy_subagent_job_tree()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open(options);
-  expect(session && session->subagent_coordinator() && session->subagent_delivery_manager(),
-         "real runtime session constructs its application coordinator and delivery manager against the seeded XDG state root");
-  if (session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime legacy subagent job tree test opens a real runtime session" : unlocked_session_result.error().format());
+  if (unlocked_session_result)
   {
-    auto coordinator = session->subagent_coordinator();
-    auto manager = session->subagent_delivery_manager();
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    expect(session_w->subagent_coordinator() && session_w->subagent_delivery_manager(),
+           "real runtime session constructs its application coordinator and delivery manager against the seeded XDG state root");
+    auto coordinator = session_w->subagent_coordinator();
+    auto manager = session_w->subagent_delivery_manager();
     auto started =
-        coordinator->start(session->store.session_id(), ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_runtime_legacy"}, [](auto const&) {
+        coordinator->start(session_w->store.session_id(), ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_runtime_legacy"}, [](auto const&) {
           return ava::agent::BackgroundJobCompletion{
               .state = ava::agent::BackgroundJobState::Completed, .final_text = "runtime result", .stop_reason = "completed"};
         });
-    auto completed = started ? coordinator->wait(session->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2))
+    auto completed = started ? coordinator->wait(session_w->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2))
                              : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(started.error()));
     expect(completed && completed->job.delivery == ava::agent::SubagentDeliveryState::Direct,
            "real runtime coordinator executes a foreground process-local job without legacy persistence");
     manager->shutdown();
     coordinator->shutdown();
-    session = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime legacy fixture"));
   }
+  unlocked_session_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release runtime legacy fixture"));
 
   struct stat after_directory{};
   struct stat after_journal{};
@@ -251,33 +261,34 @@ void test_app_active_context_status_tracks_compaction_projection()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto session = ava::app::runtime::Session::open(options);
-  expect(session.has_value(), "active context status fixture opens a runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "active context status fixture opens a runtime session" : unlocked_session_result.error().format());
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto const initial_status = ava::app::line_shell_internal::active_context_status_for_session(*session);
-  auto const appended_user = session->append_target()->append(ava::session::SessionEntry{.id = "active-context-user",
+  auto const initial_status = ava::app::line_shell_internal::active_context_status_for_session(*session_w);
+  auto const appended_user = session_w->append_target()->append(ava::session::SessionEntry{.id = "active-context-user",
                                                                                          .parent_id = "",
                                                                                          .type = ava::session::EntryType::UserMessage,
                                                                                          .timestamp = "2026-01-01T00:00:00Z",
                                                                                          .data_json = "{\"text\":\"" + std::string(50'000, 'x') + "\"}"});
-  auto const grown_status = appended_user ? ava::app::line_shell_internal::active_context_status_for_session(*session) : std::nullopt;
+  auto const grown_status = appended_user ? ava::app::line_shell_internal::active_context_status_for_session(*session_w) : std::nullopt;
   auto compaction_request = ava::session::ManualCompactionRequest{};
   compaction_request.summary = "condensed history";
   compaction_request.config = ava::session::default_compaction_config();
   compaction_request.estimated_tokens = 12'500;
   auto compaction = ava::session::make_manual_compaction_entry(std::move(compaction_request));
   auto const appended_compaction =
-      compaction ? session->append_target()->append(std::move(*compaction)) : ava::core::VoidResult(std::unexpected(compaction.error()));
-  auto const appended_recent = appended_compaction ? session->append_target()->append(ava::session::SessionEntry{.id = "active-context-recent",
+      compaction ? session_w->append_target()->append(std::move(*compaction)) : ava::core::VoidResult(std::unexpected(compaction.error()));
+  auto const appended_recent = appended_compaction ? session_w->append_target()->append(ava::session::SessionEntry{.id = "active-context-recent",
                                                                                                                  .parent_id = "",
                                                                                                                  .type = ava::session::EntryType::UserMessage,
                                                                                                                  .timestamp = "2026-01-01T00:00:01Z",
                                                                                                                  .data_json = "{\"text\":\"recent\"}"})
                                                    : ava::core::VoidResult(std::unexpected(appended_compaction.error()));
-  auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(*session) : std::nullopt;
-  auto authority = session->read_authority();
+  auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(*session_w) : std::nullopt;
+  auto authority = session_w->read_authority();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
   auto const active_tokens =
       entries ? ava::session::estimate_active_context_tokens(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
@@ -301,27 +312,31 @@ void test_app_runtime_no_session_mode()
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
 
-  auto session = ava::app::runtime::Session::open(open_context, {.sessionless = true,
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context, {.sessionless = true,
                                                                .requested_session_id = std::nullopt,
                                                                .fork_session_id = std::nullopt,
                                                                .initial_session_name = std::nullopt,
                                                                .continue_last_session = false,
                                                                .initial_reasoning_level = std::nullopt,
                                                                .expected_original_cwd = std::nullopt});
-  expect(session.has_value() && session->sessionless() && session->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
-  if (!session)
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime no-session mode opens an ephemeral sessionless session" : unlocked_session_result.error().format());
+  if (!unlocked_session_result)
     return;
 
-  auto entries = session->store.load();
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+
+  expect(session_w->sessionless() && session_w->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
+
+  auto entries = session_w->store.load();
   expect(entries && entries->size() == 1 && (*entries)[0].type == ava::session::EntryType::SessionStart,
          "runtime no-session mode records session_start in memory");
-  expect(!std::filesystem::exists(session->store.session_path()), "runtime no-session mode does not create a resumable JSONL file");
+  expect(!std::filesystem::exists(session_w->store.session_path()), "runtime no-session mode does not create a resumable JSONL file");
 
   auto listed = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
   expect(listed && listed->empty(), "runtime no-session mode does not appear in persisted session listings");
 
   auto requested_result = ava::app::runtime::Session::open(open_context, {.sessionless = true,
-                                                                        .requested_session_id = session->store.session_id(),
+                                                                        .requested_session_id = session_w->store.session_id(),
                                                                         .fork_session_id = std::nullopt,
                                                                         .initial_session_name = std::nullopt,
                                                                         .continue_last_session = false,
@@ -367,41 +382,49 @@ void test_app_runtime_replacement_open_context()
   open_context.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 123456, .max_line_bytes = 12345, .max_entries = 1234};
   open_context.diagnostics = diagnostics;
 
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "replacement context test opens a non-default runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "replacement context test opens a non-default runtime session" : unlocked_session_result.error().format());
+  if (!unlocked_session_result)
     return;
 
-  ava::app::runtime::OpenContext base_context;
-  base_context.workspace_dir = root / "wrong-workspace";
-  base_context.current_dir = root / "wrong-current";
-  base_context.pin_model_override = true;
-  base_context.exact_session_id = true;
+  {
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto replacement = session->replacement_open_context(base_context);
-  bool const inherited_context =
-      replacement.workspace_dir == session->workspace_dir() && replacement.current_dir == session->current_dir() && replacement.mode == session->mode() &&
-      replacement.tool_visibility.mode == session->tool_visibility().mode &&
-      replacement.tool_visibility.included_tools == session->tool_visibility().included_tools &&
-      replacement.paths.sessions_dir == session->paths().sessions_dir && replacement.offline == session->is_offline() &&
-      replacement.additional_writable_dirs == session->additional_writable_dirs() && replacement.anchor_set == session->anchor_set() &&
-      replacement.prompt_overrides.system_prompt == session->prompt_overrides().system_prompt &&
-      replacement.prompt_overrides.append_system_prompts == session->prompt_overrides().append_system_prompts && replacement.session_read_limits &&
-      replacement.session_read_limits->max_file_bytes == session->session_read_limits().max_file_bytes &&
-      replacement.session_read_limits->max_line_bytes == session->session_read_limits().max_line_bytes &&
-      replacement.session_read_limits->max_entries == session->session_read_limits().max_entries &&
-      replacement.subagent_coordinator == session->subagent_coordinator() && replacement.subagent_delivery_manager == session->subagent_delivery_manager() &&
-      replacement.session_title_coordinator == session->session_title_coordinator() && replacement.diagnostics == session->diagnostics();
-  expect(inherited_context, "replacement context inherits every active runtime-context and application-service field");
-  expect(replacement.pin_model_override && replacement.exact_session_id,
-         "replacement context retains frontend policy that is not represented by Session state");
+    ava::app::runtime::OpenContext base_context;
+    base_context.workspace_dir = root / "wrong-workspace";
+    base_context.current_dir = root / "wrong-current";
+    base_context.pin_model_override = true;
+    base_context.exact_session_id = true;
+
+    auto replacement = session_w->replacement_open_context(base_context);
+    bool const inherited_context =
+        replacement.workspace_dir == session_w->workspace_dir() && replacement.current_dir == session_w->current_dir() && replacement.mode == session_w->mode() &&
+        replacement.tool_visibility.mode == session_w->tool_visibility().mode &&
+        replacement.tool_visibility.included_tools == session_w->tool_visibility().included_tools &&
+        replacement.paths.sessions_dir == session_w->paths().sessions_dir && replacement.offline == session_w->is_offline() &&
+        replacement.additional_writable_dirs == session_w->additional_writable_dirs() && replacement.anchor_set == session_w->anchor_set() &&
+        replacement.prompt_overrides.system_prompt == session_w->prompt_overrides().system_prompt &&
+        replacement.prompt_overrides.append_system_prompts == session_w->prompt_overrides().append_system_prompts && replacement.session_read_limits &&
+        replacement.session_read_limits->max_file_bytes == session_w->session_read_limits().max_file_bytes &&
+        replacement.session_read_limits->max_line_bytes == session_w->session_read_limits().max_line_bytes &&
+        replacement.session_read_limits->max_entries == session_w->session_read_limits().max_entries &&
+        replacement.subagent_coordinator == session_w->subagent_coordinator() && replacement.subagent_delivery_manager == session_w->subagent_delivery_manager() &&
+        replacement.session_title_coordinator == session_w->session_title_coordinator() && replacement.diagnostics == session_w->diagnostics();
+    expect(inherited_context, "replacement context inherits every active runtime-context and application-service field");
+    expect(replacement.pin_model_override && replacement.exact_session_id,
+           "replacement context retains frontend policy that is not represented by Session state");
+  }
 
   ava::app::runtime::OpenContext at_context;
   at_context.paths = paths;
   auto unlocked_created_at_result = ava::app::runtime::Session::create_at(at_context, workspace, current_dir);
-  auto created_metadata = unlocked_created_at_result ? ava::session::load_session_metadata(ava::app::runtime::session_ts::rat(*unlocked_created_at_result)->store)
-                                                     : ava::core::Result<ava::session::SessionMetadataView>(std::unexpected(unlocked_created_at_result.error()));
-  expect(unlocked_created_at_result && created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
+  expect(unlocked_created_at_result.has_value(), unlocked_created_at_result ? "runtime replacement context creates a session at an explicit location" : unlocked_created_at_result.error().format());
+  if (!unlocked_created_at_result)
+    return;
+
+  ava::app::runtime::session_ts::rat created_at_r(*unlocked_created_at_result);
+  auto created_metadata = ava::session::load_session_metadata(created_at_r->store);
+  expect(created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
          "location-explicit session creation has no startup lifecycle state");
 }
 
@@ -419,24 +442,32 @@ void test_app_runtime_session_startup_options()
   named_options.mode = ava::agent::Mode::Build;
   named_options.paths = paths;
 
-  auto named = ava::app::runtime::Session::open(named_options, {.sessionless = false,
-                                                              .requested_session_id = std::nullopt,
-                                                              .fork_session_id = std::nullopt,
-                                                              .initial_session_name = "named startup",
-                                                              .continue_last_session = false,
-                                                              .initial_reasoning_level = std::nullopt,
-                                                              .expected_original_cwd = std::nullopt});
-  expect(named.has_value() && named->created, "runtime opens a named startup session");
-  if (!named)
+  auto unlocked_named_result = ava::app::runtime::Session::open(named_options, {.sessionless = false,
+                                                               .requested_session_id = std::nullopt,
+                                                               .fork_session_id = std::nullopt,
+                                                               .initial_session_name = "named startup",
+                                                               .continue_last_session = false,
+                                                               .initial_reasoning_level = std::nullopt,
+                                                               .expected_original_cwd = std::nullopt});
+  expect(unlocked_named_result.has_value(), unlocked_named_result ? "runtime startup --name opens a named persistent session" : unlocked_named_result.error().format());
+  if (!unlocked_named_result)
     return;
 
-  auto const named_session_id = named->store.session_id();
-  auto named_metadata = ava::session::load_session_metadata(named->store);
-  expect(named_metadata && named_metadata->name == "named startup" && named_metadata->actor == "cli", "runtime startup --name records session metadata");
-  auto named_entries = named->store.load();
-  expect(named_entries && named_entries->size() == 2 && (*named_entries)[0].type == ava::session::EntryType::SessionStart &&
-             (*named_entries)[1].type == ava::session::EntryType::SessionMetadata,
-         "runtime startup --name appends metadata after session_start");
+  std::string named_session_id;
+  ava::core::Result<std::vector<ava::session::SessionEntry>> named_entries;
+  {
+    ava::app::runtime::session_ts::rat named_r(*unlocked_named_result);
+
+    expect(unlocked_named_result.has_value() && named_r->created, "runtime opens a named startup session");
+
+    named_session_id = named_r->store.session_id();
+    auto named_metadata = ava::session::load_session_metadata(named_r->store);
+    expect(named_metadata && named_metadata->name == "named startup" && named_metadata->actor == "cli", "runtime startup --name records session metadata");
+    named_entries = named_r->store.load();
+    expect(named_entries && named_entries->size() == 2 && (*named_entries)[0].type == ava::session::EntryType::SessionStart &&
+               (*named_entries)[1].type == ava::session::EntryType::SessionMetadata,
+           "runtime startup --name appends metadata after session_start");
+  }
 
   auto custom_paths = paths;
   custom_paths.sessions_dir = root / "custom-sessions";
@@ -444,15 +475,20 @@ void test_app_runtime_session_startup_options()
   custom_options.workspace_dir = workspace;
   custom_options.current_dir = workspace;
   custom_options.paths = custom_paths;
-  auto custom = ava::app::runtime::Session::open(custom_options);
-  expect(custom.has_value() && custom->store.session_path().string().find(custom_paths.sessions_dir.string()) == 0,
-         "runtime opens sessions under a custom session directory");
-  auto default_sessions = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
-  auto custom_sessions = ava::session::SessionStore::list_sessions(workspace, custom_paths.sessions_dir);
-  expect(default_sessions && default_sessions->size() == 1 && default_sessions->front().session_id == named_session_id,
-         "runtime custom session directory leaves default session listing unchanged");
-  expect(custom_sessions && custom_sessions->size() == 1 && custom_sessions->front().session_id == custom->store.session_id(),
-         "runtime custom session directory has its own session listing");
+  auto unlocked_custom_result = ava::app::runtime::Session::open(custom_options);
+  expect(unlocked_custom_result.has_value(), unlocked_custom_result ? "runtime opens a session under a custom session directory" : unlocked_custom_result.error().format());
+  if (unlocked_custom_result)
+  {
+    ava::app::runtime::session_ts::rat custom_r(*unlocked_custom_result);
+    expect(unlocked_custom_result.has_value() && custom_r->store.session_path().string().find(custom_paths.sessions_dir.string()) == 0,
+           "runtime opens sessions under a custom session directory");
+    auto default_sessions = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
+    auto custom_sessions = ava::session::SessionStore::list_sessions(workspace, custom_paths.sessions_dir);
+    expect(default_sessions && default_sessions->size() == 1 && default_sessions->front().session_id == named_session_id,
+           "runtime custom session directory leaves default session listing unchanged");
+    expect(custom_sessions && custom_sessions->size() == 1 && custom_sessions->front().session_id == custom_r->store.session_id(),
+           "runtime custom session directory has its own session listing");
+  }
 
   ava::app::runtime::OpenContext active_source_fork_options;
   active_source_fork_options.workspace_dir = workspace;
@@ -468,28 +504,30 @@ void test_app_runtime_session_startup_options()
   expect(!active_source_fork && active_source_fork.error().message().find("already owned") != std::string::npos,
          "runtime --fork reports an actionable lease conflict while another runtime owns the source");
 
-  named = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before startup fork"));
+  unlocked_named_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before startup fork"));
 
   ava::app::runtime::OpenContext fork_options;
   fork_options.workspace_dir = workspace;
   fork_options.current_dir = workspace;
   fork_options.paths = paths;
-  auto forked = ava::app::runtime::Session::open(fork_options, {.sessionless = false,
-                                                              .requested_session_id = std::nullopt,
-                                                              .fork_session_id = named_session_id.substr(0, 12),
-                                                              .initial_session_name = "forked startup",
-                                                              .continue_last_session = false,
-                                                              .initial_reasoning_level = std::nullopt,
-                                                              .expected_original_cwd = std::nullopt});
-  expect(forked.has_value() && forked->created && forked->store.session_id() != named_session_id, "runtime --fork creates a new session from a source prefix");
-  if (forked)
+  auto unlocked_forked_result = ava::app::runtime::Session::open(fork_options, {.sessionless = false,
+                                                               .requested_session_id = std::nullopt,
+                                                               .fork_session_id = named_session_id.substr(0, 12),
+                                                               .initial_session_name = "forked startup",
+                                                               .continue_last_session = false,
+                                                               .initial_reasoning_level = std::nullopt,
+                                                               .expected_original_cwd = std::nullopt});
+  expect(unlocked_forked_result.has_value(), unlocked_forked_result ? "runtime startup --fork opens a new forked session from the source prefix" : unlocked_forked_result.error().format());
+  if (unlocked_forked_result)
   {
-    auto fork_metadata = ava::session::load_session_metadata(forked->store);
+    ava::app::runtime::session_ts::rat forked_r(*unlocked_forked_result);
+    expect(forked_r->created && forked_r->store.session_id() != named_session_id, "runtime --fork creates a new session from a source prefix");
+    auto fork_metadata = ava::session::load_session_metadata(forked_r->store);
     expect(fork_metadata && fork_metadata->name == "forked startup" && fork_metadata->parent_session_id == named_session_id &&
                fork_metadata->source_session_id == named_session_id && fork_metadata->branch_origin == "fork" && fork_metadata->actor == "cli" &&
                !fork_metadata->branch_from_entry_id.empty(),
            "runtime --fork records branch metadata and startup name");
-    auto fork_entries = forked->store.load();
+    auto fork_entries = forked_r->store.load();
     if (fork_entries && named_entries && named_entries->size() > 1)
     {
       auto const start_count = std::ranges::count_if(*fork_entries, [](auto const& entry) { return entry.type == ava::session::EntryType::SessionStart; });
@@ -543,18 +581,24 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     seed_options.workspace_dir = workspace;
     seed_options.current_dir = workspace;
     seed_options.paths = paths;
-    auto seeded = ava::app::runtime::Session::open(seed_options);
-    expect(seeded.has_value(), "runtime torn resume test creates source session for " + mode);
-    if (!seeded)
+    auto unlocked_seeded_result = ava::app::runtime::Session::open(seed_options);
+    expect(unlocked_seeded_result.has_value(), unlocked_seeded_result ? ("runtime torn resume test creates source session for " + mode) : unlocked_seeded_result.error().format());
+    if (!unlocked_seeded_result)
       continue;
-    auto const session_id = seeded->store.session_id();
-    auto const session_path = seeded->store.session_path();
+
+    std::string session_id;
+    std::filesystem::path session_path;
+    {
+      ava::app::runtime::session_ts::rat seeded_r(*unlocked_seeded_result);
+      session_id = seeded_r->store.session_id();
+      session_path = seeded_r->store.session_path();
+    }
     auto const valid_bytes = app_read_binary_file(session_path);
     {
       std::ofstream file(session_path, std::ios::binary | std::ios::app);
       file << "{\"version\":3,\"id\":\"torn";
     }
-    seeded = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before resume"));
+    unlocked_seeded_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before resume"));
 
     auto resume_context = seed_options;
     resume_context.exact_session_id = mode == "exact";
@@ -563,10 +607,16 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
       resume_request.continue_last_session = true;
     else
       resume_request.requested_session_id = mode == "exact" ? session_id : session_id.substr(0, 12);
-    auto resumed = ava::app::runtime::Session::open(resume_context, resume_request);
-    auto loaded = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
-    expect(resumed && resumed->store.session_id() == session_id && loaded && loaded->size() == 1 && app_read_binary_file(session_path) == valid_bytes,
-           "runtime " + mode + " resume acquires the lease, quarantines the torn tail, and then loads validated history");
+    auto unlocked_resumed_result = ava::app::runtime::Session::open(resume_context, resume_request);
+    expect(unlocked_resumed_result.has_value(), unlocked_resumed_result ? "runtime torn-tail recovery resumes the quarantined source session" : unlocked_resumed_result.error().format());
+    if (unlocked_resumed_result)
+    {
+      ava::app::runtime::session_ts::rat resumed_r(*unlocked_resumed_result);
+      auto loaded = unlocked_resumed_result ? resumed_r->store.load()
+                                            : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(unlocked_resumed_result.error()));
+      expect(unlocked_resumed_result && resumed_r->store.session_id() == session_id && loaded && loaded->size() == 1 &&
+          app_read_binary_file(session_path) == valid_bytes, "runtime " + mode + " resume acquires the lease, quarantines the torn tail, and then loads validated history");
+    }
   }
 
   auto const root = create_empty_root("app-runtime-torn-startup-fork");
@@ -578,30 +628,41 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   seed_options.workspace_dir = workspace;
   seed_options.current_dir = workspace;
   seed_options.paths = paths;
-  auto source = ava::app::runtime::Session::open(seed_options);
-  expect(source.has_value(), "startup fork torn recovery test creates source session");
-  if (!source)
+  auto unlocked_source_result = ava::app::runtime::Session::open(seed_options);
+  expect(unlocked_source_result.has_value(), unlocked_source_result ? "startup fork torn recovery test creates source session" : unlocked_source_result.error().format());
+  if (!unlocked_source_result)
     return;
-  auto const source_id = source->store.session_id();
-  auto const source_path = source->store.session_path();
+  std::string source_id;
+  std::filesystem::path source_path;
+  {
+    ava::app::runtime::session_ts::rat source_r(*unlocked_source_result);
+    source_id = source_r->store.session_id();
+    source_path = source_r->store.session_path();
+  }
   auto const valid_source_bytes = app_read_binary_file(source_path);
   {
     std::ofstream file(source_path, std::ios::binary | std::ios::app);
     file << "{\"version\":3,\"id\":\"fork-torn";
   }
-  source = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before startup fork"));
+  unlocked_source_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release torn source before startup fork"));
 
   auto fork_context = seed_options;
-  auto forked = ava::app::runtime::Session::open(fork_context, {.sessionless = false,
-                                                              .requested_session_id = std::nullopt,
-                                                              .fork_session_id = source_id.substr(0, 12),
-                                                              .initial_session_name = std::nullopt,
-                                                              .continue_last_session = false,
-                                                              .initial_reasoning_level = std::nullopt,
-                                                              .expected_original_cwd = std::nullopt});
-  auto fork_entries = forked ? forked->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(forked.error()));
-  expect(forked && forked->created && fork_entries && fork_entries->size() == 2 && app_read_binary_file(source_path) == valid_source_bytes,
-         "startup --fork temporarily leases and recovers its source before holding the lease through branch creation");
+  auto unlocked_forked_result = ava::app::runtime::Session::open(fork_context, {.sessionless = false,
+                                                               .requested_session_id = std::nullopt,
+                                                               .fork_session_id = source_id.substr(0, 12),
+                                                               .initial_session_name = std::nullopt,
+                                                               .continue_last_session = false,
+                                                               .initial_reasoning_level = std::nullopt,
+                                                               .expected_original_cwd = std::nullopt});
+  expect(unlocked_forked_result.has_value(),
+         unlocked_forked_result ? "startup --fork opens a recovered forked session" : unlocked_forked_result.error().format());
+  if (unlocked_forked_result)
+  {
+    ava::app::runtime::session_ts::wat forked_w(*unlocked_forked_result);
+    auto fork_entries = forked_w->store.load();
+    expect(forked_w->created && fork_entries && fork_entries->size() == 2 && app_read_binary_file(source_path) == valid_source_bytes,
+           "startup --fork temporarily leases and recovers its source before holding the lease through branch creation");
+  }
 
   auto no_recovery_artifacts = [](std::filesystem::path const& session_path) {
     auto const final_prefix = session_path.filename().string() + ".torn-tail.";
@@ -626,19 +687,24 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   bounded_seed_options.workspace_dir = bounded_workspace;
   bounded_seed_options.current_dir = bounded_workspace;
   bounded_seed_options.paths = bounded_paths;
-  auto byte_limited_seed = ava::app::runtime::Session::open(bounded_seed_options);
-  expect(byte_limited_seed.has_value(), "bounded runtime recovery test creates byte-limited source");
-  if (!byte_limited_seed)
+  auto unlocked_byte_limited_seed_result = ava::app::runtime::Session::open(bounded_seed_options);
+  expect(unlocked_byte_limited_seed_result.has_value(), unlocked_byte_limited_seed_result ? "bounded runtime recovery test creates byte-limited source" : unlocked_byte_limited_seed_result.error().format());
+  if (!unlocked_byte_limited_seed_result)
     return;
-  auto const byte_limited_id = byte_limited_seed->store.session_id();
-  auto const byte_limited_path = byte_limited_seed->store.session_path();
+  std::string byte_limited_id;
+  std::filesystem::path byte_limited_path;
+  {
+    ava::app::runtime::session_ts::rat byte_limited_r(*unlocked_byte_limited_seed_result);
+    byte_limited_id = byte_limited_r->store.session_id();
+    byte_limited_path = byte_limited_r->store.session_path();
+  }
   auto byte_limited_bytes = app_read_binary_file(byte_limited_path);
   byte_limited_bytes += "{\"version\":3,\"id\":\"bounded-byte-torn";
   {
     std::ofstream file(byte_limited_path, std::ios::binary | std::ios::trunc);
     file << byte_limited_bytes;
   }
-  byte_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release byte-limited runtime"));
+  unlocked_byte_limited_seed_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release byte-limited runtime"));
   auto byte_limited_options = bounded_seed_options;
   byte_limited_options.exact_session_id = true;
   byte_limited_options.session_read_limits =
@@ -654,25 +720,30 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
              app_read_binary_file(byte_limited_path) == byte_limited_bytes && no_recovery_artifacts(byte_limited_path),
          "bounded runtime/ACP-style recovery rejects an oversized source unchanged without quarantine");
 
-  auto entry_limited_seed = ava::app::runtime::Session::open(bounded_seed_options);
-  expect(entry_limited_seed.has_value(), "bounded runtime recovery test creates entry-limited source");
-  if (!entry_limited_seed)
+  auto unlocked_entry_limited_seed_result = ava::app::runtime::Session::open(bounded_seed_options);
+  expect(unlocked_entry_limited_seed_result.has_value(), unlocked_entry_limited_seed_result ? "bounded runtime recovery test creates entry-limited source" : unlocked_entry_limited_seed_result.error().format());
+  if (!unlocked_entry_limited_seed_result)
     return;
-  auto const entry_limited_id = entry_limited_seed->store.session_id();
-  auto const entry_limited_path = entry_limited_seed->store.session_path();
-  auto appended_entry = entry_limited_seed->append_owned(ava::session::SessionEntry{.id = "bounded_second_entry",
-                                                                                    .parent_id = "",
-                                                                                    .type = ava::session::EntryType::UserMessage,
-                                                                                    .timestamp = "2026-07-14T00:00:00Z",
-                                                                                    .data_json = "{\"text\":\"second\"}"});
-  expect(appended_entry.has_value(), "bounded runtime recovery test appends a second complete entry");
+  std::string entry_limited_id;
+  std::filesystem::path entry_limited_path;
+  {
+    ava::app::runtime::session_ts::wat entry_limited_w(*unlocked_entry_limited_seed_result);
+    entry_limited_id = entry_limited_w->store.session_id();
+    entry_limited_path = entry_limited_w->store.session_path();
+    auto appended_entry = entry_limited_w->append_owned(ava::session::SessionEntry{.id = "bounded_second_entry",
+                                                                                      .parent_id = "",
+                                                                                      .type = ava::session::EntryType::UserMessage,
+                                                                                      .timestamp = "2026-07-14T00:00:00Z",
+                                                                                      .data_json = "{\"text\":\"second\"}"});
+    expect(appended_entry.has_value(), "bounded runtime recovery test appends a second complete entry");
+  }
   auto entry_limited_bytes = app_read_binary_file(entry_limited_path);
   entry_limited_bytes += "{\"version\":3,\"id\":\"bounded-entry-torn";
   {
     std::ofstream file(entry_limited_path, std::ios::binary | std::ios::trunc);
     file << entry_limited_bytes;
   }
-  entry_limited_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release entry-limited runtime"));
+  unlocked_entry_limited_seed_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release entry-limited runtime"));
   auto entry_limited_options = bounded_seed_options;
   entry_limited_options.exact_session_id = true;
   entry_limited_options.session_read_limits = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
@@ -699,11 +770,15 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  auto seeded = ava::app::runtime::Session::open(options);
-  expect(seeded.has_value(), "committed-function reconciliation fixture opens a session");
-  if (!seeded)
+  auto unlocked_seeded_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_seeded_result.has_value(), unlocked_seeded_result ? "committed-function reconciliation fixture opens a session" : unlocked_seeded_result.error().format());
+  if (!unlocked_seeded_result)
     return;
-  auto const session_id = seeded->store.session_id();
+  std::string session_id;
+  {
+    ava::app::runtime::session_ts::rat seeded_r(*unlocked_seeded_result);
+    session_id = seeded_r->store.session_id();
+  }
   auto function = [](std::string id, std::string call_id, std::size_t sequence) {
     auto data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
         .assistant_turn_id = "reconcile-turn",
@@ -726,34 +801,44 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                                                                                                                .usage_json = std::nullopt});
   auto first = function("reconcile-function-one", "reconcile-call-one", 0);
   auto second = function("reconcile-function-two", "reconcile-call-two", 1);
-  auto committed = seeded->append_owned(first);
-  committed = committed ? seeded->append_owned(second) : std::move(committed);
-  committed = committed ? seeded->append_owned(ava::session::SessionEntry{.id = "reconcile-commit",
-                                                                          .parent_id = "",
-                                                                          .type = ava::session::EntryType::AssistantTurnCommit,
-                                                                          .timestamp = ava::session::now_timestamp(),
-                                                                          .data_json = commit_data.value_or("{}")})
-                        : std::move(committed);
-  auto partial_result = committed
-                            ? ava::agent::append_tool_result(
-                                  seeded->owner_append_route(),
-                                  ava::agent::ToolDispatchResult{
-                                      .call_id = "reconcile-call-one", .name = "read_file", .success = true, .result_text = R"({"ok":true,"path":"note.txt"})"},
-                                  "reconcile-function-one")
-                            : ava::core::VoidResult(std::unexpected(committed.error()));
-  expect(committed && partial_result, "committed-function reconciliation fixture writes a committed turn with one preexisting exact result");
-  seeded = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciliation fixture before resume"));
+  {
+    ava::app::runtime::session_ts::wat seeded_w(*unlocked_seeded_result);
+    auto committed = seeded_w->append_owned(first);
+    committed = committed ? seeded_w->append_owned(second) : std::move(committed);
+    committed = committed ? seeded_w->append_owned(ava::session::SessionEntry{.id = "reconcile-commit",
+                                                                             .parent_id = "",
+                                                                             .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                             .timestamp = ava::session::now_timestamp(),
+                                                                             .data_json = commit_data.value_or("{}")})
+                          : std::move(committed);
+    auto partial_result = committed
+                              ? ava::agent::append_tool_result(
+                                    seeded_w->owner_append_route(),
+                                    ava::agent::ToolDispatchResult{
+                                        .call_id = "reconcile-call-one", .name = "read_file", .success = true, .result_text = R"({"ok":true,"path":"note.txt"})"},
+                                    "reconcile-function-one")
+                              : ava::core::VoidResult(std::unexpected(committed.error()));
+    expect(committed && partial_result, "committed-function reconciliation fixture writes a committed turn with one preexisting exact result");
+  }
+  unlocked_seeded_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciliation fixture before resume"));
 
   auto resume = options;
   resume.exact_session_id = true;
-  auto resumed = ava::app::runtime::Session::open(resume, {.sessionless = false,
-                                                         .requested_session_id = session_id,
-                                                         .fork_session_id = std::nullopt,
-                                                         .initial_session_name = std::nullopt,
-                                                         .continue_last_session = false,
-                                                         .initial_reasoning_level = std::nullopt,
-                                                         .expected_original_cwd = std::nullopt});
-  auto entries = resumed ? resumed->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(resumed.error()));
+  auto unlocked_resumed_result = ava::app::runtime::Session::open(resume, {.sessionless = false,
+                                                          .requested_session_id = session_id,
+                                                          .fork_session_id = std::nullopt,
+                                                          .initial_session_name = std::nullopt,
+                                                          .continue_last_session = false,
+                                                          .initial_reasoning_level = std::nullopt,
+                                                          .expected_original_cwd = std::nullopt});
+  ava::core::Result<std::vector<ava::session::SessionEntry>> entries;
+  if (unlocked_resumed_result)
+  {
+    ava::app::runtime::session_ts::rat resumed_r(*unlocked_resumed_result);
+    entries = resumed_r->store.load();
+  }
+  else
+    entries = ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(unlocked_resumed_result.error()));
   std::size_t first_results = 0;
   std::size_t second_results = 0;
   bool saw_unknown_nonretriable = false;
@@ -774,103 +859,127 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   }
   auto validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
   auto messages = entries ? ava::agent::build_provider_messages_from_entries(*entries, ava::agent::MessageBuildOptions{})
-                          : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(resumed.error()));
+                          : ava::core::Result<std::vector<ava::provider::ChatMessage>>(std::unexpected(unlocked_resumed_result.error()));
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   auto request = messages ? provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
-                                                                                  .model_id = "gpt-5.5",
-                                                                                  .system_prompt = "system",
-                                                                                  .messages = std::move(*messages),
-                                                                                  .tools_json = {},
-                                                                                  .stream = true},
-                                                   "token")
-                          : ava::core::Result<ava::http::HttpRequest>(std::unexpected(messages.error()));
-  expect(resumed && entries && first_results == 1 && second_results == 1 && saw_unknown_nonretriable && validation.ok() && request,
+                                                                                   .model_id = "gpt-5.5",
+                                                                                   .system_prompt = "system",
+                                                                                   .messages = std::move(*messages),
+                                                                                   .tools_json = {},
+                                                                                   .stream = true},
+                                                    "token")
+                           : ava::core::Result<ava::http::HttpRequest>(std::unexpected(messages.error()));
+  expect(unlocked_resumed_result && entries && first_results == 1 && second_results == 1 && saw_unknown_nonretriable && validation.ok() && request,
          "resume closes only unresolved committed v4 functions, preserves exact bindings, validates replay, and builds the next provider request");
 
-  resumed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciled runtime before idempotence check"));
-  auto reopened = ava::app::runtime::Session::open(resume, {.sessionless = false,
-                                                          .requested_session_id = session_id,
-                                                          .fork_session_id = std::nullopt,
-                                                          .initial_session_name = std::nullopt,
-                                                          .continue_last_session = false,
-                                                          .initial_reasoning_level = std::nullopt,
-                                                          .expected_original_cwd = std::nullopt});
-  auto reopened_entries = reopened ? reopened->store.load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(reopened.error()));
+  unlocked_resumed_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release reconciled runtime before idempotence check"));
+  auto unlocked_reopened_result = ava::app::runtime::Session::open(resume, {.sessionless = false,
+                                                           .requested_session_id = session_id,
+                                                           .fork_session_id = std::nullopt,
+                                                           .initial_session_name = std::nullopt,
+                                                           .continue_last_session = false,
+                                                           .initial_reasoning_level = std::nullopt,
+                                                           .expected_original_cwd = std::nullopt});
+  ava::core::Result<std::vector<ava::session::SessionEntry>> reopened_entries;
+  if (unlocked_reopened_result)
+  {
+    ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
+    reopened_entries = reopened_r->store.load();
+  }
+  else
+    reopened_entries = ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(unlocked_reopened_result.error()));
   std::size_t second_results_after_reopen = 0;
   if (reopened_entries)
     for (auto const& entry : *reopened_entries)
       second_results_after_reopen +=
           entry.type == ava::session::EntryType::ToolResult && ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "reconcile-call-two";
-  expect(reopened && reopened_entries && second_results_after_reopen == 1,
+  expect(unlocked_reopened_result && reopened_entries && second_results_after_reopen == 1,
          "reopening an already reconciled committed function turn never writes a duplicate synthetic result");
 
-  auto zero_result_seed = ava::app::runtime::Session::open(options);
-  expect(zero_result_seed.has_value(), "zero-result reconciliation fixture opens a second session");
-  if (!zero_result_seed)
+  auto unlocked_zero_result_seed_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_zero_result_seed_result.has_value(), unlocked_zero_result_seed_result ? "zero-result reconciliation fixture opens a second session" : unlocked_zero_result_seed_result.error().format());
+  if (!unlocked_zero_result_seed_result)
     return;
-  auto const zero_result_session_id = zero_result_seed->store.session_id();
+  std::string zero_result_session_id;
   auto zero_commit_data = ava::session::serialize_assistant_turn_commit_data_json(ava::session::AssistantTurnCommit{.assistant_turn_id = "reconcile-turn",
-                                                                                                                    .item_count = 1,
-                                                                                                                    .provider = "openai",
-                                                                                                                    .model = "gpt-5.5",
-                                                                                                                    .finish_reason = "tool_calls",
-                                                                                                                    .usage_json = std::nullopt});
-  auto zero_committed = zero_result_seed->append_owned(function("zero-result-function", "zero-result-call", 0));
-  zero_committed = zero_committed ? zero_result_seed->append_owned(ava::session::SessionEntry{.id = "zero-result-commit",
-                                                                                              .parent_id = "",
-                                                                                              .type = ava::session::EntryType::AssistantTurnCommit,
-                                                                                              .timestamp = ava::session::now_timestamp(),
-                                                                                              .data_json = zero_commit_data.value_or("{}")})
-                                  : std::move(zero_committed);
-  expect(zero_committed.has_value(), "zero-result reconciliation fixture writes a committed v4 function without any result");
-  zero_result_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release zero-result fixture before resume"));
+                                                                                                                      .item_count = 1,
+                                                                                                                      .provider = "openai",
+                                                                                                                      .model = "gpt-5.5",
+                                                                                                                      .finish_reason = "tool_calls",
+                                                                                                                      .usage_json = std::nullopt});
+  {
+    ava::app::runtime::session_ts::wat zero_result_w(*unlocked_zero_result_seed_result);
+    zero_result_session_id = zero_result_w->store.session_id();
+    auto zero_committed = zero_result_w->append_owned(function("zero-result-function", "zero-result-call", 0));
+    zero_committed = zero_committed ? zero_result_w->append_owned(ava::session::SessionEntry{.id = "zero-result-commit",
+                                                                                            .parent_id = "",
+                                                                                            .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                            .timestamp = ava::session::now_timestamp(),
+                                                                                            .data_json = zero_commit_data.value_or("{}")})
+                                    : std::move(zero_committed);
+    expect(zero_committed.has_value(), "zero-result reconciliation fixture writes a committed v4 function without any result");
+  }
+  unlocked_zero_result_seed_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release zero-result fixture before resume"));
   auto zero_resume = options;
   zero_resume.exact_session_id = true;
-  auto zero_result_reopened = ava::app::runtime::Session::open(zero_resume, {.sessionless = false,
-                                                                           .requested_session_id = zero_result_session_id,
-                                                                           .fork_session_id = std::nullopt,
-                                                                           .initial_session_name = std::nullopt,
-                                                                           .continue_last_session = false,
-                                                                           .initial_reasoning_level = std::nullopt,
-                                                                           .expected_original_cwd = std::nullopt});
-  auto zero_entries = zero_result_reopened ? zero_result_reopened->store.load()
-                                           : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(zero_result_reopened.error()));
+  auto unlocked_zero_result_reopened_result = ava::app::runtime::Session::open(zero_resume, {.sessionless = false,
+                                                                            .requested_session_id = zero_result_session_id,
+                                                                            .fork_session_id = std::nullopt,
+                                                                            .initial_session_name = std::nullopt,
+                                                                            .continue_last_session = false,
+                                                                            .initial_reasoning_level = std::nullopt,
+                                                                            .expected_original_cwd = std::nullopt});
+  ava::core::Result<std::vector<ava::session::SessionEntry>> zero_entries;
+  if (unlocked_zero_result_reopened_result)
+  {
+    ava::app::runtime::session_ts::rat zero_reopened_r(*unlocked_zero_result_reopened_result);
+    zero_entries = zero_reopened_r->store.load();
+  }
+  else
+    zero_entries = ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(unlocked_zero_result_reopened_result.error()));
   std::size_t zero_synthetic_results = 0;
   if (zero_entries)
     for (auto const& entry : *zero_entries)
       zero_synthetic_results += entry.type == ava::session::EntryType::ToolResult &&
-                                ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "zero-result-call" &&
-                                entry.data_json.find("execution_outcome_unknown") != std::string::npos;
+                                 ava::core::json::string_field(entry.data_json, "call_id").value_or("") == "zero-result-call" &&
+                                 entry.data_json.find("execution_outcome_unknown") != std::string::npos;
   auto zero_validation = zero_entries ? ava::session::validate_session_replay(*zero_entries) : ava::session::SessionReplayValidation{};
-  expect(zero_result_reopened && zero_entries && zero_synthetic_results == 1 && zero_validation.ok(),
+  expect(unlocked_zero_result_reopened_result && zero_entries && zero_synthetic_results == 1 && zero_validation.ok(),
          "resume closes a committed v4 function with zero prior results without re-executing it");
 
-  auto invalid_seed = ava::app::runtime::Session::open(options);
-  expect(invalid_seed.has_value(), "invalid exact-result reconciliation fixture opens a third session");
-  if (!invalid_seed)
+  auto unlocked_invalid_seed_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_invalid_seed_result.has_value(), unlocked_invalid_seed_result ? "invalid exact-result reconciliation fixture opens a third session" : unlocked_invalid_seed_result.error().format());
+  if (!unlocked_invalid_seed_result)
     return;
-  auto const invalid_session_id = invalid_seed->store.session_id();
-  auto const invalid_session_path = invalid_seed->store.session_path();
-  auto invalid_committed = invalid_seed->append_owned(function("invalid-window-function", "invalid-window-call", 0));
-  invalid_committed = invalid_committed ? invalid_seed->append_owned(ava::session::SessionEntry{.id = "invalid-window-commit",
-                                                                                                .parent_id = "",
-                                                                                                .type = ava::session::EntryType::AssistantTurnCommit,
-                                                                                                .timestamp = ava::session::now_timestamp(),
-                                                                                                .data_json = zero_commit_data.value_or("{}")})
-                                        : std::move(invalid_committed);
-  invalid_committed = invalid_committed ? invalid_seed->append_owned(ava::session::SessionEntry{.id = "invalid-window-user",
-                                                                                                .parent_id = "",
-                                                                                                .type = ava::session::EntryType::UserMessage,
-                                                                                                .timestamp = ava::session::now_timestamp(),
-                                                                                                .data_json = "{\"text\":\"later input\"}"})
-                                        : std::move(invalid_committed);
-  auto invalid_result = invalid_committed
-                            ? ava::agent::append_tool_result(invalid_seed->owner_append_route(),
-                                                             {.call_id = "invalid-window-call", .name = "read_file", .success = true, .result_text = "late"},
-                                                             "invalid-window-function")
-                            : ava::core::VoidResult(std::unexpected(invalid_committed.error()));
+  std::string invalid_session_id;
+  std::filesystem::path invalid_session_path;
+  ava::core::VoidResult invalid_committed;
+  ava::core::VoidResult invalid_result;
+  {
+    ava::app::runtime::session_ts::wat invalid_w(*unlocked_invalid_seed_result);
+    invalid_session_id = invalid_w->store.session_id();
+    invalid_session_path = invalid_w->store.session_path();
+    invalid_committed = invalid_w->append_owned(function("invalid-window-function", "invalid-window-call", 0));
+    invalid_committed = invalid_committed ? invalid_w->append_owned(ava::session::SessionEntry{.id = "invalid-window-commit",
+                                                                                               .parent_id = "",
+                                                                                               .type = ava::session::EntryType::AssistantTurnCommit,
+                                                                                               .timestamp = ava::session::now_timestamp(),
+                                                                                               .data_json = zero_commit_data.value_or("{}")})
+                                         : std::move(invalid_committed);
+    invalid_committed = invalid_committed ? invalid_w->append_owned(ava::session::SessionEntry{.id = "invalid-window-user",
+                                                                                               .parent_id = "",
+                                                                                               .type = ava::session::EntryType::UserMessage,
+                                                                                               .timestamp = ava::session::now_timestamp(),
+                                                                                               .data_json = "{\"text\":\"later input\"}"})
+                                         : std::move(invalid_committed);
+    invalid_result = invalid_committed
+                        ? ava::agent::append_tool_result(invalid_w->owner_append_route(),
+                                                         {.call_id = "invalid-window-call", .name = "read_file", .success = true, .result_text = "late"},
+                                                         "invalid-window-function")
+                        : ava::core::VoidResult(std::unexpected(invalid_committed.error()));
+  }
   auto const bytes_before_invalid_resume = app_read_binary_file(invalid_session_path);
-  invalid_seed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release invalid reconciliation fixture before resume"));
+  unlocked_invalid_seed_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release invalid reconciliation fixture before resume"));
   auto invalid_resume = options;
   invalid_resume.exact_session_id = true;
   auto invalid_reopened = ava::app::runtime::Session::open(invalid_resume, {.sessionless = false,
@@ -908,52 +1017,56 @@ void test_app_runtime_cli_prompt_overrides()
   open_context.paths = paths;
   open_context.prompt_overrides.system_prompt = "cli system prompt";
   open_context.prompt_overrides.append_system_prompts = {"cli append prompt one", "cli append prompt two"};
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "runtime session opens with cli prompt overrides");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime session opens with cli prompt overrides" : unlocked_session_result.error().format());
+  if (!unlocked_session_result)
     return;
 
-  expect(session->base_prompt().from_override && !session->base_prompt().source_path &&
-             session->base_prompt().byte_count == std::string_view("cli system prompt").size() && session->base_prompt().content_fingerprint != 0,
-         "cli --system-prompt is recorded as base prompt metadata");
-  expect(session->prompt_overrides().system_prompt && *session->prompt_overrides().system_prompt == "cli system prompt" &&
-             session->prompt_overrides().append_system_prompts.size() == 2,
-         "runtime session retains cli prompt overrides for reloads");
-  expect(session->system_prompt().find("cli system prompt") != std::string::npos &&
-             session->system_prompt().find("cli append prompt one") != std::string::npos &&
-             session->system_prompt().find("cli append prompt two") != std::string::npos &&
-             session->system_prompt().find("workspace context should remain") != std::string::npos &&
-             session->system_prompt().find("provider prompt override should be replaced") == std::string::npos &&
-             session->system_prompt().find("global system prompt should be replaced") == std::string::npos &&
-             session->system_prompt().find("project system prompt should be replaced") == std::string::npos &&
-             session->system_prompt().find("global append prompt should be replaced") == std::string::npos &&
-             session->system_prompt().find("project append prompt should be replaced") == std::string::npos,
-         "cli prompt overrides replace selected system/append prompt resources while preserving context");
+  {
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto const system_source_count = std::ranges::count_if(
-      session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
-  auto const append_source_count = std::ranges::count_if(
-      session->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
-  expect(system_source_count == 1 && append_source_count == 2, "cli prompt overrides are tracked as system prompt freshness sources");
+    expect(session_w->base_prompt().from_override && !session_w->base_prompt().source_path &&
+               session_w->base_prompt().byte_count == std::string_view("cli system prompt").size() && session_w->base_prompt().content_fingerprint != 0,
+           "cli --system-prompt is recorded as base prompt metadata");
+    expect(session_w->prompt_overrides().system_prompt && *session_w->prompt_overrides().system_prompt == "cli system prompt" &&
+               session_w->prompt_overrides().append_system_prompts.size() == 2,
+           "runtime session retains cli prompt overrides for reloads");
+    expect(session_w->system_prompt().find("cli system prompt") != std::string::npos &&
+               session_w->system_prompt().find("cli append prompt one") != std::string::npos &&
+               session_w->system_prompt().find("cli append prompt two") != std::string::npos &&
+               session_w->system_prompt().find("workspace context should remain") != std::string::npos &&
+               session_w->system_prompt().find("provider prompt override should be replaced") == std::string::npos &&
+               session_w->system_prompt().find("global system prompt should be replaced") == std::string::npos &&
+               session_w->system_prompt().find("project system prompt should be replaced") == std::string::npos &&
+               session_w->system_prompt().find("global append prompt should be replaced") == std::string::npos &&
+               session_w->system_prompt().find("project append prompt should be replaced") == std::string::npos,
+           "cli prompt overrides replace selected system/append prompt resources while preserving context");
 
-  auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context --system-prompt"});
-  expect(context && context->handled && !context->output.empty() && context->output[0].find("system_prompt_sources=3") != std::string::npos &&
-             context->output[0].find("system_prompt  cli  --system-prompt  <inline>") != std::string::npos &&
-             context->output[0].find("status=inline") != std::string::npos && context->output[0].find("SYSTEM.md") == std::string::npos,
-         "context freshness reports cli system prompt overrides as inline sources");
-  auto append_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context --append-system-prompt"});
-  expect(append_context && append_context->handled && !append_context->output.empty() &&
-             append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/1  <inline>") != std::string::npos &&
-             append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/2  <inline>") != std::string::npos &&
-             append_context->output[0].find("APPEND_SYSTEM.md") == std::string::npos,
-         "context freshness reports repeated cli append prompt overrides as inline sources");
+    auto const system_source_count = std::ranges::count_if(
+        session_w->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::SystemPrompt; });
+    auto const append_source_count = std::ranges::count_if(
+        session_w->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
+    expect(system_source_count == 1 && append_source_count == 2, "cli prompt overrides are tracked as system prompt freshness sources");
 
-  auto switched_mode = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/mode"});
-  expect(switched_mode && switched_mode->handled && session->mode() == ava::agent::Mode::Build &&
-             session->system_prompt().find("cli system prompt") != std::string::npos &&
-             session->system_prompt().find("cli append prompt two") != std::string::npos &&
-             session->system_prompt().find("Implement changes directly") == std::string::npos,
-         "mode reloads preserve cli system prompt overrides");
+    auto context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context --system-prompt"});
+    expect(context && context->handled && !context->output.empty() && context->output[0].find("system_prompt_sources=3") != std::string::npos &&
+               context->output[0].find("system_prompt  cli  --system-prompt  <inline>") != std::string::npos &&
+               context->output[0].find("status=inline") != std::string::npos && context->output[0].find("SYSTEM.md") == std::string::npos,
+           "context freshness reports cli system prompt overrides as inline sources");
+    auto append_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context --append-system-prompt"});
+    expect(append_context && append_context->handled && !append_context->output.empty() &&
+               append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/1  <inline>") != std::string::npos &&
+               append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/2  <inline>") != std::string::npos &&
+               append_context->output[0].find("APPEND_SYSTEM.md") == std::string::npos,
+           "context freshness reports repeated cli append prompt overrides as inline sources");
+
+    auto switched_mode = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/mode"});
+    expect(switched_mode && switched_mode->handled && session_w->mode() == ava::agent::Mode::Build &&
+               session_w->system_prompt().find("cli system prompt") != std::string::npos &&
+               session_w->system_prompt().find("cli append prompt two") != std::string::npos &&
+               session_w->system_prompt().find("Implement changes directly") == std::string::npos,
+           "mode reloads preserve cli system prompt overrides");
+  }
 }
 
 }  // namespace ava::tests::app_runtime_tests

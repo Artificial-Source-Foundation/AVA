@@ -140,10 +140,12 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "RPC resolver write failure test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC resolver write failure test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  //FIXME: don't lock unlocked_session_result here!
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
@@ -151,7 +153,7 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
   std::ostringstream stream;
   stream.setstate(std::ios::badbit);
   ava::app::rpc::output_ts output(stream, [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(output, pending_state)); });
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-write-fail");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session_w, session_mutex, nullptr, "prompt-write-fail");
   auto result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_write_fail",
                                                             .operation = ava::permissions::Operation::ReadFile,
                                                             .mode = ava::agent::Mode::Build,
@@ -313,10 +315,12 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "RPC resolver exact-identity test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC resolver exact-identity test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  //FIXME: don't lock unlocked_session_result here!
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
@@ -324,7 +328,7 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
   ResolverPublicationStreamBuf output_buffer(true, true);
   std::ostream out(&output_buffer);
   ava::app::rpc::output_ts output(out, [] { });
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt-identity");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session_w, session_mutex, nullptr, "prompt-identity");
   ava::core::Result<ava::permissions::PermissionResolutionDecision> result = ava::permissions::PermissionResolution::Deny;
   std::jthread resolver_thread([&] {
     result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq-identity",
@@ -474,6 +478,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     input_buffer.close();
     rpc_thread.join();
 
+    ava::app::runtime::session_ts::rat session_r(unlocked_session);
     auto const jsonl = output_buffer.str();
     expect(result.has_value() && completed, "RPC permission reply loop exits successfully");
     expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
@@ -484,7 +489,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     {
       expect(jsonl.find("\"reason\":\"not approved for this run\"") != std::string::npos,
              "RPC permission deny reply preserves the client resolution reason in the event stream");
-      auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
+      auto entries = session_r->store.load();
       auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
       expect(audits.size() >= 2 && ava::core::json::string_field(audits.back().data_json, "resolution") == "deny" &&
                  ava::core::json::string_field(audits.back().data_json, "resolution_source") == "resolver" &&
@@ -546,15 +551,16 @@ void test_app_rpc_permission_reply_session_grant_flow()
   input_buffer.close();
   rpc_thread.join();
 
+  ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = output_buffer.str();
   expect(result.has_value() && first_completed && grant_listed && second_completed, "RPC permission session grant loop exits successfully");
   expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
              jsonl.find("\"decision\":\"allow_session\"") != std::string::npos && jsonl.find("\"id\":\"grants\"") != std::string::npos &&
-             jsonl.find("\"session_id\":\"" + ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id() + "\"") != std::string::npos &&
+             jsonl.find("\"session_id\":\"" + session_r->store.session_id() + "\"") != std::string::npos &&
              jsonl.find("\"operation\":\"read\"") != std::string::npos && jsonl.find("\"target_path\":\"" + outside_path.string() + "\"") != std::string::npos,
          "RPC session grants are serialized with their exact session and suppress only repeated matching prompts");
 
-  auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
+  auto entries = session_r->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   expect(audits.size() == 4 && ava::core::json::string_field(audits[3].data_json, "resolution_source") == "session_grant" &&
              ava::core::json::string_field(audits[3].data_json, "resolution") == "allow",
@@ -572,10 +578,13 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = app_test_paths(root);
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "RPC session grant bounds test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC session grant bounds test opens runtime session");
+  if (!unlocked_session_result)
     return;
+
+  //FIXME don't lock unlocked_session_result here!
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
@@ -606,7 +615,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{
         .grant_id = "permgrant_matching",
         .permission_request_id = prompt.permission_request_id,
-        .session_id = session->store.session_id(),
+        .session_id = session_w->store.session_id(),
         .operation = prompt.operation,
         .mode = prompt.mode,
         .tool_name = prompt.tool_name,
@@ -618,7 +627,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .risk = prompt.risk,
     });
   }
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt_1");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session_w, session_mutex, nullptr, "prompt_1");
   auto matched = resolver(prompt);
   expect(matched && *matched == ava::permissions::PermissionResolution::AllowSessionGrant,
          "a session grant authorizes a matching stable workspace recipe rather than an execution fingerprint");
@@ -662,7 +671,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     pending_state.permission_session_grants.push_back(ava::app::rpc::PermissionSessionGrant{
         .grant_id = "permgrant_matching_again",
         .permission_request_id = prompt.permission_request_id,
-        .session_id = session->store.session_id(),
+        .session_id = session_w->store.session_id(),
         .operation = prompt.operation,
         .mode = prompt.mode,
         .tool_name = prompt.tool_name,
@@ -675,7 +684,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     });
   }
   auto hard_deny = ava::app::rpc::make_rpc_permission_resolver(
-      pending_state, output, run_state, *session, session_mutex,
+      pending_state, output, run_state, *session_w, session_mutex,
       [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny, "hard policy deny"};
         decision.authoritative = true;
@@ -700,10 +709,13 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "RPC command one-shot test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC command one-shot test opens runtime session");
+  if (!unlocked_session_result)
     return;
+
+  //FIXME don't lock unlocked_session_result here!
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
@@ -732,7 +744,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
                                                   .risk = ava::permissions::PermissionRisk::Critical,
                                                   .command_metadata = metadata};
 
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session, session_mutex, nullptr, "prompt_os");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session_w, session_mutex, nullptr, "prompt_os");
 
   auto wait_for_permission_request = [&] {
     bool const published = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(5));
@@ -894,8 +906,10 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   input_buffer.close();
   rpc_thread.join();
 
+  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+
   auto const jsonl = output_buffer.str();
-  auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
+  auto entries = session_r->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   bool persistent_audited = false;
   for (auto const& audit : audits)

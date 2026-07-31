@@ -633,17 +633,23 @@ void test_app_rpc_utf8_recovery_and_framing()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
-  auto session = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value(), "RPC invalid UTF-8 recovery test opens runtime session");
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC invalid UTF-8 recovery test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  // Extract unlocked_session from unlocked_session_result.
+  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
 
   std::string const replacement = "\xEF\xBF\xBD";
   std::string invalid_component = "bad";
   invalid_component.push_back(static_cast<char>(0xFF));
-  session->invocation_inputs().workspace_dir = std::filesystem::path(invalid_component);
-  session->invocation_inputs().current_dir = std::filesystem::path(invalid_component);
-  auto const invalid_state = session->state_result_json(false);
+  std::string invalid_state;
+  {
+    ava::app::runtime::session_ts::wat session_w(unlocked_session);
+    session_w->invocation_inputs().workspace_dir = std::filesystem::path(invalid_component);
+    session_w->invocation_inputs().current_dir = std::filesystem::path(invalid_component);
+    invalid_state = session_w->state_result_json(false);
+  }
   auto const invalid_path = ava::app::rpc::string_field_json("path", invalid_component);
   ava::app::CommandResult invalid_output_result;
   invalid_output_result.handled = true;
@@ -671,7 +677,6 @@ void test_app_rpc_utf8_recovery_and_framing()
   std::ostringstream out;
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
-  ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, {}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result && jsonl.find("\"id\":\"\",\"type\":\"response\",\"success\":false") != std::string::npos &&

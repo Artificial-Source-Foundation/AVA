@@ -760,10 +760,11 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   open_context.current_dir = workspace;
   open_context.paths = paths;
   auto session = ava::app::runtime::Session::open(open_context);
-  auto other = ava::app::runtime::Session::open(open_context);
-  expect(session.has_value() && other.has_value(), "RPC active reject test opens runtime sessions");
-  if (!session || !other)
+  auto unlocked_other_result = ava::app::runtime::Session::open(open_context);
+  expect(session.has_value() && unlocked_other_result.has_value(), "RPC active reject test opens runtime sessions");
+  if (!session || !unlocked_other_result)
     return;
+  ava::app::runtime::session_ts::wat other_w(*unlocked_other_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});
@@ -784,7 +785,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   expect(requested, "RPC active reject test observes pending permission request");
   input_buffer.push("{\"id\":\"p2\",\"type\":\"prompt\",\"message\":\"second\"}\n");
   input_buffer.push("{\"id\":\"new\",\"type\":\"new_session\"}\n");
-  input_buffer.push("{\"id\":\"switch\",\"type\":\"switch_session\",\"session_id\":\"" + other->store.session_id() + "\"}\n");
+  input_buffer.push("{\"id\":\"switch\",\"type\":\"switch_session\",\"session_id\":\"" + other_w->store.session_id() + "\"}\n");
   input_buffer.push("{\"id\":\"messages\",\"type\":\"get_messages\"}\n");
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
   input_buffer.close();

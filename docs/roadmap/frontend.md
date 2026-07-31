@@ -111,7 +111,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 17 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 18 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -1426,11 +1426,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the seventeen isolated tmux scenarios only when the change touches their
+Run the eighteen isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 17 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 18 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1546,8 +1546,8 @@ Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 17 isolated scenarios,
-including `transcript_search` and `transcript_selection`; `streaming_scroll` and
-`active_run` measure idle/streaming flood responsiveness, active presentation
+The credential-free fake-provider tmux matrix now has 18 isolated scenarios,
+including `transcript_search`, `transcript_selection`, and `subagent_workspace`;
+`streaming_scroll` and `active_run` measure idle/streaming flood responsiveness, active presentation
 commands, draft preservation, detached stability, prompt wheel ordering, resize
 synchronization, terminal hygiene, and cleanup.

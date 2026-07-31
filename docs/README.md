@@ -33,9 +33,13 @@ This is the navigation spine for AVA's user, automation, engineering, and produc
 
 ## Engineering References
 
+- [`engineering/session-architecture.md`](engineering/session-architecture.md): conceptual overview of the session subsystem — sessions, `SessionStore`, the lease, lease-bound reads and authorities, and sessionless/ephemeral mode. Read this before the format/versioning/controller docs.
 - [`engineering/cpp-safety-rules.md`](engineering/cpp-safety-rules.md): C++ ownership, error, concurrency, and RAII rules.
 - [`engineering/session-versioning.md`](engineering/session-versioning.md): session JSONL entry and payload versioning policy.
+- [`engineering/session-run-controller.md`](engineering/session-run-controller.md): M2 run controller and append-routing contract, including the runtime read-authority consumer inventory.
+- [`engineering/run-observer.md`](engineering/run-observer.md): run-observer trace event catalog and the non-authoritative observation attachment on `SessionStore`.
 - [`engineering/side-effect-safety-checklist.md`](engineering/side-effect-safety-checklist.md): required questions before adding new side-effect classes.
+- [`engineering/backend-implementation-ledger.md`](engineering/backend-implementation-ledger.md): historical backend milestone and implementation ledger.
 - [`AGENTS.md`](../AGENTS.md): repository source map and agent workflow rules.
 
 ## Product, Parity, And Roadmap

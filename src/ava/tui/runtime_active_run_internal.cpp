@@ -11,6 +11,7 @@
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
@@ -122,7 +123,7 @@ RuntimeActiveRunState::RuntimeActiveRunState(std::string submitted_in, bool is_c
 RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                        RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator,
                                                        RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                                                       TranscriptSearchController& transcript_search)
+                                                       TranscriptSearchController& transcript_search, RuntimeSubagentWorkspaceController& subagent_workspace)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -130,7 +131,8 @@ RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& option
       prompt_coordinator_(prompt_coordinator),
       navigation_(navigation),
       action_controller_(action_controller),
-      transcript_search_(transcript_search)
+      transcript_search_(transcript_search),
+      subagent_workspace_(subagent_workspace)
 {
 }
 
@@ -283,6 +285,8 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
       transcript_scroll_offset = 0;
     }
   }
+  if (subagent_workspace_.active() && !snapshot.permission_prompt && !snapshot.question_prompt)
+    return RuntimeEventDrainResult::UpdatedNoRender;
   if (transcript_scroll_offset > 0 && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list)
     return RuntimeEventDrainResult::UpdatedNoRender;
   return renderer_.request_render() ? RuntimeEventDrainResult::UpdatedNoRender : RuntimeEventDrainResult::RenderFailed;
@@ -503,12 +507,20 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         {
           wait_duration = std::min(wait_duration, std::chrono::ceil<std::chrono::milliseconds>(renderer.time_until_pending_render()));
         }
+        if (auto workspace_wait = subagent_workspace_.time_until_poll(input_checked_at))
+          wait_duration = std::min(wait_duration, std::chrono::ceil<std::chrono::milliseconds>(*workspace_wait));
         if (submit_future.wait_for(wait_duration) == std::future_status::ready)
           break;
       }
 
-      auto const cadence_tick = cadence.advance(std::chrono::steady_clock::now());
+      auto const frame_now = std::chrono::steady_clock::now();
+      auto const cadence_tick = cadence.advance(frame_now);
       auto const spinner_advanced = cadence_tick.elapsed_spinner_frames > 0;
+      if (subagent_workspace_.poll(frame_now) && !renderer.request_render())
+      {
+        fail_active_run();
+        break;
+      }
       if (spinner_advanced)
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
@@ -524,14 +536,14 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         prompt_coordinator.fail_pending_requests();
         break;
       }
-      if (transcript_scroll_offset == 0 && !maybe_reload_display_settings())
+      if (!subagent_workspace_.active() && transcript_scroll_offset == 0 && !maybe_reload_display_settings())
       {
         terminal_write_failed = true;
         render_failed = true;
         prompt_coordinator.fail_pending_requests();
         break;
       }
-      if (spinner_advanced && !renderer.request_render(FrameRenderKind::Footer))
+      if (spinner_advanced && !subagent_workspace_.active() && !renderer.request_render(FrameRenderKind::Footer))
       {
         terminal_write_failed = true;
         render_failed = true;

@@ -1,0 +1,163 @@
+#include "sys.h"
+#include "ava/app/command_format.h"
+#include "ava/app/subagent_workspace.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <utility>
+
+namespace ava::app {
+namespace {
+
+std::string execution_label(ava::agent::SubagentExecutionState state)
+{
+  switch (state)
+  {
+    case ava::agent::SubagentExecutionState::Starting:
+      return "Starting";
+    case ava::agent::SubagentExecutionState::Running:
+      return "Running";
+    case ava::agent::SubagentExecutionState::Completed:
+      return "Completed";
+    case ava::agent::SubagentExecutionState::Failed:
+      return "Failed";
+    case ava::agent::SubagentExecutionState::Canceled:
+      return "Canceled";
+    case ava::agent::SubagentExecutionState::Interrupted:
+      return "Interrupted";
+  }
+  return "Unavailable";
+}
+
+std::string mode_label(ava::agent::SubagentJobMode mode)
+{
+  return mode == ava::agent::SubagentJobMode::Background ? "Background" : "Foreground";
+}
+
+bool safe_display_metadata(std::string_view text)
+{
+  return !text.empty() && text.find_first_not_of(' ') != std::string_view::npos && text.size() <= 120 && text.find('<') == std::string_view::npos &&
+         text.find('>') == std::string_view::npos && text.find("job_") == std::string_view::npos && text.find("session_") == std::string_view::npos &&
+         !text.starts_with('/') &&
+         !(text.size() >= 3 && ((text[0] >= 'A' && text[0] <= 'Z') || (text[0] >= 'a' && text[0] <= 'z')) && text[1] == ':' &&
+           (text[2] == '/' || text[2] == '\\'));
+}
+
+std::string display_title(ava::agent::SubagentJobSnapshot const& job)
+{
+  auto title = sanitize_inline_text(job.display_title);
+  if (safe_display_metadata(title))
+    return title;
+  if (job.display_subagent_type == "explore" || job.display_subagent_type == "Explore")
+    return "Explore subagent";
+  return "Subagent";
+}
+
+void append_detail(std::string& detail, std::string text)
+{
+  if (text.empty())
+    return;
+  if (!detail.empty())
+    detail += " · ";
+  detail += std::move(text);
+}
+
+std::string short_hidden_ref(std::string_view id)
+{
+  std::uint64_t hash = 1469598103934665603ULL;
+  for (unsigned char const byte : id)
+  {
+    hash ^= byte;
+    hash *= 1099511628211ULL;
+  }
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string ref = "@";
+  for (int shift = 28; shift >= 0; shift -= 4) ref.push_back(kHex[(hash >> shift) & 0xfU]);
+  return ref;
+}
+
+std::vector<std::string> short_hidden_refs(std::vector<std::string> const& ids)
+{
+  std::vector<std::string> refs;
+  refs.reserve(ids.size());
+  for (auto const& id : ids) refs.push_back(short_hidden_ref(id));
+  for (std::size_t index = 0; index < refs.size(); ++index)
+  {
+    std::size_t duplicate = 0;
+    for (std::size_t other = 0; other < index; ++other)
+    {
+      if (ids[other] != ids[index] && refs[other].substr(0, 9) == refs[index].substr(0, 9))
+        ++duplicate;
+    }
+    if (duplicate > 0)
+      refs[index] += "-" + std::to_string(duplicate + 1);
+  }
+  return refs;
+}
+
+}  // namespace
+
+ava::tui::SelectListView subagent_selector_view(std::vector<ava::agent::SubagentCoordinatorJobSnapshot> const& snapshots)
+{
+  ava::tui::SelectListView view;
+  view.title = "Subagents";
+  view.placeholder = "Search subagents";
+  view.empty_text = "No matching subagents";
+  view.footer_hint = "Enter open · type filter · Esc close";
+  view.freeze_underlying_transcript_layout = true;
+
+  if (snapshots.empty())
+  {
+    view.items.push_back(ava::tui::SelectListItemView{.value = {},
+                                                      .label = "No subagents yet",
+                                                      .description = "Background subagents will appear here",
+                                                      .group = {},
+                                                      .detail = {},
+                                                      .badge = {},
+                                                      .current = false,
+                                                      .enabled = false,
+                                                      .disabled_reason = {}});
+    return view;
+  }
+
+  std::vector<std::string> ids;
+  ids.reserve(snapshots.size());
+  for (auto const& snapshot : snapshots) ids.push_back(snapshot.job.identity.job_id);
+  auto const refs = short_hidden_refs(ids);
+
+  view.items.reserve(snapshots.size());
+  for (std::size_t reverse_index = snapshots.size(); reverse_index > 0; --reverse_index)
+  {
+    auto const index = reverse_index - 1;
+    auto const& job = snapshots[index].job;
+    std::string detail;
+    auto const subagent_type = sanitize_inline_text(job.display_subagent_type);
+    if (safe_display_metadata(subagent_type))
+      append_detail(detail, "type " + subagent_type);
+    if (job.tool_calls > 0)
+      append_detail(detail, "tools " + std::to_string(job.tool_calls));
+    if (!refs[index].empty())
+      append_detail(detail, "ref " + refs[index]);
+    view.items.push_back(ava::tui::SelectListItemView{.value = job.identity.job_id,
+                                                      .label = display_title(job),
+                                                      .description = std::move(detail),
+                                                      .group = {},
+                                                      .detail = {},
+                                                      .badge = execution_label(job.execution) + " · " + mode_label(job.mode),
+                                                      .current = false,
+                                                      .enabled = true,
+                                                      .disabled_reason = {}});
+  }
+  return view;
+}
+
+ava::core::Result<ava::tui::SelectListView> subagent_selector_view(std::shared_ptr<ava::agent::SubagentCoordinator> const& coordinator,
+                                                                   std::string_view parent_session_id)
+{
+  if (!coordinator)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
+  return subagent_selector_view(coordinator->list(parent_session_id));
+}
+
+}  // namespace ava::app

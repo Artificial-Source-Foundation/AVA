@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/agent/subagent_inspector.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text.h"
@@ -461,6 +462,22 @@ struct SelectListView
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct SubagentWorkspaceView
+{
+  std::string title;
+  std::string status;
+  std::string notice;
+  std::vector<ava::agent::SubagentLiveMessage> messages;
+  std::size_t scroll_offset = 0;
+  bool terminal = false;
+  bool freeze_pending = false;
+  bool unavailable = false;
+  bool evicted = false;
+  bool refresh_unavailable = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct ActiveRunHint
 {
   std::string submit_or_queue = {};
@@ -510,6 +527,7 @@ struct ComposerSnapshot
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
   std::optional<SelectListView> select_list = std::nullopt;
+  std::optional<SubagentWorkspaceView> subagent_workspace = std::nullopt;
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   bool path_completion_force_active = false;
@@ -639,6 +657,8 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout(ComposerSnapshot const& snapshot);
 [[nodiscard]] ComposerFrame render_composer_frame(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
+[[nodiscard]] std::vector<std::string> render_subagent_workspace(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
+[[nodiscard]] std::size_t subagent_workspace_max_scroll_offset(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);

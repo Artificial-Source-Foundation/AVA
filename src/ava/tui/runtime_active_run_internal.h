@@ -21,6 +21,7 @@ class RuntimeActionController;
 class RuntimeNavigationController;
 class RuntimePromptCoordinator;
 class RuntimeRenderer;
+class RuntimeSubagentWorkspaceController;
 class TranscriptSearchController;
 enum class TuiAction;
 struct InputEvent;
@@ -104,7 +105,8 @@ class RuntimeActiveRunController final
  public:
   RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                              RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator, RuntimeNavigationController& navigation,
-                             RuntimeActionController& action_controller, TranscriptSearchController& transcript_search);
+                             RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
+                             RuntimeSubagentWorkspaceController& subagent_workspace);
   RuntimeActiveRunController(RuntimeActiveRunController const&) = delete;
   RuntimeActiveRunController& operator=(RuntimeActiveRunController const&) = delete;
 
@@ -156,6 +158,7 @@ class RuntimeActiveRunController final
   RuntimeNavigationController& navigation_;
   RuntimeActionController& action_controller_;
   TranscriptSearchController& transcript_search_;
+  RuntimeSubagentWorkspaceController& subagent_workspace_;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

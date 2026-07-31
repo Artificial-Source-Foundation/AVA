@@ -2,9 +2,11 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/subagent_workspace.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/theme.h"
 #include "ava/config/model_config.h"
@@ -13,7 +15,10 @@
 #include "ava/core/error.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -329,15 +334,15 @@ void run_tui_selector_tests()
     mode_toggle_render_view.selected_item_index = mode_toggle_matches.front();
   auto const render_mode_toggle_width = [&](std::size_t width) {
     return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                               .provider = "openai",
-                                                               .model = "gpt-5.5",
-                                                               .session_id = "session_test",
-                                                               .input = "composer behind hotkeys",
-                                                               .status = "hotkeys opened",
-                                                               .transcript = {},
-                                                               .select_list = mode_toggle_render_view,
-                                                               .width = width,
-                                                               .height = 18});
+                                                                .provider = "openai",
+                                                                .model = "gpt-5.5",
+                                                                .session_id = "session_test",
+                                                                .input = "composer behind hotkeys",
+                                                                .status = "hotkeys opened",
+                                                                .transcript = {},
+                                                                .select_list = mode_toggle_render_view,
+                                                                .width = width,
+                                                                .height = 18});
   };
   auto const mode_toggle_frame_80 = render_mode_toggle_width(80);
   auto const mode_toggle_frame_92 = render_mode_toggle_width(92);
@@ -1004,4 +1009,320 @@ void run_tui_selector_tests()
   auto soft = ava::tui::attach_soft_status_warning("forked session session_x", "session tree refresh deferred: ", "tree locked\nextra");
   expect(soft == "forked session session_x · session tree refresh deferred: tree locked",
          "soft post-fork catalog warnings attach as single-line status without replacing the opened snapshot");
+
+  auto make_subagent_snapshot = [](std::string id, std::string owner, std::string title, std::string type, ava::agent::SubagentExecutionState execution,
+                                   std::size_t tools) {
+    ava::agent::SubagentCoordinatorJobSnapshot snapshot;
+    snapshot.job.identity.job_id = std::move(id);
+    snapshot.job.identity.parent_session_id = std::move(owner);
+    snapshot.job.identity.child_session_id = "session_child_hidden";
+    snapshot.job.identity.task_id = "task_hidden";
+    snapshot.job.mode = ava::agent::SubagentJobMode::Background;
+    snapshot.job.execution = execution;
+    snapshot.job.display_title = std::move(title);
+    snapshot.job.display_subagent_type = std::move(type);
+    snapshot.job.tool_calls = tools;
+    return snapshot;
+  };
+  auto selector_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
+      make_subagent_snapshot("job_0123456789abcdef_old", "owner-a", {}, "explore", ava::agent::SubagentExecutionState::Completed, 0),
+      make_subagent_snapshot("job_0123456789abcdef_new", "owner-a", "Audit parser", "general", ava::agent::SubagentExecutionState::Running, 3)};
+  auto const jobs_selector = ava::app::subagent_selector_view(selector_snapshots);
+  expect(jobs_selector.title == "Subagents" && jobs_selector.freeze_underlying_transcript_layout && jobs_selector.items.size() == 2 &&
+             jobs_selector.items[0].label == "Audit parser" && jobs_selector.items[0].badge == "Running · Background" &&
+             jobs_selector.items[0].description.find("type general") != std::string::npos &&
+             jobs_selector.items[0].description.find("tools 3") != std::string::npos && jobs_selector.items[1].label == "Explore subagent" &&
+             jobs_selector.items[0].description != jobs_selector.items[1].description,
+         "subagent selector is latest-first with human fallback labels, status badges, metadata, and duplicate-safe refs");
+  auto selector_screen_snapshot = ava::tui::ComposerSnapshot{};
+  selector_screen_snapshot.select_list = jobs_selector;
+  selector_screen_snapshot.width = 88;
+  selector_screen_snapshot.height = 20;
+  auto const selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(selector_screen_snapshot));
+  expect(selector_screen.find("job_0123456789abcdef_new") == std::string::npos && selector_screen.find("session_child_hidden") == std::string::npos &&
+             selector_screen.find("task_hidden") == std::string::npos,
+         "subagent selector renders no full job, task, or child-session identities");
+  auto unsafe_jobs_selector = ava::app::subagent_selector_view(
+      {make_subagent_snapshot("x", "owner-a", "<task> /tmp/session_secret job_secret", "/tmp/private-type", ava::agent::SubagentExecutionState::Running, 0)});
+  auto unsafe_selector_snapshot = ava::tui::ComposerSnapshot{};
+  unsafe_selector_snapshot.select_list = unsafe_jobs_selector;
+  unsafe_selector_snapshot.width = 80;
+  unsafe_selector_snapshot.height = 16;
+  auto const unsafe_selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(unsafe_selector_snapshot));
+  expect(unsafe_selector_screen.find("<task>") == std::string::npos && unsafe_selector_screen.find("/tmp/") == std::string::npos &&
+             unsafe_selector_screen.find("session_secret") == std::string::npos && unsafe_selector_screen.find("job_secret") == std::string::npos &&
+             unsafe_jobs_selector.items.front().label == "Subagent" && unsafe_jobs_selector.items.front().description.find("ref @") != std::string::npos,
+         "unsafe title/type metadata falls back safely while even degenerate full ids remain hidden behind short refs");
+  auto const empty_jobs_selector = ava::app::subagent_selector_view({});
+  expect(empty_jobs_selector.items.size() == 1 && !empty_jobs_selector.items.front().enabled && empty_jobs_selector.items.front().label == "No subagents yet",
+         "empty subagent selector stays open with a friendly disabled row");
+
+  ava::agent::SubagentCoordinatorOptions owner_options;
+  owner_options.registry_options.wait_for_terminal_before_start_returns = true;
+  owner_options.id_generator = [](std::string_view prefix) { return std::string(prefix) + "_owner_bound_0123456789abcdef"; };
+  auto owner_coordinator = ava::agent::SubagentCoordinator::create(std::move(owner_options));
+  expect(owner_coordinator.has_value(), "owner-bound selector coordinator fixture creates");
+  if (owner_coordinator)
+  {
+    ava::agent::BackgroundJobStartOptions start_options;
+    start_options.title = "Owner-visible title";
+    start_options.description = "RAW SECRET PROMPT <task>hidden</task>";
+    start_options.subagent_type = "general";
+    start_options.child_session_id = "session_owner_secret";
+    start_options.child_session_path = "/tmp/secret-child.jsonl";
+    auto started = (*owner_coordinator)->start_background("owner-a", std::move(start_options), [](ava::agent::BackgroundJobContext const&) {
+      ava::agent::BackgroundJobCompletion completion;
+      completion.state = ava::agent::BackgroundJobState::Completed;
+      completion.final_text = "finished";
+      return completion;
+    });
+    expect(started.has_value(), "owner-bound selector fixture publishes one job");
+    auto wrong_owner = ava::app::subagent_selector_view(*owner_coordinator, "owner-b");
+    auto right_owner = ava::app::subagent_selector_view(*owner_coordinator, "owner-a");
+    expect(wrong_owner && wrong_owner->items.size() == 1 && !wrong_owner->items.front().enabled && right_owner && right_owner->items.size() == 1 &&
+               right_owner->items.front().enabled,
+           "subagent selector callback is strictly owner-bound");
+    if (right_owner)
+    {
+      auto owner_snapshot = ava::tui::ComposerSnapshot{};
+      owner_snapshot.select_list = *right_owner;
+      owner_snapshot.width = 90;
+      owner_snapshot.height = 18;
+      auto const owner_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(owner_snapshot));
+      expect(owner_screen.find("RAW SECRET PROMPT") == std::string::npos && owner_screen.find("<task>") == std::string::npos &&
+                 owner_screen.find("/tmp/secret-child.jsonl") == std::string::npos && owner_screen.find("session_owner_secret") == std::string::npos &&
+                 owner_screen.find(started ? started->job.identity.job_id : std::string{}) == std::string::npos,
+             "owner-bound selector never renders raw prompts, XML, paths, session ids, or full job ids");
+    }
+  }
+
+  ava::tui::SubagentWorkspaceView live_view;
+  live_view.title = "Audit parser";
+  live_view.status = "Running · Background";
+  live_view.messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Inspect the parser."},
+                        {.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = "Committed result line."}};
+  auto const live_lines = ava::tui::render_subagent_workspace(live_view, 64, 10);
+  auto const live_screen = tui_test_support::join_visible_lines(live_lines);
+  expect(live_lines.size() == 10 && live_screen.find("Audit parser") != std::string::npos && live_screen.find("User") != std::string::npos &&
+             live_screen.find("Assistant") != std::string::npos && live_screen.find("Committed result line.") != std::string::npos &&
+             live_screen.find("Type a message") == std::string::npos,
+         "read-only subagent workspace renders only its header, committed child messages, status, and controls");
+  auto waiting_view = live_view;
+  waiting_view.messages.clear();
+  auto waiting_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(waiting_view, 20, 8));
+  auto refresh_view = live_view;
+  refresh_view.refresh_unavailable = true;
+  auto refresh_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(refresh_view, 38, 8));
+  auto unavailable_view = live_view;
+  unavailable_view.unavailable = true;
+  auto unavailable_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(unavailable_view, 38, 8));
+  auto evicted_view = unavailable_view;
+  evicted_view.evicted = true;
+  auto evicted_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(evicted_view, 48, 8));
+  expect(waiting_screen.find("Waiting for comm") != std::string::npos && waiting_screen.find("itted messages") != std::string::npos,
+         "empty running subagent workspace truthfully renders a waiting state at tiny sizes");
+  expect(refresh_screen.find("Live refresh") != std::string::npos && refresh_screen.find("last committ") != std::string::npos,
+         "subagent workspace truthfully renders refresh-unavailable state at tiny sizes");
+  expect(unavailable_screen.find("Subagent unavail") != std::string::npos && unavailable_screen.find("last committed") != std::string::npos,
+         "subagent workspace truthfully renders unavailable state at tiny sizes");
+  expect(evicted_screen.find("no longer retained") != std::string::npos, "subagent retention eviction has a distinct truthful workspace state");
+
+  auto make_selector_item = [](std::string value, std::string label, std::string badge) {
+    ava::tui::SelectListItemView item;
+    item.value = std::move(value);
+    item.label = std::move(label);
+    item.badge = std::move(badge);
+    return item;
+  };
+  auto controller_selector = [&]() {
+    ava::tui::SelectListView view;
+    view.title = "Subagents";
+    view.placeholder = "Search subagents";
+    view.empty_text = "No matching subagents";
+    view.footer_hint = "Enter open · Esc close";
+    view.freeze_underlying_transcript_layout = true;
+    view.items = {make_selector_item("job-new", "New job", "Running · Background"), make_selector_item("job-old", "Old job", "Completed · Background")};
+    return view;
+  };
+  std::size_t list_calls = 0;
+  std::size_t inspect_calls = 0;
+  bool list_refresh_failure = false;
+  std::vector<std::optional<std::uint64_t>> inspected_generations;
+  std::string canceled_id;
+  std::string promoted_id;
+  ava::tui::TuiRuntimeOptions controller_options;
+  controller_options.list_subagents = [&]() -> ava::core::Result<ava::tui::SelectListView> {
+    ++list_calls;
+    if (list_refresh_failure)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "private backend detail"));
+    return controller_selector();
+  };
+  controller_options.inspect_subagent =
+      [&](std::string_view id, std::optional<std::uint64_t> known) -> ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>> {
+    ++inspect_calls;
+    inspected_generations.push_back(known);
+    auto frame = std::make_shared<ava::agent::SubagentInspectorFrame>();
+    if (id == "job-old")
+    {
+      frame->generation = 7;
+      frame->terminal = true;
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = "Old terminal result"}};
+    }
+    else if (!known)
+    {
+      frame->generation = 1;
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Committed first"}};
+    }
+    else if (*known == 1)
+    {
+      frame->generation = 2;
+      std::string long_result;
+      for (int line = 0; line < 30; ++line) long_result += "Committed live line " + std::to_string(line) + "\n";
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Committed first"},
+                         {.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = std::move(long_result)}};
+    }
+    else
+    {
+      frame->generation = *known;
+      frame->not_modified = true;
+    }
+    return std::shared_ptr<ava::agent::SubagentInspectorFrame const>(std::move(frame));
+  };
+  controller_options.cancel_subagent = [&](std::string_view id) {
+    canceled_id = std::string(id);
+    return ava::core::VoidResult{};
+  };
+  controller_options.promote_subagent = [&](std::string_view id) -> ava::core::VoidResult {
+    promoted_id = std::string(id);
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "secret/path/job-old\nunsafe"));
+  };
+  ava::tui::ComposerSnapshot controller_snapshot;
+  controller_snapshot.input = "parent draft";
+  controller_snapshot.status = "parent status";
+  controller_snapshot.transcript = {{.label = "assistant", .text = "parent transcript"}};
+  controller_snapshot.transcript_generation = 42;
+  controller_snapshot.width = 40;
+  controller_snapshot.height = 8;
+  ava::tui::RuntimeSubagentWorkspaceController workspace_controller(controller_options, controller_snapshot);
+  using WorkspaceClock = ava::tui::RuntimeSubagentWorkspaceController::Clock;
+  auto const time_zero = WorkspaceClock::time_point{};
+  expect(workspace_controller.open_selector(time_zero) && workspace_controller.selector_active() && list_calls == 1,
+         "shared subagent controller opens the selector without changing the parent composer state");
+  ava::tui::InputEvent type_query;
+  type_query.key = ava::tui::Key::Character;
+  type_query.character = 'n';
+  type_query.text = "n";
+  auto query_result = workspace_controller.handle_input(type_query, time_zero);
+  expect(query_result.changed && controller_snapshot.select_list && controller_snapshot.select_list->query == "n",
+         "subagent controller owns selector filtering");
+  ava::tui::InputEvent enter_workspace;
+  enter_workspace.key = ava::tui::Key::Enter;
+  auto opened_workspace = workspace_controller.handle_input(enter_workspace, time_zero);
+  expect(opened_workspace.changed && workspace_controller.workspace_active() && workspace_controller.active_job_id() == "job-new" && inspect_calls == 1 &&
+             !inspected_generations.front() && controller_snapshot.subagent_workspace && controller_snapshot.subagent_workspace->messages.size() == 1,
+         "selector Enter opens the owner-bound frozen frame using hidden job identity");
+  expect(!workspace_controller.poll(time_zero + std::chrono::milliseconds(149)) && inspect_calls == 1 && list_calls == 1,
+         "subagent workspace never polls faster than 150ms");
+  auto const live_changed = workspace_controller.poll(time_zero + std::chrono::milliseconds(150));
+  expect(live_changed && inspect_calls == 2 && list_calls == 2 && inspected_generations.back() == std::optional<std::uint64_t>{1} &&
+             workspace_controller.known_generation() == std::optional<std::uint64_t>{2} && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->messages.size() == 2,
+         "subagent polling passes known generations and publishes only newly committed messages");
+  auto const bottom_offset = controller_snapshot.subagent_workspace ? controller_snapshot.subagent_workspace->scroll_offset : 0;
+  ava::tui::InputEvent up_three;
+  up_three.key = ava::tui::Key::ArrowUp;
+  auto scrolled_up = workspace_controller.handle_input(up_three);
+  expect(scrolled_up.changed && controller_snapshot.subagent_workspace && bottom_offset >= controller_snapshot.subagent_workspace->scroll_offset + 3,
+         "workspace Up scrolls exactly three rendered rows within bounds");
+  ava::tui::InputEvent page_up;
+  page_up.key = ava::tui::Key::PageUp;
+  auto const before_page = controller_snapshot.subagent_workspace ? controller_snapshot.subagent_workspace->scroll_offset : 0;
+  auto paged_up = workspace_controller.handle_input(page_up);
+  expect(paged_up.changed && controller_snapshot.subagent_workspace && before_page >= controller_snapshot.subagent_workspace->scroll_offset + 5,
+         "workspace PageUp scrolls exactly five rendered rows within bounds");
+  auto const unchanged_poll = workspace_controller.poll(time_zero + std::chrono::milliseconds(300));
+  expect(!unchanged_poll && inspect_calls == 3 && inspected_generations.back() == std::optional<std::uint64_t>{2},
+         "not-modified inspector polls retain the frozen frame without requesting redraw");
+  list_refresh_failure = true;
+  expect(workspace_controller.poll(time_zero + std::chrono::milliseconds(450)) && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->refresh_unavailable && controller_snapshot.subagent_workspace->messages.size() == 2 && inspect_calls == 3,
+         "metadata refresh failures retain the frozen child frame and expose only a fixed unavailable state");
+  auto const refresh_failure_screen =
+      controller_snapshot.subagent_workspace
+          ? tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(*controller_snapshot.subagent_workspace, 40, 8))
+          : std::string{};
+  expect(refresh_failure_screen.find("Live refresh unavail") != std::string::npos && refresh_failure_screen.find("private backend detail") == std::string::npos,
+         "poll failure rendering is truthful and sanitized");
+  list_refresh_failure = false;
+  expect(workspace_controller.poll(time_zero + std::chrono::milliseconds(600)) && controller_snapshot.subagent_workspace &&
+             !controller_snapshot.subagent_workspace->refresh_unavailable && inspect_calls == 4,
+         "a successful metadata and known-generation refresh clears transient unavailable state");
+  ava::tui::InputEvent escape_workspace;
+  escape_workspace.key = ava::tui::Key::Escape;
+  auto escaped_to_selector = workspace_controller.handle_input(escape_workspace);
+  expect(
+      escaped_to_selector.changed && workspace_controller.selector_active() && controller_snapshot.select_list && controller_snapshot.select_list->query == "n",
+      "workspace Esc returns to the same selector query");
+  static_cast<void>(workspace_controller.handle_input(enter_workspace));
+  ava::tui::InputEvent next_job;
+  next_job.key = ava::tui::Key::Tab;
+  auto cycled = workspace_controller.handle_input(next_job);
+  expect(cycled.changed && workspace_controller.active_job_id() == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->terminal,
+         "workspace Tab cycles by hidden job identity and opens the terminal frozen frame");
+  ava::tui::InputEvent cancel_job;
+  cancel_job.key = ava::tui::Key::Character;
+  cancel_job.character = 'C';
+  cancel_job.text = "C";
+  auto canceled = workspace_controller.handle_input(cancel_job);
+  ava::tui::InputEvent promote_job;
+  promote_job.key = ava::tui::Key::Character;
+  promote_job.character = 'P';
+  promote_job.text = "P";
+  auto promoted = workspace_controller.handle_input(promote_job);
+  auto const control_screen = controller_snapshot.subagent_workspace
+                                  ? tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(*controller_snapshot.subagent_workspace, 40, 8))
+                                  : std::string{};
+  expect(canceled.changed && canceled_id == "job-old" && promoted.changed && promoted.beep && promoted_id == "job-old",
+         "workspace controls invoke owner-bound hidden job ids and report failed controls with a beep");
+  expect(control_screen.find("Promotion") != std::string::npos && control_screen.find("unavaila") != std::string::npos &&
+             control_screen.find("secret/path") == std::string::npos,
+         "workspace control failures stay sanitized and retain the view");
+  static_cast<void>(workspace_controller.handle_input(escape_workspace));
+  static_cast<void>(workspace_controller.handle_input(escape_workspace));
+  expect(!workspace_controller.active() && controller_snapshot.input == "parent draft" && controller_snapshot.status == "parent status" &&
+             controller_snapshot.transcript_generation == 42 && controller_snapshot.transcript.size() == 1,
+         "closing the shared workspace restores the exact parent draft, status, transcript, and generation");
+
+  auto prompt_precedence_snapshot = ava::tui::ComposerSnapshot{};
+  prompt_precedence_snapshot.subagent_workspace = live_view;
+  ava::tui::QuestionPromptView prompt_view;
+  prompt_view.header = "Permission first";
+  prompt_view.question = "Continue parent prompt?";
+  prompt_view.modal = true;
+  ava::tui::QuestionPromptOptionView prompt_option;
+  prompt_option.value = "yes";
+  prompt_option.label = "Yes";
+  prompt_view.options.push_back(std::move(prompt_option));
+  prompt_precedence_snapshot.question_prompt = std::move(prompt_view);
+  prompt_precedence_snapshot.width = 64;
+  prompt_precedence_snapshot.height = 16;
+  auto const prompt_precedence_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(prompt_precedence_snapshot));
+  expect(prompt_precedence_screen.find("Continue parent prompt?") != std::string::npos &&
+             prompt_precedence_screen.find("Committed result line.") == std::string::npos,
+         "question prompts render ahead of the jobs workspace");
+  auto permission_precedence_snapshot = ava::tui::ComposerSnapshot{};
+  permission_precedence_snapshot.subagent_workspace = live_view;
+  ava::tui::PermissionPromptView permission_view;
+  permission_view.tool_name = "write_file";
+  permission_view.operation = "write";
+  permission_view.target = "fixture.txt";
+  permission_view.reason = "test precedence";
+  permission_precedence_snapshot.permission_prompt = std::move(permission_view);
+  permission_precedence_snapshot.width = 64;
+  permission_precedence_snapshot.height = 16;
+  auto const permission_precedence_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(permission_precedence_snapshot));
+  expect(permission_precedence_screen.find("Permission required") != std::string::npos &&
+             permission_precedence_screen.find("Committed result line.") == std::string::npos,
+         "permission prompts render ahead of the jobs workspace");
 }

@@ -332,7 +332,8 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
                                                   transcript_layout_cache.compact_spacing == compact_spacing;
     auto const frozen_cache_compatible = presentation_settings_compatible && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width;
     auto const freeze_modal_transcript_layout =
-        snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout && presentation_settings_compatible;
+        ((snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout) || snapshot.subagent_workspace.has_value()) &&
+        presentation_settings_compatible;
     // Detached freeze keeps a width-compatible cache across scheduled paints. Modal freeze keeps the
     // pre-modal underlying layout even when the active selector canvas width differs, and freezes the
     // draw itself whether or not a deferred detached viewport is pending.
@@ -363,8 +364,8 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     auto const completion_palette_visible = completion_cache.model && completion_cache.model->palette_visible;
     auto const slash_palette_is_visible =
         !snapshot.slash_palette_suppressed && slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || slash_palette_is_visible ||
-        completion_palette_visible)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+        slash_palette_is_visible || completion_palette_visible)
     {
       transcript_selection_.clear();
       pending_live_selection_item_index_shift_ = 0;
@@ -455,7 +456,8 @@ bool RuntimeRenderer::paint(FrameRenderKind kind, bool freeze_transcript_layout)
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     SignalBlockGuard block_signals;
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || !snapshot.processing)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+        !snapshot.processing)
       return true;
     wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
                                                   snapshot.transcript_generation, screen_row_cache);

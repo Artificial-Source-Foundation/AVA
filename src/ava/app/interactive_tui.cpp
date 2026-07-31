@@ -15,6 +15,7 @@
 #include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/session_user_turns.h"
+#include "ava/app/subagent_workspace.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/config/model_profiles.h"
@@ -22,6 +23,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/version.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <iterator>
@@ -432,6 +434,35 @@ int run_tui(ShellState state)
             session_selector_show_label_time = false;
             return session_selector_snapshot();
           },
+      .list_subagents = [&state]() { return ava::app::subagent_selector_view(state.session.subagent_coordinator(), state.session.store.session_id()); },
+      .inspect_subagent =
+          [&state](std::string_view job_id, std::optional<std::uint64_t> known_generation) {
+            auto const coordinator = state.session.subagent_coordinator();
+            if (!coordinator)
+            {
+              return ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>>(
+                  std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable")));
+            }
+            return coordinator->inspect(state.session.store.session_id(), job_id, known_generation);
+          },
+      .cancel_subagent = [&state](std::string_view job_id) -> ava::core::VoidResult {
+        auto const coordinator = state.session.subagent_coordinator();
+        if (!coordinator)
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
+        auto canceled = coordinator->cancel(state.session.store.session_id(), job_id);
+        if (!canceled)
+          return std::unexpected(std::move(canceled.error()));
+        return {};
+      },
+      .promote_subagent = [&state](std::string_view job_id) -> ava::core::VoidResult {
+        auto const coordinator = state.session.subagent_coordinator();
+        if (!coordinator)
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable"));
+        auto promoted = coordinator->promote(state.session.store.session_id(), job_id);
+        if (!promoted)
+          return std::unexpected(std::move(promoted.error()));
+        return {};
+      },
       .on_open_fork_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
         // F-001: refuse sessionless /fork-from before listing/selecting so a later
         // handled no-op cannot open a picker that wipes the live transcript.

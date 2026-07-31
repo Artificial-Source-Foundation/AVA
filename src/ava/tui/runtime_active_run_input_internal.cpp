@@ -11,6 +11,7 @@
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
@@ -143,6 +144,13 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (submitted_command == "/jobs")
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    static_cast<void>(subagent_workspace_.open_selector());
+    return renderer_.request_render();
+  }
   if (auto search_query = search_command_argument(submitted_command))
   {
     push_history(input_history, submitted_command);
@@ -376,6 +384,22 @@ std::optional<bool> RuntimeActiveRunController::handle_transcript_search_input(r
 
 bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
 {
+  if (subagent_workspace_.active())
+  {
+    if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+      renderer_.wheel_governor.reset();
+    if (active_input.resize)
+      return renderer_.render();
+    if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+        !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+    {
+      return true;
+    }
+    auto const handled = subagent_workspace_.handle_input(active_input.event);
+    if (handled.beep)
+      static_cast<void>(beep());
+    return !handled.changed || renderer_.request_render();
+  }
   if (auto handled = handle_transcript_search_input(active_input))
     return *handled;
   if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)

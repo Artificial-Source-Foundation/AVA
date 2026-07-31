@@ -8,7 +8,9 @@
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -159,6 +161,12 @@ struct TuiRuntimeOptions
   std::function<SelectListView()> model_selector_view;
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
+  // Path-free, owner-bound live subagent workspace callbacks. Exact ids are
+  // accepted only as hidden selector values and callback authority.
+  std::function<ava::core::Result<SelectListView>()> list_subagents;
+  std::function<ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>>(std::string_view, std::optional<std::uint64_t>)> inspect_subagent;
+  std::function<ava::core::VoidResult(std::string_view)> cancel_subagent;
+  std::function<ava::core::VoidResult(std::string_view)> promote_subagent;
   // Open searchable public user-turn pickers. Fail closed with Result when the
   // bound session authority has no public user turns, is sessionless for fork-from,
   // or cannot list them. Optional initial_query seeds the picker filter.

@@ -68,6 +68,7 @@ target_sources(ava_app
     "rpc_mode.cpp"
     "runtime.cpp"
     "runtime_catalog.cpp"
+    "subagent_workspace.cpp"
     "runtime_compaction.cpp"
     "runtime_credentials.cpp"
     "runtime_json.cpp"

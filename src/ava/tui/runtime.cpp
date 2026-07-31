@@ -13,6 +13,7 @@
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
@@ -194,8 +195,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto render = [&]() -> bool { return renderer.render(); };
 
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
+  RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
   RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
-                                                   transcript_search);
+                                                   transcript_search, subagent_workspace);
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
@@ -229,7 +231,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
   RuntimeSubmitController submit_controller(options, presentation_state, draft_state, renderer, navigation, action_controller, active_run_controller,
-                                            transcript_search, active_select_list);
+                                            transcript_search, subagent_workspace, active_select_list);
   auto handle_submit = [&](std::optional<std::string> forced_submission = std::nullopt) {
     auto const outcome = submit_controller.submit(std::move(forced_submission));
     terminal_write_failed = outcome.terminal_write_failed;
@@ -248,7 +250,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       terminal_write_failed = true;
       break;
     }
+    auto const input_poll_started_at = std::chrono::steady_clock::now();
+    if (subagent_workspace.poll(input_poll_started_at) && !renderer.request_render())
+    {
+      terminal_write_failed = true;
+      break;
+    }
     auto input_poll_delay = kIdleInputPollDelay;
+    if (auto workspace_wait = subagent_workspace.time_until_poll(input_poll_started_at))
+      input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(*workspace_wait));
     if (renderer.has_pending_render())
     {
       input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(renderer.time_until_pending_render()));
@@ -256,6 +266,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const maybe_input = read_curses_input_with_timeout(input_poll_delay);
     if (!maybe_input)
     {
+      if (subagent_workspace.poll() && !renderer.request_render())
+      {
+        terminal_write_failed = true;
+        break;
+      }
       if (!renderer.flush_pending_render_if_due() || !maybe_reload_display_settings())
       {
         terminal_write_failed = true;
@@ -293,6 +308,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (!runtime_wheel_input_accepted(renderer.wheel_governor, input.event.key))
       continue;
+    if (subagent_workspace.active())
+    {
+      auto const handled = subagent_workspace.handle_input(input.event);
+      if (handled.beep)
+        static_cast<void>(beep());
+      if (handled.changed && !renderer.request_render())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
     clear_reasoning_feedback_for_user_input(snapshot);
     if (auto handled = transcript_search.handle_input(input.event))
     {

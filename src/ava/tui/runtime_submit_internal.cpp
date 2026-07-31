@@ -9,6 +9,7 @@
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
@@ -47,7 +48,7 @@ using runtime_views::compact_path_leaf;
 RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                  RuntimeRenderer& renderer, RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
                                                  RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
-                                                 ActiveSelectList& active_select_list)
+                                                 RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -56,6 +57,7 @@ RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, Run
       action_controller_(action_controller),
       active_run_controller_(active_run_controller),
       transcript_search_(transcript_search),
+      subagent_workspace_(subagent_workspace),
       active_select_list_(active_select_list)
 {
 }
@@ -86,7 +88,8 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   else if (((exact_command(draft.text, "/models") || exact_command(draft.text, "/model")) && options_.model_selector_view) ||
            (exact_command(draft.text, "/scoped-models") && options_.scoped_model_selector_view) ||
            ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
-            options_.session_selector_view))
+            options_.session_selector_view) ||
+           exact_command(draft.text, "/jobs"))
   {
     immediate_slash_submission = expanded_composer_draft_text(draft);
   }
@@ -196,6 +199,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   path_completion_force_active = false;
   if (!submitted.empty())
   {
+    if (exact_command(submitted, "/jobs"))
+    {
+      push_history(input_history, submitted);
+      static_cast<void>(subagent_workspace_.open_selector());
+      if (!renderer_.request_render())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
     if ((exact_command(submitted, "/models") || exact_command(submitted, "/model")) && options_.model_selector_view)
     {
       push_history(input_history, submitted);

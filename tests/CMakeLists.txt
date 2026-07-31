@@ -718,6 +718,7 @@ if(Python3_Interpreter_FOUND)
     streaming_scroll
     transcript_search
     transcript_selection
+    subagent_workspace
     main_startup_trust_keybinds
     main_models_selectors
     main_editor_input

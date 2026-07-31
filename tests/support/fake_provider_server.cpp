@@ -303,6 +303,12 @@ std::string terminal_tool_body()
   return tool_body("call_terminal", "bash", R"({"command":"touch terminal-e2e-marker","timeout_ms":5000,"max_lines":20})");
 }
 
+std::string subagent_workspace_task_body()
+{
+  return tool_body("call_task_live", "task",
+                   R"({"description":"Live workspace audit","prompt":"Inspect delegated fixture.","subagent_type":"general","background":true})");
+}
+
 std::string question_tool_body()
 {
   std::string const arguments =
@@ -601,6 +607,12 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? mcp_tool_body() : text_body("after mcp tool")};
   }
+  if (scenario == "subagent-workspace")
+  {
+    if (request_index == 0)
+      return ProviderResponse{.body = subagent_workspace_task_body()};
+    return ProviderResponse{.body = text_body(request_index == 1 ? "Committed child answer." : "Parent continued after background start.")};
+  }
   if (scenario == "end-to-end-workflow")
   {
     return ProviderResponse{.body = e2e_tool_body(request_index, target_path)};
@@ -638,6 +650,7 @@ int main(int argc, char** argv)
       : scenario == "end-to-end-workflow" ? 6
       : scenario == "read-tool-twice"     ? 4
       : scenario == "read-tool-thrice"    ? 6
+      : scenario == "subagent-workspace"  ? 3
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
          scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
          scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "terminal-tool" || scenario == "compact" || scenario == "compact-delayed")
@@ -706,10 +719,17 @@ int main(int argc, char** argv)
         return 1;
       continue;
     }
+    if (scenario == "subagent-workspace" && request_index > 0 && !wait_for_streaming_marker(target_path, "release-live"))
+      return 1;
     if ((scenario == "compact-delayed" && request_index == 1) || (scenario != "compact-delayed" && request_index == 0))
       std::this_thread::sleep_for(delay);
 
-    auto const provider_response = response_for(scenario, request_index, target_path);
+    auto provider_response = response_for(scenario, request_index, target_path);
+    if (scenario == "subagent-workspace" && request_index > 0)
+    {
+      provider_response.body = text_body(request.find("You are AVA's general subagent") != std::string::npos ? "Committed child answer."
+                                                                                                             : "Parent continued after background start.");
+    }
     std::string const response = "HTTP/1.1 " + std::to_string(provider_response.status_code) + " " + provider_response.reason +
                                  "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(provider_response.body.size()) +
                                  "\r\nConnection: close\r\n\r\n" + provider_response.body;

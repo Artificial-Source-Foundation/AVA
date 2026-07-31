@@ -1,5 +1,7 @@
 # AVA Contributing
 
+For the community entry point and project policies, see the root [`CONTRIBUTING.md`](../CONTRIBUTING.md). Please read the [`Code of Conduct`](../CODE_OF_CONDUCT.md), [`Governance`](../GOVERNANCE.md), [`Security`](../SECURITY.md), and [`Support`](../SUPPORT.md) guidance before participating. Use private security reporting for suspected vulnerabilities; do not open public issues with exploit details or secrets.
+
 ## Prerequisites
 
 - CMake 3.25 or newer.

@@ -184,6 +184,7 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 ## Documentation
 
 - Start with [`docs/README.md`](docs/README.md) for the full docs map.
+- Community and project policies: [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Support](SUPPORT.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md).
 - Use [`docs/USAGE.md`](docs/USAGE.md) for TUI commands, headless modes, tool visibility, and current limits.
 - Use [`docs/CONFIG.md`](docs/CONFIG.md) for XDG paths, auth, models, prompts, subagents, project trust, and local resource layout.
 - Use [`docs/TESTING.md`](docs/TESTING.md) for CTest, opt-in live smokes, terminal smokes, and release evidence.

@@ -471,6 +471,25 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
   expect(std::ranges::none_of(compact_height, [](std::string const& line) { return line.empty(); }),
          "tui F2 explicit short-height spacing mode removes inter-group blanks at otherwise roomy widths");
 
+  auto const visible_assistant_flow = std::vector<ava::tui::TranscriptItem>{ava::tui::TranscriptItem{.label = "ava", .text = "before quiet poll"},
+                                                                            ava::tui::TranscriptItem{.label = "ava", .text = "after quiet poll"}};
+  auto quiet_poll_flow = visible_assistant_flow;
+  quiet_poll_flow.insert(
+      quiet_poll_flow.begin() + 1,
+      ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "job",
+                                             .arguments_json = R"({"action":"wait","job_id":"job_visible_spacing"})",
+                                             .result_json = R"({"schema_version":1,"job_id":"job_visible_spacing","state":"running","timed_out":true})",
+                                             .lifecycle = ava::tui::ToolLifecycleState::Complete}});
+  auto const visible_assistant_lines = ava::tui::detail::render_transcript_lines(visible_assistant_flow, 96, false, true);
+  auto const quiet_poll_lines = ava::tui::detail::render_transcript_lines(quiet_poll_flow, 96, false, true);
+  auto const visible_assistant_starts = ava::tui::detail::transcript_message_start_lines(visible_assistant_flow, 96, false, true);
+  auto const quiet_poll_starts = ava::tui::detail::transcript_message_start_lines(quiet_poll_flow, 96, false, true);
+  auto const quiet_poll_tail = ava::tui::detail::render_transcript_tail_lines(quiet_poll_flow, 96, quiet_poll_lines.size() + 3, false, true);
+  expect(quiet_poll_lines == visible_assistant_lines && quiet_poll_starts == visible_assistant_starts && quiet_poll_tail == visible_assistant_lines,
+         "tui quiet job polling items are invisible to roomy spacing, message starts, and bounded tail layout");
+
   auto const verify_hidden_thinking_spacing = [&](ava::tui::TranscriptItem first, std::string const& label) {
     auto const transcript = std::vector<ava::tui::TranscriptItem>{std::move(first), ava::tui::TranscriptItem{.label = "thinking", .text = "hidden reasoning"},
                                                                   ava::tui::TranscriptItem{.label = "ava", .text = "visible assistant"}};

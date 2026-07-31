@@ -3,6 +3,7 @@
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
 #include "ava/tui/theme.h"
+#include "ava/tui/tool_card_task_job.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -2073,7 +2074,9 @@ TranscriptGroup transcript_group(TranscriptItem const& item)
 
 bool transcript_item_is_visible(TranscriptItem const& item, bool thinking_visible)
 {
-  if (item.tool || item.label == "you" || item.label == "error" || item.label == "compaction")
+  if (item.tool)
+    return !task_job_card_is_quiet_poll(*item.tool);
+  if (item.label == "you" || item.label == "error" || item.label == "compaction")
     return true;
   if (item.label == "ava")
   {

@@ -230,9 +230,9 @@ In `--source-tree` mode the checker walks first-party Markdown while excluding G
 
 Without `--source-tree`, the same program is in **artifact mode**: it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
 
-The checker validates local relative target paths, percent-decodes paths, rejects links that escape the checked root, and ignores fenced-code examples. It deliberately does **not** validate heading fragments/anchors, external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
+The checker validates local relative target paths in inline links, full reference links, and collapsed reference links; percent-decodes paths; rejects links that escape the checked root; and ignores fenced-code examples. It deliberately does **not** validate shortcut reference links, heading fragments/anchors, external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
 
-1. review changed same-page/cross-page fragments with GitHub-compatible heading behavior;
+1. review shortcut references and changed same-page/cross-page fragments with GitHub-compatible heading behavior;
 2. review material external links manually (the required gate makes no network request);
 3. search renamed/deleted paths for inbound references; and
 4. run `git --no-pager diff --check`.

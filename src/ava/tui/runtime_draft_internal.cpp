@@ -29,6 +29,7 @@ void RuntimeDraftState::reset_for_session_transition()
 {
   clear_selection();
   reset_composer_draft(draft);
+  input_history.clear();
   history_index.reset();
   draft_input.clear();
   jump_mode = ComposerJumpMode::None;

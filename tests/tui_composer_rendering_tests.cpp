@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_internal.h"
@@ -201,6 +202,7 @@ bool test_changed_session_snapshot_resets_presentation()
   presentation.snapshot.transcript_selection_focus_item = 1;
 
   ava::tui::RuntimeDraftState draft_state;
+  draft_state.input_history = {"old session prompt"};
   draft_state.draft.text = presentation.snapshot.input;
   draft_state.draft.cursor = presentation.snapshot.input_cursor;
   draft_state.draft_selection_anchor = 0;
@@ -235,6 +237,11 @@ bool test_changed_session_snapshot_resets_presentation()
                                         .status = "new session receipt",
                                         .todos = {{.id = "todo-new", .content = "new todo", .status = ava::tui::TodoStatus::InProgress}}});
 
+  auto history_probe = ava::tui::ComposerDraftState{};
+  auto history_probe_index = std::optional<std::size_t>{};
+  auto history_probe_scratch = std::string{};
+  auto const history_restored =
+      ava::tui::browse_composer_input_history(history_probe, draft_state.input_history, history_probe_index, history_probe_scratch, true);
   auto const changed_state_ok =
       changed && search_opened && presentation.snapshot.session_id == "session_new_presentation" && presentation.snapshot.mode == "plan" &&
       presentation.snapshot.provider == "fake-next" && presentation.snapshot.model == "new-model" && presentation.snapshot.status == "new session receipt" &&
@@ -242,9 +249,9 @@ bool test_changed_session_snapshot_resets_presentation()
       presentation.snapshot.transcript_generation == previous_generation + 1 && presentation.snapshot.queued_messages.empty() &&
       presentation.sidebar.activity.empty() && presentation.sidebar.modified_files.empty() && presentation.sidebar.todos.size() == 1 &&
       presentation.sidebar.todos.front().content == "new todo" && presentation.sidebar.session_entry_count == std::nullopt && draft_state.draft.text.empty() &&
-      !draft_state.selection_bounds() && draft_state.draft_input.empty() && !draft_state.history_index &&
-      draft_state.jump_mode == ava::tui::ComposerJumpMode::None && draft_state.draft_scroll_offset == 0 && presentation.snapshot.input.empty() &&
-      presentation.snapshot.input_cursor == 0 && presentation.snapshot.input_selection_start == std::string::npos &&
+      draft_state.input_history.empty() && !history_restored && !draft_state.selection_bounds() && draft_state.draft_input.empty() &&
+      !draft_state.history_index && draft_state.jump_mode == ava::tui::ComposerJumpMode::None && draft_state.draft_scroll_offset == 0 &&
+      presentation.snapshot.input.empty() && presentation.snapshot.input_cursor == 0 && presentation.snapshot.input_selection_start == std::string::npos &&
       presentation.snapshot.input_selection_end == std::string::npos && presentation.snapshot.transcript_selection_anchor_item == std::string::npos &&
       presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.sidebar_drawer_visible &&
       presentation.snapshot.sidebar_drawer_scroll_offset == 0 && renderer.transcript_scroll_offset == 0 && renderer.detached_new_output_count == 0 &&
@@ -280,6 +287,140 @@ bool test_changed_session_snapshot_resets_presentation()
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
   return changed_state_ok && unchanged_state_ok && jobs_still_available;
+}
+
+bool test_active_run_session_transition_discards_prior_session_events()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(18, 96));
+
+  bool finish_called = false;
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "session_old_active_run";
+  options.mode = "build";
+  options.provider = "fake";
+  options.model = "old-model";
+  options.workspace = "/workspace/old";
+  options.initial_transcript = {
+      ava::tui::TranscriptItem{.label = "ava", .text = "OLD-INITIAL-TRANSCRIPT"},
+      ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "old_initial_tool"}},
+  };
+  options.initial_todos = {{.id = "old-todo", .content = "OLD TODO", .status = ava::tui::TodoStatus::InProgress}};
+  options.create_active_run_queues = [&finish_called](ava::event::EventEnvelopeSink sink) {
+    auto queued = ava::event::EventEnvelope{};
+    queued.schema_version = 1;
+    queued.event_id = "old-queued-event";
+    queued.session_id = "session_old_active_run";
+    queued.request_id = "old-follow-up";
+    queued.correlation_id = "old-request";
+    queued.name = "follow_up_queued";
+    queued.payload_json = R"({"message":"OLD QUEUED MESSAGE"})";
+    static_cast<void>(sink(queued));
+
+    auto queues = ava::tui::TuiActiveRunQueues{};
+    queues.active_request_id = "old-request";
+    queues.finish = [&finish_called, sink](bool) {
+      finish_called = true;
+      auto skipped = ava::event::EventEnvelope{};
+      skipped.schema_version = 1;
+      skipped.event_id = "old-finish-event";
+      skipped.session_id = "session_old_active_run";
+      skipped.request_id = "old-follow-up";
+      skipped.correlation_id = "old-request";
+      skipped.name = "follow_up_skipped";
+      skipped.payload_json = R"({"message":"OLD FINISH RECEIPT","reason":"run_completed_before_safe_point"})";
+      return sink(skipped);
+    };
+    return queues;
+  };
+  options.on_submit = [](std::string const&, ava::tui::TuiSubmitContext context) {
+    auto old_message = ava::event::MessagePayload{};
+    old_message.text = "OLD EVENT TRANSCRIPT";
+    static_cast<void>(context.event_sink(ava::event::RuntimeEvent{{}, ava::event::AssistantMessageEvent{.payload = std::move(old_message)}}));
+    auto old_tool = ava::event::ToolPayload{};
+    old_tool.text = "OLD TOOL RESULT";
+    old_tool.call_id = "old-tool-call";
+    old_tool.tool = "write_file";
+    old_tool.status = "success";
+    old_tool.changed_paths = {"old-event.cpp"};
+    static_cast<void>(context.event_sink(ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(old_tool)}}));
+    auto state = ava::tui::TuiRuntimeStateSnapshot{};
+    state.mode = "plan";
+    state.provider = "fake-next";
+    state.model = "new-model";
+    state.session_id = "session_new_active_run";
+    state.session_path = "/sessions/new.jsonl";
+    state.workspace = "/workspace/new";
+    state.git_branch = "new-branch";
+    state.status = "transition ready";
+    state.todos = {{.id = "new-todo", .content = "NEW TODO", .status = ava::tui::TodoStatus::Pending}};
+    auto result = ava::tui::TuiSubmitResult{};
+    result.output = {"NEW-SESSION-RECEIPT"};
+    result.context_source_count = 7;
+    result.state_snapshot = std::move(state);
+    return result;
+  };
+
+  ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.sidebar = presentation.sidebar;
+  presentation.snapshot.queued_messages = {{.id = "old-preloaded-queue", .kind = "follow-up", .text = "OLD PRELOADED QUEUE"}};
+  presentation.sidebar.activity = {{.id = "old-activity", .label = "tool", .detail = "OLD ACTIVITY"}};
+  presentation.sidebar.modified_files = {{.path = "old-preloaded.cpp"}};
+  ava::tui::RuntimeDraftState draft_state;
+  draft_state.input_history = {"OLD HISTORY PROMPT"};
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+  auto active_select_list = ava::tui::ActiveSelectList::None;
+  ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active_select_list);
+  std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
+  ava::tui::RuntimePromptCoordinator prompt_coordinator(options, presentation.snapshot, presentation.command_session_grants, renderer);
+  ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
+  ava::tui::RuntimeSubagentWorkspaceController subagent_workspace(options, presentation.snapshot);
+  ava::tui::RuntimeActiveRunController active_run(options, presentation, draft_state, renderer, prompt_coordinator, navigation, action_controller,
+                                                  transcript_search, subagent_workspace);
+
+  auto const outcome = active_run.run("OLD SUBMITTED PROMPT");
+  auto history_probe = ava::tui::ComposerDraftState{};
+  auto history_index = std::optional<std::size_t>{};
+  auto history_scratch = std::string{};
+  auto const history_restored = ava::tui::browse_composer_input_history(history_probe, draft_state.input_history, history_index, history_scratch, true);
+  auto const passed = !outcome.break_loop && !outcome.terminal_write_failed && finish_called && presentation.snapshot.session_id == "session_new_active_run" &&
+                      presentation.snapshot.mode == "plan" && presentation.snapshot.transcript.size() == 1 &&
+                      presentation.snapshot.transcript.front().text == "NEW-SESSION-RECEIPT" && !presentation.snapshot.transcript.front().tool &&
+                      presentation.snapshot.queued_messages.empty() && presentation.sidebar.activity.empty() && presentation.sidebar.modified_files.empty() &&
+                      presentation.sidebar.todos.size() == 1 && presentation.sidebar.todos.front().id == "new-todo" && presentation.snapshot.status == "done" &&
+                      presentation.snapshot.context_source_count == std::optional<std::size_t>{7} &&
+                      presentation.sidebar.context_source_count == std::optional<std::size_t>{7} && draft_state.input_history.empty() && !history_restored;
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return passed;
 }
 
 bool test_atomic_search_input_prompt_precedence()
@@ -781,6 +922,10 @@ void run_tui_prompt_search_race_tests()
       "an authoritative changed-session snapshot clears old transcript/tool rows, advances generation, resets queued/sidebar/draft/selection/search/scroll and "
       "frozen presentation state through their owners, applies the new session/model/reasoning/todos, preserves application-scoped jobs, and leaves an "
       "unchanged-session transcript intact");
+  expect(
+      test_active_run_session_transition_discards_prior_session_events(),
+      "an active-run authoritative session transition discards old submitted/event/tool/queue/finish/sidebar/todo state, resets event receipt suppression and "
+      "history, and presents only the new-session receipt and hydrated state");
   expect(test_transcript_search_controller_tail_refresh_avoids_full_layout(),
          "an open 1,000-item transcript search over a roomy 180x20 idle-sidebar layout keeps the captured 141-column transcript geometry while its modal "
          "uses the 120-column canvas, then a shift-zero tail refresh directly renders and updates exactly one authoritative item/projection/match/modal row "

@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -273,41 +272,12 @@ int run_tui(ShellState state)
                 add_output(line_result, watched.error().format());
               }
             }
-            auto append_result = [](LineResult& target, LineResult next) {
-              target.quit = target.quit || next.quit;
-              target.session_tree_changed = target.session_tree_changed || next.session_tree_changed;
-              target.ordinary_turn_committed = target.ordinary_turn_committed || next.ordinary_turn_committed;
-              target.output.insert(target.output.end(), std::make_move_iterator(next.output.begin()), std::make_move_iterator(next.output.end()));
-              target.tool_timeline.insert(target.tool_timeline.end(), std::make_move_iterator(next.tool_timeline.begin()),
-                                          std::make_move_iterator(next.tool_timeline.end()));
-            };
-            while (!line_result.quit && (!context.cancel_requested || !context.cancel_requested()))
-            {
-              if (context.skip_active_steering)
-              {
-                if (auto skipped = context.skip_active_steering("run_completed_before_safe_point"); !skipped)
-                {
-                  add_output(line_result, skipped.error().format());
-                  break;
-                }
-              }
-              if (!context.take_next_follow_up)
-                break;
-              auto follow_up = context.take_next_follow_up();
-              if (!follow_up)
-                break;
-              if (context.mark_follow_up_started)
-              {
-                if (auto started = context.mark_follow_up_started(*follow_up); !started)
-                {
-                  add_output(line_result, started.error().format());
-                  break;
-                }
-              }
-              workspace_catalog_reload = workspace_catalog_reload || workspace_catalog_reload_requested(follow_up->message);
-              append_result(line_result, handle_line(state, follow_up->message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                                     context.cancel_requested, context.take_steering_messages));
-            }
+            auto const session_changed = run_queued_follow_ups_until_session_transition(
+                line_result, workspace_catalog_reload, session_id_before, context, [&state]() { return state.session.store.session_id(); },
+                [&](std::string const& follow_up) {
+                  return handle_line(state, follow_up, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
+                                     context.take_steering_messages);
+                });
             bool const workspace_changed = workspace_catalog_reload || workspace_catalog_changed(line_result);
             if (workspace_changed)
               application_catalog.refresh_workspace(state.session, hotkeys);
@@ -316,7 +286,7 @@ int run_tui(ShellState state)
               if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
                 add_output(line_result, refreshed.error().format());
             }
-            else if (state.session.store.session_id() != session_id_before)
+            else if (session_changed)
             {
               application_catalog.retarget_session(state.session.store.session_id());
               application_catalog.refresh_values(state.session, hotkeys);

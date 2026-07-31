@@ -40,6 +40,7 @@ struct RuntimeEventQueue
   [[nodiscard]] ava::event::EventEnvelopeSink envelope_sink();
   [[nodiscard]] ava::core::VoidResult enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context = {});
   [[nodiscard]] std::vector<QueuedTuiEvent> drain();
+  void discard();
   [[nodiscard]] bool received_any();
 
  private:

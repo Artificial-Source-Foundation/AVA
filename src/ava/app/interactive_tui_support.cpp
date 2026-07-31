@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -647,6 +648,59 @@ bool workspace_catalog_reload_requested(std::string_view submitted)
     return true;
   auto const end = arguments.find_first_of(" \t\r\n", first);
   return arguments.substr(first, end - first) == "all";
+}
+
+bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
+                                                    ava::tui::TuiSubmitContext const& context, std::function<std::string()> const& current_session_id,
+                                                    std::function<LineResult(std::string const&)> const& run_follow_up)
+{
+  if (current_session_id() != initial_session_id)
+    return true;
+
+  while (!result.quit && (!context.cancel_requested || !context.cancel_requested()))
+  {
+    if (context.skip_active_steering)
+    {
+      if (auto skipped = context.skip_active_steering("run_completed_before_safe_point"); !skipped)
+      {
+        add_output(result, skipped.error().format());
+        break;
+      }
+    }
+    if (!context.take_next_follow_up)
+      break;
+    auto follow_up = context.take_next_follow_up();
+    if (!follow_up)
+      break;
+    if (context.mark_follow_up_started)
+    {
+      if (auto started = context.mark_follow_up_started(*follow_up); !started)
+      {
+        add_output(result, started.error().format());
+        break;
+      }
+    }
+
+    workspace_catalog_reload = workspace_catalog_reload || workspace_catalog_reload_requested(follow_up->message);
+    auto next = run_follow_up(follow_up->message);
+    auto const session_changed = current_session_id() != initial_session_id;
+    if (session_changed)
+    {
+      next.quit = next.quit || result.quit;
+      next.session_tree_changed = next.session_tree_changed || result.session_tree_changed;
+      next.ordinary_turn_committed = next.ordinary_turn_committed || result.ordinary_turn_committed;
+      result = std::move(next);
+      return true;
+    }
+
+    result.quit = result.quit || next.quit;
+    result.session_tree_changed = result.session_tree_changed || next.session_tree_changed;
+    result.ordinary_turn_committed = result.ordinary_turn_committed || next.ordinary_turn_committed;
+    result.output.insert(result.output.end(), std::make_move_iterator(next.output.begin()), std::make_move_iterator(next.output.end()));
+    result.tool_timeline.insert(result.tool_timeline.end(), std::make_move_iterator(next.tool_timeline.begin()),
+                                std::make_move_iterator(next.tool_timeline.end()));
+  }
+  return false;
 }
 
 }  // namespace ava::app::line_shell_internal

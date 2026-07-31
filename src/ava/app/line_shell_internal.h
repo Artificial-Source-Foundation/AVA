@@ -78,6 +78,13 @@ void append_status_line(std::string& target, std::string line);
 [[nodiscard]] bool workspace_catalog_reload_requested(std::string_view submitted);
 [[nodiscard]] bool is_display_settings_command(std::string_view line) noexcept;
 void add_output(LineResult& result, std::string text);
+// Runs queued follow-ups only while the submit worker still owns the same
+// authoritative session. A transition keeps only that line's presentation
+// output/tool data while preserving aggregate control flags.
+[[nodiscard]] bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
+                                                                  ava::tui::TuiSubmitContext const& context,
+                                                                  std::function<std::string()> const& current_session_id,
+                                                                  std::function<LineResult(std::string const&)> const& run_follow_up);
 [[nodiscard]] LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                                      ava::agent::QuestionResolver question_resolver = nullptr, std::vector<CommandHotkey> const& hotkeys = {},
                                      ava::event::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,

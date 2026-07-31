@@ -63,6 +63,13 @@ std::vector<QueuedTuiEvent> RuntimeEventQueue::drain()
   return drained;
 }
 
+void RuntimeEventQueue::discard()
+{
+  std::lock_guard<std::mutex> lock(mutex);
+  events.clear();
+  received = false;
+}
+
 bool RuntimeEventQueue::received_any()
 {
   std::lock_guard<std::mutex> lock(mutex);

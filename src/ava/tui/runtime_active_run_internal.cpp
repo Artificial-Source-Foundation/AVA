@@ -120,6 +120,14 @@ RuntimeActiveRunState::RuntimeActiveRunState(std::string submitted_in, bool is_c
 {
 }
 
+void RuntimeActiveRunState::discard_for_session_transition()
+{
+  submitted_transcript.clear();
+  turn_snapshot_leading_evictions = 0;
+  event_queue.discard();
+  event_state = {};
+}
+
 RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                        RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator,
                                                        RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
@@ -309,8 +317,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller_.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
-    static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,
-                                                                                subagent_workspace_, std::move(runtime_state)));
+    return apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,
+                                                                     subagent_workspace_, std::move(runtime_state));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
   auto refresh_active_context_status = [&]() { presentation_state_.refresh_active_context_status(options); };
@@ -400,6 +408,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};
   }
   auto result = TuiSubmitResult{};
+  bool session_changed = false;
   if (options.on_submit)
   {
     permission_resolver = prompt_coordinator.permission_resolver();
@@ -575,7 +584,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       // on the TUI thread before another prompt can consult UI-local
       // session grants or attachments.
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-      apply_runtime_state_snapshot(std::move(*result.state_snapshot));
+      session_changed = apply_runtime_state_snapshot(std::move(*result.state_snapshot));
     }
     if (active_queues && active_queues->finish)
     {
@@ -588,7 +597,14 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         render_failed = true;
       }
     }
-    if (drain_events(state) == RuntimeEventDrainResult::RenderFailed)
+    if (session_changed)
+    {
+      // The completed worker and queue are bound to the prior session. Drop
+      // everything they emitted, including finish receipts, before fallback
+      // presentation considers whether any runtime event was received.
+      state.discard_for_session_transition();
+    }
+    else if (drain_events(state) == RuntimeEventDrainResult::RenderFailed)
     {
       terminal_write_failed = true;
       render_failed = true;
@@ -611,11 +627,11 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     auto const assistant_meta = assistant_meta_for_snapshot(snapshot, turn_elapsed);
     auto const transcript_size_before_fallback = snapshot.transcript.size();
     std::ptrdiff_t item_index_shift = 0;
-    if (!is_command_submission)
+    if (!is_command_submission && !session_changed)
     {
       item_index_shift += push_transcript(snapshot, TranscriptItem{.label = "you", .text = submitted});
     }
-    if (run_cancel_requested.load())
+    if (run_cancel_requested.load() && !session_changed)
     {
       item_index_shift += push_fallback_assistant_outputs(snapshot, {"stopped by user"}, assistant_meta);
     }
@@ -638,7 +654,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   if (!events_received && !transcript_search_.is_open())
     transcript_scroll_offset = 0;
   auto const show_command_status =
-      !events_received && !run_cancel_requested.load() && should_show_slash_command_output_as_status(submitted) && !result.output.empty();
+      !events_received && (!run_cancel_requested.load() || session_changed) && should_show_slash_command_output_as_status(submitted) && !result.output.empty();
   snapshot.status = show_command_status ? result.output.back()
                                         : (events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
                                                               : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"

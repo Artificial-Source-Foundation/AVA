@@ -25,6 +25,13 @@ share/doc/ava/THIRD_PARTY_NOTICES.md
 share/doc/ava/PROVENANCE.json
 share/doc/ava/docs/USAGE.md
 share/doc/ava/docs/CONFIG.md
+share/doc/ava/docs/context-resources.md
+share/doc/ava/docs/providers.md
+share/doc/ava/docs/security-sandboxing.md
+share/doc/ava/docs/subagents.md
+share/doc/ava/docs/terminal-setup.md
+share/doc/ava/docs/themes-keybindings.md
+share/doc/ava/docs/thinking-modes.md
 share/doc/ava/docs/TESTING.md
 share/doc/ava/docs/environment-variables.md
 share/doc/ava/docs/lsp.md

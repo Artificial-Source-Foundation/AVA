@@ -261,7 +261,7 @@ untrusted extensions, you need OS/container/VM containment in addition to AVA.
 
 ## Docker Build Image Is Not A Runtime Sandbox
 
-[docker/README.md](docker/README.md) documents a Docker image and persistent
+[docker/README.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/docker/README.md) documents a Docker image and persistent
 container workflow for building and testing AVA. That workflow is a development
 convenience, not a complete security sandbox:
 

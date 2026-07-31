@@ -372,7 +372,7 @@ The template body supports `$1`, `$2`, `$@`, `$ARGUMENTS`, `${1:-default}`,
 
 ## Subagents
 
-The built-in `task` tool can run foreground or background child sessions through configured subagents. AVA always provides two built-ins:
+The built-in `task` tool can run foreground or background child sessions through configured subagents. See [subagents.md](subagents.md) for operational behavior, job controls, delivery, durability, and limits. AVA always provides two built-ins:
 
 - `general`: inherits the parent tool visibility except recursive `task` is hidden.
 - `explore`: read-only preset that exposes `read_file`, `list_directory`, `glob`, and `grep` while hiding mutation, shell, network, LSP, and recursive `task` tools.

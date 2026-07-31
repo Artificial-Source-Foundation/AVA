@@ -101,7 +101,9 @@ system prompt, then loads the full skill content only when the model calls the
 ## Subagents
 
 AVA always provides built-in `general` and read-only `explore` subagents. Custom
-subagents are Markdown files with frontmatter and a body prompt.
+subagents are Markdown files with frontmatter and a body prompt. See
+[subagents.md](subagents.md) for execution modes, permissions, job controls,
+delivery, durability, and limits.
 
 - Global roots include `$XDG_CONFIG_HOME/ava/agents/`, `agent/`, `~/.agents/*`,
   and `~/.claude/*` agent directories.

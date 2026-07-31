@@ -7,13 +7,13 @@ providers from this file, and do not treat a listed deferral as runtime support.
 
 Primary source files:
 
-- Runtime provider factories: [`src/ava/provider/registry.cpp`](../src/ava/provider/registry.cpp)
-- Provider metadata: [`src/ava/config/provider_profiles.cpp`](../src/ava/config/provider_profiles.cpp)
-- Built-in model metadata: [`src/ava/config/model_profiles.cpp`](../src/ava/config/model_profiles.cpp)
-- Auth resolution: [`src/ava/config/auth.cpp`](../src/ava/config/auth.cpp)
-- Reasoning profiles: [`src/ava/config/reasoning_profiles.cpp`](../src/ava/config/reasoning_profiles.cpp)
-- Live provider smoke harness: [`tests/provider_live_smoke_tests.cpp`](../tests/provider_live_smoke_tests.cpp)
-- Pi provider registry reference: [`docs/reference-code/pi/packages/ai/src/providers/all.ts`](reference-code/pi/packages/ai/src/providers/all.ts)
+- Runtime provider factories: [`src/ava/provider/registry.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/provider/registry.cpp)
+- Provider metadata: [`src/ava/config/provider_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/provider_profiles.cpp)
+- Built-in model metadata: [`src/ava/config/model_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/model_profiles.cpp)
+- Auth resolution: [`src/ava/config/auth.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/auth.cpp)
+- Reasoning profiles: [`src/ava/config/reasoning_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/reasoning_profiles.cpp)
+- Live provider smoke harness: [`tests/provider_live_smoke_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/provider_live_smoke_tests.cpp)
+- Pi provider registry reference: [`docs/reference-code/pi/packages/ai/src/providers/all.ts`](https://github.com/Artificial-Source/AVA/blob/develop/docs/reference-code/pi/packages/ai/src/providers/all.ts)
 
 Related user docs: [`docs/CONFIG.md#auth`](CONFIG.md#auth),
 [`docs/CONFIG.md#models`](CONFIG.md#models),

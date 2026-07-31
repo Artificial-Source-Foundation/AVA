@@ -8,6 +8,7 @@ Use this task- and audience-oriented index for current AVA documentation. Histor
 | --- | --- | --- |
 | Install, run, and choose an interface | [USAGE.md](USAGE.md) | [features.md](features.md), [headless-protocol.md](headless-protocol.md), [Docker](docker/README.md) |
 | Configure auth, models, resources, and permissions | [CONFIG.md](CONFIG.md) | [environment-variables.md](environment-variables.md), [providers.md](providers.md), [context-resources.md](context-resources.md) |
+| Delegate work and manage jobs | [subagents.md](subagents.md) | [tools.md](tools.md), [USAGE.md](USAGE.md#commands), [rpc-protocol.md](rpc-protocol.md#subagent-job-snapshot) |
 | Understand model-visible operations | [tools.md](tools.md) | [security-sandboxing.md](security-sandboxing.md), [LSP](lsp.md), [MCP](mcp.md), [plugins](plugin-system.md) |
 | Fix a failure | [troubleshooting.md](troubleshooting.md) | [diagnostics.md](diagnostics.md), [terminal setup](terminal-setup.md), [SUPPORT.md](../SUPPORT.md) |
 | Customize the terminal UI | [themes-keybindings.md](themes-keybindings.md) | [terminal-setup.md](terminal-setup.md), [thinking-modes.md](thinking-modes.md) |

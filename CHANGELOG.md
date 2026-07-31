@@ -9,13 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Community documentation and GitHub contribution templates.
-- Current architecture, codebase, build-configuration, environment-variable, LSP, built-in-tool, troubleshooting, and documentation-policy references.
+- Current architecture, codebase, build-configuration, environment-variable, LSP, built-in-tool, subagent/background-job, troubleshooting, and documentation-policy references.
 - Offline source Markdown relative-target validation with focused CTest coverage.
 
 ### Changed
 
 - Reorganized the repository and documentation entry points around user, automation/extension-author, and maintainer tasks.
-- Refreshed build, testing, Docker, release, support, and Linux host-artifact documentation; packaged end-user references now include environment, LSP, tools, and troubleshooting guides.
+- Refreshed build, testing, Docker, release, support, and Linux host-artifact documentation; packaged end-user references now include context resources, providers, security, subagents, terminal setup, themes/keybindings, thinking modes, environment, LSP, tools, and troubleshooting guides.
 
 ## Historical release-position documentation
 

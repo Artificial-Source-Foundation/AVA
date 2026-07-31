@@ -207,6 +207,13 @@ doc_root="$stage/share/doc/ava"
 doc_sources=(
   docs/USAGE.md
   docs/CONFIG.md
+  docs/context-resources.md
+  docs/providers.md
+  docs/security-sandboxing.md
+  docs/subagents.md
+  docs/terminal-setup.md
+  docs/themes-keybindings.md
+  docs/thinking-modes.md
   docs/TESTING.md
   docs/environment-variables.md
   docs/lsp.md

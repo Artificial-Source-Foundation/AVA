@@ -155,7 +155,7 @@ Useful reasoning checks include:
 - TUI thinking visibility can be checked with `/thinking` or Ctrl+T; TUI
   reasoning cycling can be checked with Shift+Tab when the terminal reports
   BackTab/Shift+Tab correctly. Gated tmux/PTY smoke coverage is referenced in
-  [product/mvp-baseline.md](product/mvp-baseline.md#testing-release-and-quality-bar).
+  [product/mvp-baseline.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/mvp-baseline.md#testing-release-and-quality-bar).
 
 ## Pi parity and divergence
 
@@ -174,5 +174,5 @@ AVA tracks Pi-facing ergonomics where they fit AVA's safety boundaries:
 - AVA persists provider-native reasoning blocks for safe replay and audit while
   sanitizing signatures/redacted payloads in user-facing RPC/export surfaces.
 
-See [docs/goals/pi-mvp-parity/cli-commands-sessions-share-import.md](goals/pi-mvp-parity/cli-commands-sessions-share-import.md)
+See [docs/goals/pi-mvp-parity/cli-commands-sessions-share-import.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/goals/pi-mvp-parity/cli-commands-sessions-share-import.md)
 for the CLI parity disposition matrix.

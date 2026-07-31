@@ -198,6 +198,13 @@ install(
   FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/USAGE.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIG.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/context-resources.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/providers.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/security-sandboxing.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/subagents.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/terminal-setup.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/themes-keybindings.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/thinking-modes.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/TESTING.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/environment-variables.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/lsp.md"

@@ -100,4 +100,4 @@ scripts/run-tests.sh --build-dir build --jobs 4 \
   -R '^ava_tests\.(agent_loop|agent_tool_dispatcher|subagent_coordinator|subagent_delivery_manager)$'
 ```
 
-Related coverage also lives in [`tests/agent_tool_dispatcher_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/agent_tool_dispatcher_tests.cpp), [`tests/app_command_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/app_command_tests.cpp), and the RPC contract tests.
+Related coverage also lives in [`tests/agent_tool_dispatcher_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/agent_tool_dispatcher_tests.cpp), [`tests/app_command_registry_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/app_command_registry_tests.cpp), and [`tests/app_rpc_commands_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/app_rpc_commands_tests.cpp).

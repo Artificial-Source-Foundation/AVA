@@ -11,6 +11,7 @@
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/terminal.h"
@@ -134,6 +135,151 @@ bool test_transcript_search_controller_tail_refresh_avoids_full_layout()
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
   return direct_refresh_passed && scheduled_render_passed && full_sync_passed;
+}
+
+bool test_changed_session_snapshot_resets_presentation()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(18, 96));
+
+  std::size_t job_list_calls = 0;
+  ava::tui::TuiRuntimeOptions options;
+  options.session_id = "session_old_presentation";
+  options.mode = "build";
+  options.provider = "fake";
+  options.model = "old-model";
+  options.workspace = "/workspace/old";
+  options.reasoning_status_provider = []() { return std::optional<std::string>("high"); };
+  options.initial_transcript = {
+      ava::tui::TranscriptItem{.label = "you", .text = "OLD-TRANSCRIPT-MARKER"},
+      ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "read_file"}},
+  };
+  options.list_subagents = [&]() -> ava::core::Result<ava::tui::SelectListView> {
+    ++job_list_calls;
+    auto view = ava::tui::SelectListView{};
+    view.title = "Application jobs";
+    return view;
+  };
+
+  ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.sidebar = presentation.sidebar;
+  presentation.snapshot.queued_messages = {{.id = "queued-old", .kind = "follow-up", .text = "old queued message"}};
+  presentation.snapshot.sidebar_drawer_visible = true;
+  presentation.snapshot.sidebar_drawer_scroll_offset = 4;
+  presentation.sidebar.activity = {{.id = "activity-old", .label = "tool", .detail = "old activity"}};
+  presentation.sidebar.modified_files = {{.path = "old.cpp"}};
+  presentation.sidebar.session_entry_count = 9;
+  presentation.snapshot.input = "old composer draft";
+  presentation.snapshot.input_cursor = presentation.snapshot.input.size();
+  presentation.snapshot.input_selection_start = 0;
+  presentation.snapshot.input_selection_end = 3;
+  presentation.snapshot.transcript_selection_anchor_item = 0;
+  presentation.snapshot.transcript_selection_focus_item = 1;
+
+  ava::tui::RuntimeDraftState draft_state;
+  draft_state.draft.text = presentation.snapshot.input;
+  draft_state.draft.cursor = presentation.snapshot.input_cursor;
+  draft_state.draft_selection_anchor = 0;
+  draft_state.draft_selection_cursor = 3;
+  draft_state.draft_input = "history scratch";
+  draft_state.history_index = 0;
+  draft_state.jump_mode = ava::tui::ComposerJumpMode::Forward;
+  draft_state.draft_scroll_offset = 2;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+  auto active_select_list = ava::tui::ActiveSelectList::None;
+  ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active_select_list);
+  ava::tui::RuntimeSubagentWorkspaceController subagent_workspace(options, presentation.snapshot);
+
+  auto const search_opened = transcript_search.open("OLD-TRANSCRIPT-MARKER");
+  renderer.transcript_scroll_offset = 3;
+  renderer.detached_new_output_count = 2;
+  renderer.detached_sidebar_snapshot = presentation.sidebar;
+  renderer.defer_detached_transcript_update({}, 1);
+  renderer.transcript_layout_cache.valid = true;
+  auto const previous_generation = presentation.snapshot.transcript_generation;
+
+  auto changed = ava::tui::apply_runtime_state_snapshot_with_presentation_transition(
+      options, presentation, draft_state, renderer, transcript_search, subagent_workspace,
+      ava::tui::TuiRuntimeStateSnapshot{.mode = "plan",
+                                        .provider = "fake-next",
+                                        .model = "new-model",
+                                        .session_id = "session_new_presentation",
+                                        .session_path = "/sessions/new.jsonl",
+                                        .workspace = "/workspace/new",
+                                        .git_branch = "new-branch",
+                                        .status = "new session receipt",
+                                        .todos = {{.id = "todo-new", .content = "new todo", .status = ava::tui::TodoStatus::InProgress}}});
+
+  auto const changed_state_ok =
+      changed && search_opened && presentation.snapshot.session_id == "session_new_presentation" && presentation.snapshot.mode == "plan" &&
+      presentation.snapshot.provider == "fake-next" && presentation.snapshot.model == "new-model" && presentation.snapshot.status == "new session receipt" &&
+      presentation.snapshot.reasoning_status == std::optional<std::string>("high") && presentation.snapshot.transcript.empty() &&
+      presentation.snapshot.transcript_generation == previous_generation + 1 && presentation.snapshot.queued_messages.empty() &&
+      presentation.sidebar.activity.empty() && presentation.sidebar.modified_files.empty() && presentation.sidebar.todos.size() == 1 &&
+      presentation.sidebar.todos.front().content == "new todo" && presentation.sidebar.session_entry_count == std::nullopt && draft_state.draft.text.empty() &&
+      !draft_state.selection_bounds() && draft_state.draft_input.empty() && !draft_state.history_index &&
+      draft_state.jump_mode == ava::tui::ComposerJumpMode::None && draft_state.draft_scroll_offset == 0 && presentation.snapshot.input.empty() &&
+      presentation.snapshot.input_cursor == 0 && presentation.snapshot.input_selection_start == std::string::npos &&
+      presentation.snapshot.input_selection_end == std::string::npos && presentation.snapshot.transcript_selection_anchor_item == std::string::npos &&
+      presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.sidebar_drawer_visible &&
+      presentation.snapshot.sidebar_drawer_scroll_offset == 0 && renderer.transcript_scroll_offset == 0 && renderer.detached_new_output_count == 0 &&
+      !renderer.detached_sidebar_snapshot && !renderer.has_deferred_detached_transcript_update() && !renderer.transcript_layout_cache.valid &&
+      !transcript_search.is_open() && active_select_list == ava::tui::ActiveSelectList::None;
+
+  presentation.snapshot.transcript = {{.label = "ava", .text = "new receipt only"}};
+  ++presentation.snapshot.transcript_generation;
+  presentation.snapshot.queued_messages = {{.id = "queued-new", .kind = "follow-up", .text = "new queued message"}};
+  presentation.sidebar.activity = {{.id = "activity-new", .label = "tool", .detail = "new activity"}};
+  auto const unchanged_generation = presentation.snapshot.transcript_generation;
+  auto unchanged = ava::tui::apply_runtime_state_snapshot_with_presentation_transition(
+      options, presentation, draft_state, renderer, transcript_search, subagent_workspace,
+      ava::tui::TuiRuntimeStateSnapshot{.mode = "build",
+                                        .provider = "fake-next",
+                                        .model = "same-session-model-update",
+                                        .session_id = "session_new_presentation",
+                                        .session_path = "/sessions/new.jsonl",
+                                        .workspace = "/workspace/new",
+                                        .git_branch = "new-branch",
+                                        .status = "same session update",
+                                        .todos = {{.id = "todo-same", .content = "same-session todo"}}});
+  auto const unchanged_state_ok = !unchanged && presentation.snapshot.transcript_generation == unchanged_generation &&
+                                  presentation.snapshot.transcript.size() == 1 && presentation.snapshot.transcript.front().text == "new receipt only" &&
+                                  presentation.snapshot.queued_messages.size() == 1 && presentation.sidebar.activity.size() == 1 &&
+                                  presentation.snapshot.model == "same-session-model-update" && presentation.sidebar.todos.size() == 1 &&
+                                  presentation.sidebar.todos.front().content == "same-session todo";
+
+  auto const jobs_still_available = subagent_workspace.open_selector() && subagent_workspace.active() && job_list_calls == 1;
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return changed_state_ok && unchanged_state_ok && jobs_still_available;
 }
 
 bool test_atomic_search_input_prompt_precedence()
@@ -630,6 +776,11 @@ bool test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless
 
 void run_tui_prompt_search_race_tests()
 {
+  expect(
+      test_changed_session_snapshot_resets_presentation(),
+      "an authoritative changed-session snapshot clears old transcript/tool rows, advances generation, resets queued/sidebar/draft/selection/search/scroll and "
+      "frozen presentation state through their owners, applies the new session/model/reasoning/todos, preserves application-scoped jobs, and leaves an "
+      "unchanged-session transcript intact");
   expect(test_transcript_search_controller_tail_refresh_avoids_full_layout(),
          "an open 1,000-item transcript search over a roomy 180x20 idle-sidebar layout keeps the captured 141-column transcript geometry while its modal "
          "uses the 120-column canvas, then a shift-zero tail refresh directly renders and updates exactly one authoritative item/projection/match/modal row "

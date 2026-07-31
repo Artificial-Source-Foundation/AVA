@@ -131,6 +131,7 @@ class RuntimeRenderer final
   [[nodiscard]] bool has_transcript_selection() const noexcept;
   [[nodiscard]] bool has_pointer_interaction() const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionRange> transcript_selection_range() const noexcept;
+  void reset_for_session_transition();
 
   std::size_t transcript_scroll_offset = 0;
   std::size_t detached_new_output_count = 0;

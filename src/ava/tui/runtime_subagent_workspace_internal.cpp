@@ -144,6 +144,11 @@ void RuntimeSubagentWorkspaceController::close_to_parent()
   publish();
 }
 
+void RuntimeSubagentWorkspaceController::reset_for_session_transition()
+{
+  close_to_parent();
+}
+
 void RuntimeSubagentWorkspaceController::close_to_selector()
 {
   mode_ = Mode::Selector;

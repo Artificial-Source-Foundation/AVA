@@ -27,6 +27,11 @@
 
 void run_tui_selector_tests()
 {
+  expect(ava::tui::runtime_commands::session_switching_command("/clear") && ava::tui::runtime_commands::session_switching_command("  /clear Fresh session  ") &&
+             !ava::tui::runtime_commands::session_switching_command("/clearance") &&
+             !ava::tui::runtime_commands::session_switching_command("/clearance Fresh session"),
+         "session-switch attachment safety recognizes exact /clear submissions and rejects ambiguous prefixes");
+
   auto make_model = [](std::string provider, std::string id, std::string name, std::string family, std::optional<bool> reasoning,
                        std::vector<std::string> levels = {}) {
     ava::config::ModelInfo model;

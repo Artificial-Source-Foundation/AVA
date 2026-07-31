@@ -449,27 +449,39 @@ void test_app_session_new_resume_commands()
   expect(missing_resume && missing_resume->handled && !missing_resume->output.empty() && missing_resume->output[0] == "usage: /resume <id>",
          "slash /resume without an id returns usage text");
 
-  auto fresh = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new Fresh session"});
+  auto clearance = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/clearance Fresh session"});
+  expect(clearance && !clearance->handled && session->store.session_id() == source_session_id,
+         "slash /clearance does not prefix-dispatch the exact /clear alias");
+
+  auto cleared = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/clear Fresh session"});
   auto const fresh_session_id = session->store.session_id();
   auto fresh_metadata = ava::session::load_session_metadata(session->store);
   auto fresh_entries = session->store.load();
   auto const expected_fresh_receipt = "started session \"Fresh session\" · id " + fresh_session_id + "\nprevious session \"Old title\" · id " +
                                       source_session_id + "\nswitched to \"Fresh session\"";
-  expect(fresh && fresh->handled && fresh->output.size() == 1 && fresh_session_id != source_session_id && fresh->output[0] == expected_fresh_receipt &&
-             fresh->output[0].find("previous session " + source_session_id) == std::string::npos &&
-             fresh->output[0].find("switched to " + fresh_session_id) == std::string::npos && fresh_metadata && fresh_metadata->name == "Fresh session" &&
+  expect(cleared && cleared->handled && cleared->output.size() == 1 && fresh_session_id != source_session_id && cleared->output[0] == expected_fresh_receipt &&
+             cleared->output[0].find("previous session " + source_session_id) == std::string::npos &&
+             cleared->output[0].find("switched to " + fresh_session_id) == std::string::npos && fresh_metadata && fresh_metadata->name == "Fresh session" &&
              fresh_metadata->actor == "tui" && fresh_entries && fresh_entries->size() >= 2,
-         "slash /new emits title-first lifecycle receipts with each actionable full id exactly once, records metadata, and switches runtime session");
+         "slash /clear uses the /new lifecycle, emits its receipt, records an optional name, and switches to a fresh durable session");
+
+  auto sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions Old"});
+  expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Old title") != std::string::npos &&
+             sessions->output[0].find(source_session_id) != std::string::npos,
+         "slash /clear leaves the previous session listable");
 
   auto resumed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
   expect(resumed && resumed->handled && !resumed->output.empty() && session->store.session_id() == source_session_id &&
              resumed->output[0].find("resumed session " + source_session_id) != std::string::npos,
-         "slash /resume switches runtime session by id");
+         "the previous session remains resumable after slash /clear");
 
-  auto sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions Fresh"});
-  expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Fresh session") != std::string::npos &&
-             sessions->output[0].find(fresh_session_id) != std::string::npos,
-         "slash /sessions shows named sessions created through /new");
+  auto const slash_items = ava::app::command_catalog_slash_items(*session);
+  auto const clear_matches = ava::tui::filter_slash_commands("/clear", slash_items);
+  auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help"});
+  expect(clear_matches.size() == 1 && clear_matches.front().command == "/new" &&
+             std::ranges::find(clear_matches.front().aliases, "/clear") != clear_matches.front().aliases.end() && help && help->handled &&
+             !help->output.empty() && help->output.front().find("/clear") != std::string::npos,
+         "slash /clear is present as one exact /new alias in command help and autocomplete");
 
   auto unnamed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/new"});
   auto const unnamed_session_id = session->store.session_id();

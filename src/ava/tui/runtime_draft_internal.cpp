@@ -25,6 +25,20 @@ void RuntimeDraftState::clear_selection()
   mouse_selecting = false;
 }
 
+void RuntimeDraftState::reset_for_session_transition()
+{
+  clear_selection();
+  reset_composer_draft(draft);
+  history_index.reset();
+  draft_input.clear();
+  jump_mode = ComposerJumpMode::None;
+  selected_slash_command_index = 0;
+  slash_palette_suppressed = false;
+  path_completion_force_active = false;
+  draft_scroll_offset = 0;
+  pending_escape_clear = false;
+}
+
 std::optional<std::pair<std::size_t, std::size_t>> RuntimeDraftState::selection_bounds() const
 {
   if (draft_selection_anchor == std::string::npos || draft_selection_cursor == std::string::npos)

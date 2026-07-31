@@ -60,8 +60,9 @@ bool exact_command(std::string_view submitted, std::string_view command)
 
 bool session_switching_command(std::string_view submitted)
 {
-  return starts_with_command_submission(submitted, "/new") || starts_with_command_submission(submitted, "/resume") ||
-         starts_with_command_submission(submitted, "/fork") || starts_with_command_submission(submitted, "/clone");
+  return starts_with_command_submission(submitted, "/new") || starts_with_command_submission(submitted, "/clear") ||
+         starts_with_command_submission(submitted, "/resume") || starts_with_command_submission(submitted, "/fork") ||
+         starts_with_command_submission(submitted, "/clone");
 }
 
 std::optional<std::string> reload_command_argument(std::string_view submitted)

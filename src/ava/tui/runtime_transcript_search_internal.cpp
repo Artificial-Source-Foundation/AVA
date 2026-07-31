@@ -947,6 +947,24 @@ void TranscriptSearchController::close_before_prompt()
     restore_saved_viewport({});
 }
 
+void TranscriptSearchController::reset_for_session_transition()
+{
+  if (is_open())
+  {
+    presentation_state_.snapshot.select_list.reset();
+    active_select_list_ = ActiveSelectList::None;
+  }
+  query_.clear();
+  projection_cache_.clear();
+  saved_viewport_anchor_ = {};
+  saved_scroll_offset_ = 0;
+  saved_transcript_generation_ = 0;
+  saved_width_ = 0;
+  saved_height_ = 0;
+  authoritative_settings_valid_ = false;
+  accumulated_item_index_shift_ = 0;
+}
+
 detail::TranscriptSearchDiagnostics TranscriptSearchController::diagnostics() const noexcept
 {
   return detail::TranscriptSearchDiagnostics{.authoritative_mutation_item_render_count = projection_cache_.authoritative_mutation_item_render_count(),

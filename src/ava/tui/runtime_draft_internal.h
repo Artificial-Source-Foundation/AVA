@@ -20,6 +20,7 @@ struct RuntimeDraftState
   [[nodiscard]] std::size_t max_draft_scroll_offset(ComposerSnapshot const& snapshot, std::size_t height) const;
 
   void clear_selection();
+  void reset_for_session_transition();
   [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> selection_bounds() const;
   bool replace_selection(std::string_view replacement);
   bool delete_selection();

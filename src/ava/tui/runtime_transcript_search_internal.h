@@ -139,6 +139,7 @@ class TranscriptSearchController final
   void refresh_after_transcript_mutation(std::ptrdiff_t item_index_shift, std::size_t changed_from_item_index);
   void refresh_after_resize();
   void close_before_prompt();
+  void reset_for_session_transition();
   [[nodiscard]] detail::TranscriptSearchDiagnostics diagnostics() const noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

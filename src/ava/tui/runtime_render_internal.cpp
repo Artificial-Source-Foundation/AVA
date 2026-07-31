@@ -236,6 +236,23 @@ void RuntimeRenderer::clear_transcript_selection()
   transcript_selection_.publish(snapshot_);
 }
 
+void RuntimeRenderer::reset_for_session_transition()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.clear();
+  pending_live_selection_item_index_shift_ = 0;
+  transcript_selection_.publish(snapshot_);
+  transcript_scroll_offset = 0;
+  detached_new_output_count = 0;
+  detached_sidebar_snapshot.reset();
+  deferred_detached_viewport_.reset();
+  transcript_layout_cache = {};
+  screen_row_cache.valid = false;
+  wheel_governor.reset();
+  snapshot_.transcript_scroll_offset = 0;
+  snapshot_.transcript_new_output_count = 0;
+}
+
 void RuntimeRenderer::cancel_pointer_interaction()
 {
   std::lock_guard<std::recursive_mutex> lock(ui_mutex);

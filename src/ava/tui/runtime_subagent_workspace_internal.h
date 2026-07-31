@@ -33,6 +33,7 @@ class RuntimeSubagentWorkspaceController final
   [[nodiscard]] bool poll(Clock::time_point now = Clock::now());
   [[nodiscard]] std::optional<Clock::duration> time_until_poll(Clock::time_point now = Clock::now()) const;
   [[nodiscard]] RuntimeSubagentWorkspaceInputResult handle_input(InputEvent const& event, Clock::time_point now = Clock::now());
+  void reset_for_session_transition();
 
   [[nodiscard]] bool active() const noexcept;
   [[nodiscard]] bool selector_active() const noexcept;

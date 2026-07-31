@@ -154,7 +154,7 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/fork [name]`: fork the current session at its latest entry and switch to the branch
 - `/fork-from [query]`: fork from a selected public user turn in the TUI and switch to the branch (sessionless sessions refuse; `/copy user` still works)
 - `/clone [name]`: clone the full current session and switch to the copy
-- `/new [name]`: start a fresh session and switch to it
+- `/new [name]` (alias `/clear [name]`): start a fresh session and switch to it
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty
 - `/name <name|--clear>`: set or clear the current session display name; `/rename` is an alias
 - `/labels <label...|--clear>`: set or clear current session labels; `/label` is an alias

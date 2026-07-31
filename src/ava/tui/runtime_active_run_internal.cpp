@@ -309,8 +309,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller_.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
-    renderer.clear_transcript_selection();
-    presentation_state_.apply_runtime_state_snapshot(options, std::move(runtime_state));
+    static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,
+                                                                                subagent_workspace_, std::move(runtime_state)));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
   auto refresh_active_context_status = [&]() { presentation_state_.refresh_active_context_status(options); };

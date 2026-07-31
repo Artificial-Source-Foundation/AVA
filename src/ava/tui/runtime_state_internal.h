@@ -16,8 +16,12 @@
 
 namespace ava::tui {
 
+struct RuntimeDraftState;
 struct TuiRuntimeOptions;
 struct TuiRuntimeStateSnapshot;
+class RuntimeRenderer;
+class RuntimeSubagentWorkspaceController;
+class TranscriptSearchController;
 
 struct QueuedRuntimeEvent
 {
@@ -106,5 +110,13 @@ class RuntimePresentationState final
  private:
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+// Applies every authoritative runtime snapshot, but clears session-scoped TUI
+// presentation first only when the authoritative session identity changed.
+[[nodiscard]] bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
+                                                                             RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
+                                                                             TranscriptSearchController& transcript_search,
+                                                                             RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                                             TuiRuntimeStateSnapshot state);
 
 }  // namespace ava::tui

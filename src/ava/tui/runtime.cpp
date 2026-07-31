@@ -434,21 +434,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       };
       auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool announce) {
         auto status = state.status;
-        snapshot.transcript.clear();
-        ++snapshot.transcript_generation;
-        draft_state.clear_selection();
-        renderer.clear_transcript_selection();
-        reset_composer_draft(draft);
-        jump_mode = ComposerJumpMode::None;
-        draft_input.clear();
-        history_index.reset();
-        apply_runtime_state_snapshot(std::move(state));
+        static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state, draft_state, renderer, transcript_search,
+                                                                                    subagent_workspace, std::move(state)));
         if (announce && !status.empty())
         {
           push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
         }
-        transcript_scroll_offset = 0;
-        draft_scroll_offset = 0;
       };
       if (input_result.action == SelectListInputAction::Redraw && snapshot.select_list)
       {

@@ -89,7 +89,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/fork", .description = "Fork the current session at its latest entry", .hint = "[name]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/fork-from", .description = "Fork from a selected public user turn in the TUI", .category = "Sessions"},
       CommandCatalogEntry{.command = "/clone", .description = "Clone the full current session", .hint = "[name]", .category = "Sessions"},
-      CommandCatalogEntry{.command = "/new", .description = "Start a new session", .hint = "[name]", .category = "Sessions"},
+      CommandCatalogEntry{.command = "/new", .aliases = {"/clear"}, .description = "Start a new session", .hint = "[name]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/resume", .description = "Resume a session", .hint = "<id>", .category = "Sessions"},
       CommandCatalogEntry{
           .command = "/name", .aliases = {"/rename"}, .description = "Set or clear the current session name", .hint = "<name|--clear>", .category = "Sessions"},

@@ -359,6 +359,43 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     if "* Branch child" not in child_active:
         raise RuntimeError(f"selector Alt+Right did not make the child branch current\nscreen:\n{child_active}")
 
+    old_new_marker = "OLD-PRESENTATION-BEFORE-NEW-7E4C"
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, f"/clearance {old_new_marker}")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, old_new_marker, "old transcript marker before /new")
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/new Presentation reset new")
+    send_keys(tmux_exe, session, "Enter")
+    reset_by_new = wait_for(
+        tmux_exe,
+        session,
+        r'(?s)started session "Presentation reset new" · id.*?session_.*previous session "Branch child" · id.*?session_.*switched to "Presentation reset new"',
+        "fresh visible presentation after /new",
+    )
+    assert_title_first_new_receipt(reset_by_new, "Presentation reset new", "Branch child", "presentation reset /new")
+    if old_new_marker in reset_by_new:
+        raise RuntimeError(f"/new retained an old transcript marker\nscreen:\n{reset_by_new}")
+
+    old_clear_marker = "OLD-PRESENTATION-BEFORE-CLEAR-9A2D"
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, f"/clearance {old_clear_marker}")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, old_clear_marker, "old transcript marker before /clear")
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/clear Presentation reset clear")
+    send_keys(tmux_exe, session, "Enter")
+    reset_by_clear = wait_for(
+        tmux_exe,
+        session,
+        r'(?s)started session "Presentation reset clear" · id.*?session_.*previous session "Presentation reset new" · id.*?session_.*switched to "Presentation reset clear"',
+        "fresh visible presentation after /clear",
+    )
+    assert_title_first_new_receipt(reset_by_clear, "Presentation reset clear", "Presentation reset new", "presentation reset /clear")
+    if old_new_marker in reset_by_clear or old_clear_marker in reset_by_clear or 'started session "Presentation reset new"' in reset_by_clear:
+        raise RuntimeError(f"/clear retained old presentation rows\nscreen:\n{reset_by_clear}")
+    save_evidence(root, "session-new-clear-presentation-reset", reset_by_clear)
+
     _finish_main(tmux_exe, session)
 
     # Production-path evidence for /fork-from and /copy user over real public turns

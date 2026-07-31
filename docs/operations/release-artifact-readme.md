@@ -2,7 +2,7 @@
 
 This archive contains the AVA terminal executable for the Linux host on which it was built. It is a dynamically linked host artifact, not a portable Linux distribution package.
 
-This README is the **offline documentation spine** for the artifact. Every packaged user, operator, protocol, security, testing, and release document is indexed below; the source-tree `docs/README.md` is intentionally not installed because its maintainer and history navigation depends on the repository checkout.
+This README is the **offline documentation spine** for the artifact. All 31 packaged source documents (29 Markdown and 2 JSON) are indexed below; the source-tree category indexes and `docs/README.md` are intentionally not installed because their maintainer and history navigation depends on the repository checkout.
 
 ## Runtime requirements
 

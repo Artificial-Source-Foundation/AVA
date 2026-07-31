@@ -4,7 +4,7 @@ These current operational guides cover source builds, validation, diagnosis, and
 
 - [Build configuration](build-configuration.md): CMake options, dependency modes, and build profiles.
 - [Testing](testing.md): deterministic, optional, terminal, and live-provider test surfaces.
-- [Docker build environment](docker.md) and its [build recipe](docker.dockerfile): containerized Linux build workflow and limitations.
+- [Docker build environment](docker/README.md) and its [build recipe](docker/Dockerfile): containerized Linux build workflow and limitations.
 - [Terminal setup](terminal-setup.md): terminal capabilities, keyboard protocols, images, links, and clipboard helpers.
 - [Troubleshooting](troubleshooting.md): symptom-first recovery guidance.
 - [Diagnostics](diagnostics.md): passive doctor, private diagnostics, and sanitized support exports.

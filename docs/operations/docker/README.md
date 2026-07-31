@@ -12,7 +12,7 @@ outside the read-only source mount:
 REPOROOT=$(git rev-parse --show-toplevel)
 BUILDDIR=$(mktemp -d "${TMPDIR:-/tmp}/ava-docker-build.XXXXXXXX")
 mkdir -p "$BUILDDIR/docker"
-docker build -f "$REPOROOT/docs/operations/docker.dockerfile" -t ava-ubuntu24 "$REPOROOT/docs/operations"
+docker build -f "$REPOROOT/docs/operations/docker/Dockerfile" -t ava-ubuntu24 "$REPOROOT/docs/operations/docker"
 ```
 
 ## Run a persistent container

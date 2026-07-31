@@ -74,7 +74,7 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
             "build-debug/README.md",
             "cmake-build-release/README.md",
             "docs/reference-code/README.md",
-            "docs/release-artifact-readme.md",
+            "docs/operations/release-artifact-readme.md",
             "cmake/aicxx/README.md",
             "cwds/README.md",
             "enchantum/README.md",
@@ -98,6 +98,60 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
         self.write("docs/space name.md", "target\n")
 
         result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_tree_accepts_existing_self_github_link(self) -> None:
+        self.write(
+            "README.md",
+            "[guide](https://github.com/Artificial-Source/AVA/blob/develop/docs/guide.md#part)\n",
+        )
+        self.write("docs/guide.md", "guide\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_tree_reports_missing_self_github_target(self) -> None:
+        self.write(
+            "README.md",
+            "[missing](https://github.com/Artificial-Source/AVA/blob/develop/docs/reference-code/missing.md)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("missing local link target", result.stderr)
+
+    def test_source_tree_decodes_self_github_target(self) -> None:
+        self.write(
+            "README.md",
+            "[guide](https://github.com/Artificial-Source/AVA/blob/develop/docs/space%20name.md)\n",
+        )
+        self.write("docs/space name.md", "guide\n")
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_tree_rejects_escaping_self_github_target(self) -> None:
+        self.write(
+            "README.md",
+            "[outside](https://github.com/Artificial-Source/AVA/blob/develop/%2e%2e/outside.md)\n",
+        )
+
+        result = self.run_verifier("--source-tree")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("README.md: link escapes source tree", result.stderr)
+
+    def test_artifact_mode_treats_self_github_link_as_external(self) -> None:
+        self.write(
+            "README.md",
+            "[external](https://github.com/Artificial-Source/AVA/blob/develop/docs/missing.md)\n",
+        )
+
+        result = self.run_verifier()
 
         self.assertEqual(result.returncode, 0, result.stderr)
 

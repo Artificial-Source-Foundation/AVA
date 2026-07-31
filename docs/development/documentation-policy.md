@@ -11,7 +11,7 @@ Use one primary home for each kind of information:
 | Audience/purpose | Primary location | Content |
 | --- | --- | --- |
 | Repository entry | root [`README.md`](../../README.md) | concise product summary, install/build start, links into current docs |
-| Documentation navigation | [`docs/README.md`](../README.md) | single human spine in task order |
+| Documentation navigation | [`docs/README.md`](../README.md) and root [`llms.txt`](../../llms.txt) | single human spine in task order and concise robot entry point |
 | Users/operators | `docs/core/`, `docs/interfaces/`, `docs/operations/` | current commands, configuration, interfaces, behavior, limits, and recovery |
 | Client/extension authors | `docs/extensions/` plus fixed contracts in `docs/` | current setup/authoring guides and versioned normative wire/file contracts |
 | Maintainers | `docs/development/` and [`docs/AGENTS.md`](../AGENTS.md) | current architecture, source map, invariants, and engineering/documentation policy |
@@ -21,6 +21,8 @@ Use one primary home for each kind of information:
 | Future work | `docs/plans/`, `docs/roadmap/`, `docs/goals/` | proposals, sequencing, acceptance criteria, unresolved work |
 | History/evidence | `docs/history/`, `docs/versions/`, `docs/interop/evidence/` | what was claimed or observed at a particular point in time |
 | Schemas/machine status | `docs/schema/`, JSON manifests | machine-readable contracts or status checked by tests |
+
+The mechanically allowed top-level taxonomy is `core`, `interfaces`, `extensions`, `operations`, `development`, `security`, `product`, `plans`, `roadmap`, `goals`, `history`, `versions`, `interop`, and `schema`, plus optional excluded `reference-code`. Only `README.md`, `AGENTS.md`, `acp.md`, `acp-support.json`, `rpc-protocol.md`, `headless-protocol.md`, `session-format.md`, and `plugin-compatibility-policy.md` remain as fixed `docs/`-root files. Every owned category has its required `README.md`; nested implementation inputs such as `operations/docker/Dockerfile` are not document graph nodes.
 
 Do not make a historical ledger, roadmap, or reference checkout the only place
 that current user or maintainer behavior is explained. `docs/reference-code/`
@@ -226,15 +228,34 @@ scripts/run-tests.sh --build-dir build \
 
 The exact test names are `ava_tests.markdown_link_verifier` (focused checker behavior) and `ava_tests.markdown_links_source` (the first-party source-tree gate). Python 3 is optional at CMake configuration time; these tests are registered when its interpreter is found.
 
-In `--source-tree` mode the checker walks first-party Markdown while excluding Git metadata, build trees (`build`, `build-*`, and `cmake-build-*`), generated/cache/package directories, dependency trees (`cmake/aicxx`, `cwds`, `enchantum`, `src/json`, `threadsafe`, and `utils`), and local `docs/reference-code/`. The artifact template at `docs/operations/release-artifact-readme.md` is relocated to the artifact documentation root before its links become valid and must remain source-tree-excluded. Phase B synchronizes that moved exclusion with the checker and its focused coverage in [`tests/verify_markdown_links_test.py`](../../tests/verify_markdown_links_test.py); exact exclusions live in [`scripts/verify-markdown-links.py`](../../scripts/verify-markdown-links.py).
+In `--source-tree` mode the checker walks first-party Markdown while excluding Git metadata, build trees (`build`, `build-*`, and `cmake-build-*`), generated/cache/package directories, dependency trees (`cmake/aicxx`, `cwds`, `enchantum`, `src/json`, `threadsafe`, and `utils`), and local `docs/reference-code/`. The artifact template at `docs/operations/release-artifact-readme.md` is relocated to the artifact documentation root before its links become valid and remains source-tree-excluded. Exact exclusions live in [`scripts/verify-markdown-links.py`](../../scripts/verify-markdown-links.py).
 
-Without `--source-tree`, the same program is in **artifact mode**: it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
+Exact absolute `https://github.com/Artificial-Source/AVA/blob/develop/<path>[#fragment]` self-links are repository-local in source-tree mode: their percent-decoded targets must exist and remain root-confined even when they point into an otherwise excluded tree. Other absolute URLs remain external and no network request is made. Without `--source-tree`, the program is in **artifact mode**: all absolute URLs, including AVA self-links, remain external, and it recursively checks all Markdown beneath the supplied staged documentation root with no source-tree exclusions. `scripts/package-linux.sh` runs that mode after staging, where the relocated artifact README and exact package allowlist must resolve together.
 
-The checker validates local relative target paths in inline links, full reference links, and collapsed reference links; percent-decodes paths; rejects links that escape the checked root; and ignores fenced-code examples. It deliberately does **not** validate shortcut reference links, heading fragments/anchors, external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
+The checker validates local relative target paths in inline links, full reference links, and collapsed reference links; percent-decodes paths; rejects links that escape the checked root; and ignores fenced-code examples. It deliberately does **not** validate shortcut reference links, heading fragments/anchors, ordinary external URLs, or images, and it currently reports the source file but not a source line number. Therefore maintainers must still:
 
 1. review shortcut references and changed same-page/cross-page fragments with GitHub-compatible heading behavior;
 2. review material external links manually (the required gate makes no network request);
 3. search renamed/deleted paths for inbound references; and
 4. run `git --no-pager diff --check`.
 
-A successful source-tree run proves only that checked local relative target paths exist within the documented scope. It is not evidence that anchors, external sites, examples, or historical claims are current.
+A successful source-tree run proves only that checked local relative targets and exact AVA self-link targets exist within the documented scope. It is not evidence that anchors, external sites, examples, or historical claims are current.
+
+## Structure and reachability workflow
+
+Run the deterministic hierarchy gate from the repository root:
+
+```sh
+python3 scripts/verify-documentation-structure.py .
+```
+
+Its focused and real-tree CTests are exactly `ava_tests.documentation_structure_checker` and `ava_tests.documentation_structure_source`:
+
+```sh
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.documentation_structure_(checker|source)$' --output-on-failure
+```
+
+The gate enforces the allowed taxonomy and required category indexes, builds a bounded first-party Markdown/JSON graph excluding `docs/reference-code/`, and requires every node to be reachable from `docs/README.md`. JSON files are terminal nodes. Each category index directly owns its immediate Markdown/JSON files and child `README.md` indexes. The reachable artifact README source template is not traversed because its outbound links intentionally resolve only after installation at the artifact root.
+
+The same gate validates every local Markdown-style link in `llms.txt` for existence and root confinement, and requires the concise human/category/evidence spine plus the fixed ACP, RPC, headless, session, and plugin compatibility contracts. `llms.txt` need not enumerate every leaf: category ownership and whole-graph reachability provide that guarantee without a duplicate JSON catalog.

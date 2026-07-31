@@ -23,40 +23,40 @@ share/doc/ava/README.md
 share/doc/ava/LICENSE
 share/doc/ava/THIRD_PARTY_NOTICES.md
 share/doc/ava/PROVENANCE.json
-share/doc/ava/docs/USAGE.md
-share/doc/ava/docs/CONFIG.md
-share/doc/ava/docs/context-resources.md
-share/doc/ava/docs/providers.md
-share/doc/ava/docs/security-sandboxing.md
-share/doc/ava/docs/subagents.md
-share/doc/ava/docs/terminal-setup.md
-share/doc/ava/docs/themes-keybindings.md
-share/doc/ava/docs/thinking-modes.md
-share/doc/ava/docs/TESTING.md
-share/doc/ava/docs/environment-variables.md
-share/doc/ava/docs/lsp.md
-share/doc/ava/docs/tools.md
-share/doc/ava/docs/troubleshooting.md
-share/doc/ava/docs/diagnostics.md
+share/doc/ava/docs/core/usage.md
+share/doc/ava/docs/core/configuration.md
+share/doc/ava/docs/core/context-resources.md
+share/doc/ava/docs/core/environment-variables.md
+share/doc/ava/docs/core/providers.md
+share/doc/ava/docs/core/subagents.md
+share/doc/ava/docs/core/thinking-modes.md
+share/doc/ava/docs/core/tools.md
+share/doc/ava/docs/interfaces/themes-keybindings.md
+share/doc/ava/docs/operations/testing.md
+share/doc/ava/docs/operations/terminal-setup.md
+share/doc/ava/docs/operations/troubleshooting.md
+share/doc/ava/docs/operations/diagnostics.md
+share/doc/ava/docs/operations/release-checklist.md
+share/doc/ava/docs/extensions/lsp.md
+share/doc/ava/docs/extensions/mcp.md
+share/doc/ava/docs/extensions/plugin-system.md
+share/doc/ava/docs/security/sandboxing.md
+share/doc/ava/docs/security/containment.md
+share/doc/ava/docs/development/session-versioning.md
+share/doc/ava/docs/development/side-effect-safety-checklist.md
 share/doc/ava/docs/headless-protocol.md
 share/doc/ava/docs/rpc-protocol.md
 share/doc/ava/docs/acp.md
-share/doc/ava/docs/mcp.md
+share/doc/ava/docs/acp-support.json
 share/doc/ava/docs/session-format.md
-share/doc/ava/docs/plugin-system.md
 share/doc/ava/docs/plugin-compatibility-policy.md
-share/doc/ava/docs/release-checklist.md
-share/doc/ava/docs/security/containment.md
-share/doc/ava/docs/engineering/session-versioning.md
-share/doc/ava/docs/engineering/side-effect-safety-checklist.md
 share/doc/ava/docs/interop/evidence/README.md
 share/doc/ava/docs/interop/evidence/zed-1.9.0-2026-07-14.md
 share/doc/ava/docs/product/mvp-coverage-ledger.md
-share/doc/ava/docs/acp-support.json
 share/doc/ava/docs/schema/theme.schema.json
 ```
 
-The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
+The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. The curated documentation payload is exactly 31 source files (29 Markdown and 2 JSON) mirrored under their source categories; category indexes remain source-only. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
 
 The allowlist excludes reference repositories, source and test trees, build trees, examples, credentials, auth/config/session state, provider output, raw interoperability evidence, and the optional desktop prototype. CMake component `ava` must remain exact; always pass `--component ava` for a manual stage:
 

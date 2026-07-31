@@ -47,7 +47,13 @@ SOURCE_EXCLUDED_NAMES = frozenset(
 )
 # This file is relocated to the artifact root and is checked there by the
 # package verifier; its links intentionally do not resolve from its source path.
-SOURCE_EXCLUDED_FILES = frozenset({("docs", "release-artifact-readme.md")})
+SOURCE_EXCLUDED_FILES = frozenset(
+    {("docs", "operations", "release-artifact-readme.md")}
+)
+
+SELF_GITHUB_SCHEME = "https"
+SELF_GITHUB_HOST = "github.com"
+SELF_GITHUB_PATH_PREFIX = "/Artificial-Source/AVA/blob/develop/"
 
 
 def markdown_without_fenced_code(text: str) -> str:
@@ -127,17 +133,29 @@ def validate_link(
     failures: list[str],
 ) -> None:
     parsed = urllib.parse.urlsplit(raw_target)
-    if parsed.scheme or parsed.netloc or raw_target.startswith("//") or not parsed.path:
-        return
-    decoded_path = urllib.parse.unquote(parsed.path)
-    candidate = (markdown.parent / decoded_path).resolve(strict=False)
+    self_github_link = (
+        source_tree
+        and parsed.scheme == SELF_GITHUB_SCHEME
+        and parsed.netloc == SELF_GITHUB_HOST
+        and parsed.path.startswith(SELF_GITHUB_PATH_PREFIX)
+    )
+    if self_github_link:
+        decoded_path = urllib.parse.unquote(
+            parsed.path[len(SELF_GITHUB_PATH_PREFIX) :]
+        )
+        candidate = (root / decoded_path).resolve(strict=False)
+    else:
+        if parsed.scheme or parsed.netloc or raw_target.startswith("//") or not parsed.path:
+            return
+        decoded_path = urllib.parse.unquote(parsed.path)
+        candidate = (markdown.parent / decoded_path).resolve(strict=False)
     try:
         relative_candidate = candidate.relative_to(root)
     except ValueError:
         tree_kind = "source tree" if source_tree else "artifact docs"
         failures.append(f"{markdown.relative_to(root)}: link escapes {tree_kind}: {raw_target}")
         return
-    if source_tree and source_path_is_excluded(relative_candidate):
+    if source_tree and not self_github_link and source_path_is_excluded(relative_candidate):
         return
     if not candidate.exists():
         failures.append(f"{markdown.relative_to(root)}: missing local link target: {raw_target}")

@@ -1,14 +1,24 @@
-# Creating docker image
+# AVA Docker build environment
+
+The image supplies a Linux build environment. It is **not** an AVA runtime
+sandbox: the container has the host-mounted checkout and build workspace, and
+AVA itself is not run as a contained production service.
+
+Run the following from any shell with Docker and Git. The commands derive every
+host path from the checkout and keep build/cache state in a writable directory
+outside the read-only source mount:
 
 ```sh
-$ docker build -f $REPOROOT/docs/docker/Dockerfile -t ava-ubuntu24 $REPOROOT/docs/docker
+REPOROOT=$(git rev-parse --show-toplevel)
+BUILDDIR=$(mktemp -d "${TMPDIR:-/tmp}/ava-docker-build.XXXXXXXX")
+mkdir -p "$BUILDDIR/docker"
+docker build -f "$REPOROOT/docs/docker/Dockerfile" -t ava-ubuntu24 "$REPOROOT/docs/docker"
 ```
 
-# Run persistent docker container
+## Run a persistent container
 
 ```sh
-$ mkdir "$BUILDDIR/docker"
-$ docker run -d --name ava-ubuntu24 \
+docker run -d --name ava-ubuntu24 \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,src="$BUILDDIR/docker",dst=/work \
   --mount type=bind,src="$REPOROOT",dst=/reporoot,readonly \
@@ -20,41 +30,40 @@ $ docker run -d --name ava-ubuntu24 \
   ava-ubuntu24 sleep infinity
 ```
 
-To stop that container again run
+Stop it when finished, then remove the host build directory if it is no longer
+needed:
 
 ```sh
-$ docker rm -f ava-ubuntu24
+docker rm -f ava-ubuntu24
+rm -rf "$BUILDDIR"
 ```
 
-# Running commands
-
-While the persistent container is running, you can run commands in it with
+While it is running, execute commands with:
 
 ```sh
-$ docker exec -it ava-ubuntu24 bash -lc 'echo "$REPOROOT"'
+docker exec -it ava-ubuntu24 bash -lc 'echo "$REPOROOT"'
 ```
 
-# Configuring AVA
+## Configure, build, and test
 
-To configure AVA inside docker, run
+Configure a normal tree and an optional sanitizer tree inside the mounted build
+workspace:
 
 ```sh
-$ docker exec ava-ubuntu24 bash -lc 'mkdir "$GITACHE_ROOT" "$CCACHE_DIR"'
-$ docker exec ava-ubuntu24 bash -lc \
+docker exec ava-ubuntu24 bash -lc 'mkdir -p "$GITACHE_ROOT" "$CCACHE_DIR"'
+docker exec ava-ubuntu24 bash -lc \
   'cmake -S "$REPOROOT" -B "$BUILDDIR" -DCMAKE_BUILD_TYPE=Release -GNinja --log-level=WARNING -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DAVA_BUILD_TESTS=ON'
-$ docker exec -it ava-ubuntu24 bash -lc \
+docker exec ava-ubuntu24 bash -lc \
   'cmake -S "$REPOROOT" -B "$BUILDDIR-sanitize" -DCMAKE_BUILD_TYPE=Release -GNinja --log-level=WARNING -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON'
 ```
 
-# Building AVA
+Use the repository runners so build and CTest concurrency are bounded and the
+per-build-tree lock is honored. Do not run build and test commands concurrently
+against the same tree.
 
 ```sh
-$ docker exec ava-ubuntu24 bash -lc 'cmake --build "$BUILDDIR" --parallel 32'
-$ docker exec ava-ubuntu24 bash -lc 'cmake --build "$BUILDDIR-sanitize" --parallel 32'
-```
-
-# Running tests
-
-```sh
-$ docker exec ava-ubuntu24 bash -lc 'ctest --test-dir "$BUILDDIR" --output-on-failure'
+docker exec ava-ubuntu24 bash -lc 'scripts/build.sh --build-dir "$BUILDDIR"'
+docker exec ava-ubuntu24 bash -lc 'scripts/run-tests.sh --build-dir "$BUILDDIR"'
+docker exec ava-ubuntu24 bash -lc 'scripts/build.sh --build-dir "$BUILDDIR-sanitize" --jobs 2'
+docker exec ava-ubuntu24 bash -lc 'scripts/run-tests.sh --build-dir "$BUILDDIR-sanitize" --jobs 2'
 ```

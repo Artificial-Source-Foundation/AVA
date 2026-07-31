@@ -26,6 +26,7 @@ share/doc/ava/PROVENANCE.json
 share/doc/ava/docs/USAGE.md
 share/doc/ava/docs/CONFIG.md
 share/doc/ava/docs/TESTING.md
+share/doc/ava/docs/diagnostics.md
 share/doc/ava/docs/headless-protocol.md
 share/doc/ava/docs/rpc-protocol.md
 share/doc/ava/docs/acp.md
@@ -106,7 +107,7 @@ If the host cannot run ASan/UBSan, record the exact environment blocker rather t
 On a host with tmux and terminal support:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 13 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 18 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Other terminal and intentionally credential-gated live-provider checks remain classified in [`TESTING.md`](TESTING.md). They are not package-script steps.

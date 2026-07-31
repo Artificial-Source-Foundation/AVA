@@ -541,6 +541,21 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_tests.markdown_link_verifier
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/verify_markdown_links_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/verify-markdown-links.py)
+  set_tests_properties(ava_tests.markdown_link_verifier PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.markdown_links_source
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/verify-markdown-links.py
+            ${CMAKE_SOURCE_DIR}
+            --source-tree)
+  set_tests_properties(ava_tests.markdown_links_source PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_build.generate_print_members_completion
     COMMAND ${CMAKE_COMMAND}
             -DAVA_SOURCE_DIR=${CMAKE_SOURCE_DIR}

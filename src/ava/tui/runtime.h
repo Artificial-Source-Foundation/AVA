@@ -175,6 +175,9 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>()> on_reload_display_settings;
   std::function<ava::core::Result<std::optional<TuiRuntimeStateSnapshot>>()> on_maybe_reload_display_settings;
   std::function<SelectListView()> model_selector_view;
+  // The bool is true for the staged model-selection handoff, allowing an
+  // accurate "Esc keep default" footer. No value means no configurable mode.
+  std::function<std::optional<SelectListView>(bool)> reasoning_selector_view;
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
   // Path-free, owner-bound live subagent workspace callbacks. Exact ids are
@@ -202,6 +205,8 @@ struct TuiRuntimeOptions
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
+  // No value clears the explicit AVA level and restores model/provider default.
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::optional<std::string>)> on_reasoning_selected;
   // Fork at the selected public user entry id through the normal branch path.
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view entry_id)> on_fork_user_turn_selected;
   // Re-read exact public user-turn text by stable entry id at action time.

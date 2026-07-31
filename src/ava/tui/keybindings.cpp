@@ -62,6 +62,7 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::Interrupt,
                                  TuiAction::Exit,
                                  TuiAction::VariantCycle,
+                                 TuiAction::ReasoningSelect,
                                  TuiAction::ThinkingToggle,
                                  TuiAction::ModelSelect,
                                  TuiAction::ModelCycleForward,
@@ -206,6 +207,8 @@ constexpr std::array kActionAliases = {
     ActionAlias{"modelsReorderDown", TuiAction::ModelsReorderDown, 1},
     ActionAlias{"app.thinking.cycle", TuiAction::VariantCycle, 2},
     ActionAlias{"thinkingCycle", TuiAction::VariantCycle, 1},
+    ActionAlias{"app.thinking.select", TuiAction::ReasoningSelect, 2},
+    ActionAlias{"thinkingSelect", TuiAction::ReasoningSelect, 1},
     ActionAlias{"app.thinking.toggle", TuiAction::ThinkingToggle, 2},
     ActionAlias{"toggleThinking", TuiAction::ThinkingToggle, 1},
     ActionAlias{"app.message.followUp", TuiAction::MessageFollowUp, 2},
@@ -701,6 +704,7 @@ bool is_select_action(TuiAction action)
     case TuiAction::Interrupt:
     case TuiAction::Exit:
     case TuiAction::VariantCycle:
+    case TuiAction::ReasoningSelect:
     case TuiAction::ThinkingToggle:
     case TuiAction::ModelSelect:
     case TuiAction::ModelCycleForward:
@@ -868,6 +872,8 @@ std::string_view config_action_id(TuiAction action)
       return "app.exit";
     case TuiAction::VariantCycle:
       return "app.thinking.cycle";
+    case TuiAction::ReasoningSelect:
+      return "app.thinking.select";
     case TuiAction::ThinkingToggle:
       return "app.thinking.toggle";
     case TuiAction::ModelSelect:
@@ -1036,7 +1042,8 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::Interrupt, {Key::CtrlC}},
                                      {TuiAction::Exit, {Key::CtrlD}},
                                      {TuiAction::VariantCycle, {Key::ShiftTab}},
-                                     {TuiAction::ThinkingToggle, {Key::CtrlT}},
+                                     {TuiAction::ReasoningSelect, {Key::CtrlT}},
+                                     {TuiAction::ThinkingToggle, {}},
                                      {TuiAction::ModelSelect, {Key::CtrlL}},
                                      {TuiAction::ModelCycleForward, {Key::CtrlP}},
                                      {TuiAction::ModelCycleBackward, {Key::CtrlShiftP}},
@@ -1692,6 +1699,8 @@ std::string action_name(TuiAction action)
       return "exit";
     case TuiAction::VariantCycle:
       return "variant_cycle";
+    case TuiAction::ReasoningSelect:
+      return "reasoning_select";
     case TuiAction::ThinkingToggle:
       return "thinking_toggle";
     case TuiAction::ModelSelect:
@@ -1858,6 +1867,8 @@ std::string action_label(TuiAction action)
       return "Exit";
     case TuiAction::VariantCycle:
       return "Cycle variant";
+    case TuiAction::ReasoningSelect:
+      return "Select thinking mode";
     case TuiAction::ThinkingToggle:
       return "Toggle thinking";
     case TuiAction::ModelSelect:
@@ -2037,6 +2048,8 @@ std::string action_description(TuiAction action)
       return "Exit the TUI when the composer is empty";
     case TuiAction::VariantCycle:
       return "Cycle model reasoning choices when backend support exists";
+    case TuiAction::ReasoningSelect:
+      return "Choose a policy-supported thinking mode between turns";
     case TuiAction::ThinkingToggle:
       return "Toggle thinking block visibility without changing provider reasoning mode";
     case TuiAction::ModelSelect:

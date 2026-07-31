@@ -62,6 +62,7 @@ enum class TuiAction
   Interrupt,
   Exit,
   VariantCycle,
+  ReasoningSelect,
   ThinkingToggle,
   ModelSelect,
   ModelCycleForward,

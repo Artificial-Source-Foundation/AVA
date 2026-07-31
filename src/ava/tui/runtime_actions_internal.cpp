@@ -360,6 +360,29 @@ bool RuntimeActionController::open_model_selector()
   return renderer_.request_render();
 }
 
+bool RuntimeActionController::open_reasoning_selector(bool chained_from_model_selection)
+{
+  auto& snapshot = presentation_state_.snapshot;
+  auto view =
+      options_.reasoning_selector_view && options_.on_reasoning_selected ? options_.reasoning_selector_view(chained_from_model_selection) : std::nullopt;
+  if (!view)
+  {
+    if (!chained_from_model_selection)
+    {
+      snapshot.status = "thinking mode unavailable for current model";
+      static_cast<void>(beep());
+    }
+    return true;
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*view);
+  active_select_list_ = ActiveSelectList::Reasoning;
+  snapshot.status = "thinking mode selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
 bool RuntimeActionController::open_scoped_model_selector()
 {
   auto& snapshot = presentation_state_.snapshot;

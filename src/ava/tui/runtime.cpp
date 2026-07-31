@@ -206,6 +206,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto cycle_reasoning = [&]() { action_controller.cycle_reasoning(); };
   auto toggle_thinking_visibility = [&]() { action_controller.toggle_thinking_visibility(); };
   auto open_model_selector = [&]() -> bool { return action_controller.open_model_selector(); };
+  auto open_reasoning_selector = [&](bool chained = false) -> bool { return action_controller.open_reasoning_selector(chained); };
   auto open_scoped_model_selector = [&]() -> bool { return action_controller.open_scoped_model_selector(); };
   auto open_session_selector = [&]() -> bool { return action_controller.open_session_selector(); };
   auto cycle_model = [&](bool forward) { action_controller.cycle_model(forward); };
@@ -778,7 +779,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         session_archive_confirmation.reset();
         if (input_result.action == SelectListInputAction::Cancel)
         {
-          snapshot.status = "view canceled";
+          snapshot.status = resolved_list == ActiveSelectList::Reasoning ? "thinking mode unchanged" : "view canceled";
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsOpenModels)
         {
@@ -858,6 +859,26 @@ int run_interactive_composer(TuiRuntimeOptions options)
         else if (resolved_list == ActiveSelectList::Model && options.on_model_selected)
         {
           auto selected = dispatch_tui_selector_authority(snapshot, "switching model…", render, [&]() { return options.on_model_selected(selected_value); });
+          if (selected)
+          {
+            apply_runtime_state_snapshot(std::move(*selected));
+            if (!open_reasoning_selector(true))
+            {
+              terminal_write_failed = true;
+              break;
+            }
+          }
+          else
+          {
+            snapshot.status = selected.error().format();
+            static_cast<void>(beep());
+          }
+        }
+        else if (resolved_list == ActiveSelectList::Reasoning && options.on_reasoning_selected)
+        {
+          auto level = selected_value == "default" ? std::optional<std::string>{} : std::optional<std::string>{selected_value};
+          auto selected =
+              dispatch_tui_selector_authority(snapshot, "setting thinking mode…", render, [&]() { return options.on_reasoning_selected(std::move(level)); });
           if (selected)
           {
             apply_runtime_state_snapshot(std::move(*selected));
@@ -1322,6 +1343,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       pending_escape_clear = false;
       cycle_reasoning();
+    }
+    else if (is_action(TuiAction::ReasoningSelect))
+    {
+      pending_escape_clear = false;
+      if (!open_reasoning_selector())
+      {
+        terminal_write_failed = true;
+        break;
+      }
     }
     else if (is_action(TuiAction::ThinkingToggle))
     {

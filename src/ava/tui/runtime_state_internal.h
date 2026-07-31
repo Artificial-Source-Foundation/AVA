@@ -65,6 +65,7 @@ enum class ActiveSelectList
   Hotkeys,
   Settings,
   Model,
+  Reasoning,
   ScopedModels,
   Session,
   TranscriptSearch,

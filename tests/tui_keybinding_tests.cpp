@@ -237,7 +237,8 @@ void run_tui_keybinding_tests()
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ExternalEditor, ava::tui::Key::CtrlG) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::ShiftTab) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT) &&
-             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelSelect, ava::tui::Key::CtrlL) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleForward, ava::tui::Key::CtrlP) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleBackward, ava::tui::Key::CtrlShiftP) &&
@@ -277,6 +278,7 @@ void run_tui_keybinding_tests()
           ava::tui::action_name(ava::tui::TuiAction::ModelsToggleProvider) == "models_toggle_provider" &&
           ava::tui::action_name(ava::tui::TuiAction::ModelsReorderUp) == "models_reorder_up" &&
           ava::tui::action_name(ava::tui::TuiAction::ModelsReorderDown) == "models_reorder_down" &&
+          ava::tui::action_name(ava::tui::TuiAction::ReasoningSelect) == "reasoning_select" &&
           ava::tui::action_name(ava::tui::TuiAction::ThinkingToggle) == "thinking_toggle" &&
           ava::tui::action_name(ava::tui::TuiAction::MessageFollowUp) == "message_follow_up" &&
           ava::tui::action_name(ava::tui::TuiAction::MessageDequeue) == "message_dequeue" &&
@@ -306,6 +308,9 @@ void run_tui_keybinding_tests()
                                    item.keys.find("Ctrl+T") == std::string::npos;
                           }) &&
           std::ranges::any_of(
+              help_items,
+              [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "reasoning_select" && item.keys.find("Ctrl+T") != std::string::npos; }) &&
+          std::ranges::none_of(
               help_items,
               [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "thinking_toggle" && item.keys.find("Ctrl+T") != std::string::npos; }) &&
           std::ranges::any_of(
@@ -491,6 +496,7 @@ void run_tui_keybinding_tests()
         ava::tui::TuiAction::Interrupt,
         ava::tui::TuiAction::Exit,
         ava::tui::TuiAction::VariantCycle,
+        ava::tui::TuiAction::ReasoningSelect,
         ava::tui::TuiAction::ThinkingToggle,
         ava::tui::TuiAction::ModelSelect,
         ava::tui::TuiAction::ModelCycleForward,
@@ -623,8 +629,15 @@ void run_tui_keybinding_tests()
          "tui keybind parser accepts legacy camelCase action aliases where AVA has matching semantics");
   auto const thinking_toggle_keybinds = ava::tui::parse_key_bindings_json("{\"app.thinking.toggle\":\"Ctrl+T\"}");
   expect(thinking_toggle_keybinds && ava::tui::key_matches_action(*thinking_toggle_keybinds, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
+             !ava::tui::key_matches_action(*thinking_toggle_keybinds, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
              !ava::tui::key_matches_action(*thinking_toggle_keybinds, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT),
-         "tui keybind parser accepts Pi thinking visibility toggle action id");
+         "tui keybind parser retains the configurable Pi thinking visibility toggle action id");
+  auto const reasoning_select_keybinds = ava::tui::parse_key_bindings_json("{\"app.thinking.select\":\"Ctrl+T\"}");
+  expect(reasoning_select_keybinds && ava::tui::key_matches_action(*reasoning_select_keybinds, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+             !ava::tui::key_matches_action(*reasoning_select_keybinds, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT),
+         "tui keybind parser accepts the thinking-mode selector action id");
+  expect(!ava::tui::parse_key_bindings_json("{\"reasoning_select\":\"Ctrl+T\",\"thinking_toggle\":\"Ctrl+T\"}"),
+         "tui keybind parser preserves duplicate conflict detection across thinking selector and visibility actions");
   auto const namespaced_over_legacy_keybinds =
       ava::tui::parse_key_bindings_json("{\"app.tools.expand\":\"Ctrl+O\",\"expandTools\":\"Ctrl+T\",\"variant_cycle\":\"Ctrl+T\"}");
   expect(namespaced_over_legacy_keybinds &&
@@ -712,7 +725,8 @@ void run_tui_keybinding_tests()
           default_config_json.find("\"app.tree.filter.labeledOnly\"") == std::string::npos &&
           default_config_json.find("\"app.tree.filter.all\"") == std::string::npos &&
           default_config_json.find("\"app.models.clearAll\"") != std::string::npos &&
-          default_config_json.find("\"app.thinking.toggle\"") != std::string::npos &&
+          default_config_json.find("\"app.thinking.select\"") != std::string::npos &&
+          default_config_json.find("\"app.thinking.toggle\"") == std::string::npos &&
           default_config_json.find("\"app.message.followUp\"") != std::string::npos &&
           default_config_json.find("\"app.model.cycleForward\"") != std::string::npos && default_config_json.find("\"message_prev\"") != std::string::npos &&
           default_config_json.find("\"message_next\"") != std::string::npos && default_config_json.find("\"jump_to_bottom\"") != std::string::npos &&
@@ -738,7 +752,8 @@ void run_tui_keybinding_tests()
           !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFilterLabeledOnly, ava::tui::Key::CtrlN) &&
           !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFilterAll, ava::tui::Key::CtrlA) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ModelsClearAll, ava::tui::Key::CtrlX) &&
-          ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
+          ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+          !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessageFollowUp, ava::tui::Key::AltEnter) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessagePrev, ava::tui::Key::AltK) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessageNext, ava::tui::Key::AltJ) &&

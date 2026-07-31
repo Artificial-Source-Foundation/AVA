@@ -5,9 +5,12 @@
 #include "ava/core/error.h"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ava::app {
 namespace {
@@ -32,6 +35,77 @@ std::optional<std::string> reasoning_status_for_session(runtime::Session const& 
   if (!session.reasoning() || session.reasoning()->level.empty())
     return std::nullopt;
   return session.reasoning()->level;
+}
+
+std::string reasoning_level_label(std::string_view level)
+{
+  if (level == "xhigh")
+    return "Max";
+
+  std::string label;
+  label.reserve(level.size());
+  bool capitalize = true;
+  for (auto const ch : level)
+  {
+    if (ch == '_' || ch == '-')
+    {
+      if (!label.empty() && label.back() != ' ')
+        label.push_back(' ');
+      capitalize = true;
+      continue;
+    }
+    auto const byte = static_cast<unsigned char>(ch);
+    label.push_back(static_cast<char>(capitalize ? std::toupper(byte) : std::tolower(byte)));
+    capitalize = false;
+  }
+  return label.empty() ? std::string("Custom") : label;
+}
+
+std::optional<tui::SelectListView> reasoning_selector_view(ava::config::ModelInfo const& model, std::optional<runtime::ReasoningSelection> const& current,
+                                                           std::string footer_hint)
+{
+  std::vector<std::string> levels;
+  for (auto const& level : ava::config::supported_reasoning_levels(model))
+  {
+    if (level != "off" && level != "disabled")
+      levels.push_back(level);
+  }
+  if (levels.empty())
+    return std::nullopt;
+
+  tui::SelectListView view{.title = "Select thinking mode",
+                           .subtitle = {},
+                           .items = {},
+                           .selected_item_index = 0,
+                           .query = {},
+                           .placeholder = "Filter thinking modes",
+                           .empty_text = "No thinking modes match",
+                           .footer_hint = std::move(footer_hint)};
+  auto make_item = [](std::string value, std::string label, bool is_current) {
+    return tui::SelectListItemView{.value = std::move(value),
+                                   .label = std::move(label),
+                                   .description = {},
+                                   .group = {},
+                                   .detail = {},
+                                   .badge = {},
+                                   .current = is_current,
+                                   .enabled = true,
+                                   .disabled_reason = {}};
+  };
+  view.items.push_back(make_item("default", "Default", !current));
+  for (auto const& level : levels)
+  {
+    auto const is_current = current && current->level == level;
+    if (is_current)
+      view.selected_item_index = view.items.size();
+    view.items.push_back(make_item(level, reasoning_level_label(level), is_current));
+  }
+  return view;
+}
+
+std::optional<tui::SelectListView> reasoning_selector_view(runtime::Session const& session, std::string footer_hint)
+{
+  return reasoning_selector_view(session.model(), session.reasoning(), std::move(footer_hint));
 }
 
 ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model, std::string level)

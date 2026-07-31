@@ -393,6 +393,11 @@ int run_tui(ShellState state)
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
       },
       .model_selector_view = [&state]() { return ava::app::model_selector_view(state.session, "Enter switch model · type to filter · Esc cancel"); },
+      .reasoning_selector_view =
+          [&state](bool chained) {
+            return ava::app::reasoning_selector_view(
+                state.session, chained ? "Enter select · type to filter · Esc keep default" : "Enter select · type to filter · Esc cancel");
+          },
       .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view(state.session, scoped_model_selector_footer_hint()); },
       .session_selector_view =
           [&session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
@@ -543,6 +548,23 @@ int run_tui(ShellState state)
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
+      },
+      .on_reasoning_selected = [&state, &state_snapshot](std::optional<std::string> level) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        if (!level)
+        {
+          auto changed = state.session.set_runtime_reasoning(std::nullopt);
+          if (!changed)
+            return std::unexpected(std::move(changed.error()));
+          return state_snapshot(*changed ? "thinking mode set to Default" : "thinking mode already Default");
+        }
+        auto selection = ava::app::reasoning_selection_for_level(state.session.model(), *level);
+        if (!selection)
+          return std::unexpected(std::move(selection.error()));
+        auto changed = state.session.set_runtime_reasoning(std::move(*selection));
+        if (!changed)
+          return std::unexpected(std::move(changed.error()));
+        auto const label = ava::app::reasoning_level_label(*level);
+        return state_snapshot(*changed ? "thinking mode set to " + label : "thinking mode already " + label);
       },
       .on_fork_user_turn_selected = [&state, &state_snapshot, &application_catalog, &hotkeys,
                                      &refresh_session_tree_catalog](std::string_view entry_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {

@@ -159,8 +159,9 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              models->output[0].find("reasoning levels: low, medium, high, xhigh") != std::string::npos &&
              models->output[0].find("reasoning params") != std::string::npos && models->output[0].find("reasoning.effort=<level>") != std::string::npos &&
              models->output[0].find("reasoning.summary=auto") != std::string::npos && models->output[0].find("reasoning format") != std::string::npos &&
-             models->output[0].find("Shift+Tab or Ctrl+T cycles") != std::string::npos,
-         "command dispatcher lists provider/model reasoning metadata and documents TUI reasoning cycling");
+             models->output[0].find("Shift+Tab cycles") != std::string::npos &&
+             models->output[0].find("Ctrl+T opens the policy-resolved thinking-mode selector") != std::string::npos,
+         "command dispatcher lists provider/model reasoning metadata and documents TUI reasoning controls");
   auto filtered_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/models gpt-5.5"});
   expect(filtered_models && filtered_models->handled && !filtered_models->output.empty() &&
              filtered_models->output[0].find("filter gpt-5.5") != std::string::npos && filtered_models->output[0].find("gpt-5.5") != std::string::npos,

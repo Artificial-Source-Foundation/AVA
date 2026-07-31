@@ -150,7 +150,9 @@ std::string select_footer_line(SelectListView const& view, std::size_t width)
   auto const session_selector = view.title.find("session") != std::string::npos || view.title.find("Session") != std::string::npos;
   auto const scoped_models = view.title.find("Scoped model") != std::string::npos;
   std::string hint;
-  if (session_selector && content_width >= 67)
+  if (view.title == "Select thinking mode" && !view.footer_hint.empty())
+    hint = sanitize_terminal_text(view.footer_hint);
+  else if (session_selector && content_width >= 67)
     hint = "↑↓ navigate · Enter open · type filter · Esc close · Ctrl+D archive";
   else if (session_selector && content_width >= 53)
     hint = "↑↓ navigate · Enter open · Esc close · Ctrl+D archive";

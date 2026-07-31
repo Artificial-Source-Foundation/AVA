@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/reasoning_controls.h"
 #include "ava/app/subagent_workspace.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
@@ -101,6 +102,53 @@ void run_tui_selector_tests()
       expect(hit && *hit == 2, "model selector mouse hit-testing shares the exact required-size rendered row window");
     }
   }
+  auto reasoning_model = make_model("openai", "reasoning-policy", "Reasoning Policy", "gpt-5", true, {"off", "low", "medium", "high", "disabled", "blocked"});
+  reasoning_model.reasoning_level_mappings.push_back(
+      ava::config::ModelReasoningLevelMapping{.level = "blocked", .provider_level = std::nullopt, .supported = false});
+  auto const default_reasoning_picker = ava::app::reasoning_selector_view(reasoning_model, std::nullopt, "Enter select · type to filter · Esc keep default");
+  auto const explicit_reasoning_picker = ava::app::reasoning_selector_view(
+      reasoning_model,
+      ava::app::runtime::ReasoningSelection{.level = "high", .provider_level = std::string("provider-secret"), .budget_tokens = std::nullopt, .display = {}},
+      "Esc cancel");
+  auto non_reasoning_model = make_model("openai", "plain", "Plain", "plain", false, {"low", "disabled"});
+  auto const unavailable_reasoning_picker = ava::app::reasoning_selector_view(non_reasoning_model, std::nullopt);
+  expect(default_reasoning_picker && default_reasoning_picker->title == "Select thinking mode" && default_reasoning_picker->items.size() == 4 &&
+             default_reasoning_picker->items[0].value == "default" && default_reasoning_picker->items[0].label == "Default" &&
+             default_reasoning_picker->items[0].current && default_reasoning_picker->selected_item_index == 0 &&
+             default_reasoning_picker->footer_hint.find("Esc keep default") != std::string::npos && explicit_reasoning_picker &&
+             explicit_reasoning_picker->selected_item_index == 3 && explicit_reasoning_picker->items[3].value == "high" &&
+             explicit_reasoning_picker->items[3].label == "High" && explicit_reasoning_picker->items[3].current &&
+             std::ranges::none_of(explicit_reasoning_picker->items,
+                                  [](auto const& item) { return item.value == "off" || item.value == "disabled" || item.value == "blocked"; }) &&
+             !unavailable_reasoning_picker,
+         "thinking-mode selector uses policy-resolved configurable levels with Default and explicit current semantics");
+  if (explicit_reasoning_picker)
+  {
+    auto tiny_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                    .provider = "openai",
+                                                    .model = "Reasoning Policy",
+                                                    .session_id = "session_reasoning_selector",
+                                                    .input = {},
+                                                    .status = "selecting thinking mode",
+                                                    .transcript = {},
+                                                    .select_list = *explicit_reasoning_picker,
+                                                    .width = 44,
+                                                    .height = 8};
+    auto const frame = ava::tui::render_composer(tiny_snapshot);
+    auto const selected_line = std::ranges::find_if(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("›") != std::string::npos && visible.find("High") != std::string::npos;
+    });
+    auto const visible = tui_test_support::join_visible_lines(frame);
+    expect(selected_line != frame.end() && visible.find("provider-secret") == std::string::npos && visible.find("blocked") == std::string::npos,
+           "thinking-mode selector stays human-readable and keeps the current row visible at tiny terminal size");
+    if (selected_line != frame.end())
+    {
+      auto const hit = ava::tui::select_list_selection_for_screen_position(tiny_snapshot, static_cast<std::size_t>(selected_line - frame.begin()) + 1, 22);
+      expect(hit && *hit == 3, "thinking-mode selector tiny-terminal mouse hit-testing shares generic rendered rows");
+    }
+  }
+
   auto const scoped_all_models =
       ava::app::scoped_model_selector_view(model_registry, model_registry.models.front(), std::nullopt, "Enter toggle · Ctrl+X clear");
   auto const scoped_ordered_models = ava::app::scoped_model_selector_view(

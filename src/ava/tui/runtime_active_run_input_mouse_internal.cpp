@@ -165,6 +165,11 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_res
     snapshot.status = "reasoning can be changed between turns";
     return to_input_handling(renderer_.request_render());
   }
+  if (is_action(active_event, TuiAction::ReasoningSelect))
+  {
+    snapshot.status = "thinking mode can be changed between turns";
+    return to_input_handling(renderer_.request_render());
+  }
   if (is_action(active_event, TuiAction::ThinkingToggle))
   {
     action_controller_.toggle_thinking_visibility();

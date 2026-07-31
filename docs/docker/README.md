@@ -62,8 +62,8 @@ per-build-tree lock is honored. Do not run build and test commands concurrently
 against the same tree.
 
 ```sh
-docker exec ava-ubuntu24 bash -lc 'scripts/build.sh --build-dir "$BUILDDIR"'
-docker exec ava-ubuntu24 bash -lc 'scripts/run-tests.sh --build-dir "$BUILDDIR"'
-docker exec ava-ubuntu24 bash -lc 'scripts/build.sh --build-dir "$BUILDDIR-sanitize" --jobs 2'
-docker exec ava-ubuntu24 bash -lc 'scripts/run-tests.sh --build-dir "$BUILDDIR-sanitize" --jobs 2'
+docker exec ava-ubuntu24 bash -lc '"$REPOROOT/scripts/build.sh" --build-dir "$BUILDDIR"'
+docker exec ava-ubuntu24 bash -lc '"$REPOROOT/scripts/run-tests.sh" --build-dir "$BUILDDIR"'
+docker exec ava-ubuntu24 bash -lc '"$REPOROOT/scripts/build.sh" --build-dir "$BUILDDIR-sanitize" --jobs 2'
+docker exec ava-ubuntu24 bash -lc '"$REPOROOT/scripts/run-tests.sh" --build-dir "$BUILDDIR-sanitize" --jobs 2'
 ```

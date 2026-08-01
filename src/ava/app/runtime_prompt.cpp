@@ -94,7 +94,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& sess
     return std::unexpected(offline_provider_error("prompt"));
   if (!session.run_controller())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
-  auto const request_id = options.request_id.value_or(ava::core::make_id("run"));
+  auto const request_id = options.request_id.value_or(ava::core::make_id("request"));
   auto const admission = session.run_controller()->inspect_admission(RunRequest{.request_id = request_id});
   if (admission == AdmissionDisposition::JoinExistingOutcome)
   {
@@ -140,7 +140,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
   // Normalize immutable private presentation before parent/coordinator locks.
   // Model/provider ids and provider-specific reasoning fields never enter it.
   auto const subagent_launch_display =
-      ava::agent::SubagentLaunchDisplay::normalized(session.model().display_name, launch_reasoning_level);
+      ava::agent::SubagentLaunchDisplay::normalized(ava::config::proven_configured_model_display_name(session.model()), launch_reasoning_level);
 
   auto fail_run = [&guard, &session](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
     if (session.diagnostics())

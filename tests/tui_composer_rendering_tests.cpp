@@ -319,6 +319,7 @@ bool test_active_run_session_transition_discards_prior_session_events()
   static_cast<void>(resizeterm(18, 96));
 
   bool finish_called = false;
+  bool initial_identity_forwarded = false;
   ava::tui::TuiRuntimeOptions options;
   options.session_id = "session_old_active_run";
   options.mode = "build";
@@ -357,7 +358,9 @@ bool test_active_run_session_transition_discards_prior_session_events()
     };
     return queues;
   };
-  options.on_submit = [](std::string const&, ava::tui::TuiSubmitContext context) {
+  options.on_subagent_launch = [](ava::agent::SubagentLaunchNotification const&) {};
+  options.on_submit = [&initial_identity_forwarded](std::string const&, ava::tui::TuiSubmitContext context) {
+    initial_identity_forwarded = context.request_id == "old-request" && static_cast<bool>(context.on_subagent_launch);
     auto old_message = ava::event::MessagePayload{};
     old_message.text = "OLD EVENT TRANSCRIPT";
     static_cast<void>(context.event_sink(ava::event::RuntimeEvent{{}, ava::event::AssistantMessageEvent{.payload = std::move(old_message)}}));
@@ -408,11 +411,12 @@ bool test_active_run_session_transition_discards_prior_session_events()
   auto history_index = std::optional<std::size_t>{};
   auto history_scratch = std::string{};
   auto const history_restored = ava::tui::browse_composer_input_history(history_probe, draft_state.input_history, history_index, history_scratch, true);
-  auto const passed = !outcome.break_loop && !outcome.terminal_write_failed && finish_called && presentation.snapshot.session_id == "session_new_active_run" &&
-                      presentation.snapshot.mode == "plan" && presentation.snapshot.transcript.size() == 1 &&
-                      presentation.snapshot.transcript.front().text == "NEW-SESSION-RECEIPT" && !presentation.snapshot.transcript.front().tool &&
-                      presentation.snapshot.queued_messages.empty() && presentation.sidebar.activity.empty() && presentation.sidebar.modified_files.empty() &&
-                      presentation.sidebar.todos.size() == 1 && presentation.sidebar.todos.front().id == "new-todo" && presentation.snapshot.status == "done" &&
+  auto const passed = !outcome.break_loop && !outcome.terminal_write_failed && finish_called && initial_identity_forwarded &&
+                      presentation.snapshot.session_id == "session_new_active_run" && presentation.snapshot.mode == "plan" &&
+                      presentation.snapshot.transcript.size() == 1 && presentation.snapshot.transcript.front().text == "NEW-SESSION-RECEIPT" &&
+                      !presentation.snapshot.transcript.front().tool && presentation.snapshot.queued_messages.empty() &&
+                      presentation.sidebar.activity.empty() && presentation.sidebar.modified_files.empty() && presentation.sidebar.todos.size() == 1 &&
+                      presentation.sidebar.todos.front().id == "new-todo" && presentation.snapshot.status == "done" &&
                       presentation.snapshot.context_source_count == std::optional<std::size_t>{7} &&
                       presentation.sidebar.context_source_count == std::optional<std::size_t>{7} && draft_state.input_history.empty() && !history_restored;
 

@@ -84,12 +84,13 @@ void add_output(LineResult& result, std::string text);
 [[nodiscard]] bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
                                                                   ava::tui::TuiSubmitContext const& context,
                                                                   std::function<std::string()> const& current_session_id,
-                                                                  std::function<LineResult(std::string const&)> const& run_follow_up);
+                                                                  std::function<LineResult(ava::tui::TuiQueuedFollowUp const&)> const& run_follow_up);
 [[nodiscard]] LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                                      ava::agent::QuestionResolver question_resolver = nullptr, std::vector<CommandHotkey> const& hotkeys = {},
                                      ava::event::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                                      std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
-                                     std::vector<ava::session::ImageAttachmentRef> image_attachments = {});
+                                     std::vector<ava::session::ImageAttachmentRef> image_attachments = {}, std::string request_id = {},
+                                     ava::agent::SubagentLaunchSink on_subagent_launch = nullptr);
 
 [[nodiscard]] int run_tui(ShellState state);
 

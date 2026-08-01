@@ -652,7 +652,7 @@ bool workspace_catalog_reload_requested(std::string_view submitted)
 
 bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
                                                     ava::tui::TuiSubmitContext const& context, std::function<std::string()> const& current_session_id,
-                                                    std::function<LineResult(std::string const&)> const& run_follow_up)
+                                                    std::function<LineResult(ava::tui::TuiQueuedFollowUp const&)> const& run_follow_up)
 {
   if (current_session_id() != initial_session_id)
     return true;
@@ -682,7 +682,7 @@ bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& wo
     }
 
     workspace_catalog_reload = workspace_catalog_reload || workspace_catalog_reload_requested(follow_up->message);
-    auto next = run_follow_up(follow_up->message);
+    auto next = run_follow_up(*follow_up);
     auto const session_changed = current_session_id() != initial_session_id;
     if (session_changed)
     {

@@ -383,6 +383,12 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(reopened.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   expect(reopened && reopened->model().provider_id == "anthropic" && reopened->model().model_id == "claude-test",
          "runtime reopen restores latest persisted model_change");
+  auto const resumed_unknown_launch_display =
+      reopened ? ava::agent::SubagentLaunchDisplay::normalized(ava::config::proven_configured_model_display_name(reopened->model()))
+               : ava::agent::SubagentLaunchDisplay{};
+  expect(reopened && reopened->model().display_name == "Claude Test" && ava::config::proven_configured_model_display_name(reopened->model()).empty() &&
+             resumed_unknown_launch_display.model_display_name().empty(),
+         "resumed unknown model retains its public fallback label but is omitted from private launch display without process-local provenance");
   bool restored_emoji_quirk = false;
   if (reopened)
   {

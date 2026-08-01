@@ -2,6 +2,7 @@
 
 #include "ava/event/events.h"
 #include "ava/agent/question.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/session/attachments.h"
@@ -108,6 +109,9 @@ struct TuiKeyBindingReloadResult
 
 struct TuiSubmitContext
 {
+  // One exact identity for this submitted turn. The event envelope and backend
+  // RunOptions must both use it; queued follow-ups replace it before dispatch.
+  std::string request_id;
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
   ava::event::RuntimeEventSink event_sink;
@@ -116,6 +120,7 @@ struct TuiSubmitContext
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
+  ava::agent::SubagentLaunchSink on_subagent_launch;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -163,6 +168,9 @@ struct TuiRuntimeOptions
   std::function<std::optional<std::string>()> active_context_status_provider;
   std::function<std::optional<std::string>()> reasoning_status_provider;
   std::function<TuiActiveRunQueues(ava::event::EventEnvelopeSink)> create_active_run_queues;
+  // Private callback seam only; rendering/queueing launch metadata is owned by
+  // a later checkpoint.
+  ava::agent::SubagentLaunchSink on_subagent_launch;
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<ava::session::ImageAttachmentRef>(std::string const&)> on_attach_image;
   std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>()> on_paste_clipboard_image;

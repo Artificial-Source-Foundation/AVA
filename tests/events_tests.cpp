@@ -623,11 +623,13 @@ void test_interactive_tui_stops_follow_ups_at_session_transition()
   };
   bool workspace_catalog_reload = false;
   std::vector<std::string> executed;
+  std::vector<std::string> executed_request_ids;
   auto const transitioned = ava::app::line_shell_internal::run_queued_follow_ups_until_session_transition(
       result, workspace_catalog_reload, "session_old", context, [&session_id]() { return session_id; },
-      [&](std::string const& follow_up) {
-        executed.push_back(follow_up);
-        if (follow_up == "/new")
+      [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
+        executed.push_back(follow_up.message);
+        executed_request_ids.push_back(follow_up.request_id);
+        if (follow_up.message == "/new")
         {
           session_id = "session_new";
           return ava::app::line_shell_internal::LineResult{
@@ -640,8 +642,9 @@ void test_interactive_tui_stops_follow_ups_at_session_transition()
       });
   auto const finished = queue.finish(false);
 
-  expect(transitioned && finished.has_value() && executed == std::vector<std::string>{"/new"} && result.session_tree_changed &&
-             result.ordinary_turn_committed && result.output == std::vector<std::string>{"NEW-SESSION-RECEIPT"} && result.tool_timeline.size() == 1 &&
+  expect(transitioned && finished.has_value() && executed == std::vector<std::string>{"/new"} && executed_request_ids.size() == 1 && events.size() >= 3 &&
+             executed_request_ids.front() == events[2].request_id && result.session_tree_changed && result.ordinary_turn_committed &&
+             result.output == std::vector<std::string>{"NEW-SESSION-RECEIPT"} && result.tool_timeline.size() == 1 &&
              result.tool_timeline.front().name == "transition_tool" && events.size() == 4 && events[2].name == "follow_up_started" &&
              events[3].name == "follow_up_skipped" && events[3].payload_json.find("OLD-FOLLOW-UP-MUST-NOT-RUN") != std::string::npos &&
              events[3].payload_json.find("run_completed_before_safe_point") != std::string::npos,

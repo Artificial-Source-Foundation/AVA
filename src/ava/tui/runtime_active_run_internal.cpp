@@ -16,6 +16,7 @@
 #include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/ids.h"
 
 #include <algorithm>
 #include <chrono>
@@ -357,12 +358,13 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     current_event_context.request_id = request_id;
     current_event_context.correlation_id = std::move(request_id);
   };
+  std::string submit_request_id;
   if (supports_active_queue && options.create_active_run_queues)
   {
     active_queues = options.create_active_run_queues(control_sink);
     if (!active_queues->active_request_id.empty())
     {
-      set_current_request_id(active_queues->active_request_id);
+      submit_request_id = active_queues->active_request_id;
       auto mark_follow_up_started = active_queues->mark_follow_up_started;
       active_queues->mark_follow_up_started = [&, mark_follow_up_started](TuiQueuedFollowUp const& follow_up) {
         set_current_request_id(follow_up.request_id);
@@ -372,6 +374,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       };
     }
   }
+  if (submit_request_id.empty())
+    submit_request_id = ava::core::make_id("request");
+  set_current_request_id(submit_request_id);
   auto runtime_event_queue_sink = [&]() -> ava::event::RuntimeEventSink {
     return [&](ava::event::RuntimeEvent const& event) {
       ava::event::EventEnvelopeContext context_snapshot;
@@ -418,7 +423,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       auto skip_active_steering = active_queues ? active_queues->skip_active_steering : std::function<ava::core::VoidResult(std::string_view)>{};
       auto take_next_follow_up = active_queues ? active_queues->take_next_follow_up : std::function<std::optional<TuiQueuedFollowUp>()>{};
       auto mark_follow_up_started = active_queues ? active_queues->mark_follow_up_started : std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)>{};
-      return options.on_submit(submitted, TuiSubmitContext{.permission_resolver = permission_resolver,
+      return options.on_submit(submitted, TuiSubmitContext{.request_id = submit_request_id,
+                                                           .permission_resolver = permission_resolver,
                                                            .question_resolver = question_resolver,
                                                            .event_sink = event_sink,
                                                            .cancel_requested = cancel_requested,
@@ -426,6 +432,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                                            .skip_active_steering = skip_active_steering,
                                                            .take_next_follow_up = take_next_follow_up,
                                                            .mark_follow_up_started = mark_follow_up_started,
+                                                           .on_subagent_launch = options.on_subagent_launch,
                                                            .image_attachments = submit_image_attachments});
     });
     bool render_failed = false;

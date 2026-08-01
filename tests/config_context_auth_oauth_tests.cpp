@@ -47,6 +47,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
@@ -1311,6 +1312,8 @@ void test_builtin_provider_model_metadata_contracts()
            "builtin model ids are unique per provider: " + model.provider_id + "/" + model.model_id);
     expect(!model.display_name.empty() && !model.family.empty(),
            "builtin model display and family metadata is populated: " + model.provider_id + "/" + model.model_id);
+    expect(model.display_name_is_configured && ava::config::proven_configured_model_display_name(model) == model.display_name,
+           "builtin model display name retains explicit catalog provenance: " + model.provider_id + "/" + model.model_id);
     expect(model.context_window_tokens && *model.context_window_tokens > 0,
            "builtin model context window metadata is populated: " + model.provider_id + "/" + model.model_id);
     expect(contains_string(model.input_modalities, "text") && contains_string(model.output_modalities, "text"),
@@ -1693,6 +1696,24 @@ void test_model_and_prompt_config()
     expect(!ava::agent::usage_cost_usd(*selected.pricing, cached_usage), "usage cost remains unknown when present cache usage has no cache pricing");
   }
 
+  auto const provenance_registry = ava::config::parse_model_registry(
+      R"JSON({"default_provider":"custom","default_model":"unnamed","models":[
+        {"provider":"custom","id":"named","name":"Human Name"},
+        {"provider":"custom","id":"unnamed"},
+        {"provider":"custom","id":"same","name":"same"}
+      ]})JSON");
+  auto const named_custom = ava::config::find_model(provenance_registry, "custom", "named");
+  auto const unnamed_custom = ava::config::find_model(provenance_registry, "custom", "unnamed");
+  auto const same_custom = ava::config::find_model(provenance_registry, "custom", "same");
+  auto const unresolved_default =
+      ava::config::select_default_model(ava::config::ModelRegistry{.default_provider_id = "custom", .default_model_id = "missing", .models = {}});
+  expect(named_custom && ava::config::proven_configured_model_display_name(*named_custom) == "Human Name" && same_custom &&
+             ava::config::proven_configured_model_display_name(*same_custom) == "same",
+         "explicit custom display names retain provenance, including a configured name equal to the model id");
+  expect(unnamed_custom && unnamed_custom->display_name == "unnamed" && ava::config::proven_configured_model_display_name(*unnamed_custom).empty() &&
+             unresolved_default.display_name == "missing" && ava::config::proven_configured_model_display_name(unresolved_default).empty(),
+         "unnamed custom and unresolved models keep ordinary ID fallback labels but expose no proven launch display name");
+
   {
     std::ofstream file(paths.models_file, std::ios::binary | std::ios::trunc);
     file << "{\"default_provider\":\"openai\",\"default_model\":\"gpt-5.5\","
@@ -1733,6 +1754,11 @@ void test_model_and_prompt_config()
   expect(saved_default_scope.has_value(), "model config removes scoped model cycle for default all-model cycling");
   registry = ava::config::load_model_registry(paths);
   expect(registry && !registry->scoped_model_cycle, "model registry treats a missing scoped model cycle as all registered models enabled");
+  std::ifstream persisted_model_config(paths.models_file, std::ios::binary);
+  auto const persisted_model_config_bytes =
+      std::string(std::istreambuf_iterator<char>(persisted_model_config), std::istreambuf_iterator<char>());
+  expect(persisted_model_config_bytes.find("display_name_is_configured") == std::string::npos,
+         "process-local display-name provenance never alters the public model config schema");
 
   std::error_code remove_error;
   std::filesystem::remove(paths.models_file, remove_error);

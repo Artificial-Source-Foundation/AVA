@@ -108,7 +108,8 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                        ava::agent::QuestionResolver question_resolver, std::vector<ava::app::CommandHotkey> const& hotkeys,
                        ava::event::RuntimeEventSink event_sink, std::function<bool()> cancel_requested,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages,
-                       std::vector<ava::session::ImageAttachmentRef> image_attachments)
+                       std::vector<ava::session::ImageAttachmentRef> image_attachments, std::string request_id,
+                       ava::agent::SubagentLaunchSink on_subagent_launch)
 {
   LineResult line_result;
   if (line.empty())
@@ -135,6 +136,9 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
           [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
             run_options.cancel_requested = cancel_requested;
             run_options.event_sink = event_sink;
+            if (!request_id.empty())
+              run_options.request_id = request_id;
+            run_options.on_subagent_launch = on_subagent_launch;
             auto command_result = ava::app::run_command(
                 state.session,
                 ava::app::CommandRequest{.command = line,
@@ -185,6 +189,9 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                      run_options.event_sink = std::move(event_sink);
                                      run_options.cancel_requested = std::move(cancel_requested);
                                      run_options.take_steering_messages = std::move(take_steering_messages);
+                                     if (!request_id.empty())
+                                       run_options.request_id = request_id;
+                                     run_options.on_subagent_launch = on_subagent_launch;
                                      auto result = ava::app::run_prompt(state.session, *command_result->prompt_message, provider, transport, run_options);
                                      LineResult prompt_result;
                                      if (!result)
@@ -223,6 +230,9 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                  run_options.cancel_requested = std::move(cancel_requested);
                                  run_options.take_steering_messages = std::move(take_steering_messages);
                                  run_options.image_attachments = std::move(image_attachments);
+                                 if (!request_id.empty())
+                                   run_options.request_id = std::move(request_id);
+                                 run_options.on_subagent_launch = std::move(on_subagent_launch);
                                  auto result = ava::app::run_prompt(state.session, line, provider, transport, run_options);
                                  LineResult prompt_result;
                                  if (!result)

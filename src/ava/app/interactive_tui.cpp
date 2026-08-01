@@ -253,6 +253,7 @@ int run_tui(ShellState state)
                 },
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
+      .on_subagent_launch = nullptr,
       .on_submit =
           [&state, &hotkeys, &refresh_display_watch_state, &refresh_session_tree_catalog, &refresh_title_catalog, &state_snapshot, &application_catalog](
               std::string const& submitted, ava::tui::TuiSubmitContext context) {
@@ -263,8 +264,9 @@ int run_tui(ShellState state)
                 ava::permissions::build_persistent_permission_rule_resolver(state.session.permission_rule_store(), context.permission_resolver);
             auto const session_id_before = state.session.store.session_id();
             bool workspace_catalog_reload = workspace_catalog_reload_requested(submitted);
-            auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                           context.cancel_requested, context.take_steering_messages, std::move(context.image_attachments));
+            auto line_result =
+                handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
+                            context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch);
             if (is_display_settings_command(submitted))
             {
               if (auto watched = refresh_display_watch_state(); !watched)
@@ -274,9 +276,9 @@ int run_tui(ShellState state)
             }
             auto const session_changed = run_queued_follow_ups_until_session_transition(
                 line_result, workspace_catalog_reload, session_id_before, context, [&state]() { return state.session.store.session_id(); },
-                [&](std::string const& follow_up) {
-                  return handle_line(state, follow_up, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
-                                     context.take_steering_messages);
+                [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
+                  return handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
+                                     context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch);
                 });
             bool const workspace_changed = workspace_catalog_reload || workspace_catalog_changed(line_result);
             if (workspace_changed)

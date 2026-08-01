@@ -26,7 +26,7 @@ namespace ava::app::runtime {
 // All callback members default to null; run_prompt treats a null permission or question resolver as an error and a null event sink as a no-op.
 struct RunOptions
 {
-  // Caller-supplied correlation ID. run_prompt generates one when absent.
+  // Caller-supplied request identity. run_prompt generates one when absent.
   std::optional<std::string> request_id = std::nullopt;
   std::string access_token;
   std::string credential_type = "bearer";

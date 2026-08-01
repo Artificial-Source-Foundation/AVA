@@ -687,7 +687,10 @@ ModelRegistry parse_model_registry(std::string_view content)
     model.provider_id = *provider;
     model.model_id = *id;
     if (auto name = ava::core::json::string_field(item, "name"))
+    {
       model.display_name = *name;
+      model.display_name_is_configured = true;
+    }
     if (auto family = ava::core::json::string_field(item, "family"))
       model.family = *family;
     if (auto context_window = positive_integer_field(item, {"context_window_tokens", "context_window"}))
@@ -812,6 +815,11 @@ ModelInfo select_default_model(ModelRegistry const& registry)
       .output_modalities = {},
       .reasoning_format = {},
   };
+}
+
+std::string_view proven_configured_model_display_name(ModelInfo const& model) noexcept
+{
+  return model.display_name_is_configured ? std::string_view(model.display_name) : std::string_view{};
 }
 
 std::optional<ModelReasoningLevelMapping> find_reasoning_level_mapping(ModelInfo const& model, std::string_view level)

@@ -50,15 +50,15 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(runtime::Session const& current, runtime::OpenContext const& open_context,
-                                                                RpcCommand const& command)
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::session_ts::crat const& current_r,
+    runtime::OpenContext const& open_context, RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())
     return std::unexpected(invalid_rpc(command.type + " session_id must be non-empty when provided"));
   if (!command.session_id)
-    return current.store.session_id();
+    return current_r->store.session_id();
 
-  auto sessions = ava::session::SessionStore::list_sessions(current.workspace_dir(), current.paths().sessions_dir);
+  auto sessions = ava::session::SessionStore::list_sessions(current_r->workspace_dir(), current_r->paths().sessions_dir);
   if (!sessions)
     return std::unexpected(std::move(sessions.error()));
   std::vector<std::string> matches;
@@ -488,8 +488,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     session_ts::wat session_w(session);
-    // FIXME: resolve_branch_source_session_id should accept a rat.
-    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_context, command);
+    auto source_session_id = resolve_branch_source_session_id(session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
 
@@ -561,8 +560,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     session_ts::wat session_w(session);
-    // FIXME: resolve_branch_source_session_id should accept a rat.
-    auto source_session_id = resolve_branch_source_session_id(*session_w, context.open_context, command);
+    auto source_session_id = resolve_branch_source_session_id(session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
     bool const current_source = *source_session_id == session_w->store.session_id();

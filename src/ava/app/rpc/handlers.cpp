@@ -31,20 +31,17 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::sessi
     return resolve_runtime_model(session_r->paths(), *command.provider, *command.model);
   }
 
-  //FIXME select_runtime_model should accept a rat
-  return select_runtime_model(*session_r, std::nullopt, *command.model);
+  return select_runtime_model(session_r, std::nullopt, *command.model);
 }
 
 ava::core::Result<ava::config::ModelInfo> next_runtime_model(ava::app::runtime::session_ts::rat const& session_r)
 {
-  //FIXME select_runtime_model should accept a rat
-  return cycle_runtime_model(*session_r, 1);
+  return cycle_runtime_model(session_r, 1);
 }
 
 ava::core::Result<ava::config::ModelInfo> previous_runtime_model(ava::app::runtime::session_ts::rat const& session_r)
 {
-  //FIXME select_runtime_model should accept a rat
-  return cycle_runtime_model(*session_r, -1);
+  return cycle_runtime_model(session_r, -1);
 }
 
 ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,

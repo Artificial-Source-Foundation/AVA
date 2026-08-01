@@ -122,6 +122,46 @@ void run_tui_selector_tests()
                                   [](auto const& item) { return item.value == "off" || item.value == "disabled" || item.value == "blocked"; }) &&
              !unavailable_reasoning_picker,
          "thinking-mode selector uses policy-resolved configurable levels with Default and explicit current semantics");
+
+  auto const enabled_labels_are_unique = [](ava::tui::SelectListView const& view) {
+    for (std::size_t left = 0; left < view.items.size(); ++left)
+    {
+      if (!view.items[left].enabled)
+        continue;
+      for (std::size_t right = left + 1; right < view.items.size(); ++right)
+      {
+        if (view.items[right].enabled && view.items[left].label == view.items[right].label)
+          return false;
+      }
+    }
+    return true;
+  };
+  auto const builtin_models = ava::config::builtin_model_registry();
+  auto const gpt56_model = ava::config::find_model(builtin_models, "openai", "gpt-5.6-sol");
+  auto const gpt56_reasoning_picker = gpt56_model ? ava::app::reasoning_selector_view(*gpt56_model, std::nullopt) : std::nullopt;
+  std::vector<std::pair<std::string, std::string>> const expected_gpt56_rows = {
+      {"default", "Default"}, {"minimal", "Minimal"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}, {"xhigh", "Extra high"}, {"max", "Max"}};
+  auto gpt56_rows_match = gpt56_reasoning_picker && gpt56_reasoning_picker->items.size() == expected_gpt56_rows.size();
+  if (gpt56_rows_match)
+  {
+    for (std::size_t index = 0; index < expected_gpt56_rows.size(); ++index)
+    {
+      gpt56_rows_match = gpt56_reasoning_picker->items[index].value == expected_gpt56_rows[index].first &&
+                         gpt56_reasoning_picker->items[index].label == expected_gpt56_rows[index].second;
+      if (!gpt56_rows_match)
+        break;
+    }
+  }
+  expect(gpt56_model && gpt56_rows_match && enabled_labels_are_unique(*gpt56_reasoning_picker),
+         "GPT-5.6 thinking-mode selector keeps canonical authority and distinct Default through Max human labels");
+
+  auto collision_model = make_model("custom", "colliding-levels", "Colliding Levels", "custom", true, {"foo-bar", "foo_bar"});
+  auto const collision_picker = ava::app::reasoning_selector_view(collision_model, std::nullopt);
+  expect(collision_picker && collision_picker->items.size() == 3 && collision_picker->items[1].value == "foo-bar" &&
+             collision_picker->items[1].label == "Foo Bar (foo-bar)" && collision_picker->items[2].value == "foo_bar" &&
+             collision_picker->items[2].label == "Foo Bar (foo_bar)" && enabled_labels_are_unique(*collision_picker),
+         "thinking-mode selector deterministically disambiguates colliding custom human labels without changing canonical values");
+
   if (explicit_reasoning_picker)
   {
     auto tiny_snapshot = ava::tui::ComposerSnapshot{.mode = "build",

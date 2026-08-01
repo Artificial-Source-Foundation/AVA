@@ -5,7 +5,6 @@
 #include "ava/core/error.h"
 
 #include <algorithm>
-#include <cctype>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,6 +24,50 @@ std::string reasoning_selected_status(runtime::ReasoningSelection const& selecti
   return status;
 }
 
+std::string reasoning_level_qualifier(std::string_view level)
+{
+  constexpr std::size_t kMaximumQualifierLength = 24;
+  std::string qualifier;
+  qualifier.reserve(std::min(level.size(), kMaximumQualifierLength));
+  for (auto const ch : level)
+  {
+    if (qualifier.size() == kMaximumQualifierLength)
+      break;
+    auto const ascii_alphanumeric = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
+    if (ascii_alphanumeric || ch == '-' || ch == '_' || ch == '.' || ch == '+')
+      qualifier.push_back(ch);
+    else
+      qualifier.push_back('-');
+  }
+  return qualifier.empty() ? std::string("level") : qualifier;
+}
+
+void disambiguate_reasoning_labels(std::vector<tui::SelectListItemView>& items)
+{
+  std::vector<std::string> base_labels;
+  base_labels.reserve(items.size());
+  for (auto const& item : items) base_labels.push_back(item.label);
+
+  std::vector<std::string> used_labels;
+  used_labels.reserve(items.size());
+  for (std::size_t index = 0; index < items.size(); ++index)
+  {
+    auto& item = items[index];
+    if (!item.enabled)
+      continue;
+    std::size_t collision_count = 0;
+    for (std::size_t candidate = 0; candidate < items.size(); ++candidate)
+      collision_count += items[candidate].enabled && base_labels[candidate] == base_labels[index] ? 1 : 0;
+    if (collision_count > 1)
+      item.label += " (" + (index == 0 ? std::string("automatic") : reasoning_level_qualifier(item.value)) + ")";
+
+    auto const candidate = item.label;
+    std::size_t suffix = 2;
+    while (std::ranges::find(used_labels, item.label) != used_labels.end()) item.label = candidate + " " + std::to_string(suffix++);
+    used_labels.push_back(item.label);
+  }
+}
+
 }  // namespace
 
 std::optional<std::string> reasoning_status_for_session(runtime::Session const& session)
@@ -40,24 +83,28 @@ std::optional<std::string> reasoning_status_for_session(runtime::Session const& 
 std::string reasoning_level_label(std::string_view level)
 {
   if (level == "xhigh")
-    return "Max";
+    return "Extra high";
 
   std::string label;
   label.reserve(level.size());
   bool capitalize = true;
   for (auto const ch : level)
   {
-    if (ch == '_' || ch == '-')
+    auto const ascii_letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+    auto const ascii_digit = ch >= '0' && ch <= '9';
+    if (!ascii_letter && !ascii_digit)
     {
       if (!label.empty() && label.back() != ' ')
         label.push_back(' ');
       capitalize = true;
       continue;
     }
-    auto const byte = static_cast<unsigned char>(ch);
-    label.push_back(static_cast<char>(capitalize ? std::toupper(byte) : std::tolower(byte)));
+    auto const lowercase = ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch + ('a' - 'A')) : ch;
+    label.push_back(capitalize && lowercase >= 'a' && lowercase <= 'z' ? static_cast<char>(lowercase - ('a' - 'A')) : lowercase);
     capitalize = false;
   }
+  if (!label.empty() && label.back() == ' ')
+    label.pop_back();
   return label.empty() ? std::string("Custom") : label;
 }
 
@@ -100,6 +147,7 @@ std::optional<tui::SelectListView> reasoning_selector_view(ava::config::ModelInf
       view.selected_item_index = view.items.size();
     view.items.push_back(make_item(level, reasoning_level_label(level), is_current));
   }
+  disambiguate_reasoning_labels(view.items);
   return view;
 }
 

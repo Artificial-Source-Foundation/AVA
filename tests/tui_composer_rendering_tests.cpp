@@ -358,9 +358,13 @@ bool test_active_run_session_transition_discards_prior_session_events()
     };
     return queues;
   };
-  options.on_subagent_launch = [](ava::agent::SubagentLaunchNotification const&) {};
   options.on_submit = [&initial_identity_forwarded](std::string const&, ava::tui::TuiSubmitContext context) {
     initial_identity_forwarded = context.request_id == "old-request" && static_cast<bool>(context.on_subagent_launch);
+    context.on_subagent_launch(
+        ava::agent::SubagentLaunchNotification{.tool_call_id = "old-tool-call",
+                                               .request_id = "old-request",
+                                               .correlation_id = "old-request",
+                                               .display = ava::agent::SubagentLaunchDisplay::normalized("OLD PRIVATE LAUNCH", std::string_view("high"))});
     auto old_message = ava::event::MessagePayload{};
     old_message.text = "OLD EVENT TRANSCRIPT";
     static_cast<void>(context.event_sink(ava::event::RuntimeEvent{{}, ava::event::AssistantMessageEvent{.payload = std::move(old_message)}}));

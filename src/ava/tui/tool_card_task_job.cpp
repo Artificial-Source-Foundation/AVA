@@ -264,11 +264,26 @@ std::string status_primary(ToolTimelineStatus status)
   return {};
 }
 
+std::string launch_display_text(ava::agent::SubagentLaunchDisplay const& display)
+{
+  std::string text = display.model_display_name();
+  auto const& reasoning = display.reasoning_label();
+  if (!reasoning.empty())
+  {
+    if (!text.empty())
+      text += " · ";
+    text += "thinking " + reasoning;
+  }
+  return text;
+}
+
 TaskJobCardPresentation present_task(ToolTimelineItem const& item)
 {
   TaskJobCardPresentation presentation;
   presentation.kind = TaskJobToolKind::Task;
   presentation.display_name = "task";
+  if (item.subagent_launch_display)
+    presentation.launch_display = launch_display_text(*item.subagent_launch_display);
 
   // Production task serializer allowlist only (no invented duration fields).
   auto description = allowlisted_string(item.arguments_json, "description");

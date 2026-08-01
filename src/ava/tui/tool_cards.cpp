@@ -606,6 +606,26 @@ void append_tool_detail_lines(std::vector<std::string>& lines, std::string_view 
   }
 }
 
+void append_task_launch_lines(std::vector<std::string>& lines, std::string const& text, std::size_t width)
+{
+  if (text.empty())
+    return;
+  auto const prefix = wide_blocks(width) ? std::string("  │     ") : std::string("      ");
+  auto const label = std::string("launch: ");
+  auto const first_prefix = prefix + label;
+  auto const continuation_prefix = prefix + std::string(label.size(), ' ');
+  auto const first_columns = detail::terminal_text_columns(first_prefix);
+  auto const body_width = width > first_columns ? width - first_columns : std::size_t{1};
+  auto wrapped = detail::wrap_transcript_text(sanitize_terminal_text(text), body_width);
+  if (wrapped.empty())
+    return;
+  for (std::size_t index = 0; index < wrapped.size(); ++index)
+  {
+    auto row = (index == 0 ? first_prefix : continuation_prefix) + wrapped[index];
+    lines.push_back(detail::fit_line_preserving_sgr(std::string(detail::kSgrDim) + std::move(row) + std::string(detail::kSgrReset), width));
+  }
+}
+
 std::vector<std::string> display_changed_paths(ToolTimelineItem const& item)
 {
   auto paths = item.changed_paths;
@@ -1573,6 +1593,8 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   if (!primary_raw.empty())
     header += " " + std::string(kSgrDim) + "· " + primary_raw + std::string(kSgrReset);
   lines.push_back(fit_line_preserving_sgr(std::move(header), width));
+  if (task_job.kind == TaskJobToolKind::Task)
+    append_task_launch_lines(lines, task_job.launch_display, width);
 
   if (presentation != ToolPresentation::Compact)
   {

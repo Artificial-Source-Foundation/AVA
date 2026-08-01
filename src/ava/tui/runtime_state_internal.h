@@ -2,6 +2,7 @@
 
 #include "ava/event/EventEnvelope.h"
 #include "ava/event/events.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/session_grants.h"
 #include "ava/session/attachments.h"
@@ -33,11 +34,12 @@ struct QueuedRuntimeEvent
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-using QueuedTuiEvent = std::variant<QueuedRuntimeEvent, ava::event::EventEnvelope>;
+using QueuedTuiEvent = std::variant<QueuedRuntimeEvent, ava::event::EventEnvelope, ava::agent::SubagentLaunchNotification>;
 
 struct RuntimeEventQueue
 {
   [[nodiscard]] ava::event::EventEnvelopeSink envelope_sink();
+  [[nodiscard]] ava::agent::SubagentLaunchSink subagent_launch_sink();
   [[nodiscard]] ava::core::VoidResult enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context = {});
   [[nodiscard]] std::vector<QueuedTuiEvent> drain();
   void discard();

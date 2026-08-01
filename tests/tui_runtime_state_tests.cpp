@@ -1796,6 +1796,122 @@ void test_tui_mixed_runtime_event_queue_preserves_order_and_context()
          "mixed TUI event queue drains typed runtime records and controls in arrival order with exact un-serialized context");
 }
 
+void test_tui_private_subagent_launch_queue_and_exact_reducer()
+{
+  auto task_event = [](bool result = false) {
+    ava::event::ToolPayload payload;
+    payload.call_id = "duplicate-call";
+    payload.tool = "task";
+    payload.args_json = R"({"description":"live task","subagent_type":"general"})";
+    if (result)
+    {
+      payload.status = "success";
+      payload.result_json = R"({"tool":"task","ok":true,"description":"live task","state":"completed"})";
+      return ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(payload)}};
+    }
+    return ava::event::RuntimeEvent{{}, ava::event::ToolStartEvent{.payload = std::move(payload)}};
+  };
+  auto context = ava::event::EventEnvelopeContext{};
+  context.request_id = "request-new";
+  context.correlation_id = "correlation-new";
+  auto notification =
+      ava::agent::SubagentLaunchNotification{.tool_call_id = "duplicate-call",
+                                             .request_id = "request-new",
+                                             .correlation_id = "correlation-new",
+                                             .display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"))};
+
+  ava::tui::RuntimeEventQueue queue;
+  expect(queue.enqueue(task_event(), context).has_value(), "private launch queue accepts the public task Running event");
+  queue.subagent_launch_sink()(notification);
+  expect(queue.enqueue(task_event(true), context).has_value(), "private launch queue accepts the later public task result");
+  auto drained = queue.drain();
+  expect(drained.size() == 3 && std::holds_alternative<ava::tui::QueuedRuntimeEvent>(drained[0]) &&
+             std::holds_alternative<ava::agent::SubagentLaunchNotification>(drained[1]) && std::holds_alternative<ava::tui::QueuedRuntimeEvent>(drained[2]) &&
+             queue.received_any(),
+         "private launch queue preserves Running, launch metadata, and result order");
+
+  ava::tui::TuiEventState state;
+  for (auto const& queued : drained)
+  {
+    std::visit(
+        [&](auto const& value) {
+          using Value = std::remove_cvref_t<decltype(value)>;
+          if constexpr (std::same_as<Value, ava::tui::QueuedRuntimeEvent>)
+            ava::tui::apply_runtime_event(state, value.event, value.context);
+          else if constexpr (std::same_as<Value, ava::agent::SubagentLaunchNotification>)
+            ava::tui::apply_subagent_launch_notification(state, value);
+        },
+        queued);
+  }
+  expect(state.pending_tools.empty() && state.transcript.size() == 1 && state.transcript.front().tool &&
+             state.transcript.front().tool->subagent_launch_display &&
+             state.transcript.front().tool->subagent_launch_display->model_display_name() == "GPT-5.6 Terra" &&
+             state.transcript.front().tool->subagent_launch_display->reasoning_label() == "high",
+         "one drain batch associates exact private launch metadata and preserves it through task settlement");
+
+  ava::tui::TuiEventState historical;
+  ava::tui::apply_runtime_event(historical, task_event(), context);
+  ava::tui::apply_runtime_event(historical, task_event(true), context);
+  expect(historical.transcript.size() == 1 && historical.transcript.front().tool && !historical.transcript.front().tool->subagent_launch_display,
+         "historical task replay without a private notification has no launch metadata");
+
+  auto make_pending = [](std::string request, std::string correlation, std::string name = "task") {
+    return ava::tui::PendingToolItem{.call_id = "display-fallback",
+                                     .backend_call_id = "duplicate-call",
+                                     .request_id = std::move(request),
+                                     .correlation_id = std::move(correlation),
+                                     .item = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Running, .name = std::move(name)}};
+  };
+  ava::tui::TuiEventState duplicates;
+  duplicates.pending_tools.push_back(make_pending("request-old", "correlation-old"));
+  duplicates.pending_tools.push_back(make_pending("request-new", "correlation-new"));
+  ava::tui::apply_subagent_launch_notification(duplicates, notification);
+  expect(!duplicates.pending_tools[0].item.subagent_launch_display && duplicates.pending_tools[1].item.subagent_launch_display,
+         "duplicate backend call ids associate only through the exact request and correlation context");
+
+  auto exact_rejection = [&](ava::agent::SubagentLaunchNotification rejected) {
+    ava::tui::TuiEventState candidate;
+    candidate.pending_tools.push_back(make_pending("request-new", "correlation-new"));
+    ava::tui::apply_subagent_launch_notification(candidate, rejected);
+    return candidate.pending_tools.front().item.subagent_launch_display.has_value();
+  };
+  auto wrong_request = notification;
+  wrong_request.request_id = "request-wrong";
+  auto wrong_correlation = notification;
+  wrong_correlation.correlation_id = "correlation-wrong";
+  auto empty_request = notification;
+  empty_request.request_id.clear();
+  auto empty_correlation = notification;
+  empty_correlation.correlation_id.clear();
+  auto wrong_call = notification;
+  wrong_call.tool_call_id = "call-wrong";
+  expect(!exact_rejection(wrong_request) && !exact_rejection(wrong_correlation) && !exact_rejection(empty_request) && !exact_rejection(empty_correlation) &&
+             !exact_rejection(wrong_call),
+         "private launch reducer rejects wrong or missing request, correlation, and backend call identities without fallback");
+
+  ava::tui::TuiEventState non_task;
+  non_task.pending_tools.push_back(make_pending("request-new", "correlation-new", "job"));
+  ava::tui::apply_subagent_launch_notification(non_task, notification);
+  ava::tui::TuiEventState ambiguous;
+  ambiguous.pending_tools.push_back(make_pending("request-new", "correlation-new"));
+  ambiguous.pending_tools.push_back(make_pending("request-new", "correlation-new"));
+  ava::tui::apply_subagent_launch_notification(ambiguous, notification);
+  expect(!non_task.pending_tools.front().item.subagent_launch_display &&
+             std::ranges::none_of(ambiguous.pending_tools, [](auto const& pending) { return pending.item.subagent_launch_display.has_value(); }),
+         "private launch reducer rejects non-task and ambiguous exact candidates");
+
+  ava::tui::TuiEventState unmatched;
+  ava::tui::apply_subagent_launch_notification(unmatched, notification);
+  unmatched.pending_tools.push_back(make_pending("request-new", "correlation-new"));
+  expect(!unmatched.pending_tools.front().item.subagent_launch_display, "unmatched private launch metadata is discarded rather than cached");
+
+  ava::tui::RuntimeEventQueue teardown_queue;
+  teardown_queue.subagent_launch_sink()(notification);
+  teardown_queue.discard();
+  expect(teardown_queue.drain().empty() && !teardown_queue.received_any(),
+         "active-run or session teardown discards queued private launch metadata with ordinary events");
+}
+
 void test_tui_typed_runtime_inherits_session_identity_fields()
 {
   ava::tui::TuiEventState state;
@@ -2100,6 +2216,7 @@ void run_tui_runtime_event_state_tests()
   test_tui_retry_activity_settles_and_restores_contextual_hint();
   test_tui_transcript_projection_and_cap_parity();
   test_tui_mixed_runtime_event_queue_preserves_order_and_context();
+  test_tui_private_subagent_launch_queue_and_exact_reducer();
   test_tui_typed_runtime_inherits_session_identity_fields();
   test_tui_todowrite_event_state_and_snapshot_hydration();
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text.h"
@@ -67,6 +68,8 @@ struct ToolTimelineItem
   std::string call_id = {};
   std::string request_id = {};
   std::string correlation_id = {};
+  // Private process-local presentation attached only by the live TUI reducer.
+  std::optional<ava::agent::SubagentLaunchDisplay> subagent_launch_display = std::nullopt;
   ToolLifecycleState lifecycle = ToolLifecycleState::ExecutionStarted;
   std::optional<bool> details_visible = std::nullopt;
   std::vector<std::string> permission_request_ids = {};
@@ -91,7 +94,7 @@ struct ToolTimelineItem
   std::string spill_path = {};
   bool spill_truncated = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptItem
@@ -112,7 +115,7 @@ struct TranscriptItem
   std::string stream_id = {};
   bool append_only_stream = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SidebarActivityItem
@@ -398,6 +401,8 @@ struct QuestionPromptView
 
 struct SelectListItemView
 {
+  // Rendered as a muted suffix but deliberately omitted from selector matching.
+  std::string non_searchable_suffix = {};
   std::string value;
   std::string label;
   std::string description;
@@ -408,7 +413,7 @@ struct SelectListItemView
   bool enabled = true;
   std::string disabled_reason;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 enum class SelectListInputAction
@@ -459,7 +464,7 @@ struct SelectListView
   // while this selector is shown, even if the modal canvas width differs.
   bool freeze_underlying_transcript_layout = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SubagentWorkspaceView
@@ -467,6 +472,8 @@ struct SubagentWorkspaceView
   std::string title;
   std::string status;
   std::string notice;
+  // Private selector-derived presentation; never part of child message text.
+  std::string launch_detail;
   std::vector<ava::agent::SubagentLiveMessage> messages;
   std::size_t scroll_offset = 0;
   bool terminal = false;
@@ -557,7 +564,7 @@ struct ComposerSnapshot
   bool thinking_visible = true;
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ComposerCanvasLayout

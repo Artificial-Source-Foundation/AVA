@@ -47,6 +47,15 @@ ava::event::EventEnvelopeSink RuntimeEventQueue::envelope_sink()
   };
 }
 
+ava::agent::SubagentLaunchSink RuntimeEventQueue::subagent_launch_sink()
+{
+  return [this](ava::agent::SubagentLaunchNotification const& notification) {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.emplace_back(std::in_place_type<ava::agent::SubagentLaunchNotification>, notification);
+    received = true;
+  };
+}
+
 ava::core::VoidResult RuntimeEventQueue::enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context)
 {
   std::lock_guard<std::mutex> lock(mutex);

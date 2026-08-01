@@ -253,7 +253,6 @@ int run_tui(ShellState state)
                 },
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
-      .on_subagent_launch = nullptr,
       .on_submit =
           [&state, &hotkeys, &refresh_display_watch_state, &refresh_session_tree_catalog, &refresh_title_catalog, &state_snapshot, &application_catalog](
               std::string const& submitted, ava::tui::TuiSubmitContext context) {

@@ -2140,9 +2140,60 @@ void test_tui_task_job_tool_card_presentation()
                                  [](std::string const& line) { return visible_columns(line) <= 80 && ava::core::json::is_valid_utf8(strip_sgr(line)); }),
          "tui task description/body caps preserve valid UTF-8 clusters under width and copy");
 
+  auto launch_task = completed_task;
+  launch_task.subagent_launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  for (auto const presentation : {ava::tui::ToolPresentation::Compact, ava::tui::ToolPresentation::Rich, ava::tui::ToolPresentation::Expanded})
+  {
+    auto const launch_lines = ava::tui::detail::render_tool_card(launch_task, 80, presentation);
+    auto const launch_screen = tui_test_support::join_visible_lines(launch_lines);
+    expect(launch_screen.find("launch: GPT-5.6 Terra · thinking high") != std::string::npos,
+           "live task cards render a dedicated launch row in every presentation");
+  }
+  auto const narrow_launch_lines = ava::tui::detail::render_tool_card(launch_task, 32, ava::tui::ToolPresentation::Compact);
+  auto const narrow_launch_screen = tui_test_support::join_visible_lines(narrow_launch_lines);
+  auto narrow_launch_compact = narrow_launch_screen;
+  std::erase_if(narrow_launch_compact, [](unsigned char ch) { return ch == ' ' || ch == '\n'; });
+  expect(narrow_launch_lines.size() > 2 && std::ranges::all_of(narrow_launch_lines, [](auto const& line) { return visible_columns(line) <= 32; }) &&
+             narrow_launch_compact.find("launch:GPT-5.6Terra·thinkinghigh") != std::string::npos,
+         "narrow live task launch rows wrap within the requested width");
+
+  auto reasoning_only_task = completed_task;
+  reasoning_only_task.subagent_launch_display = ava::agent::SubagentLaunchDisplay::normalized("", std::string_view("high"));
+  auto const reasoning_only_screen =
+      tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(reasoning_only_task, 80, ava::tui::ToolPresentation::Compact));
+  expect(reasoning_only_screen.find("launch: thinking high") != std::string::npos && reasoning_only_screen.find("launch: ·") == std::string::npos,
+         "task launch rows show exact reasoning without inferring a missing model name");
+
+  auto const launch_presentation = ava::tui::detail::task_job_card_presentation(launch_task);
+  auto const launch_copy = ava::tui::detail::tool_card_copy_text(launch_task);
+  expect(launch_copy.find("GPT-5.6 Terra") == std::string::npos && launch_copy.find("thinking high") == std::string::npos &&
+             launch_presentation.primary.find("GPT-5.6 Terra") == std::string::npos &&
+             launch_presentation.searchable_text.find("GPT-5.6 Terra") == std::string::npos &&
+             launch_presentation.expanded_detail.find("GPT-5.6 Terra") == std::string::npos &&
+             !ava::tui::detail::tool_card_matches_copy_query(launch_task, "GPT-5.6 Terra") &&
+             !ava::tui::detail::tool_card_matches_copy_query(launch_task, "thinking high"),
+         "task launch metadata is absent from copy, primary, details, and matching corpora");
+
+  auto historical_task = completed_task;
+  auto const historical_screen =
+      tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(historical_task, 80, ava::tui::ToolPresentation::Expanded));
+  auto unrelated_tool = completed_task;
+  unrelated_tool.name = "plugin_task";
+  unrelated_tool.subagent_launch_display = launch_task.subagent_launch_display;
+  auto job_with_metadata = job_result_completed;
+  job_with_metadata.subagent_launch_display = launch_task.subagent_launch_display;
+  expect(historical_screen.find("launch:") == std::string::npos &&
+             tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(unrelated_tool, 80, ava::tui::ToolPresentation::Expanded))
+                     .find("GPT-5.6 Terra") == std::string::npos &&
+             tui_test_support::join_visible_lines(ava::tui::detail::render_tool_card(job_with_metadata, 80, ava::tui::ToolPresentation::Expanded))
+                     .find("GPT-5.6 Terra") == std::string::npos,
+         "historical tasks, arbitrary tools, and job polling cards never consume task launch metadata");
+
   // Exact reserved names only — case spoofs keep generic tool behavior (may show raw summaries).
+  spoofed_task_name.subagent_launch_display = launch_task.subagent_launch_display;
   auto const spoof_row = plain_lines(ava::tui::detail::render_tool_card(spoofed_task_name, 120, ava::tui::ToolPresentation::Compact));
-  expect(!spoof_row.empty() && strip_sgr(spoof_row.front()).find("TASK") != std::string::npos,
+  expect(!spoof_row.empty() && strip_sgr(spoof_row.front()).find("TASK") != std::string::npos &&
+             tui_test_support::join_plain_lines(spoof_row).find("GPT-5.6 Terra") == std::string::npos,
          "tui case-spoofed task names do not enter the reserved task presentation adapter");
 }
 }  // namespace

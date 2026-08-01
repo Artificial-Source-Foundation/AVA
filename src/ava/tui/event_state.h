@@ -3,6 +3,7 @@
 #include "ava/event/EventEnvelope.h"
 #include "ava/event/EventEnvelopeContext.h"
 #include "ava/event/RuntimeEvent.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/core/mode.h"
 
@@ -32,7 +33,7 @@ struct PendingToolItem
   ToolTimelineItem item;
   bool append_only_stream = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiEventState
@@ -68,11 +69,12 @@ struct TuiEventState
 
   std::optional<std::size_t> stream_assistant_transcript_index = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext const& context = {});
 void apply_control_event_envelope(TuiEventState& state, ava::event::EventEnvelope const& envelope);
+void apply_subagent_launch_notification(TuiEventState& state, ava::agent::SubagentLaunchNotification const& notification);
 
 enum class PendingTextProjection
 {

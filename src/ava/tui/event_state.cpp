@@ -1031,6 +1031,7 @@ void apply_tool_result(TuiEventState& state, ava::event::ToolPayload const& payl
       item.call_id = existing->call_id;
     item.request_id = existing->request_id;
     item.correlation_id = existing->correlation_id;
+    item.subagent_launch_display = existing->item.subagent_launch_display;
     for (auto const& permission_id : existing->item.permission_request_ids) add_permission_request_id(item, permission_id);
     for (auto const& audit : existing->item.permissions) add_permission_audit(item, audit);
     state.pending_tools.erase(existing);
@@ -1471,6 +1472,28 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
         }
       },
       event.payload());
+}
+
+void apply_subagent_launch_notification(TuiEventState& state, ava::agent::SubagentLaunchNotification const& notification)
+{
+  if (notification.tool_call_id.empty() || notification.request_id.empty() || notification.correlation_id.empty())
+    return;
+
+  auto match = state.pending_tools.end();
+  for (auto pending = state.pending_tools.begin(); pending != state.pending_tools.end(); ++pending)
+  {
+    if (pending->item.status != ToolTimelineStatus::Running || pending->item.name != "task" || pending->backend_call_id != notification.tool_call_id ||
+        pending->request_id.empty() || pending->request_id != notification.request_id || pending->correlation_id.empty() ||
+        pending->correlation_id != notification.correlation_id)
+    {
+      continue;
+    }
+    if (match != state.pending_tools.end())
+      return;
+    match = pending;
+  }
+  if (match != state.pending_tools.end())
+    match->item.subagent_launch_display = notification.display;
 }
 
 void apply_control_event_envelope(TuiEventState& state, ava::event::EventEnvelope const& envelope)

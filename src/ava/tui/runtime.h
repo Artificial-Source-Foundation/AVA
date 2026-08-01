@@ -96,7 +96,7 @@ struct TuiSubmitResult
   // output/status, which the TUI settles after rendering the completed turn.
   std::optional<TuiRuntimeStateSnapshot> state_snapshot = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiKeyBindingReloadResult
@@ -123,7 +123,7 @@ struct TuiSubmitContext
   ava::agent::SubagentLaunchSink on_subagent_launch;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Narrow TUI outcomes for live subagent workspace controls. Mappers and
@@ -168,9 +168,6 @@ struct TuiRuntimeOptions
   std::function<std::optional<std::string>()> active_context_status_provider;
   std::function<std::optional<std::string>()> reasoning_status_provider;
   std::function<TuiActiveRunQueues(ava::event::EventEnvelopeSink)> create_active_run_queues;
-  // Private callback seam only; rendering/queueing launch metadata is owned by
-  // a later checkpoint.
-  ava::agent::SubagentLaunchSink on_subagent_launch;
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<ava::session::ImageAttachmentRef>(std::string const&)> on_attach_image;
   std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>()> on_paste_clipboard_image;
@@ -227,7 +224,7 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);

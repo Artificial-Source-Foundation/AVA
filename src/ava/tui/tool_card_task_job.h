@@ -25,6 +25,9 @@ struct TaskJobCardPresentation
   std::string display_name = {};
   // Single-line primary summary after the status marker and name.
   std::string primary = {};
+  // Private process-local launch configuration. Rendered on its own row and
+  // deliberately absent from primary, expanded detail, copy, and search.
+  std::string launch_display = {};
   // Expanded-only body (bounded sanitized plain task_result). Empty for jobs.
   // Render may show this under effective Expanded presentation; copy/search only
   // include it when the item is explicitly expanded (details_visible == true).

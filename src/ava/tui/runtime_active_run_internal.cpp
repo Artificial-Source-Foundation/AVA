@@ -230,8 +230,10 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
           using Queued = std::remove_cvref_t<decltype(queued)>;
           if constexpr (std::same_as<Queued, QueuedRuntimeEvent>)
             apply_runtime_event(event_state, queued.event, queued.context);
-          else
+          else if constexpr (std::same_as<Queued, ava::event::EventEnvelope>)
             apply_control_event_envelope(event_state, queued);
+          else
+            apply_subagent_launch_notification(event_state, queued);
         },
         event);
   }
@@ -432,7 +434,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                                            .skip_active_steering = skip_active_steering,
                                                            .take_next_follow_up = take_next_follow_up,
                                                            .mark_follow_up_started = mark_follow_up_started,
-                                                           .on_subagent_launch = options.on_subagent_launch,
+                                                           .on_subagent_launch = event_queue.subagent_launch_sink(),
                                                            .image_attachments = submit_image_attachments});
     });
     bool render_failed = false;

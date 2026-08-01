@@ -71,8 +71,8 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "/jobs ")
     send_keys(tmux_exe, session, "Enter")
     selector = wait_for(tmux_exe, session, r"Search subagents", "live subagent selector during active parent run")
-    if "Running" not in selector or "Background" not in selector or "launch AVA TUI Fa" not in selector:
-        raise RuntimeError(f"live subagent selector omitted running/background launch metadata\nscreen:\n{selector}")
+    if "Running" not in selector or "Background" not in selector or "ref @" not in selector or "Launch: AVA TUI Fake · thinking default" not in selector:
+        raise RuntimeError(f"live subagent selector omitted running/background status, duplicate-safe ref, or launch metadata\nscreen:\n{selector}")
     _assert_workspace_safe(selector, "live subagent selector")
     save_evidence(ctx.root, "subagent-workspace-selector", selector)
 

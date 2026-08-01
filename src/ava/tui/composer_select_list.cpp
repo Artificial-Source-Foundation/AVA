@@ -122,11 +122,6 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
     line += label;
   if (!item.badge.empty())
     line += "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.badge) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  if (!item.non_searchable_suffix.empty())
-  {
-    line += "  " + std::string(detail::kSgrMuted) + "launch " + sanitize_terminal_text(item.non_searchable_suffix) + std::string(detail::kSgrReset) +
-            std::string(detail::kSgrComposerBg);
-  }
   if (!item.description.empty())
   {
     line +=
@@ -143,6 +138,16 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
       line += ": " + sanitize_terminal_text(item.disabled_reason);
     line += std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
+  line = detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width);
+  if (!item.enabled)
+    line = std::string(detail::kSgrDim) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
+  return select_modal_line(std::move(line), width);
+}
+
+std::string select_item_launch_line(SelectListItemView const& item, std::size_t width)
+{
+  auto line = std::string("    ") + std::string(detail::kSgrMuted) + "Launch: " + sanitize_terminal_text(item.non_searchable_suffix) +
+              std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   line = detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width);
   if (!item.enabled)
     line = std::string(detail::kSgrDim) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
@@ -178,59 +183,49 @@ struct SelectListContentRow
 {
   std::optional<std::size_t> item_index;
   std::string group;
+  bool launch_detail = false;
 };
 
 std::vector<SelectListContentRow> select_list_content_rows(SelectListView const& view, std::size_t row_budget)
 {
-  std::vector<SelectListContentRow> rows;
   if (row_budget == 0)
-    return rows;
+    return {};
 
   auto const matches = filter_select_list_items(view);
   if (matches.empty())
-    return rows;
+    return {};
   auto const selected = clamp_select_list_selection(view, view.selected_item_index);
-  auto const selected_it = std::ranges::find(matches, selected);
-  auto const selected_visible = selected_it == matches.end() ? std::size_t{0} : static_cast<std::size_t>(selected_it - matches.begin());
 
-  auto build_rows = [&](std::size_t start) {
-    std::vector<SelectListContentRow> candidate_rows;
-    candidate_rows.reserve(row_budget);
-    std::string last_group;
-    for (std::size_t visible = start; visible < matches.size() && candidate_rows.size() < row_budget; ++visible)
-    {
-      auto const item_index = matches[visible];
-      auto const& item = view.items[item_index];
-      if (!item.group.empty() && item.group != last_group)
-      {
-        auto const rows_remaining = row_budget - candidate_rows.size();
-        if (rows_remaining >= 2)
-        {
-          candidate_rows.push_back(SelectListContentRow{.item_index = std::nullopt, .group = item.group});
-        }
-        else if (row_budget > 1)
-        {
-          break;
-        }
-      }
-      if (candidate_rows.size() >= row_budget)
-        break;
-      candidate_rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}});
-      last_group = item.group;
-    }
-    return candidate_rows;
-  };
-
-  auto start = selected_visible >= row_budget ? selected_visible - row_budget + 1 : std::size_t{0};
-  for (;;)
+  std::vector<SelectListContentRow> all_rows;
+  all_rows.reserve(matches.size() * 2);
+  std::string last_group;
+  for (auto const item_index : matches)
   {
-    rows = build_rows(start);
-    if (std::ranges::any_of(rows, [selected](SelectListContentRow const& row) { return row.item_index == selected; }) || start >= selected_visible)
-    {
-      return rows;
-    }
-    ++start;
+    auto const& item = view.items[item_index];
+    if (!item.group.empty() && item.group != last_group)
+      all_rows.push_back(SelectListContentRow{.item_index = std::nullopt, .group = item.group});
+    all_rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}});
+    if (!item.non_searchable_suffix.empty())
+      all_rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}, .launch_detail = true});
+    last_group = item.group;
   }
+  if (all_rows.size() <= row_budget)
+    return all_rows;
+
+  auto const selected_primary =
+      std::ranges::find_if(all_rows, [selected](SelectListContentRow const& row) { return row.item_index == selected && !row.launch_detail; });
+  auto const selected_row = selected_primary == all_rows.end() ? std::size_t{0} : static_cast<std::size_t>(selected_primary - all_rows.begin());
+  auto selected_past_last = selected_row + 1;
+  if (selected_past_last < all_rows.size() && all_rows[selected_past_last].item_index == selected && all_rows[selected_past_last].launch_detail)
+    ++selected_past_last;
+
+  auto const selected_span = selected_past_last - selected_row;
+  auto start = selected_span > row_budget ? selected_row : (selected_past_last > row_budget ? selected_past_last - row_budget : std::size_t{0});
+  if (start < selected_row && all_rows[start].launch_detail)
+    ++start;
+  auto past_last = std::min(all_rows.size(), start + row_budget);
+  while (past_last > start && !all_rows[past_last - 1].item_index) --past_last;
+  return std::vector<SelectListContentRow>(all_rows.begin() + static_cast<std::ptrdiff_t>(start), all_rows.begin() + static_cast<std::ptrdiff_t>(past_last));
 }
 
 std::string character_text(InputEvent const& event)
@@ -686,7 +681,10 @@ std::vector<std::string> render_select_list_modal(SelectListView const& view, st
       if (row.item_index)
       {
         auto const item_index = *row.item_index;
-        lines.push_back(select_item_line(view.items[item_index], item_index == selected, width));
+        if (row.launch_detail)
+          lines.push_back(select_item_launch_line(view.items[item_index], width));
+        else
+          lines.push_back(select_item_line(view.items[item_index], item_index == selected, width));
       }
       else
       {

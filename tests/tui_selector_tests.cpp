@@ -5,6 +5,7 @@
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/subagent_workspace.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_commands_internal.h"
@@ -1173,12 +1174,49 @@ void run_tui_selector_tests()
   expect(ava::tui::filter_select_list_items(launch_filter).empty(), "subagent launch suffix is excluded from selector filter scoring");
   auto selector_screen_snapshot = ava::tui::ComposerSnapshot{};
   selector_screen_snapshot.select_list = jobs_selector;
-  selector_screen_snapshot.width = 120;
+  selector_screen_snapshot.width = 88;
   selector_screen_snapshot.height = 20;
   auto const selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(selector_screen_snapshot));
-  expect(selector_screen.find("launch GPT-5.6 Terra") != std::string::npos && selector_screen.find("job_0123456789abcdef_new") == std::string::npos &&
-             selector_screen.find("session_child_hidden") == std::string::npos && selector_screen.find("task_hidden") == std::string::npos,
-         "subagent selector renders launch configuration but no full job, task, or child-session identities");
+  auto const description_ref = [](std::string const& description) {
+    auto const start = description.find("ref ");
+    auto const end = start == std::string::npos ? start : description.find(" · ", start);
+    return start == std::string::npos ? std::string{} : description.substr(start, end == std::string::npos ? end : end - start);
+  };
+  auto const primary_ref = description_ref(jobs_selector.items[0].description);
+  expect(selector_screen.find("Launch: GPT-5.6 Terra") != std::string::npos && !primary_ref.empty() && selector_screen.find(primary_ref) != std::string::npos &&
+             selector_screen.find("job_0123456789abcdef_new") == std::string::npos && selector_screen.find("session_child_hidden") == std::string::npos &&
+             selector_screen.find("task_hidden") == std::string::npos,
+         "88-column subagent selector keeps duplicate-safe ref authority on the primary row and launch configuration on its secondary row without full ids");
+
+  auto duplicate_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
+      make_subagent_snapshot("job_duplicate_alpha_0123456789", "owner-a", "Duplicate audit", "general", ava::agent::SubagentExecutionState::Running, 0),
+      make_subagent_snapshot("job_duplicate_beta_9876543210", "owner-a", "Duplicate audit", "general", ava::agent::SubagentExecutionState::Running, 0)};
+  duplicate_snapshots[0].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  duplicate_snapshots[1].job.launch_display = duplicate_snapshots[0].job.launch_display;
+  auto duplicate_selector = ava::app::subagent_selector_view(duplicate_snapshots);
+  auto duplicate_snapshot = ava::tui::ComposerSnapshot{};
+  duplicate_snapshot.select_list = duplicate_selector;
+  duplicate_snapshot.width = 88;
+  duplicate_snapshot.height = 12;
+  auto const duplicate_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(duplicate_snapshot));
+  auto const duplicate_ref_0 = description_ref(duplicate_selector.items[0].description);
+  auto const duplicate_ref_1 = description_ref(duplicate_selector.items[1].description);
+  expect(duplicate_selector.items.size() == 2 && duplicate_selector.items[0].label == duplicate_selector.items[1].label &&
+             duplicate_selector.items[0].badge == duplicate_selector.items[1].badge &&
+             duplicate_selector.items[0].description != duplicate_selector.items[1].description && !duplicate_ref_0.empty() && !duplicate_ref_1.empty() &&
+             duplicate_ref_0 != duplicate_ref_1 && duplicate_screen.find(duplicate_ref_0) != std::string::npos &&
+             duplicate_screen.find(duplicate_ref_1) != std::string::npos && duplicate_screen.find("Launch: GPT-5.6 Terra") != std::string::npos,
+         "88-column duplicate title/status subagent rows remain visually distinct by short refs while each launch configuration remains visible");
+
+  duplicate_selector.selected_item_index = 1;
+  auto const tiny_two_rows = ava::tui::detail::render_select_list_modal(duplicate_selector, 88, 5);
+  auto const tiny_one_row = ava::tui::detail::render_select_list_modal(duplicate_selector, 88, 4);
+  auto const tiny_primary_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 2, 88, 5);
+  auto const tiny_launch_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 3, 88, 5);
+  auto const one_row_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 2, 88, 4);
+  expect(tiny_two_rows.size() == 5 && tiny_one_row.size() == 4 && tiny_primary_hit == std::size_t{1} && tiny_launch_hit == std::size_t{1} &&
+             one_row_hit == std::size_t{1} && tui_test_support::join_visible_lines(tiny_one_row).find(duplicate_ref_1) != std::string::npos,
+         "secondary launch rows preserve one logical hit target and keep the selected primary row visible when the tiny viewport has only one content row");
   auto unsafe_jobs_selector = ava::app::subagent_selector_view(
       {make_subagent_snapshot("x", "owner-a", "<task> /tmp/session_secret job_secret", "/tmp/private-type", ava::agent::SubagentExecutionState::Running, 0)});
   auto unsafe_selector_snapshot = ava::tui::ComposerSnapshot{};

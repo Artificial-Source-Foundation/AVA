@@ -41,6 +41,10 @@ struct SessionStore::EphemeralState
   mutable std::mutex mutation_mutex;
   mutable std::mutex entries_mutex;
   std::vector<SessionEntry> entries;
+  // Monotonic write generation for this in-memory store, analogous to
+  // append_epoch_for_path for persistent files: bumped on every durable append
+  // so independent ephemeral targets detect each other's advances.
+  std::atomic<std::uint64_t> append_epoch{0};
 
   // Owns the complete in-memory session transcript; never generate debug output.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -118,6 +122,8 @@ class SessionTraceScope
 
 [[nodiscard]] std::string project_key(std::filesystem::path const& workspace_dir);
 [[nodiscard]] std::mutex& append_mutex_for_path(std::filesystem::path const& path);
+// Per-path monotonic write generation shared by all append targets on one file.
+[[nodiscard]] std::atomic<std::uint64_t>& append_epoch_for_path(std::filesystem::path const& path);
 [[nodiscard]] ava::core::Error path_io_error(std::string message, std::filesystem::path const& path, int error_number = 0);
 [[nodiscard]] std::filesystem::path anchored_child_diagnostic_path(int parent_fd, std::string_view name, std::filesystem::path const& fallback_parent);
 [[nodiscard]] ava::core::Error append_authority_error(std::string message, std::filesystem::path const& path);

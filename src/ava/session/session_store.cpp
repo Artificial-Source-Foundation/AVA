@@ -108,6 +108,28 @@ std::mutex& append_mutex_for_path(std::filesystem::path const& path)
   return *mutex;
 }
 
+// Monotonic per-path write generation shared by all SessionAppendTarget
+// instances (and any other writer) on the same session file. A target records
+// the generation it has folded into its cached assistant_output_state_ and, on
+// its next append, reloads from storage only when the generation advanced --
+// i.e. only when some other writer committed to the file. The single-target
+// runtime append path therefore stays O(1) while independent targets on one
+// path still observe each other's commits.
+std::atomic<std::uint64_t>& append_epoch_for_path(std::filesystem::path const& path)
+{
+  static std::mutex registry_mutex;
+  static std::map<std::filesystem::path, std::shared_ptr<std::atomic<std::uint64_t>>> append_epochs;
+
+  auto const key = std::filesystem::absolute(path).lexically_normal();
+  std::lock_guard lock(registry_mutex);
+  auto& epoch = append_epochs[key];
+  if (!epoch)
+  {
+    epoch = std::make_shared<std::atomic<std::uint64_t>>(0);
+  }
+  return *epoch;
+}
+
 ava::core::Error path_io_error(std::string message, std::filesystem::path const& path, int error_number)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));

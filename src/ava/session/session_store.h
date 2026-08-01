@@ -5,6 +5,8 @@
 #include "ava/session/assistant_output.h"
 #include "ava/core/result.h"
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -357,11 +359,34 @@ class SessionAppendTarget
  private:
   SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state, SessionReadLimits read_limits);
 
+  // Reload assistant_output_state_ from storage when another writer advanced the
+  // file since this target last folded it into its cache. Must be called with
+  // the per-path serialization lock held. No-op (returns success) when the
+  // shared append epoch still equals last_seen_append_epoch_.
+  [[nodiscard]] ava::core::VoidResult refresh_state_if_stale();
+  // Advance the shared append epoch after a durable write and record the new
+  // value as the generation this target's cache now reflects. Returns the new
+  // epoch. Must be called with the serialization lock held and only after
+  // assistant_output_state_ was updated to match the write.
+  std::uint64_t advance_append_epoch();
+  // Advance the shared append epoch after a durable but indeterminate write
+  // (partial/unknown) without claiming the cache still matches storage. Used on
+  // failure paths that latch recovery_required_; the next successful recover()
+  // reestablishes the cache-to-epoch correspondence.
+  void bump_append_epoch();
+  // The shared append epoch for this target's destination: the per-path epoch
+  // for persistent targets, or the ephemeral store's in-memory epoch otherwise.
+  [[nodiscard]] std::atomic<std::uint64_t>& append_epoch_ref() const;
+
   SessionStore store_;
   std::optional<SessionLease> lease_;
   SessionReadLimits read_limits_;
   mutable std::mutex mutex_;
   AssistantOutputAppendState assistant_output_state_;
+  // The shared append epoch value that assistant_output_state_ reflects. Zero at
+  // construction is corrected by create_persistent/create_ephemeral, which
+  // snapshot the live epoch right after building the initial cached state.
+  std::uint64_t last_seen_append_epoch_ = 0;
   bool recovery_required_ = false;
 };
 

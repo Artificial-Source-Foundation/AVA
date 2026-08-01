@@ -3,6 +3,7 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
@@ -54,12 +55,15 @@ struct ToolDispatchServices
 {
   QuestionResolver question_resolver = nullptr;
   TaskSubagentRunner task_subagent_runner = nullptr;
+  // Dedicated private observer for validated built-in task dispatch only.
+  SubagentLaunchObserver subagent_launch = {};
   // Exact coordinator/owner pair for public job controls. Child loops clear
   // both this coordinator and the task runner, then hide both schemas.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
   std::vector<SubagentDefinition> subagents = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Carries callbacks and private launch metadata; never auto-print it.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::agent

@@ -41,6 +41,68 @@ using agent_loop_test::sse_response;
 using agent_loop_test::tool_call_sse;
 using agent_loop_test::TraceCollector;
 
+void test_agent_loop_private_task_launch_follows_public_running_and_stays_private()
+{
+  auto const root = create_empty_root("agent-private-task-launch-order");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "parent-private-launch"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport(
+      {sse_response(tool_call_sse("call_private_launch", "task",
+                                  R"({"description":"private launch","prompt":"return child","subagent_type":"general"})") +
+                    "data: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child done\"}\n\ndata: [DONE]\n\n"),
+       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"parent done\"}\n\ndata: [DONE]\n\n")});
+  auto const display = ava::agent::SubagentLaunchDisplay::normalized("MODEL_SENTINEL_PRIVATE", std::string_view("LEVEL_SENTINEL"));
+  std::vector<std::string> order;
+  std::vector<ava::agent::SubagentLaunchNotification> launches;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .model = agent_loop_test::model_invocation_options(),
+      .access_token = "token",
+      .on_tool_event = [&order](ava::agent::ToolTimelineEntry const& entry) {
+        if (entry.status == ava::agent::ToolTimelineStatus::Running)
+          order.emplace_back("public_running");
+      },
+      .subagent_launch = {.display = display,
+                          .request_id = "request-private",
+                          .correlation_id = "correlation-private",
+                          .sink = [&order, &launches](ava::agent::SubagentLaunchNotification const& launch) {
+                            order.emplace_back("private_launch");
+                            launches.push_back(launch);
+                          }},
+      .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("delegate", store, provider, transport);
+  auto entries = store.load();
+  bool session_private = entries.has_value();
+  if (entries)
+    for (auto const& entry : *entries)
+      session_private = session_private && entry.data_json.find("MODEL_SENTINEL_PRIVATE") == std::string::npos &&
+                        entry.data_json.find("LEVEL_SENTINEL") == std::string::npos;
+  bool timeline_private = result.has_value();
+  if (result)
+    for (auto const& entry : result->tool_timeline)
+      timeline_private = timeline_private && entry.result_json.find("MODEL_SENTINEL_PRIVATE") == std::string::npos &&
+                         entry.result_json.find("LEVEL_SENTINEL") == std::string::npos &&
+                         entry.structured_result_json.find("MODEL_SENTINEL_PRIVATE") == std::string::npos;
+  expect(result && result->final_text == "parent done" && order.size() >= 2 && order[0] == "public_running" && order[1] == "private_launch" &&
+             launches.size() == 1 && launches.front().tool_call_id == "call_private_launch" && launches.front().request_id == "request-private" &&
+             launches.front().correlation_id == "correlation-private" && launches.front().display == display,
+         "ordinary public task Running publication precedes one exact private launch callback on the parent execution thread");
+  expect(session_private && timeline_private,
+         "private launch model/reasoning sentinels never enter task JSON/XML timeline results or persisted session serialization");
+}
+
 void test_agent_loop_task_subagent_runs_child_session()
 {
   auto const root = create_empty_root("agent-task-subagent");

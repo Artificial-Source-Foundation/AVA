@@ -4,6 +4,7 @@
 #include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
+#include "ava/event/events.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/onboarding.h"
@@ -275,6 +276,121 @@ void test_app_run_prompt_isolates_ambient_extensions()
   expect(exact_null_result && exact_null_result->final_text == "exact null answer" && exact_null_transport.requests().size() == 1,
          "exact isolated composition allocates an empty immutable MCP config when the session config is null");
   expect(session->system_prompt() == ordinary_prompt, "isolated runtime requests leave the ordinary session system prompt unchanged");
+}
+
+void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation()
+{
+  auto const root = create_empty_root("app-runtime-private-launch-source");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(paths.ava_config_dir);
+  write_app_test_file(paths.models_file, R"JSON({
+    "default_provider":"openai",
+    "default_model":"launch-source",
+    "models":[{
+      "provider":"openai",
+      "id":"launch-source",
+      "name":"Configured   Launch Model",
+      "family":"launch-source",
+      "api_family":"openai_responses",
+      "context_window_tokens":100000,
+      "max_output_tokens":4096,
+      "supports_tools":true,
+      "supports_streaming":true,
+      "supports_reasoning":true,
+      "reasoning_levels":["high"],
+      "input_modalities":["text"],
+      "output_modalities":["text"]
+    }]
+  })JSON");
+
+  ava::app::runtime::OpenOptions open_options;
+  open_options.workspace_dir = workspace;
+  open_options.current_dir = workspace;
+  open_options.mode = ava::agent::Mode::Build;
+  open_options.paths = paths;
+  auto session = ava::app::open_runtime_session(open_options);
+  expect(session.has_value(), "runtime private-launch source fixture opens a configured session");
+  if (!session)
+    return;
+
+  auto task_response = [](std::string_view call_id) {
+    return ava::http::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + std::string(call_id) +
+                                           "\",\"name\":\"task\"}\n\n"
+                                           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" + std::string(call_id) +
+                                           "\",\"delta\":\"{\\\"description\\\":\\\"runtime launch\\\",\\\"prompt\\\":\\\"return child\\\","
+                                           "\\\"subagent_type\\\":\\\"general\\\"}\"}\n\n"
+                                           "data: {\"type\":\"response.function_call.done\",\"call_id\":\"" + std::string(call_id) +
+                                           "\"}\n\ndata: [DONE]\n\n"};
+  };
+  auto text_response = [](std::string_view text) {
+    return ava::http::HttpResponse{.status_code = 200,
+                                   .headers = {},
+                                   .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + std::string(text) +
+                                           "\"}\n\ndata: [DONE]\n\n"};
+  };
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport default_transport({task_response("runtime_task_default"), text_response("parent default")});
+  std::vector<ava::agent::SubagentLaunchNotification> launches;
+  std::vector<ava::event::RuntimeEvent> public_events;
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "token";
+  run_options.request_id = std::nullopt;
+  run_options.on_subagent_launch = [&launches](auto const& launch) { launches.push_back(launch); };
+  run_options.event_sink = [&public_events](auto const& event) {
+    public_events.push_back(event);
+    return ava::core::VoidResult{};
+  };
+  auto default_result = ava::app::run_prompt(*session, "launch default", provider, default_transport, run_options);
+  auto selected = session->set_runtime_reasoning(
+      ava::app::runtime::ReasoningSelection{.level = "high", .budget_tokens = std::nullopt, .display = {}});
+  run_options.request_id = "runtime-request-high";
+  ava::tests::FakeTransport high_transport({task_response("runtime_task_high"), text_response("parent high")});
+  auto high_result = selected ? ava::app::run_prompt(*session, "launch high", provider, high_transport, run_options)
+                              : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(selected.error()));
+
+  expect(default_result && high_result,
+         "runtime private-launch source fixture completes both delegated turns: default=" +
+             (default_result ? std::string("ok") : default_result.error().format()) + ", high=" +
+             (high_result ? std::string("ok") : high_result.error().format()));
+  expect(launches.size() == 2,
+         "runtime private-launch source fixture emits exactly two callbacks; actual=" + std::to_string(launches.size()) + ", requests=" +
+             std::to_string(default_transport.requests().size() + high_transport.requests().size()) +
+             ", default_text=" + (default_result ? default_result->final_text : std::string("error")) +
+             ", high_text=" + (high_result ? high_result->final_text : std::string("error")) +
+             (launches.empty() ? std::string{} : ", first_id=" + launches.front().tool_call_id));
+  if (launches.size() == 2)
+  {
+    expect(launches[0].tool_call_id == "runtime_task_default" && launches[1].tool_call_id == "runtime_task_high",
+           "runtime private launch callback captures exact backend task call identities");
+    expect(!launches[0].request_id.empty() && launches[0].request_id == launches[0].correlation_id &&
+               launches[1].request_id == "runtime-request-high" && launches[1].correlation_id == "runtime-request-high" &&
+               launches[1].correlation_id != launches[0].correlation_id,
+           "runtime private launch callback captures request and per-run correlation identities");
+    expect(launches[0].display.model_display_name() == "Configured Launch Model" &&
+               launches[1].display.model_display_name() == "Configured Launch Model",
+           "runtime private launch display uses configured ModelInfo display name; actual=" + launches[0].display.model_display_name());
+    expect(launches[0].display.reasoning_label() == "default" && launches[1].display.reasoning_label() == "high",
+           "runtime private launch display uses literal default then explicit AVA level; actual=" + launches[0].display.reasoning_label() + "/" +
+               launches[1].display.reasoning_label());
+  }
+
+  std::string public_event_bytes;
+  std::size_t event_index = 0;
+  for (auto const& event : public_events)
+  {
+    ava::event::EventEnvelopeContext context;
+    context.event_id = "event_" + std::to_string(event_index++);
+    public_event_bytes += ava::event::serialize_event_envelope_jsonl(ava::event::to_event_envelope(event, context));
+  }
+  auto const session_bytes = app_read_binary_file(session->store.session_path());
+  expect(public_event_bytes.find("Configured Launch Model") == std::string::npos,
+         "private launch model display stays absent from public runtime event envelopes");
+  expect(session_bytes.find("Configured Launch Model") == std::string::npos,
+         "private launch model display stays absent from persisted session bytes");
 }
 
 void test_app_run_prompt_emits_events()

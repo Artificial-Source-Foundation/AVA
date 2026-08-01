@@ -494,11 +494,14 @@ void SubagentCoordinator::prune_eligible_locked()
   while (eligible > options_.registry_options.max_retained_finished_jobs && erase_oldest_eligible_locked()) --eligible;
 }
 
-ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
-                                                                             BackgroundJobStartOptions options, BackgroundJobWorker worker,
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(SubagentCoordinatorStartRequest request, BackgroundJobWorker worker,
                                                                              std::shared_ptr<SubagentInteractionGate> interaction_gate,
                                                                              std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
+  auto parent_session_id = std::move(request.parent_session_id);
+  auto const mode = request.mode;
+  auto options = std::move(request.job);
+  auto launch_display = std::move(request.launch_display);
   if (!worker)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "background job worker is unavailable");
@@ -601,7 +604,8 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
                            .started_at = now,
                            .updated_at = now,
                            .display_title = make_display_field(options.title, kMaxDisplayTitleBytes),
-                           .display_subagent_type = make_display_field(options.subagent_type, kMaxDisplaySubagentTypeBytes)};
+                           .display_subagent_type = make_display_field(options.subagent_type, kMaxDisplaySubagentTypeBytes),
+                           .launch_display = launch_display};
     candidate->interaction_gate = interaction_gate;
     // Store the source before registry start/publication so inspect can observe
     // the child as soon as the job becomes visible.
@@ -693,6 +697,15 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
   }
   publish_terminal_notification(state);
   return result;
+}
+
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
+                                                                             BackgroundJobStartOptions options, BackgroundJobWorker worker,
+                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate,
+                                                                             std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
+{
+  return start(SubagentCoordinatorStartRequest{.parent_session_id = std::move(parent_session_id), .mode = mode, .job = std::move(options)}, std::move(worker),
+               std::move(interaction_gate), std::move(inspection_source));
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_background(std::string parent_session_id, BackgroundJobStartOptions options,

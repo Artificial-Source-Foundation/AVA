@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -62,10 +63,10 @@ struct SubagentDeliveryAttemptSnapshot
 // filesystem paths do not belong in the public contract; terminal delivery
 // text is explicitly bounded and control-safe.
 //
-// display_title / display_subagent_type are process-local interactive display
-// only. They may carry the bounded start title / type, never the full task
-// prompt/description, and must not appear in public JSON, RPC, model-tool, or
-// persisted/wire schemas.
+// display_title / display_subagent_type / launch_display are process-local
+// interactive display only. They may carry the bounded start title / type and
+// configured launch presentation, never the full task prompt/description, and
+// must not appear in public JSON, RPC, model-tool, or persisted/wire schemas.
 struct SubagentJobSnapshot
 {
   long long schema_version = kSubagentJobContractVersion;
@@ -100,6 +101,7 @@ struct SubagentJobSnapshot
   // Interactive display only; omitted from every public serializer.
   std::string display_title = {};
   std::string display_subagent_type = {};
+  SubagentLaunchDisplay launch_display = {};
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

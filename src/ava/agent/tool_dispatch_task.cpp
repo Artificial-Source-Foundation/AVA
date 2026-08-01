@@ -122,6 +122,23 @@ ava::core::Result<SubagentDefinition> selected_subagent_definition(ToolDispatchS
   return std::unexpected(std::move(error));
 }
 
+void publish_subagent_launch_best_effort(ToolDispatchServices const& services, std::string_view tool_call_id) noexcept
+{
+  if (!services.subagent_launch.sink)
+    return;
+  try
+  {
+    services.subagent_launch.sink(SubagentLaunchNotification{.tool_call_id = std::string(tool_call_id),
+                                                              .request_id = services.subagent_launch.request_id,
+                                                              .correlation_id = services.subagent_launch.correlation_id,
+                                                              .display = services.subagent_launch.display});
+  }
+  catch (...)
+  {
+    // Private presentation observers cannot affect validated task execution.
+  }
+}
+
 }  // namespace
 
 ToolDispatchResult task_result(ava::tools::ToolContext const& context, ToolDispatchServices const& services, ProviderToolCall const& call)
@@ -159,6 +176,12 @@ ToolDispatchResult task_result(ava::tools::ToolContext const& context, ToolDispa
   auto background = task_background_mode(call.arguments_json, call.name);
   if (!background)
     return tool_error_result(call, background.error());
+  // AgentTurnExecutor has already published the ordinary public Running event
+  // on this thread. Emit private launch association only after all built-in task
+  // arguments and catalog identity have validated, but before permission/start
+  // can fail so the future card can retain truthful requested launch metadata.
+  publish_subagent_launch_best_effort(services, call.id);
+
   if (!services.task_subagent_runner)
   {
     return simple_error_result(call, ava::core::ErrorCategory::Tool, "task subagent runner is unavailable");

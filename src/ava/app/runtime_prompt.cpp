@@ -134,6 +134,14 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
                                                                    ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                    runtime::RunOptions const& options, ActiveRunGuard guard)
 {
+  std::optional<std::string_view> launch_reasoning_level = std::nullopt;
+  if (session.reasoning())
+    launch_reasoning_level = session.reasoning()->level;
+  // Normalize immutable private presentation before parent/coordinator locks.
+  // Model/provider ids and provider-specific reasoning fields never enter it.
+  auto const subagent_launch_display =
+      ava::agent::SubagentLaunchDisplay::normalized(session.model().display_name, launch_reasoning_level);
+
   auto fail_run = [&guard, &session](ava::core::Error error) -> ava::core::Result<ava::agent::AgentLoopResult> {
     if (session.diagnostics())
       if (auto failure_class = diagnostic_failure_class(error))
@@ -169,6 +177,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     return fail_run(offline_provider_error("prompt"));
   if (!session.run_controller())
     return fail_run(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  auto const subagent_launch_correlation_id = session.run_controller()->snapshot().run_id;
   if (!guard.active())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime prompt admission is inactive"));
   auto session_read_authority = session.read_authority();
@@ -390,6 +399,10 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         }
         return {};
       },
+      .subagent_launch = {.display = subagent_launch_display,
+                          .request_id = subagent_launch_correlation_id,
+                          .correlation_id = subagent_launch_correlation_id,
+                          .sink = runtime_options.on_subagent_launch},
       .permission_resolver = runtime_options.permission_resolver,
       .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
       .question_resolver = runtime_options.question_resolver,

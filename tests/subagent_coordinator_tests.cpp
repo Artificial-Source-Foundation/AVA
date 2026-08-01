@@ -176,6 +176,68 @@ void test_owner_filter_wait_result_cancel_and_wire_contract()
          "schema-version-1 status/result wire fields and terminal-content policy remain unchanged");
 }
 
+void test_launch_display_survives_coordinator_lifecycle_and_owner_checks()
+{
+  auto coordinator = coordinator_with();
+  if (!coordinator)
+    return;
+  auto const display =
+      ava::agent::SubagentLaunchDisplay::normalized("COORDINATOR_MODEL_SENTINEL", std::string_view("COORD_REASONING_SENTINEL"));
+  auto worker = std::make_shared<BlockingWorker>();
+  auto started = coordinator->start(ava::agent::SubagentCoordinatorStartRequest{.parent_session_id = "launch_owner",
+                                                                                .mode = ava::agent::SubagentJobMode::Foreground,
+                                                                                .job = {.title = "launch", .child_session_id = "launch_child"},
+                                                                                .launch_display = display},
+                                    [worker](auto const& context) { return worker->run(context, "launch terminal"); });
+  expect(started && worker->wait_started() && started->job.launch_display == display, "coordinator stores launch display before foreground publication");
+  if (!started)
+    return;
+  auto const job_id = started->job.identity.job_id;
+  auto listed = coordinator->list("launch_owner");
+  auto status = coordinator->snapshot("launch_owner", job_id);
+  auto timed = coordinator->wait("launch_owner", job_id, std::chrono::milliseconds(1));
+  auto hidden = coordinator->snapshot("wrong_owner", job_id);
+  auto promoted = coordinator->promote("launch_owner", job_id);
+  expect(listed.size() == 1 && listed.front().job.launch_display == display && status && status->job.launch_display == display && timed && timed->timed_out &&
+             timed->job.launch_display == display && !hidden &&
+             hidden.error().category() == ava::core::ErrorCategory::NotFound && promoted && promoted->job.launch_display == display,
+         "list/status/wait/promotion preserve immutable launch display while wrong-owner authority remains non-enumerating");
+  worker->finish();
+  auto terminal = coordinator->wait("launch_owner", job_id, std::chrono::seconds(2));
+  auto retained = coordinator->result("launch_owner", job_id);
+  auto const public_status = terminal ? ava::agent::public_job_snapshot_json(*terminal) : std::string{};
+  auto const public_result = retained ? ava::agent::public_job_snapshot_json(*retained, ava::agent::PublicJobContent::IncludeTerminalResult) : std::string{};
+  auto const public_list = ava::agent::public_job_list_json(coordinator->list("launch_owner"));
+  expect(terminal && retained && terminal->job.was_promoted && terminal->job.launch_display == display && retained->job.launch_display == display &&
+             public_status.find("COORDINATOR_MODEL_SENTINEL") == std::string::npos && public_result.find("COORDINATOR_MODEL_SENTINEL") == std::string::npos &&
+             public_list.find("COORDINATOR_MODEL_SENTINEL") == std::string::npos &&
+             public_result.find("COORD_REASONING_SENTINEL") == std::string::npos,
+         "promotion, terminal completion, retained result, and public status/list/result keep private launch display in coordinator custody only");
+
+  auto canceled_worker = std::make_shared<BlockingWorker>();
+  auto cancel_start = coordinator->start(ava::agent::SubagentCoordinatorStartRequest{.parent_session_id = "cancel_owner",
+                                                                                     .mode = ava::agent::SubagentJobMode::Background,
+                                                                                     .job = {.child_session_id = "cancel_child"},
+                                                                                     .launch_display = display},
+                                         [canceled_worker](auto const& context) { return canceled_worker->run(context); });
+  if (cancel_start && canceled_worker->wait_started())
+  {
+    auto canceled = coordinator->cancel("cancel_owner", cancel_start->job.identity.job_id);
+    auto canceled_terminal = coordinator->wait("cancel_owner", cancel_start->job.identity.job_id, std::chrono::seconds(2));
+    expect(canceled && canceled->job.launch_display == display && canceled_terminal && canceled_terminal->job.launch_display == display,
+           "cancel request and canceled terminal snapshot preserve launch display");
+  }
+
+  auto rejected = coordinator->start(ava::agent::SubagentCoordinatorStartRequest{.parent_session_id = "../invalid",
+                                                                                 .mode = ava::agent::SubagentJobMode::Background,
+                                                                                 .job = {.child_session_id = "rejected_child"},
+                                                                                 .launch_display = display},
+                                     [](auto const&) { return ava::agent::BackgroundJobCompletion{}; });
+  expect(!rejected && coordinator->list("../invalid").empty() &&
+             ava::agent::subagent_publication_commit_state(rejected.error()) == ava::agent::SubagentPublicationCommitState::ProvenUnpublished,
+         "coordinator start failure publishes neither job state nor private launch metadata");
+}
+
 void test_exact_v1_job_snapshot_and_enum_strings()
 {
   ava::agent::SubagentCoordinatorJobSnapshot snapshot{.job = {.schema_version = 1,
@@ -206,13 +268,18 @@ void test_exact_v1_job_snapshot_and_enum_strings()
                                                               .tool_calls = 12,
                                                               .tool_iterations = 13,
                                                               .display_title = "internal display only",
-                                                              .display_subagent_type = "explore"},
+                                                              .display_subagent_type = "explore",
+                                                              .launch_display = ava::agent::SubagentLaunchDisplay::normalized(
+                                                                  "MODEL_DISPLAY_SENTINEL", std::string_view("REASONING_SENTINEL"))},
                                                       .timed_out = true};
   auto const expected =
       R"({"schema_version":1,"job_id":"job_fixed","task_id":"task_fixed","parent_session_id":"parent_fixed","child_session_id":"child_fixed","delivery_id":"delivery_fixed","mode":"background","state":"completed","delivery_state":"acknowledged","was_promoted":true,"cancel_requested":true,"timed_out":true,"started_at":"started","updated_at":"updated","promoted_at":null,"cancel_requested_at":"cancel-requested","terminal_at":null,"delivery_pending_at":"delivery-pending","last_delivery_attempt_at":null,"delivery_acknowledged_at":"delivery-acknowledged","delivery_attempts":7,"summary_truncated":true,"error_truncated":false,"stop_reason_truncated":true,"provider_iterations":11,"tool_calls":12,"tool_iterations":13,"result":{"status":"completed","summary":"fixed summary"}})";
   auto const encoded = ava::agent::public_job_snapshot_json(snapshot, ava::agent::PublicJobContent::IncludeTerminalResult);
+  auto const listed = ava::agent::public_job_list_json({snapshot});
   expect(encoded == expected && encoded.find("display_title") == std::string::npos && encoded.find("internal display only") == std::string::npos &&
-             encoded.find("\"title\"") == std::string::npos && encoded.find("explore") == std::string::npos,
+             encoded.find("\"title\"") == std::string::npos && encoded.find("explore") == std::string::npos &&
+             encoded.find("MODEL_DISPLAY_SENTINEL") == std::string::npos && encoded.find("REASONING_SENTINEL") == std::string::npos &&
+             listed.find("MODEL_DISPLAY_SENTINEL") == std::string::npos && listed.find("REASONING_SENTINEL") == std::string::npos,
          "exact schema-version-1 public snapshot JSON retains every field, nullable value, counter, truncation flag, and terminal result shape while omitting internal display fields");
 
   std::array const modes{ava::agent::SubagentJobMode::Foreground, ava::agent::SubagentJobMode::Background};
@@ -1415,6 +1482,7 @@ void run_subagent_coordinator_tests()
   test_hidden_immediate_completion_publishes_once_after_visibility();
   test_process_locality_after_prior_coordinator_shutdown();
   test_owner_filter_wait_result_cancel_and_wire_contract();
+  test_launch_display_survives_coordinator_lifecycle_and_owner_checks();
   test_exact_v1_job_snapshot_and_enum_strings();
   test_foreground_promotion_cancel_and_interaction_gate();
   test_concurrent_state_transition_matrices();

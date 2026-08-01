@@ -19,6 +19,7 @@ add_library(ava_agent
   "subagent_coordinator.cpp"
   "subagent_inspector.cpp"
   "subagent_job.cpp"
+  "subagent_launch.cpp"
   "tool_dispatch_bash.cpp"
   "tool_dispatch_common.cpp"
   "tool_dispatch_file.cpp"

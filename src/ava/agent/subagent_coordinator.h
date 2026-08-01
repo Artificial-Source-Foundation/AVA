@@ -54,6 +54,18 @@ enum class SubagentWaitMode
   TerminalOrPromotion,
 };
 
+// Coordinator-owned launch request. Private launch presentation crosses the
+// ownership boundary here and never enters BackgroundJobStartOptions/registry.
+struct SubagentCoordinatorStartRequest
+{
+  std::string parent_session_id;
+  SubagentJobMode mode = SubagentJobMode::Foreground;
+  BackgroundJobStartOptions job;
+  SubagentLaunchDisplay launch_display = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 // Owns foreground-only frontend callbacks. Promotion reserves this gate before
 // changing coordinator state, preventing a new callback from racing promotion.
 class SubagentInteractionGate final : public std::enable_shared_from_this<SubagentInteractionGate>
@@ -116,6 +128,10 @@ class SubagentCoordinator final
   SubagentCoordinator(SubagentCoordinator&&) = delete;
   SubagentCoordinator& operator=(SubagentCoordinator&&) = delete;
 
+  [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start(SubagentCoordinatorStartRequest request, BackgroundJobWorker worker,
+                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr,
+                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
+  // Compatibility surface for callers with no private launch presentation.
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start(std::string parent_session_id, SubagentJobMode mode, BackgroundJobStartOptions options,
                                                                         BackgroundJobWorker worker,
                                                                         std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr,

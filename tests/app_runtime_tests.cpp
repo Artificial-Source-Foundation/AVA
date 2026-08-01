@@ -33,6 +33,7 @@ void run_app_runtime_tests()
   test_app_runtime_plugin_install_remove_commands();
   test_app_context_reports_lsp_config_load_errors();
   test_app_run_prompt_isolates_ambient_extensions();
+  test_app_run_prompt_sources_private_launch_display_from_runtime_invocation();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_expands_file_references();
   test_app_run_prompt_sends_imported_image_attachment();

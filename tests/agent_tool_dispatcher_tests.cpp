@@ -63,6 +63,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1451,7 +1452,13 @@ void test_task_mode_and_job_tool_controls()
     }
   };
   auto state = std::make_shared<WorkerState>();
-  auto started = coordinator->start_background("owner", {.child_session_id = "child_job_tool"}, [state](auto const& context) { return state->run(context); });
+  auto started = coordinator->start(
+      ava::agent::SubagentCoordinatorStartRequest{.parent_session_id = "owner",
+                                                   .mode = ava::agent::SubagentJobMode::Background,
+                                                   .job = {.child_session_id = "child_job_tool"},
+                                                   .launch_display = ava::agent::SubagentLaunchDisplay::normalized(
+                                                       "MODEL_JOB_SENTINEL", std::string_view("REASONING_JOB_SENTINEL"))},
+      [state](auto const& context) { return state->run(context); });
   expect(started.has_value(), "job dispatcher fixture starts owned job");
   if (!started)
     return;
@@ -1474,7 +1481,9 @@ void test_task_mode_and_job_tool_controls()
   expect(list && list->success && list->result_text.find(job_id) != std::string::npos && list->result_text.find("safe terminal summary") == std::string::npos &&
              status && status->success && status->result_text.find("\"state\":\"running\"") != std::string::npos && timed && timed->success &&
              timed->result_text.find("\"timed_out\":true") != std::string::npos && not_ready && !not_ready->success &&
-             not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success,
+             not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success &&
+             list->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos && status->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos &&
+             timed->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos && not_ready->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos,
          "job tool shares bounded snapshots, strict parsing, timeout snapshots, and stable not-ready status");
 
   ava::agent::ToolDispatcher other_owner(ava::tools::ToolContext{.workspace_dir = workspace, .session_id = "other"},
@@ -1491,7 +1500,9 @@ void test_task_mode_and_job_tool_controls()
   auto completed = coordinator->wait("owner", job_id, std::chrono::seconds(1));
   auto terminal_result = job_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "job_terminal", .name = "job", .arguments_json = "{\"action\":\"result\",\"job_id\":\"" + job_id + "\"}"});
-  expect(completed && terminal_result && terminal_result->success && terminal_result->result_text.find("safe terminal summary") != std::string::npos,
+  expect(completed && terminal_result && terminal_result->success && terminal_result->result_text.find("safe terminal summary") != std::string::npos &&
+             terminal_result->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos &&
+             terminal_result->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos,
          "job result includes a completed bounded summary only after terminal completion");
 
   auto promoted_state = std::make_shared<WorkerState>();
@@ -1607,6 +1618,96 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
              denied_structured.find("/permissions diagnose permreq_") != std::string::npos,
          "tool dispatcher exposes actionable permission denial details in structured results");
   expect(!std::filesystem::exists(workspace / "main.cpp"), "denied plan mode write does not create source file");
+}
+
+void test_subagent_launch_display_normalization_and_validated_task_callback()
+{
+  auto const normalized = ava::agent::SubagentLaunchDisplay::normalized("  Configured\tModel  ", std::string_view("  high\n"));
+  auto const idempotent =
+      ava::agent::SubagentLaunchDisplay::normalized(normalized.model_display_name(), std::string_view(normalized.reasoning_label()));
+  auto const defaulted = ava::agent::SubagentLaunchDisplay::normalized("");
+  auto const controlled = ava::agent::SubagentLaunchDisplay::normalized("unsafe\x1b[31m", std::string_view("low\x7f"));
+  auto const malformed = ava::agent::SubagentLaunchDisplay::normalized(std::string("\xC3\x28", 2), std::string_view(std::string("\xC2\x9B", 2)));
+  auto const bounded = ava::agent::SubagentLaunchDisplay::normalized(std::string(200, 'm'), std::string_view(std::string(80, 'r')));
+  auto const utf8_bounded = ava::agent::SubagentLaunchDisplay::normalized(std::string(127, 'u') + "\xF0\x9F\x98\x80");
+  expect(normalized.model_display_name() == "Configured Model" && normalized.reasoning_label() == "high" && idempotent == normalized &&
+             defaulted.model_display_name().empty() && defaulted.reasoning_label() == "default" && controlled.model_display_name().empty() &&
+             controlled.reasoning_label() == "default" && malformed.model_display_name().empty() && malformed.reasoning_label() == "default" &&
+             bounded.model_display_name().size() == ava::agent::kMaxSubagentLaunchModelDisplayNameBytes &&
+             bounded.reasoning_label().size() == ava::agent::kMaxSubagentLaunchReasoningLabelBytes && utf8_bounded.model_display_name().size() == 127 &&
+             ava::core::json::is_valid_utf8(utf8_bounded.model_display_name()),
+         "subagent launch display normalization is idempotent, bounded, UTF-8/control-safe, defaulted, and never falls back to ids");
+
+  auto const root = create_empty_root("dispatcher-private-task-launch");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::tools::ToolContext allow_context{
+      .workspace_dir = workspace,
+      .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  std::vector<ava::agent::SubagentLaunchNotification> notifications;
+  std::size_t runs = 0;
+  ava::agent::ToolDispatchServices services{
+      .task_subagent_runner = [&runs](ava::agent::TaskSubagentRequest const& request) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+        ++runs;
+        return ava::agent::TaskSubagentResult{.task_id = "child",
+                                              .job_id = {},
+                                              .session_path = {},
+                                              .subagent_type = request.subagent_type,
+                                              .state = "completed",
+                                              .final_text = "done",
+                                              .stop_reason = "completed"};
+      },
+      .subagent_launch = {.display = normalized,
+                          .request_id = "request-exact",
+                          .correlation_id = "correlation-exact",
+                          .sink = [&notifications](ava::agent::SubagentLaunchNotification const& notification) { notifications.push_back(notification); }}};
+  ava::agent::ToolDispatcher dispatcher(allow_context, services);
+  auto valid = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "backend-call-exact", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(valid && valid->success && runs == 1 && notifications.size() == 1 && notifications.front().tool_call_id == "backend-call-exact" &&
+             notifications.front().request_id == "request-exact" && notifications.front().correlation_id == "correlation-exact" &&
+             notifications.front().display == normalized,
+         "validated built-in task callback carries exact backend/request/correlation identity and immutable display");
+
+  auto malformed_task = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "malformed", .name = "task", .arguments_json = R"({"description":"missing fields"})"});
+  auto similar = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "similar", .name = "task_similar", .arguments_json = "{}"});
+  auto job = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "job", .name = "job", .arguments_json = R"({"action":"list"})"});
+  ava::agent::ToolDispatcher excluded(allow_context, services, ava::agent::ToolVisibilityOptions{.excluded_tools = {"task"}});
+  auto excluded_task = excluded.dispatch(ava::agent::ProviderToolCall{
+      .id = "excluded", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(malformed_task && !malformed_task->success && similar && !similar->success && job && !job->success && excluded_task && !excluded_task->success &&
+             notifications.size() == 1 && runs == 1,
+         "malformed, unknown, similarly named, job, and excluded calls never emit private task launch metadata");
+
+  std::size_t denied_notifications = 0;
+  ava::tools::ToolContext deny_context{
+      .workspace_dir = workspace,
+      .auto_allow_deny_preflight = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Deny;
+      }};
+  auto denied_services = services;
+  denied_services.subagent_launch.sink = [&](auto const&) { ++denied_notifications; };
+  ava::agent::ToolDispatcher denied_dispatcher(deny_context, denied_services);
+  auto denied = denied_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "denied", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+
+  std::size_t failed_notifications = 0;
+  auto failed_services = services;
+  failed_services.task_subagent_runner = [](auto const&) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "start failed"));
+  };
+  failed_services.subagent_launch.sink = [&](auto const&) {
+    ++failed_notifications;
+    throw std::runtime_error("private sink failure");
+  };
+  ava::agent::ToolDispatcher failed_dispatcher(allow_context, failed_services);
+  auto failed = failed_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "failed", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(denied && !denied->success && denied_notifications == 1 && failed && !failed->success && failed_notifications == 1 && runs == 1,
+         "valid task permission denial and start failure retain launch metadata while a throwing private sink cannot affect execution");
 }
 
 void test_permission_denial_guidance_provider_only_channel()
@@ -1778,6 +1879,7 @@ void run_agent_tool_dispatcher_tests()
   test_tool_dispatcher_plugin_tool_inclusion_control();
   test_tool_dispatcher();
   test_task_persistent_deny_preflight_blocks_runner();
+  test_subagent_launch_display_normalization_and_validated_task_callback();
   test_task_mode_and_job_tool_controls();
   test_empty_worker_services_disable_interactive_tools();
   test_tool_dispatcher_plan_mode_denies_mutation();

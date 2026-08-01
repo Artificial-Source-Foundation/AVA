@@ -48,6 +48,8 @@ struct RunOptions
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   ava::event::RuntimeEventSink event_sink = nullptr;
+  // Private process-local task launch metadata; never enters RuntimeEvent/RPC.
+  ava::agent::SubagentLaunchSink on_subagent_launch = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;

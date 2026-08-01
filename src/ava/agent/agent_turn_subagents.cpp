@@ -208,6 +208,12 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
   child_options.on_tool_event = nullptr;
   child_options.on_tool_progress = nullptr;
   child_options.on_stream_event = nullptr;
+  // Preserve the child invocation's configured display for any future nested
+  // task ownership, but never route child launches into the parent's private
+  // observer. Recursive task/job tools are currently hidden below as well.
+  child_options.subagent_launch.sink = nullptr;
+  child_options.subagent_launch.request_id.clear();
+  child_options.subagent_launch.correlation_id.clear();
   child_options.take_steering_messages = nullptr;
   child_options.compact_context = nullptr;
   child_options.background_provider_factory = nullptr;
@@ -344,8 +350,12 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
       return completion;
     };
 
-    auto coordinated = options_.subagent_coordinator->start(store_.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
-                                                            std::move(start_options), std::move(worker), interaction_gate, std::move(*inspection_source));
+    auto coordinated = options_.subagent_coordinator->start(
+        SubagentCoordinatorStartRequest{.parent_session_id = store_.session_id(),
+                                        .mode = request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
+                                        .job = std::move(start_options),
+                                        .launch_display = run_state->child_options.subagent_launch.display},
+        std::move(worker), interaction_gate, std::move(*inspection_source));
     if (!coordinated)
     {
       auto error = std::move(coordinated.error());

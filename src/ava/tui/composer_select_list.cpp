@@ -122,6 +122,11 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
     line += label;
   if (!item.badge.empty())
     line += "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.badge) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
+  if (!item.non_searchable_suffix.empty())
+  {
+    line += "  " + std::string(detail::kSgrMuted) + "launch " + sanitize_terminal_text(item.non_searchable_suffix) + std::string(detail::kSgrReset) +
+            std::string(detail::kSgrComposerBg);
+  }
   if (!item.description.empty())
   {
     line +=

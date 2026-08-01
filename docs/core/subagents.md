@@ -42,6 +42,8 @@ Three control surfaces are available:
 
 The TUI child workspace is inspection-only. It projects bounded committed child User/Assistant messages and live/final availability, but has no composer or tool controls and does not expose reasoning, paths, session IDs, or full job IDs in the rendered workspace.
 
+While a task belongs to the current AVA process, its task card shows a separate `launch:` row, the `/jobs` selector shows a compact launch suffix, and the child workspace shows a `Launch:` line. This is AVA's configured launch request (the proven display model name when available plus the selected AVA thinking level), not provider-confirmed serving identity. Launch display metadata is presentation-only and process-local: it is excluded from task/job results, public `/jobs` text and JSON, RPC, events, sessions, exports, search, filtering, details queries, and clipboard text. Replayed or historical task cards therefore omit the row after restart.
+
 `status`/`show` can inspect running or terminal state. `wait` waits only for its finite timeout and may return a still-running snapshot; it does not cancel the job. `result` is available only after terminal completion. `cancel` is cooperative: it records a cancellation request and signals the worker, so the snapshot can briefly remain running before reaching `canceled`. Completed, failed, canceled, and interrupted work is terminal; repeat controls return the current terminal state or an invalid-transition/not-found error as appropriate.
 
 ## Promote foreground work

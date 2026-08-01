@@ -13,9 +13,9 @@ namespace {
 
 bool item_equal(SelectListItemView const& left, SelectListItemView const& right)
 {
-  return left.value == right.value && left.label == right.label && left.description == right.description && left.group == right.group &&
-         left.detail == right.detail && left.badge == right.badge && left.current == right.current && left.enabled == right.enabled &&
-         left.disabled_reason == right.disabled_reason;
+  return left.non_searchable_suffix == right.non_searchable_suffix && left.value == right.value && left.label == right.label &&
+         left.description == right.description && left.group == right.group && left.detail == right.detail && left.badge == right.badge &&
+         left.current == right.current && left.enabled == right.enabled && left.disabled_reason == right.disabled_reason;
 }
 
 bool selector_metadata_equal(SelectListView const& left, SelectListView const& right)
@@ -222,10 +222,12 @@ bool RuntimeSubagentWorkspaceController::refresh_selector()
     }
     else
     {
-      if (workspace_.title != current->label || workspace_.status != current->badge || workspace_.unavailable || workspace_.evicted)
+      if (workspace_.title != current->label || workspace_.status != current->badge || workspace_.launch_detail != current->non_searchable_suffix ||
+          workspace_.unavailable || workspace_.evicted)
       {
         workspace_.title = current->label;
         workspace_.status = current->badge;
+        workspace_.launch_detail = current->non_searchable_suffix;
         workspace_.unavailable = false;
         workspace_.evicted = false;
         changed = true;
@@ -299,6 +301,7 @@ bool RuntimeSubagentWorkspaceController::open_selected_workspace()
   workspace_ = {};
   workspace_.title = item.label;
   workspace_.status = item.badge;
+  workspace_.launch_detail = item.non_searchable_suffix;
   bool changed = true;
   changed = refresh_inspection() || changed;
   publish();

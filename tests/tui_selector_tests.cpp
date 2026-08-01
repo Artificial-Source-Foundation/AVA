@@ -1159,21 +1159,26 @@ void run_tui_selector_tests()
   auto selector_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
       make_subagent_snapshot("job_0123456789abcdef_old", "owner-a", {}, "explore", ava::agent::SubagentExecutionState::Completed, 0),
       make_subagent_snapshot("job_0123456789abcdef_new", "owner-a", "Audit parser", "general", ava::agent::SubagentExecutionState::Running, 3)};
+  selector_snapshots[1].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
   auto const jobs_selector = ava::app::subagent_selector_view(selector_snapshots);
   expect(jobs_selector.title == "Subagents" && jobs_selector.freeze_underlying_transcript_layout && jobs_selector.items.size() == 2 &&
              jobs_selector.items[0].label == "Audit parser" && jobs_selector.items[0].badge == "Running · Background" &&
              jobs_selector.items[0].description.find("type general") != std::string::npos &&
-             jobs_selector.items[0].description.find("tools 3") != std::string::npos && jobs_selector.items[1].label == "Explore subagent" &&
+             jobs_selector.items[0].description.find("tools 3") != std::string::npos &&
+             jobs_selector.items[0].non_searchable_suffix == "GPT-5.6 Terra · thinking high" && jobs_selector.items[1].label == "Explore subagent" &&
              jobs_selector.items[0].description != jobs_selector.items[1].description,
-         "subagent selector is latest-first with human fallback labels, status badges, metadata, and duplicate-safe refs");
+         "subagent selector is latest-first with human fallback labels, status badges, launch configuration, and duplicate-safe refs");
+  auto launch_filter = jobs_selector;
+  launch_filter.query = "GPT-5.6 Terra";
+  expect(ava::tui::filter_select_list_items(launch_filter).empty(), "subagent launch suffix is excluded from selector filter scoring");
   auto selector_screen_snapshot = ava::tui::ComposerSnapshot{};
   selector_screen_snapshot.select_list = jobs_selector;
-  selector_screen_snapshot.width = 88;
+  selector_screen_snapshot.width = 120;
   selector_screen_snapshot.height = 20;
   auto const selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(selector_screen_snapshot));
-  expect(selector_screen.find("job_0123456789abcdef_new") == std::string::npos && selector_screen.find("session_child_hidden") == std::string::npos &&
-             selector_screen.find("task_hidden") == std::string::npos,
-         "subagent selector renders no full job, task, or child-session identities");
+  expect(selector_screen.find("launch GPT-5.6 Terra") != std::string::npos && selector_screen.find("job_0123456789abcdef_new") == std::string::npos &&
+             selector_screen.find("session_child_hidden") == std::string::npos && selector_screen.find("task_hidden") == std::string::npos,
+         "subagent selector renders launch configuration but no full job, task, or child-session identities");
   auto unsafe_jobs_selector = ava::app::subagent_selector_view(
       {make_subagent_snapshot("x", "owner-a", "<task> /tmp/session_secret job_secret", "/tmp/private-type", ava::agent::SubagentExecutionState::Running, 0)});
   auto unsafe_selector_snapshot = ava::tui::ComposerSnapshot{};
@@ -1231,11 +1236,13 @@ void run_tui_selector_tests()
   ava::tui::SubagentWorkspaceView live_view;
   live_view.title = "Audit parser";
   live_view.status = "Running · Background";
+  live_view.launch_detail = "GPT-5.6 Terra · thinking high";
   live_view.messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Inspect the parser."},
                         {.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = "Committed result line."}};
   auto const live_lines = ava::tui::render_subagent_workspace(live_view, 64, 10);
   auto const live_screen = tui_test_support::join_visible_lines(live_lines);
-  expect(live_lines.size() == 10 && live_screen.find("Audit parser") != std::string::npos && live_screen.find("User") != std::string::npos &&
+  expect(live_lines.size() == 10 && live_screen.find("Audit parser") != std::string::npos &&
+             live_screen.find("Launch: GPT-5.6 Terra · thinking high") != std::string::npos && live_screen.find("User") != std::string::npos &&
              live_screen.find("Assistant") != std::string::npos && live_screen.find("Committed result line.") != std::string::npos &&
              live_screen.find("C cancel") != std::string::npos && live_screen.find("P promote") != std::string::npos &&
              live_screen.find("Type a message") == std::string::npos,
@@ -1247,12 +1254,15 @@ void run_tui_selector_tests()
              terminal_controls_screen.find("Esc jobs") != std::string::npos,
          "terminal workspace frames omit C/P controls from the footer");
   auto waiting_view = live_view;
+  waiting_view.launch_detail.clear();
   waiting_view.messages.clear();
   auto waiting_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(waiting_view, 20, 8));
   auto refresh_view = live_view;
+  refresh_view.launch_detail.clear();
   refresh_view.refresh_unavailable = true;
   auto refresh_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(refresh_view, 38, 8));
   auto unavailable_view = live_view;
+  unavailable_view.launch_detail.clear();
   unavailable_view.unavailable = true;
   auto unavailable_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(unavailable_view, 38, 8));
   auto evicted_view = unavailable_view;
@@ -1266,13 +1276,15 @@ void run_tui_selector_tests()
          "subagent workspace truthfully renders unavailable state at tiny sizes");
   expect(evicted_screen.find("no longer retained") != std::string::npos, "subagent retention eviction has a distinct truthful workspace state");
 
-  auto make_selector_item = [](std::string value, std::string label, std::string badge) {
+  auto make_selector_item = [](std::string value, std::string label, std::string badge, std::string launch) {
     ava::tui::SelectListItemView item;
     item.value = std::move(value);
     item.label = std::move(label);
     item.badge = std::move(badge);
+    item.non_searchable_suffix = std::move(launch);
     return item;
   };
+  std::string current_new_launch = "GPT-5.6 Terra · thinking default";
   auto controller_selector = [&]() {
     ava::tui::SelectListView view;
     view.title = "Subagents";
@@ -1280,7 +1292,8 @@ void run_tui_selector_tests()
     view.empty_text = "No matching subagents";
     view.footer_hint = "Enter open · Esc close";
     view.freeze_underlying_transcript_layout = true;
-    view.items = {make_selector_item("job-new", "New job", "Running · Background"), make_selector_item("job-old", "Old job", "Completed · Background")};
+    view.items = {make_selector_item("job-new", "New job", "Running · Background", current_new_launch),
+                  make_selector_item("job-old", "Old job", "Completed · Background", "thinking high")};
     return view;
   };
   std::size_t list_calls = 0;
@@ -1360,15 +1373,18 @@ void run_tui_selector_tests()
   enter_workspace.key = ava::tui::Key::Enter;
   auto opened_workspace = workspace_controller.handle_input(enter_workspace, time_zero);
   expect(opened_workspace.changed && workspace_controller.workspace_active() && workspace_controller.active_job_id() == "job-new" && inspect_calls == 1 &&
-             !inspected_generations.front() && controller_snapshot.subagent_workspace && controller_snapshot.subagent_workspace->messages.size() == 1,
-         "selector Enter opens the owner-bound frozen frame using hidden job identity");
+             !inspected_generations.front() && controller_snapshot.subagent_workspace && controller_snapshot.subagent_workspace->messages.size() == 1 &&
+             controller_snapshot.subagent_workspace->launch_detail == "GPT-5.6 Terra · thinking default",
+         "selector Enter opens the owner-bound frozen frame with launch metadata using hidden job identity");
+  current_new_launch = "GPT-5.6 Luna · thinking default";
   expect(!workspace_controller.poll(time_zero + std::chrono::milliseconds(149)) && inspect_calls == 1 && list_calls == 1,
          "subagent workspace never polls faster than 150ms");
   auto const live_changed = workspace_controller.poll(time_zero + std::chrono::milliseconds(150));
   expect(live_changed && inspect_calls == 2 && list_calls == 2 && inspected_generations.back() == std::optional<std::uint64_t>{1} &&
              workspace_controller.known_generation() == std::optional<std::uint64_t>{2} && controller_snapshot.subagent_workspace &&
-             controller_snapshot.subagent_workspace->messages.size() == 2,
-         "subagent polling passes known generations and publishes only newly committed messages");
+             controller_snapshot.subagent_workspace->messages.size() == 2 &&
+             controller_snapshot.subagent_workspace->launch_detail == "GPT-5.6 Luna · thinking default",
+         "subagent polling updates launch metadata while preserving hidden selection and publishes only newly committed messages");
   auto const bottom_offset = controller_snapshot.subagent_workspace ? controller_snapshot.subagent_workspace->scroll_offset : 0;
   ava::tui::InputEvent up_three;
   up_three.key = ava::tui::Key::ArrowUp;
@@ -1401,16 +1417,17 @@ void run_tui_selector_tests()
   ava::tui::InputEvent escape_workspace;
   escape_workspace.key = ava::tui::Key::Escape;
   auto escaped_to_selector = workspace_controller.handle_input(escape_workspace);
-  expect(
-      escaped_to_selector.changed && workspace_controller.selector_active() && controller_snapshot.select_list && controller_snapshot.select_list->query == "n",
-      "workspace Esc returns to the same selector query");
+  expect(escaped_to_selector.changed && workspace_controller.selector_active() && controller_snapshot.select_list &&
+             controller_snapshot.select_list->query == "n" &&
+             controller_snapshot.select_list->items[controller_snapshot.select_list->selected_item_index].value == "job-new",
+         "workspace Esc returns to the same selector query and hidden job selection after launch metadata refresh");
   static_cast<void>(workspace_controller.handle_input(enter_workspace));
   ava::tui::InputEvent next_job;
   next_job.key = ava::tui::Key::Tab;
   auto cycled = workspace_controller.handle_input(next_job);
   expect(cycled.changed && workspace_controller.active_job_id() == "job-old" && controller_snapshot.subagent_workspace &&
-             controller_snapshot.subagent_workspace->terminal,
-         "workspace Tab cycles by hidden job identity and opens the terminal frozen frame");
+             controller_snapshot.subagent_workspace->terminal && controller_snapshot.subagent_workspace->launch_detail == "thinking high",
+         "workspace Tab cycles launch metadata by hidden job identity and opens the terminal frozen frame");
   ava::tui::InputEvent cancel_job;
   cancel_job.key = ava::tui::Key::Character;
   cancel_job.character = 'C';

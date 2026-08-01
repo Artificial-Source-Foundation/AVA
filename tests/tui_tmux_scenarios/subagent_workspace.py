@@ -20,7 +20,7 @@ from tui_smoke_helpers import (
 
 
 def _assert_workspace_safe(screen: str, label: str, *, parent_card: bool = False) -> None:
-    forbidden = ["job_", "session_", "/tmp/", "<task", "</task", "call_task_live"]
+    forbidden = ["job_", "session_", "/tmp/", "<task", "</task", "call_task_live", "ava-tui-fake", "moonshot"]
     if parent_card:
         forbidden.extend(["arguments provided", "Inspect delegated fixture"])
     leaked = [value for value in forbidden if value in screen]
@@ -62,21 +62,30 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "start the live delegated workspace fixture")
     send_keys(tmux_exe, session, "Enter")
     wait_for_request_count(provider.request_log, 2, "background task and parent continuation requests", timeout=12.0)
-    wait_for(tmux_exe, session, r"Esc stop.*type a follow-up|type a follow-up", "active parent run before /jobs")
+    active_parent = wait_for(tmux_exe, session, r"Esc stop.*type a follow-up|type a follow-up", "active parent run before /jobs")
+    if "launch: AVA TUI Fake · thinking default" not in active_parent:
+        raise RuntimeError(f"live task card omitted launch configuration\nscreen:\n{active_parent}")
+    _assert_workspace_safe(active_parent, "active parent task card", parent_card=True)
 
     # Trailing ASCII whitespace must still open the exact active /jobs selector.
     send_literal(tmux_exe, session, "/jobs ")
     send_keys(tmux_exe, session, "Enter")
     selector = wait_for(tmux_exe, session, r"Search subagents", "live subagent selector during active parent run")
-    if "Running" not in selector or "Background" not in selector:
-        raise RuntimeError(f"live subagent selector omitted running/background metadata\nscreen:\n{selector}")
+    if "Running" not in selector or "Background" not in selector or "launch AVA TUI Fa" not in selector:
+        raise RuntimeError(f"live subagent selector omitted running/background launch metadata\nscreen:\n{selector}")
     _assert_workspace_safe(selector, "live subagent selector")
     save_evidence(ctx.root, "subagent-workspace-selector", selector)
 
     send_keys(tmux_exe, session, "Enter")
     live = wait_for(tmux_exe, session, r"Esc jobs.*Tab", "complete live child workspace frame")
-    if "Live workspace audit" not in live or "Inspect delegated fixture" not in live or "Type a message" in live or "Esc stop" in live:
-        raise RuntimeError(f"live child workspace retained parent composer chrome\nscreen:\n{live}")
+    if (
+        "Live workspace audit" not in live
+        or "Inspect delegated fixture" not in live
+        or "Launch: AVA TUI Fake · thinking default" not in live
+        or "Type a message" in live
+        or "Esc stop" in live
+    ):
+        raise RuntimeError(f"live child workspace retained parent composer chrome or omitted launch metadata\nscreen:\n{live}")
     if "Parent continued after background start" in live:
         raise RuntimeError(f"live child workspace rendered parent transcript output\nscreen:\n{live}")
     _assert_workspace_safe(live, "live child workspace")
@@ -122,6 +131,8 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
         raise RuntimeError(f"restored parent view omitted specialized task card title\nscreen:\n{restored}")
     if not re.search(r"\bGeneral\b", restored):
         raise RuntimeError(f"restored parent view omitted specialized task card type\nscreen:\n{restored}")
+    if "launch: AVA TUI Fake · thinking default" not in restored:
+        raise RuntimeError(f"restored parent view omitted task launch configuration\nscreen:\n{restored}")
     if re.search(r"[~+]\s+job\s+·\s+(?:list|status|wait|running)|job\s+·\s+(?:list|status|wait|running)", restored, re.IGNORECASE):
         raise RuntimeError(f"restored parent view exposed routine job polling plumbing\nscreen:\n{restored}")
     _assert_workspace_safe(restored, "restored parent view", parent_card=True)

@@ -48,6 +48,14 @@ std::vector<std::string> workspace_body(SubagentWorkspaceView const& view, std::
   else if (view.freeze_pending)
     append_notice("Final refresh pending; showing the last committed messages.");
 
+  if (!view.launch_detail.empty())
+  {
+    auto const first = lines.size();
+    append_wrapped(lines, view.launch_detail, width, "Launch: ");
+    for (auto index = first; index < lines.size(); ++index)
+      lines[index] = std::string(detail::kSgrMuted) + std::move(lines[index]) + std::string(detail::kSgrReset);
+  }
+
   if (!lines.empty() && !view.messages.empty())
     lines.emplace_back();
 

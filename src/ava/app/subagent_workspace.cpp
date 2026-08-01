@@ -35,6 +35,19 @@ std::string mode_label(ava::agent::SubagentJobMode mode)
   return mode == ava::agent::SubagentJobMode::Background ? "Background" : "Foreground";
 }
 
+std::string launch_display_text(ava::agent::SubagentLaunchDisplay const& display)
+{
+  std::string text = display.model_display_name();
+  auto const& reasoning = display.reasoning_label();
+  if (!reasoning.empty())
+  {
+    if (!text.empty())
+      text += " · ";
+    text += "thinking " + reasoning;
+  }
+  return text;
+}
+
 bool safe_display_metadata(std::string_view text)
 {
   return !text.empty() && text.find_first_not_of(' ') != std::string_view::npos && text.size() <= 120 && text.find('<') == std::string_view::npos &&
@@ -159,7 +172,8 @@ ava::tui::SelectListView subagent_selector_view(std::vector<ava::agent::Subagent
       append_detail(detail, "tools " + std::to_string(job.tool_calls));
     if (!refs[index].empty())
       append_detail(detail, "ref " + refs[index]);
-    view.items.push_back(ava::tui::SelectListItemView{.value = job.identity.job_id,
+    view.items.push_back(ava::tui::SelectListItemView{.non_searchable_suffix = launch_display_text(job.launch_display),
+                                                      .value = job.identity.job_id,
                                                       .label = display_title(job),
                                                       .description = std::move(detail),
                                                       .group = {},

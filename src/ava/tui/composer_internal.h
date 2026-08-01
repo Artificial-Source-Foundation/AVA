@@ -186,15 +186,26 @@ struct CompletionMatchCache
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TranscriptRenderedBlock
+{
+  std::vector<std::string> lines = {};
+  std::vector<bool> presentation_private_rows = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TranscriptLayout
 {
   std::vector<std::string> lines = {};
+  // Exact row-aligned presentation policy. Private rows remain in `lines` for
+  // screen geometry but are excluded from transcript search and extraction.
+  std::vector<bool> presentation_private_rows = {};
   std::vector<std::size_t> block_boundaries = {};
   std::vector<std::size_t> message_starts = {};
   std::vector<std::size_t> content_starts = {};
   std::vector<std::size_t> message_item_indices = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptViewportAnchor
@@ -260,7 +271,7 @@ struct TranscriptTailRenderCache
   std::size_t max_carry_source_bytes = 0;
   std::size_t incremental_updates = 0;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptLayoutCache
@@ -276,7 +287,7 @@ struct TranscriptLayoutCache
   mutable std::size_t visible_slice_count = 0;
   TranscriptTailRenderCache tail = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ScreenRowCache
@@ -289,7 +300,7 @@ struct ScreenRowCache
   std::size_t height = 0;
   bool valid = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
@@ -351,6 +362,8 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                         ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                         bool compact_spacing = false);
+[[nodiscard]] TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                                    ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing);
 [[nodiscard]] std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index,
                                                                            std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
                                                                            bool compact_spacing);

@@ -266,9 +266,12 @@ TranscriptSelectionExtractResult extract_transcript_selection_text(detail::Trans
   // Bound construction: stop once more than max_bytes would be required
   // (observe max_bytes+1 without retaining a truncated payload).
   auto const hard_limit = max_bytes;
+  bool emitted_row = false;
   for (std::size_t line = *start_abs; line <= *end_abs; ++line)
   {
     ++result.examined_rows;
+    if (line < layout.presentation_private_rows.size() && layout.presentation_private_rows[line])
+      continue;
     auto const plain = transcript_selection_plain_row(layout.lines[line]);
     auto const line_columns = transcript_selection_plain_columns(plain);
     auto col_start = line == *start_abs ? ordered.first.display_column : 0;
@@ -278,7 +281,7 @@ TranscriptSelectionExtractResult extract_transcript_selection_text(detail::Trans
     if (col_start > col_end)
       std::swap(col_start, col_end);
     auto slice = plain_slice(plain, col_start, col_end);
-    if (line > *start_abs)
+    if (emitted_row)
     {
       if (!append_bounded(result.text, "\n", hard_limit, result.oversize))
       {
@@ -291,6 +294,7 @@ TranscriptSelectionExtractResult extract_transcript_selection_text(detail::Trans
       result.text.clear();
       return result;
     }
+    emitted_row = true;
   }
   if (result.text.empty() && !result.oversize)
   {

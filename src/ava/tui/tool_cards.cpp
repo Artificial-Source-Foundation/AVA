@@ -1543,7 +1543,7 @@ std::string tool_primary_summary(ToolTimelineItem const& item, bool suppress_res
 
 }  // namespace
 
-std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, ToolPresentation inherited, bool suppress_result_summary)
+ToolCardRenderResult render_tool_card_rows(ToolTimelineItem const& item, std::size_t width, ToolPresentation inherited, bool suppress_result_summary)
 {
   if (task_job_card_is_quiet_poll(item))
     return {};
@@ -1593,8 +1593,10 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
   if (!primary_raw.empty())
     header += " " + std::string(kSgrDim) + "· " + primary_raw + std::string(kSgrReset);
   lines.push_back(fit_line_preserving_sgr(std::move(header), width));
+  auto const private_rows_first = lines.size();
   if (task_job.kind == TaskJobToolKind::Task)
     append_task_launch_lines(lines, task_job.launch_display, width);
+  auto const private_rows_past_last = lines.size();
 
   if (presentation != ToolPresentation::Compact)
   {
@@ -1676,7 +1678,15 @@ std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::siz
       line = "  " + std::move(line) + "  ";
     line = fit_line_preserving_sgr(std::move(line), outer_width);
   }
-  return lines;
+  std::vector<bool> presentation_private_rows(lines.size(), false);
+  std::fill(presentation_private_rows.begin() + static_cast<std::ptrdiff_t>(private_rows_first),
+            presentation_private_rows.begin() + static_cast<std::ptrdiff_t>(private_rows_past_last), true);
+  return ToolCardRenderResult{.lines = std::move(lines), .presentation_private_rows = std::move(presentation_private_rows)};
+}
+
+std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, ToolPresentation inherited, bool suppress_result_summary)
+{
+  return render_tool_card_rows(item, width, inherited, suppress_result_summary).lines;
 }
 
 std::vector<std::string> render_tool_card(ToolTimelineItem const& item, std::size_t width, bool global_details_visible, bool suppress_result_summary)

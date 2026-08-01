@@ -43,7 +43,7 @@ struct TranscriptSearchProjection
   std::vector<std::size_t> row_boundary_offsets;
   std::string default_detail;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptSearchUpdate

@@ -2247,13 +2247,16 @@ std::size_t full_thinking_rendered_line_count(TranscriptItem const& item, std::s
   return 0;
 }
 
-std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
-                                                      bool suppress_result_summary, bool compact_spacing)
+TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                     bool suppress_result_summary, bool compact_spacing)
 {
   if (item.tool)
-    return render_tool_card(*item.tool, width, tool_presentation, suppress_result_summary);
+  {
+    auto rendered = render_tool_card_rows(*item.tool, width, tool_presentation, suppress_result_summary);
+    return TranscriptRenderedBlock{.lines = std::move(rendered.lines), .presentation_private_rows = std::move(rendered.presentation_private_rows)};
+  }
   if (item.label == "you")
-    return render_user_block(text_model_or(item.text_model, item.text), width);
+    return TranscriptRenderedBlock{.lines = render_user_block(text_model_or(item.text_model, item.text), width)};
   if (item.label == "ava")
   {
     auto assistant_text = item.text;
@@ -2261,32 +2264,33 @@ std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item
       assistant_text = to_plain_text(item.text_model);
     auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
     auto const thinking_live = item.append_only_stream && !item.stream_id.empty() && !thinking_text.empty();
-    return render_assistant_block(assistant_text, item.meta, thinking_text, width, roomy_transcript_spacing(width, compact_spacing), item.thinking_expanded,
-                                  thinking_live);
+    return TranscriptRenderedBlock{.lines = render_assistant_block(assistant_text, item.meta, thinking_text, width,
+                                                                   roomy_transcript_spacing(width, compact_spacing), item.thinking_expanded, thinking_live)};
   }
   if (item.label == "thinking")
   {
     if (thinking_visible)
     {
       auto const thinking_live = item.append_only_stream && !item.stream_id.empty();
-      return render_thinking_block(text_model_or(item.text_model, item.text), width, item.thinking_expanded, thinking_live);
+      return TranscriptRenderedBlock{.lines = render_thinking_block(text_model_or(item.text_model, item.text), width, item.thinking_expanded, thinking_live)};
     }
     return {};
   }
   if (item.label == "compaction")
-    return render_compaction_block(text_model_or(item.text_model, item.text), width);
+    return TranscriptRenderedBlock{.lines = render_compaction_block(text_model_or(item.text_model, item.text), width)};
   if (item.label == "setup" && item.text.starts_with("! "))
   {
     auto const marker = tui_plain_output() ? std::string("!") : std::string(kSgrWarning) + "!" + std::string(kSgrReset);
     auto line = std::string("  ") + marker + " " + sanitize_terminal_text(item.text.substr(2));
-    return {fit_line_preserving_sgr(std::move(line), width)};
+    return TranscriptRenderedBlock{.lines = {fit_line_preserving_sgr(std::move(line), width)}};
   }
   if (item.label == "error")
   {
-    return render_error_block(text_model_or(item.text_model, item.text), item.meta, width, tool_presentation == ToolPresentation::Expanded);
+    return TranscriptRenderedBlock{
+        .lines = render_error_block(text_model_or(item.text_model, item.text), item.meta, width, tool_presentation == ToolPresentation::Expanded)};
   }
 
-  std::vector<std::string> lines;
+  TranscriptRenderedBlock block;
   auto text = text_model_or(item.text_model, item.text);
   if (text.empty())
   {
@@ -2299,10 +2303,16 @@ std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item
   {
     for (auto const& wrapped : wrap_transcript_text(part, width))
     {
-      lines.push_back(render_generic_line(wrapped, width));
+      block.lines.push_back(render_generic_line(wrapped, width));
     }
   }
-  return lines;
+  return block;
+}
+
+std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                      bool suppress_result_summary, bool compact_spacing)
+{
+  return render_transcript_item_block(item, width, tool_presentation, thinking_visible, suppress_result_summary, compact_spacing).lines;
 }
 
 }  // namespace
@@ -2365,19 +2375,29 @@ std::size_t restore_transcript_viewport_anchor(TranscriptViewportAnchor anchor, 
   return max_scroll_offset - std::min(desired_start, max_scroll_offset);
 }
 
-std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
-                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
 {
   if (item_index >= transcript.size() || suppress_adjacent_tool_result(transcript, item_index))
     return {};
-  auto block = render_transcript_item_lines(transcript[item_index], width, tool_presentation, thinking_visible, false, compact_spacing);
-  if (block.empty())
+  auto block = render_transcript_item_block(transcript[item_index], width, tool_presentation, thinking_visible, false, compact_spacing);
+  if (block.lines.empty())
     return block;
+  block.presentation_private_rows.resize(block.lines.size(), false);
 
   auto const context_run_size = context_tool_run_size(transcript, item_index);
   if (context_run_size >= 2 && (item_index == 0 || !is_context_gathering_tool(transcript[item_index - 1])))
-    block.insert(block.begin(), render_context_tool_group_heading(context_run_size, width));
+  {
+    block.lines.insert(block.lines.begin(), render_context_tool_group_heading(context_run_size, width));
+    block.presentation_private_rows.insert(block.presentation_private_rows.begin(), false);
+  }
   return block;
+}
+
+std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+{
+  return render_transcript_search_item(transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing).lines;
 }
 
 TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
@@ -2386,19 +2406,24 @@ TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& tra
   TranscriptLayout layout;
   for (std::size_t index = 0; index < transcript.size(); ++index)
   {
-    auto block = render_transcript_search_item_lines(transcript, index, width, tool_presentation, thinking_visible, compact_spacing);
-    if (block.empty())
+    auto block = render_transcript_search_item(transcript, index, width, tool_presentation, thinking_visible, compact_spacing);
+    if (block.lines.empty())
       continue;
 
     layout.block_boundaries.push_back(layout.lines.size());
     if (roomy_transcript_spacing(width, compact_spacing) && !layout.lines.empty() && starts_visual_group(transcript, index, thinking_visible))
+    {
       layout.lines.emplace_back();
+      layout.presentation_private_rows.push_back(false);
+    }
     layout.message_starts.push_back(layout.lines.size());
     layout.message_item_indices.push_back(index);
     auto const context_run_size = context_tool_run_size(transcript, index);
     auto const context_heading = context_run_size >= 2 && (index == 0 || !is_context_gathering_tool(transcript[index - 1]));
     layout.content_starts.push_back(layout.lines.size() + (context_heading ? 1 : 0));
-    layout.lines.insert(layout.lines.end(), block.begin(), block.end());
+    layout.lines.insert(layout.lines.end(), std::make_move_iterator(block.lines.begin()), std::make_move_iterator(block.lines.end()));
+    layout.presentation_private_rows.insert(layout.presentation_private_rows.end(), block.presentation_private_rows.begin(),
+                                            block.presentation_private_rows.end());
   }
   return layout;
 }

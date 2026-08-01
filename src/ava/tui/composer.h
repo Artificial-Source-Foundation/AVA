@@ -198,7 +198,7 @@ struct ComposerFrame
   std::vector<std::string> lines;
   std::vector<TerminalGraphicOverlay> graphics;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SlashCommandArgumentCompletion

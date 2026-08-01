@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
@@ -9,9 +10,26 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
+
+ava::tui::TranscriptItem private_launch_task_item()
+{
+  ava::tui::ToolTimelineItem tool{
+      .status = ava::tui::ToolTimelineStatus::Success,
+      .name = "task",
+      .argument_summary = "arguments provided",
+      .result_summary = "ok",
+      .arguments_json = R"({"description":"ordinary visible audit","subagent_type":"explore","mode":"foreground"})",
+      .result_json =
+          R"({"tool":"task","ok":true,"subagent_type":"explore","description":"ordinary visible audit","state":"completed","tool_calls":2,"task_result":"ordinary visible result"})",
+      .call_id = "call_private_launch_search",
+      .lifecycle = ava::tui::ToolLifecycleState::Complete};
+  tool.subagent_launch_display = ava::agent::SubagentLaunchDisplay::normalized("PRIVATE MODEL SEARCH TOKEN", std::string_view("private-thinking-token"));
+  return ava::tui::TranscriptItem{.tool = std::move(tool)};
+}
 
 void test_transcript_search_literal_and_sanitized_rendered_scope()
 {
@@ -477,6 +495,42 @@ void test_transcript_search_bounded_thinking_hidden_tail_and_generation()
   static_cast<void>(update);
 }
 
+void test_transcript_search_excludes_private_launch_rows_from_authoritative_projections()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.tool_presentation = ava::tui::ToolPresentation::Expanded;
+  snapshot.transcript = {private_launch_task_item(), ava::tui::TranscriptItem{.label = "ava", .text = "ordinary following assistant content"}};
+  constexpr auto width = std::size_t{32};
+  auto const layout = ava::tui::detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, snapshot.thinking_visible, false);
+  auto visible = tui_test_support::join_visible_lines(layout.lines);
+  std::erase_if(visible, [](unsigned char ch) { return ch == ' ' || ch == '\n'; });
+  auto const private_rows = static_cast<std::size_t>(std::ranges::count(layout.presentation_private_rows, true));
+
+  ava::tui::detail::TranscriptSearchProjectionCache cache;
+  static_cast<void>(cache.update_query("PRIVATE MODEL SEARCH TOKEN"));
+  static_cast<void>(cache.rebuild_all(snapshot, layout));
+  auto const model_matches = cache.matches();
+  static_cast<void>(cache.update_query("private-thinking-token"));
+  auto const thinking_matches = cache.matches();
+  static_cast<void>(cache.update_query("Explore"));
+  auto const ordinary_matches = cache.matches();
+  static_cast<void>(cache.update_query("ordinary following assistant"));
+  auto const following_matches = cache.matches();
+
+  snapshot.transcript[0].tool->subagent_launch_display =
+      ava::agent::SubagentLaunchDisplay::normalized("PRIVATE MUTATED MODEL TOKEN", std::string_view("mutated-private-thinking"));
+  static_cast<void>(cache.update_query("PRIVATE MUTATED MODEL TOKEN"));
+  static_cast<void>(cache.refresh_after_transcript_mutation(snapshot, width, snapshot.tool_presentation, snapshot.thinking_visible, false, 0, 0));
+  auto const mutated_matches = cache.matches();
+
+  expect(visible.find("PRIVATEMODELSEARCHTOKEN") != std::string::npos && private_rows >= 2 && layout.presentation_private_rows.size() == layout.lines.size() &&
+             model_matches.empty() && thinking_matches.empty() && ordinary_matches.size() == 1 && ordinary_matches.front().item_index == 0 &&
+             ordinary_matches.front().detail.find("PRIVATE MODEL SEARCH TOKEN") == std::string::npos && following_matches.size() == 1 &&
+             following_matches.front().item_index == 1 && mutated_matches.empty(),
+         "authoritative transcript search cache keeps wrapped task launch model/reasoning visible but omits every private row from initial and changed-suffix "
+         "projections, details, and matches while retaining ordinary card and following text");
+}
+
 void test_transcript_search_details_and_queries_are_bounded()
 {
   ava::tui::ComposerSnapshot snapshot;
@@ -509,5 +563,6 @@ void run_tui_transcript_search_tests()
   test_transcript_search_rebuilds_positive_shift_shortened_context_heading();
   test_transcript_search_realigns_context_metadata_before_later_tail_update();
   test_transcript_search_bounded_thinking_hidden_tail_and_generation();
+  test_transcript_search_excludes_private_launch_rows_from_authoritative_projections();
   test_transcript_search_details_and_queries_are_bounded();
 }

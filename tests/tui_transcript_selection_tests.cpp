@@ -1,11 +1,18 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/tui_test_support.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_selection_internal.h"
 #include "ava/tui/theme.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
+#include <unistd.h>
 
 namespace {
 
@@ -34,6 +41,21 @@ ava::tui::detail::TranscriptLayoutCache selection_cache(ava::tui::detail::Transc
 ava::tui::InputEvent mouse_event(ava::tui::Key key, std::size_t row, std::size_t column)
 {
   return ava::tui::InputEvent{.key = key, .mouse_column = column, .mouse_row = row};
+}
+
+ava::tui::TranscriptItem private_launch_selection_task()
+{
+  ava::tui::ToolTimelineItem tool{
+      .status = ava::tui::ToolTimelineStatus::Success,
+      .name = "task",
+      .argument_summary = "arguments provided",
+      .result_summary = "ok",
+      .arguments_json = R"({"description":"ordinary selectable header","subagent_type":"explore","mode":"foreground"})",
+      .result_json = R"({"tool":"task","ok":true,"subagent_type":"explore","description":"ordinary selectable header","state":"completed","tool_calls":1})",
+      .call_id = "call_private_launch_selection",
+      .lifecycle = ava::tui::ToolLifecycleState::Complete};
+  tool.subagent_launch_display = ava::agent::SubagentLaunchDisplay::normalized("PRIVATE MODEL SELECTION TOKEN", std::string_view("private-selection-thinking"));
+  return ava::tui::TranscriptItem{.tool = std::move(tool)};
 }
 
 template <typename ToggleTool, typename ToggleThinking>
@@ -77,6 +99,40 @@ void run_tui_transcript_selection_tests()
                  "c\ne\xCC\x81" &&
              extracted.examined_rows == 2,
          "transcript selection extracts stripped rendered rows with soft-wrap newlines and whole grapheme clusters");
+
+  auto private_snapshot = ava::tui::ComposerSnapshot{};
+  private_snapshot.transcript = {private_launch_selection_task(), ava::tui::TranscriptItem{.label = "ava", .text = "ordinary selectable following content"}};
+  auto const private_layout = ava::tui::detail::render_transcript_layout(private_snapshot.transcript, 32, ava::tui::ToolPresentation::Compact, true, true);
+  auto const first_private = std::ranges::find(private_layout.presentation_private_rows, true);
+  auto const private_count = static_cast<std::size_t>(std::ranges::count(private_layout.presentation_private_rows, true));
+  auto const following_position = std::ranges::find(private_layout.message_item_indices, std::size_t{1});
+  auto const following_layout_position = static_cast<std::size_t>(following_position - private_layout.message_item_indices.begin());
+  auto const following_line = private_layout.message_starts[following_layout_position];
+  auto const header_line = private_layout.message_starts.front();
+  auto const header_plain = ava::tui::transcript_selection_plain_row(private_layout.lines[header_line]);
+  auto const following_plain = ava::tui::transcript_selection_plain_row(private_layout.lines[following_line]);
+  auto const private_span = ava::tui::extract_transcript_selection_text(
+      private_layout,
+      TranscriptSelectionRange{
+          .anchor = *ava::tui::endpoint_for_absolute_line(private_layout, header_line, 0),
+          .focus = *ava::tui::endpoint_for_absolute_line(private_layout, following_line, ava::tui::transcript_selection_plain_columns(following_plain))},
+      64 * 1024);
+  auto const private_partial = ava::tui::extract_transcript_selection_text(
+      private_layout,
+      TranscriptSelectionRange{
+          .anchor = *ava::tui::endpoint_for_absolute_line(private_layout,
+                                                          static_cast<std::size_t>(first_private - private_layout.presentation_private_rows.begin()), 5),
+          .focus = *ava::tui::endpoint_for_absolute_line(private_layout, following_line, ava::tui::transcript_selection_plain_columns(following_plain))},
+      64 * 1024);
+  auto private_visible_compact = tui_test_support::join_visible_lines(private_layout.lines);
+  std::erase_if(private_visible_compact, [](unsigned char ch) { return ch == ' ' || ch == '\n'; });
+  expect(private_layout.presentation_private_rows.size() == private_layout.lines.size() && private_count >= 2 &&
+             private_span.text == header_plain + "\n" + following_plain && private_partial.text == following_plain &&
+             private_span.text.find("PRIVATE MODEL SELECTION TOKEN") == std::string::npos &&
+             private_span.text.find("private-selection-thinking") == std::string::npos &&
+             private_visible_compact.find("PRIVATEMODELSELECTIONTOKEN") != std::string::npos,
+         "rendered transcript selection traverses wrapped private launch rows but excludes their full and partial bytes without blank lines or accidental "
+         "joining while ordinary header and following content stay selectable");
 
   auto long_layout = ava::tui::detail::TranscriptLayout{
       .lines = {std::string(64 * 1024 + 1, 'x')}, .block_boundaries = {0, 1}, .message_starts = {0}, .content_starts = {0}, .message_item_indices = {0}};
@@ -440,5 +496,67 @@ void run_tui_transcript_selection_tests()
     auto const copy_frame = ava::tui::render_composer(copy_snapshot);
     expect(std::ranges::any_of(copy_frame, [](std::string const& line) { return strip_sgr(line).find("selection too large to copy") != std::string::npos; }),
            "oversize copy failure status is visible in the terminal frame");
+  }
+
+  // Production copy path over a frozen detached authority: geometry may cross the
+  // private row, but the OSC52 payload must be built only from ordinary rows.
+  {
+    ava::tui::ComposerSnapshot copy_snapshot;
+    copy_snapshot.width = 40;
+    copy_snapshot.height = 10;
+    copy_snapshot.transcript = {private_launch_selection_task()};
+    auto frozen_private_layout = ava::tui::detail::TranscriptLayout{.lines = {"ordinary header", "PRIVATE FROZEN LAUNCH", "ordinary following"},
+                                                                    .presentation_private_rows = {false, true, false},
+                                                                    .block_boundaries = {0, 3},
+                                                                    .message_starts = {0},
+                                                                    .content_starts = {0},
+                                                                    .message_item_indices = {1}};
+    auto frozen_private_cache = selection_cache(std::move(frozen_private_layout), 40);
+    ava::tui::RuntimeTranscriptSelectionState copy_state;
+    ava::tui::RuntimeDraftState copy_draft;
+    std::size_t copy_scroll = 0;
+    static_cast<void>(handle(copy_state, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), copy_snapshot, frozen_private_cache, &copy_draft, copy_scroll,
+                             never_toggle, never_toggle, /*frozen_to_live_shift=*/-1));
+    static_cast<void>(handle(copy_state, mouse_event(ava::tui::Key::MouseLeftDrag, 3, 20), copy_snapshot, frozen_private_cache, &copy_draft, copy_scroll,
+                             never_toggle, never_toggle, /*frozen_to_live_shift=*/-1));
+    static_cast<void>(handle(copy_state, mouse_event(ava::tui::Key::MouseLeftRelease, 3, 20), copy_snapshot, frozen_private_cache, &copy_draft, copy_scroll,
+                             never_toggle, never_toggle, /*frozen_to_live_shift=*/-1));
+    auto const copy_range = copy_state.range();
+    auto const expected_text =
+        copy_range ? ava::tui::extract_transcript_selection_text(frozen_private_cache.layout, *copy_range, 64 * 1024).text : std::string{};
+    auto const expected_sequence = ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence(expected_text);
+
+    auto* output = std::tmpfile();
+    auto const saved_stdout = output ? dup(STDOUT_FILENO) : -1;
+    auto redirected = saved_stdout >= 0 && std::fflush(stdout) == 0 && dup2(fileno(output), STDOUT_FILENO) >= 0;
+    auto copied = false;
+    if (redirected)
+      copied = copy_state.copy_selection(copy_snapshot, frozen_private_cache);
+    if (saved_stdout >= 0)
+    {
+      static_cast<void>(std::fflush(stdout));
+      static_cast<void>(dup2(saved_stdout, STDOUT_FILENO));
+      static_cast<void>(close(saved_stdout));
+    }
+    std::string captured;
+    if (output)
+    {
+      if (std::fflush(output) == 0 && std::fseek(output, 0, SEEK_END) == 0)
+      {
+        auto const size = std::ftell(output);
+        if (size >= 0 && std::fseek(output, 0, SEEK_SET) == 0)
+        {
+          captured.resize(static_cast<std::size_t>(size));
+          if (!captured.empty() && std::fread(captured.data(), 1, captured.size(), output) != captured.size())
+            captured.clear();
+        }
+      }
+      static_cast<void>(std::fclose(output));
+    }
+
+    expect(copy_range && expected_sequence && expected_text.find("rdinary header") != std::string::npos &&
+               expected_text.find("ordinary following") != std::string::npos && expected_text.find("PRIVATE FROZEN LAUNCH") == std::string::npos && copied &&
+               copy_snapshot.status == "copied selection to clipboard" && captured == *expected_sequence,
+           "frozen detached selection copy emits an OSC52 payload containing ordinary cross-row text but no private launch bytes");
   }
 }

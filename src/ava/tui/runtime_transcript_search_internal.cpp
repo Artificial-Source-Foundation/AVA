@@ -172,9 +172,10 @@ std::optional<std::size_t> projection_match_offset(TranscriptSearchProjection co
 }
 
 TranscriptSearchProjection build_projection_from_lines(ComposerSnapshot const& snapshot, std::size_t item_index, std::vector<std::string> const& lines,
-                                                       std::size_t start = 0, std::size_t end = std::numeric_limits<std::size_t>::max())
+                                                       std::vector<bool> const& presentation_private_rows, std::size_t start = 0,
+                                                       std::size_t end = std::numeric_limits<std::size_t>::max())
 {
-  TranscriptSearchProjection projection{.available = true,
+  TranscriptSearchProjection projection{.available = false,
                                         .context_gathering = context_gathering_item(snapshot.transcript[item_index]),
                                         .identity = match_identity(snapshot.transcript[item_index]),
                                         .searchable_text = {},
@@ -186,6 +187,8 @@ TranscriptSearchProjection build_projection_from_lines(ComposerSnapshot const& s
   bool first_row = true;
   for (auto line_index = start; line_index < end; ++line_index)
   {
+    if (line_index < presentation_private_rows.size() && presentation_private_rows[line_index])
+      continue;
     auto line = trim_horizontal_space(strip_terminal_sequences(lines[line_index]));
     if (snapshot.transcript[item_index].tool && line.starts_with("│"))
       line = trim_horizontal_space(line.substr(std::string_view("│").size()));
@@ -198,6 +201,7 @@ TranscriptSearchProjection build_projection_from_lines(ComposerSnapshot const& s
     }
     projection.searchable_text += line;
     projection.unspaced_searchable_text += line;
+    projection.available = true;
     first_row = false;
   }
   projection.default_detail = bound_utf8_detail(std::move(projection.default_detail));
@@ -220,7 +224,7 @@ TranscriptSearchProjection build_projection(ComposerSnapshot const& snapshot, Tr
         end = next_boundary;
     }
   }
-  return build_projection_from_lines(snapshot, item_index, layout.lines, start, end);
+  return build_projection_from_lines(snapshot, item_index, layout.lines, layout.presentation_private_rows, start, end);
 }
 
 std::string relevant_detail(TranscriptSearchProjection const& projection, std::string_view query, std::size_t match_offset)
@@ -346,12 +350,12 @@ void TranscriptSearchProjectionCache::rebuild_affected_direct(ComposerSnapshot c
     for (auto item_index = std::min(interval.first, past_last); item_index < past_last; ++item_index)
     {
       auto const context_run_offset = projections_[item_index].context_run_offset;
-      auto const lines = render_transcript_search_item_lines(snapshot.transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing);
+      auto const block = render_transcript_search_item(snapshot.transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing);
       ++authoritative_mutation_item_render_count_;
-      if (lines.empty())
+      if (block.lines.empty())
         continue;
       ++layout_position_visit_count_;
-      projections_[item_index] = build_projection_from_lines(snapshot, item_index, lines);
+      projections_[item_index] = build_projection_from_lines(snapshot, item_index, block.lines, block.presentation_private_rows);
       projections_[item_index].context_run_offset = context_run_offset;
       ++projection_build_count_;
     }

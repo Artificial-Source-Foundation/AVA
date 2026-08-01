@@ -72,9 +72,9 @@ template <typename F>
   });
 #else
   if constexpr (std::is_invocable_v<F&&, std::stop_token>)
-    std::jthread([f = std::forward<F>(f)](std::stop_token st) mutable {
-      std::forward<F>(f)(std::move(st)));
-    };
+    return std::jthread([f = std::forward<F>(f)](std::stop_token st) mutable {
+      std::forward<F>(f)(std::move(st));
+    });
   else
     std::jthread(std::forward<F>(f)());
 #endif
@@ -96,7 +96,7 @@ template <typename F>
     std::forward<F>(f)();
   });
 #else
-  return std::thread(std::forward<F>(f)());
+  return std::thread(std::forward<F>(f));
 #endif
 }
 
@@ -116,7 +116,7 @@ template <typename F>
     return std::forward<F>(f)();
   });
 #else
-  return std::async(std::launch::async, std::forward<F>(f)());
+  return std::async(std::launch::async, std::forward<F>(f));
 #endif
 }
 

@@ -238,6 +238,9 @@ std::vector<SelectListContentRow> select_list_content_rows(SelectListView const&
     return rows;
   };
 
+  auto const baseline_rows = build_rows(selected_visible);
+  auto const baseline_shows_selected_launch =
+      std::ranges::any_of(baseline_rows, [selected](SelectListContentRow const& row) { return row.item_index == selected && row.launch_detail; });
   auto start = selected_visible;
   // At most row_budget preceding logical items can fit because every item owns
   // a primary row. Rebuild only this bounded candidate window so the first
@@ -245,9 +248,11 @@ std::vector<SelectListContentRow> select_list_content_rows(SelectListView const&
   for (auto attempts = std::size_t{0}; start > 0 && attempts < row_budget; ++attempts)
   {
     auto candidate = build_rows(start - 1);
-    auto const selected_visible_in_candidate =
+    auto const candidate_shows_selected_primary =
         std::ranges::any_of(candidate, [selected](SelectListContentRow const& row) { return row.item_index == selected && !row.launch_detail; });
-    if (!selected_visible_in_candidate)
+    auto const candidate_shows_selected_launch =
+        std::ranges::any_of(candidate, [selected](SelectListContentRow const& row) { return row.item_index == selected && row.launch_detail; });
+    if (!candidate_shows_selected_primary || (baseline_shows_selected_launch && !candidate_shows_selected_launch))
       break;
     --start;
   }

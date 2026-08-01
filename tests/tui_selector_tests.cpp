@@ -1291,6 +1291,17 @@ void run_tui_selector_tests()
   expect(tiny_two_rows.size() == 5 && tiny_one_row.size() == 4 && tiny_primary_hit == std::size_t{1} && tiny_launch_hit == std::size_t{1} &&
              one_row_hit == std::size_t{1} && tui_test_support::join_visible_lines(tiny_one_row).find(duplicate_ref_1) != std::string::npos,
          "secondary launch rows preserve one logical hit target and keep the selected primary row visible when the tiny viewport has only one content row");
+
+  auto mixed_suffix_selector = duplicate_selector;
+  mixed_suffix_selector.items[0].non_searchable_suffix.clear();
+  auto const mixed_suffix_rows = ava::tui::detail::render_select_list_modal(mixed_suffix_selector, 88, 5);
+  auto const mixed_suffix_screen = tui_test_support::join_visible_lines(mixed_suffix_rows);
+  auto const mixed_primary_hit = ava::tui::detail::select_list_item_for_modal_row(mixed_suffix_selector, 2, 88, 5);
+  auto const mixed_launch_hit = ava::tui::detail::select_list_item_for_modal_row(mixed_suffix_selector, 3, 88, 5);
+  expect(mixed_suffix_rows.size() == 5 && mixed_suffix_screen.find(duplicate_ref_0) == std::string::npos &&
+             mixed_suffix_screen.find(duplicate_ref_1) != std::string::npos && mixed_suffix_screen.find("Launch: GPT-5.6 Terra") != std::string::npos &&
+             mixed_primary_hit == std::size_t{1} && mixed_launch_hit == std::size_t{1},
+         "two-row backfill preserves the selected primary and launch span when a preceding logical item has no launch suffix");
   auto unsafe_jobs_selector = ava::app::subagent_selector_view(
       {make_subagent_snapshot("x", "owner-a", "<task> /tmp/session_secret job_secret", "/tmp/private-type", ava::agent::SubagentExecutionState::Running, 0)});
   auto unsafe_selector_snapshot = ava::tui::ComposerSnapshot{};

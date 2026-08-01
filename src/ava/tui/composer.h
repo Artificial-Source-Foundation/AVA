@@ -403,6 +403,9 @@ struct SelectListItemView
 {
   // Rendered as a muted suffix but deliberately omitted from selector matching.
   std::string non_searchable_suffix = {};
+  // Renderer-reserved authority/status text. When present, the primary row
+  // truncates the label before this field and optional details.
+  std::string priority_suffix = {};
   std::string value;
   std::string label;
   std::string description;

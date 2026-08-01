@@ -65,7 +65,7 @@ std::optional<int> item_match_score(SelectListView const& view, SelectListItemVi
     return 0;
   std::optional<int> best;
   for (auto const field : {std::string_view(item.label), std::string_view(item.description), std::string_view(item.value), std::string_view(item.group),
-                           std::string_view(item.detail), std::string_view(item.badge)})
+                           std::string_view(item.detail), std::string_view(item.badge), std::string_view(item.priority_suffix)})
   {
     auto score = fuzzy_match_score(view.query, field);
     if (!score)
@@ -120,8 +120,21 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
     line += std::string(detail::kSgrBold) + label + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   else
     line += label;
-  if (!item.badge.empty())
+  if (!item.priority_suffix.empty())
+  {
+    auto const priority = "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.priority_suffix) + std::string(detail::kSgrReset) +
+                          std::string(detail::kSgrComposerBg);
+    auto const content_width = width > 4 ? width - 4 : width;
+    auto const priority_width = detail::terminal_text_columns(priority);
+    auto const trailing_reserve = !item.description.empty() || !item.detail.empty() || !item.enabled ? std::size_t{3} : std::size_t{0};
+    auto const reserved_width = priority_width + trailing_reserve;
+    line = detail::fit_line_preserving_sgr(std::move(line), content_width > reserved_width ? content_width - reserved_width : std::size_t{0});
+    line += priority;
+  }
+  else if (!item.badge.empty())
+  {
     line += "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.badge) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
+  }
   if (!item.description.empty())
   {
     line +=
@@ -195,37 +208,50 @@ std::vector<SelectListContentRow> select_list_content_rows(SelectListView const&
   if (matches.empty())
     return {};
   auto const selected = clamp_select_list_selection(view, view.selected_item_index);
+  auto const selected_match = std::ranges::find(matches, selected);
+  auto const selected_visible = selected_match == matches.end() ? std::size_t{0} : static_cast<std::size_t>(selected_match - matches.begin());
 
-  std::vector<SelectListContentRow> all_rows;
-  all_rows.reserve(matches.size() * 2);
-  std::string last_group;
-  for (auto const item_index : matches)
+  auto build_rows = [&](std::size_t start) {
+    std::vector<SelectListContentRow> rows;
+    rows.reserve(row_budget);
+    std::string last_group;
+    for (auto visible = start; visible < matches.size() && rows.size() < row_budget; ++visible)
+    {
+      auto const item_index = matches[visible];
+      auto const& item = view.items[item_index];
+      auto const needs_heading = !item.group.empty() && (visible == start || item.group != last_group);
+      if (needs_heading)
+      {
+        auto const rows_remaining = row_budget - rows.size();
+        if (rows_remaining >= 2)
+          rows.push_back(SelectListContentRow{.item_index = std::nullopt, .group = item.group});
+        else if (!rows.empty())
+          break;
+      }
+      if (rows.size() >= row_budget)
+        break;
+      rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}});
+      if (!item.non_searchable_suffix.empty() && rows.size() < row_budget)
+        rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}, .launch_detail = true});
+      last_group = item.group;
+    }
+    return rows;
+  };
+
+  auto start = selected_visible;
+  // At most row_budget preceding logical items can fit because every item owns
+  // a primary row. Rebuild only this bounded candidate window so the first
+  // visible grouped item can synthesize its heading without scanning all rows.
+  for (auto attempts = std::size_t{0}; start > 0 && attempts < row_budget; ++attempts)
   {
-    auto const& item = view.items[item_index];
-    if (!item.group.empty() && item.group != last_group)
-      all_rows.push_back(SelectListContentRow{.item_index = std::nullopt, .group = item.group});
-    all_rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}});
-    if (!item.non_searchable_suffix.empty())
-      all_rows.push_back(SelectListContentRow{.item_index = item_index, .group = {}, .launch_detail = true});
-    last_group = item.group;
+    auto candidate = build_rows(start - 1);
+    auto const selected_visible_in_candidate =
+        std::ranges::any_of(candidate, [selected](SelectListContentRow const& row) { return row.item_index == selected && !row.launch_detail; });
+    if (!selected_visible_in_candidate)
+      break;
+    --start;
   }
-  if (all_rows.size() <= row_budget)
-    return all_rows;
-
-  auto const selected_primary =
-      std::ranges::find_if(all_rows, [selected](SelectListContentRow const& row) { return row.item_index == selected && !row.launch_detail; });
-  auto const selected_row = selected_primary == all_rows.end() ? std::size_t{0} : static_cast<std::size_t>(selected_primary - all_rows.begin());
-  auto selected_past_last = selected_row + 1;
-  if (selected_past_last < all_rows.size() && all_rows[selected_past_last].item_index == selected && all_rows[selected_past_last].launch_detail)
-    ++selected_past_last;
-
-  auto const selected_span = selected_past_last - selected_row;
-  auto start = selected_span > row_budget ? selected_row : (selected_past_last > row_budget ? selected_past_last - row_budget : std::size_t{0});
-  if (start < selected_row && all_rows[start].launch_detail)
-    ++start;
-  auto past_last = std::min(all_rows.size(), start + row_budget);
-  while (past_last > start && !all_rows[past_last - 1].item_index) --past_last;
-  return std::vector<SelectListContentRow>(all_rows.begin() + static_cast<std::ptrdiff_t>(start), all_rows.begin() + static_cast<std::ptrdiff_t>(past_last));
+  return build_rows(start);
 }
 
 std::string character_text(InputEvent const& event)

@@ -165,20 +165,23 @@ ava::tui::SelectListView subagent_selector_view(std::vector<ava::agent::Subagent
     auto const index = reverse_index - 1;
     auto const& job = snapshots[index].job;
     std::string detail;
-    if (!refs[index].empty())
-      append_detail(detail, "ref " + refs[index]);
     auto const subagent_type = sanitize_inline_text(job.display_subagent_type);
     if (safe_display_metadata(subagent_type))
       append_detail(detail, "type " + subagent_type);
     if (job.tool_calls > 0)
       append_detail(detail, "tools " + std::to_string(job.tool_calls));
+    auto const status = execution_label(job.execution) + " · " + mode_label(job.mode);
+    auto priority_suffix = status;
+    if (!refs[index].empty())
+      append_detail(priority_suffix, "ref " + refs[index]);
     view.items.push_back(ava::tui::SelectListItemView{.non_searchable_suffix = launch_display_text(job.launch_display),
+                                                      .priority_suffix = std::move(priority_suffix),
                                                       .value = job.identity.job_id,
                                                       .label = display_title(job),
                                                       .description = std::move(detail),
                                                       .group = {},
                                                       .detail = {},
-                                                      .badge = execution_label(job.execution) + " · " + mode_label(job.mode),
+                                                      .badge = status,
                                                       .current = false,
                                                       .enabled = true,
                                                       .disabled_reason = {}});

@@ -103,6 +103,52 @@ void run_tui_selector_tests()
       expect(hit && *hit == 2, "model selector mouse hit-testing shares the exact required-size rendered row window");
     }
   }
+  ava::tui::SelectListView grouped_model_view;
+  grouped_model_view.title = "Select model";
+  grouped_model_view.placeholder = "Search models";
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    ava::tui::SelectListItemView item;
+    item.value = "model-" + std::to_string(index);
+    item.label = "Grouped model " + std::to_string(index);
+    item.group = "OpenAI";
+    grouped_model_view.items.push_back(std::move(item));
+  }
+  grouped_model_view.selected_item_index = 6;
+  auto const grouped_rows = ava::tui::detail::render_select_list_modal(grouped_model_view, 88, 8);
+  auto const grouped_heading = std::ranges::find_if(grouped_rows, [](std::string const& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; });
+  auto const grouped_selected = std::ranges::find_if(grouped_rows, [](std::string const& line) {
+    auto const plain = strip_sgr(line);
+    return plain.find("›") != std::string::npos && plain.find("Grouped model 6") != std::string::npos;
+  });
+  auto const grouped_selected_hit =
+      grouped_selected == grouped_rows.end()
+          ? std::optional<std::size_t>{}
+          : ava::tui::detail::select_list_item_for_modal_row(grouped_model_view, static_cast<std::size_t>(grouped_selected - grouped_rows.begin()), 88, 8);
+  auto const grouped_tiny_rows = ava::tui::detail::render_select_list_modal(grouped_model_view, 88, 4);
+  auto const grouped_tiny_screen = tui_test_support::join_visible_lines(grouped_tiny_rows);
+  auto const grouped_tiny_hit = ava::tui::detail::select_list_item_for_modal_row(grouped_model_view, 2, 88, 4);
+  expect(grouped_rows.size() == 8 && grouped_heading != grouped_rows.end() && grouped_selected != grouped_rows.end() && grouped_heading < grouped_selected &&
+             grouped_selected_hit == std::size_t{6} && grouped_tiny_rows.size() == 4 && grouped_tiny_screen.find("Grouped model 6") != std::string::npos &&
+             grouped_tiny_screen.find("OpenAI") == std::string::npos && grouped_tiny_hit == std::size_t{6},
+         "grouped selectors synthesize the first visible group heading for deep selections while one-content-row modals prioritize the selected item");
+
+  ava::tui::SelectListView generic_parity_view;
+  generic_parity_view.title = "Keybindings";
+  ava::tui::SelectListItemView generic_parity_item;
+  generic_parity_item.value = "cursor-up";
+  generic_parity_item.label = "Move up";
+  generic_parity_item.description = "Arrow Up";
+  generic_parity_item.detail = "configurable";
+  generic_parity_item.badge = "Default";
+  generic_parity_view.items.push_back(std::move(generic_parity_item));
+  auto const generic_parity_rows = ava::tui::detail::render_select_list_modal(generic_parity_view, 88, 6);
+  auto const generic_parity_screen = tui_test_support::join_visible_lines(generic_parity_rows);
+  expect(generic_parity_view.items.front().priority_suffix.empty() &&
+             generic_parity_screen.find("Move up  Default  Arrow Up  configurable") != std::string::npos &&
+             ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 2, 88, 6) == std::size_t{0},
+         "generic keybinding-style selectors preserve label/badge/description/detail order and mouse mapping when no priority suffix is requested");
+
   auto reasoning_model = make_model("openai", "reasoning-policy", "Reasoning Policy", "gpt-5", true, {"off", "low", "medium", "high", "disabled", "blocked"});
   reasoning_model.reasoning_level_mappings.push_back(
       ava::config::ModelReasoningLevelMapping{.level = "blocked", .provider_level = std::nullopt, .supported = false});
@@ -1164,11 +1210,12 @@ void run_tui_selector_tests()
   auto const jobs_selector = ava::app::subagent_selector_view(selector_snapshots);
   expect(jobs_selector.title == "Subagents" && jobs_selector.freeze_underlying_transcript_layout && jobs_selector.items.size() == 2 &&
              jobs_selector.items[0].label == "Audit parser" && jobs_selector.items[0].badge == "Running · Background" &&
+             jobs_selector.items[0].priority_suffix.find("Running · Background · ref @") == 0 &&
              jobs_selector.items[0].description.find("type general") != std::string::npos &&
              jobs_selector.items[0].description.find("tools 3") != std::string::npos &&
              jobs_selector.items[0].non_searchable_suffix == "GPT-5.6 Terra · thinking high" && jobs_selector.items[1].label == "Explore subagent" &&
-             jobs_selector.items[0].description != jobs_selector.items[1].description,
-         "subagent selector is latest-first with human fallback labels, status badges, launch configuration, and duplicate-safe refs");
+             jobs_selector.items[0].priority_suffix != jobs_selector.items[1].priority_suffix,
+         "subagent selector is latest-first with human fallback labels, reserved status/refs, launch configuration, and optional details");
   auto launch_filter = jobs_selector;
   launch_filter.query = "GPT-5.6 Terra";
   expect(ava::tui::filter_select_list_items(launch_filter).empty(), "subagent launch suffix is excluded from selector filter scoring");
@@ -1177,12 +1224,12 @@ void run_tui_selector_tests()
   selector_screen_snapshot.width = 88;
   selector_screen_snapshot.height = 20;
   auto const selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(selector_screen_snapshot));
-  auto const description_ref = [](std::string const& description) {
-    auto const start = description.find("ref ");
-    auto const end = start == std::string::npos ? start : description.find(" · ", start);
-    return start == std::string::npos ? std::string{} : description.substr(start, end == std::string::npos ? end : end - start);
+  auto const priority_ref = [](std::string const& suffix) {
+    auto const start = suffix.find("ref ");
+    auto const end = start == std::string::npos ? start : suffix.find(" · ", start);
+    return start == std::string::npos ? std::string{} : suffix.substr(start, end == std::string::npos ? end : end - start);
   };
-  auto const primary_ref = description_ref(jobs_selector.items[0].description);
+  auto const primary_ref = priority_ref(jobs_selector.items[0].priority_suffix);
   expect(selector_screen.find("Launch: GPT-5.6 Terra") != std::string::npos && !primary_ref.empty() && selector_screen.find(primary_ref) != std::string::npos &&
              selector_screen.find("job_0123456789abcdef_new") == std::string::npos && selector_screen.find("session_child_hidden") == std::string::npos &&
              selector_screen.find("task_hidden") == std::string::npos,
@@ -1199,14 +1246,41 @@ void run_tui_selector_tests()
   duplicate_snapshot.width = 88;
   duplicate_snapshot.height = 12;
   auto const duplicate_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(duplicate_snapshot));
-  auto const duplicate_ref_0 = description_ref(duplicate_selector.items[0].description);
-  auto const duplicate_ref_1 = description_ref(duplicate_selector.items[1].description);
+  auto const duplicate_ref_0 = priority_ref(duplicate_selector.items[0].priority_suffix);
+  auto const duplicate_ref_1 = priority_ref(duplicate_selector.items[1].priority_suffix);
   expect(duplicate_selector.items.size() == 2 && duplicate_selector.items[0].label == duplicate_selector.items[1].label &&
              duplicate_selector.items[0].badge == duplicate_selector.items[1].badge &&
-             duplicate_selector.items[0].description != duplicate_selector.items[1].description && !duplicate_ref_0.empty() && !duplicate_ref_1.empty() &&
-             duplicate_ref_0 != duplicate_ref_1 && duplicate_screen.find(duplicate_ref_0) != std::string::npos &&
+             duplicate_selector.items[0].priority_suffix != duplicate_selector.items[1].priority_suffix && !duplicate_ref_0.empty() &&
+             !duplicate_ref_1.empty() && duplicate_ref_0 != duplicate_ref_1 && duplicate_screen.find(duplicate_ref_0) != std::string::npos &&
              duplicate_screen.find(duplicate_ref_1) != std::string::npos && duplicate_screen.find("Launch: GPT-5.6 Terra") != std::string::npos,
          "88-column duplicate title/status subagent rows remain visually distinct by short refs while each launch configuration remains visible");
+
+  std::string long_duplicate_title;
+  for (std::size_t index = 0; index < 30; ++index) long_duplicate_title += "界";
+  long_duplicate_title += " delegated duplicate audit";
+  auto long_duplicate_snapshots =
+      std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{make_subagent_snapshot("job_long_duplicate_alpha_0123456789", "owner-a", long_duplicate_title,
+                                                                                     "general", ava::agent::SubagentExecutionState::Running, 999),
+                                                              make_subagent_snapshot("job_long_duplicate_beta_9876543210", "owner-a", long_duplicate_title,
+                                                                                     "general", ava::agent::SubagentExecutionState::Running, 999)};
+  long_duplicate_snapshots[0].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  long_duplicate_snapshots[1].job.launch_display = long_duplicate_snapshots[0].job.launch_display;
+  auto const long_duplicate_selector = ava::app::subagent_selector_view(long_duplicate_snapshots);
+  auto const long_ref_0 = priority_ref(long_duplicate_selector.items[0].priority_suffix);
+  auto const long_ref_1 = priority_ref(long_duplicate_selector.items[1].priority_suffix);
+  for (auto const width : {std::size_t{80}, std::size_t{88}, std::size_t{92}})
+  {
+    auto const rows = ava::tui::detail::render_select_list_modal(long_duplicate_selector, width, 12);
+    auto const first_ref_row = std::ranges::find_if(rows, [&](std::string const& line) { return strip_sgr(line).find(long_ref_0) != std::string::npos; });
+    auto const second_ref_row = std::ranges::find_if(rows, [&](std::string const& line) { return strip_sgr(line).find(long_ref_1) != std::string::npos; });
+    auto const visible = tui_test_support::join_visible_lines(rows);
+    expect(!long_ref_0.empty() && !long_ref_1.empty() && long_ref_0 != long_ref_1 && first_ref_row != rows.end() && second_ref_row != rows.end() &&
+               strip_sgr(*first_ref_row).find("Running · Background") != std::string::npos &&
+               strip_sgr(*second_ref_row).find("Running · Background") != std::string::npos && visible.find("Launch: GPT-5.6 Terra") != std::string::npos &&
+               visible.find("job_long_duplicate_alpha_0123456789") == std::string::npos &&
+               visible.find("job_long_duplicate_beta_9876543210") == std::string::npos,
+           "80/88/92-column long UTF-8 duplicate subagent rows reserve status and distinct short refs before truncating titles and optional details");
+  }
 
   duplicate_selector.selected_item_index = 1;
   auto const tiny_two_rows = ava::tui::detail::render_select_list_modal(duplicate_selector, 88, 5);
@@ -1226,8 +1300,8 @@ void run_tui_selector_tests()
   auto const unsafe_selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(unsafe_selector_snapshot));
   expect(unsafe_selector_screen.find("<task>") == std::string::npos && unsafe_selector_screen.find("/tmp/") == std::string::npos &&
              unsafe_selector_screen.find("session_secret") == std::string::npos && unsafe_selector_screen.find("job_secret") == std::string::npos &&
-             unsafe_jobs_selector.items.front().label == "Subagent" && unsafe_jobs_selector.items.front().description.find("ref @") != std::string::npos,
-         "unsafe title/type metadata falls back safely while even degenerate full ids remain hidden behind short refs");
+             unsafe_jobs_selector.items.front().label == "Subagent" && unsafe_jobs_selector.items.front().priority_suffix.find("ref @") != std::string::npos,
+         "unsafe title/type metadata falls back safely while even degenerate full ids remain hidden behind reserved short refs");
   auto const empty_jobs_selector = ava::app::subagent_selector_view({});
   expect(empty_jobs_selector.items.size() == 1 && !empty_jobs_selector.items.front().enabled && empty_jobs_selector.items.front().label == "No subagents yet",
          "empty subagent selector stays open with a friendly disabled row");

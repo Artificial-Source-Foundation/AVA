@@ -202,6 +202,7 @@ void load_prompt_command_dir(RegistryBuilder& builder, std::filesystem::path con
   }
 }
 
+// Called from Session::load_command_registry that passes *this: session is already locked.
 void load_prompt_commands(RegistryBuilder& builder, Session const& session, ExtensionResourcePolicy const& policy)
 {
   if (policy.include_project_resources)
@@ -227,6 +228,7 @@ std::string namespaced_command(std::string_view prefix, std::string_view id, std
   return command;
 }
 
+// Called from Session::load_command_registry that passes *this: session is already locked.
 void load_plugin_commands(RegistryBuilder& builder, Session const& session, ExtensionResourcePolicy const& policy)
 {
   auto diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
@@ -293,6 +295,7 @@ ava::core::VoidResult ensure_mcp_prompt_server_permission(ava::tools::ToolContex
   return {};
 }
 
+// Called from Session::load_command_registry that passes *this: session is already locked.
 void load_mcp_prompt_commands(RegistryBuilder& builder, Session& session, CommandRegistryOptions const& options, ExtensionResourcePolicy const& policy)
 {
   auto config = ava::mcp::load_mcp_config(policy.mcp_config);

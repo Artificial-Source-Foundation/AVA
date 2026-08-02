@@ -11,7 +11,7 @@ namespace ava::tui {
 
 namespace runtime_input {
 struct RuntimeInput;
-}
+} // namespace runtime_input
 
 struct RuntimeActiveRunState;
 struct RuntimeDraftState;

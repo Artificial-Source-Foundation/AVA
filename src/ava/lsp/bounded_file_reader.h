@@ -13,7 +13,7 @@
 
 namespace ava::core {
 class AnchorSet;
-}
+} // namespace ava::core
 
 namespace ava::lsp {
 

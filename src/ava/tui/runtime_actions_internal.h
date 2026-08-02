@@ -9,7 +9,7 @@
 
 namespace ava::session {
 struct ImageAttachmentRef;
-}
+} // namespace ava::session
 
 namespace ava::tui {
 

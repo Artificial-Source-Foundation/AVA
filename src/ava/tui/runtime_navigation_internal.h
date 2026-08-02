@@ -18,7 +18,7 @@ class RuntimeRenderer;
 
 namespace detail {
 struct CompletionMatchModel;
-}
+} // namespace detail
 
 class RuntimeNavigationController final
 {

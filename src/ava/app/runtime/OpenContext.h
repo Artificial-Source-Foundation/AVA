@@ -16,16 +16,16 @@
 
 namespace ava::core {
 class AnchorSet;
-}
+} // namespace ava::core
 
 namespace ava::diagnostics {
 class RuntimeDiagnostics;
-}
+} // namespace ava::diagnostics
 
 namespace ava::app {
 class SessionTitleCoordinator;
 class SubagentDeliveryManager;
-}  // namespace ava::app
+} // namespace ava::app
 
 namespace ava::app::runtime {
 

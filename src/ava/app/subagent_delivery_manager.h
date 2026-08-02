@@ -24,7 +24,7 @@
 namespace ava::app {
 namespace runtime {
 class Session;
-}
+} // namespace runtime
 
 struct SubagentDeliveryManagerOptions
 {

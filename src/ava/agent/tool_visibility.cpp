@@ -18,4 +18,4 @@ std::string to_string(ToolVisibilityMode mode)
   AI_NEVER_REACHED
 }
 
-} // ava::agent
+} // namespace ava::agent

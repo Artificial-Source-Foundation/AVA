@@ -240,19 +240,40 @@ void write_process_group_marker(std::string const& path)
 void spawn_term_ignoring_descendant(Options const& options)
 {
   write_process_group_marker(options.marker_path);
+  int readiness_pipe[2];
+  if (pipe(readiness_pipe) != 0)
+    return;
+
   pid_t const descendant = fork();
   if (descendant < 0)
+  {
+    close(readiness_pipe[0]);
+    close(readiness_pipe[1]);
     return;
+  }
   if (descendant == 0)
   {
+    close(readiness_pipe[0]);
     struct sigaction ignored{};
     ignored.sa_handler = SIG_IGN;
     sigemptyset(&ignored.sa_mask);
     sigaction(SIGTERM, &ignored, nullptr);
     write_process_group_marker(options.descendant_marker_path);
+    char const ready = 1;
+    while (write(readiness_pipe[1], &ready, sizeof(ready)) < 0 && errno == EINTR)
+    {
+    }
+    close(readiness_pipe[1]);
     for (int attempt = 0; attempt < 50; ++attempt) usleep(100000);
     _exit(0);
   }
+
+  close(readiness_pipe[1]);
+  char ready{};
+  while (read(readiness_pipe[0], &ready, sizeof(ready)) < 0 && errno == EINTR)
+  {
+  }
+  close(readiness_pipe[0]);
 }
 
 void write_launch_marker(std::string const& path)

@@ -990,7 +990,7 @@ bool is_backend_command(std::string_view line) noexcept
   return find_command_catalog_entry(line) != nullptr;
 }
 
-bool is_backend_command(std::string_view line, runtime::Session& session)
+bool is_backend_command_1(std::string_view line, runtime::Session& session)
 {
   if (is_backend_command(line))
     return true;
@@ -1174,7 +1174,7 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   }
   if (starts_with_command(request.command, "/jobs"))
   {
-    return run_jobs_command(session, command_argument(request.command, "/jobs"));
+    return run_jobs_command_1(session, command_argument(request.command, "/jobs"));
   }
   if (request.command == "/recover-persistence")
   {

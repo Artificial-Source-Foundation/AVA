@@ -120,7 +120,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   LineResult line_result;
   if (line.empty())
     return line_result;
-  if (ava::app::is_backend_command(line, state_session))
+  if (ava::app::is_backend_command_1(line, state_session))
   {
     if (is_compact_command(line))
     {

@@ -65,6 +65,7 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   [[nodiscard]] ava::core::Result<CapsuleGeneration> refresh_parent(runtime::Session const& session, runtime::RunOptions const& options);
   // Refreshes configuration-only runtime state while preserving the current
   // detached callback-free policy snapshot. Missing capsules are a no-op.
+  // Called from Session::refresh_parent_configuration that passes *this: session is already locked.
   [[nodiscard]] ava::core::VoidResult refresh_parent_configuration_1(runtime::Session const& session);
   void release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation);
   // Marks an explicit runtime attachment, preventing stale detach state from

@@ -404,6 +404,7 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
   return files;
 }
 
+// Called from Session::load_command_registry that passes *this: session is already locked.
 void load_skill_commands(RegistryBuilder& builder, Session const& session, ExtensionResourcePolicy const& policy)
 {
   auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());

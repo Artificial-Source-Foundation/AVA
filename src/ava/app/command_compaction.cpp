@@ -61,7 +61,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, 
   {
     return fail_compaction(std::move(config.error()));
   }
-  auto read_authority = session.read_authority();
+  auto read_authority = session.read_authority_1();
   if (!read_authority)
     return fail_compaction(std::move(read_authority.error()));
 

@@ -125,7 +125,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
     if (!trimmed_name.empty())
     {
       auto metadata =
-          opened_w->append_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+          opened_w->append_metadata_1(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
       if (!metadata)
         return std::unexpected(std::move(metadata.error()));
     }
@@ -183,7 +183,7 @@ ava::core::Result<CommandResult> run_name_command(runtime::Session& session, std
   ava::session::SessionMetadataUpdate update;
   update.name = clear_name ? std::optional<std::string>(std::string{}) : std::optional<std::string>(trimmed_name);
   update.actor = "tui";
-  auto metadata = session.append_metadata(std::move(update));
+  auto metadata = session.append_metadata_1(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -222,7 +222,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = session.append_metadata(std::move(update));
+  auto metadata = session.append_metadata_1(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -242,7 +242,7 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = session.append_mode_change(new_mode); !appended)
+  if (auto appended = session.append_mode_change_1(new_mode); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }

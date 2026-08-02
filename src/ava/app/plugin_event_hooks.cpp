@@ -250,7 +250,7 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::Session& sessi
       .permission_resolver = std::move(permission_resolver),
       // Permission audits are owner-routed outside active runs and replaced by
       // run_prompt's immutable generation route during one.
-      .permission_audit_sink = [sink = session.owner_append_route()](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+      .permission_audit_sink = [sink = session.owner_append_route_1()](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         return ava::agent::append_permission_decision(sink, event);
       },
       .cancel_requested = nullptr,

@@ -648,7 +648,7 @@ void test_app_rpc_utf8_recovery_and_framing()
     ava::app::runtime::session_ts::wat session_w(unlocked_session);
     session_w->invocation_inputs().workspace_dir = std::filesystem::path(invalid_component);
     session_w->invocation_inputs().current_dir = std::filesystem::path(invalid_component);
-    invalid_state = session_w->state_result_json(false);
+    invalid_state = session_w->state_result_json_1(false);
   }
   auto const invalid_path = ava::app::rpc::string_field_json("path", invalid_component);
   ava::app::CommandResult invalid_output_result;

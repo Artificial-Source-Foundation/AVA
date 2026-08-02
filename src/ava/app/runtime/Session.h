@@ -251,7 +251,7 @@ class Session : protected Session_aggregate_base
   // credential fallbacks, plus this session's store parent as a fallback for
   // custom/test path layouts. The list is short, stable, and deduplicated; keep
   // it in sync across direct command planning and ToolContext construction.
-  std::vector<std::filesystem::path> ava_authority_roots() const;
+  std::vector<std::filesystem::path> ava_authority_roots_1() const;
 
   // Accessors.
 
@@ -317,7 +317,7 @@ class Session : protected Session_aggregate_base
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).
-  [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority() const
+  [[nodiscard]] ava::core::Result<ava::session::SessionReadAuthority> read_authority_1() const
   {
     if (resources_.bound_read_authority)
       return *resources_.bound_read_authority;
@@ -335,13 +335,13 @@ class Session : protected Session_aggregate_base
   }
 
   // Return the stable append route owned by this session, or an empty route when the controller is unavailable.
-  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const
+  [[nodiscard]] ava::agent::SessionAppendSink owner_append_route_1() const
   {
     return resources_.run_controller ? resources_.run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
 
   [[nodiscard]] CommandRegistry load_command_registry(CommandRegistryOptions options = {});
-  [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route()
+  [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route_1()
   {
     return resources_.run_controller ? resources_.run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};
   }
@@ -397,14 +397,14 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] OpenContext replacement_open_context(OpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
-  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_metadata(ava::session::SessionMetadataUpdate update);
+  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_metadata_1(ava::session::SessionMetadataUpdate update);
 
   // Append a mode change entry through the runtime owner's serialized route.
   //
   // Records an EntryType::ModeChange entry carrying the given `mode` so the
   // transition survives session resume. Returns failure when the append route
   // rejects the entry (for example, a latched controller).
-  [[nodiscard]] ava::core::VoidResult append_mode_change(ava::agent::Mode mode);
+  [[nodiscard]] ava::core::VoidResult append_mode_change_1(ava::agent::Mode mode);
 
   // Apply a CLI-supplied initial reasoning level to a freshly opened session.
   //
@@ -440,11 +440,11 @@ class Session : protected Session_aggregate_base
 
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_metadata() const;
 
-  [[nodiscard]] std::string state_result_json(bool cancel_requested) const;
+  [[nodiscard]] std::string state_result_json_1(bool cancel_requested) const;
   [[nodiscard]] ava::core::Result<std::string> messages_result_json() const;
-  [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json_1() const;
   [[nodiscard]] ava::core::Result<std::string> tree_result_json() const;
-  [[nodiscard]] ava::core::Result<std::string> list_models_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> list_models_result_json_1() const;
   [[nodiscard]] ava::core::Result<std::string> stats_result_json() const;
   [[nodiscard]] ava::core::Result<std::string> validation_result_json() const;
 

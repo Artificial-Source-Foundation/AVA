@@ -383,7 +383,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit = ava::agent::append_permission_decision(
-      session->owner_append_route(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
+      session->owner_append_route_1(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
                                                                       .operation = ava::permissions::Operation::RunCommand,
                                                                       .mode = ava::agent::Mode::Build,
                                                                       .tool_name = "bash",

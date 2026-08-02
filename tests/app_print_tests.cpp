@@ -640,7 +640,7 @@ void test_runtime_ava_authority_roots_are_shared_with_direct_tool_context()
     return;
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto const roots = session_w->ava_authority_roots();
+  auto const roots = session_w->ava_authority_roots_1();
   auto const direct_context = ava::app::make_tool_context(*session_w, nullptr);
   auto const contains = [&roots](std::filesystem::path const& path) {
     auto const normalized = path.lexically_normal();

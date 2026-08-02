@@ -235,7 +235,7 @@ void test_app_rpc_protocol_version_and_session_commands()
   {
     ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
     initial_id = session_w->store.session_id();
-  auto appended_metadata = session_w->append_metadata(std::move(metadata_update));
+  auto appended_metadata = session_w->append_metadata_1(std::move(metadata_update));
 
   auto appended_user = session_w->append_owned(ava::session::SessionEntry{.id = "entry_user",
                                                                         .parent_id = "",

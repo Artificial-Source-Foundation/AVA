@@ -638,8 +638,8 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
     return;
   try
   {
-    auto read_authority = session.read_authority();
-    auto append_route = session.owner_append_route();
+    auto read_authority = session.read_authority_1();
+    auto append_route = session.owner_append_route_1();
     if (!read_authority || !append_route)
       return;
     auto const session_id = session.store.session_id();

@@ -213,12 +213,12 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
   {
     bool const canceled = cancel_requested(context.run_state);
 
-    return handled(write_success(context.output, command.id, session_ts::rat(session)->state_result_json(canceled)));
+    return handled(write_success(context.output, command.id, session_ts::rat(session)->state_result_json_1(canceled)));
   }
 
   if (command.type == "list_sessions")
   {
-    auto sessions_json = session_ts::rat(session)->list_sessions_result_json();
+    auto sessions_json = session_ts::rat(session)->list_sessions_result_json_1();
     if (!sessions_json)
       return handled(write_error(context.output, command.id, sessions_json.error()));
     return handled(write_success(context.output, command.id, *sessions_json));
@@ -279,7 +279,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
 
   if (command.type == "list_models")
   {
-    auto models_json = session_ts::rat(session)->list_models_result_json();
+    auto models_json = session_ts::rat(session)->list_models_result_json_1();
     if (!models_json)
       return handled(write_error(context.output, command.id, models_json.error()));
     return handled(write_success(context.output, command.id, *models_json));
@@ -351,7 +351,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     }
 
     update.actor = "rpc";
-    auto metadata = session_ts::wat(session)->append_metadata(std::move(update));
+    auto metadata = session_ts::wat(session)->append_metadata_1(std::move(update));
     if (!metadata)
       return handled(write_error(context.output, command.id, metadata.error()));
     return handled(write_success(context.output, command.id, ava::session::session_metadata_json(*metadata)));
@@ -442,7 +442,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto switched = session_w->switch_model(std::move(*selected));
     if (!switched)
       return handled(write_error(context.output, command.id, switched.error()));
-    return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));
+    return handled(write_success(context.output, command.id, session_w->state_result_json_1(cancel_requested(context.run_state))));
   }
 
   if (command.type == "set_reasoning" || command.type == "clear_reasoning")
@@ -474,7 +474,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     auto changed = session_w->set_reasoning(std::move(selection));
     if (!changed)
       return handled(write_error(context.output, command.id, changed.error()));
-    return handled(write_success(context.output, command.id, session_w->state_result_json(cancel_requested(context.run_state))));
+    return handled(write_success(context.output, command.id, session_w->state_result_json_1(cancel_requested(context.run_state))));
   }
 
   if (command.type == "fork_session" || command.type == "clone_session")
@@ -526,7 +526,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         return handled(write_error(context.output, command.id, replaced.error()));
     }
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
+    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
   }
 
   if (command.type == "summarize_branch")
@@ -585,7 +585,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       auto prepared = ava::session::prepare_branch_summary(std::move(options));
       if (!prepared)
         return handled(write_error(context.output, command.id, prepared.error()));
-      auto owner_append = session_w->owner_append_route();
+      auto owner_append = session_w->owner_append_route_1();
       session_w.unlock();
       if (!owner_append)
         return handled(write_error(context.output, command.id,
@@ -621,7 +621,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         return handled(write_error(context.output, command.id, replaced.error()));
     }
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
+    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
   }
 
   if (command.type == "open_session" || command.type == "switch_session")
@@ -644,7 +644,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         return handled(write_error(context.output, command.id, replaced.error()));
     }
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json(false)));
+    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
   }
 
   return false;

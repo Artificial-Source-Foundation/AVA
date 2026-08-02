@@ -1046,7 +1046,7 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_session_tree_and_
 ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_during_operation(runtime::Session const& session,
                                                                                                 std::vector<CommandHotkey> const& hotkeys)
 {
-  auto authority = session.read_authority();
+  auto authority = session.read_authority_1();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   auto entries = authority->load();

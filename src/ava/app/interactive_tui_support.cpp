@@ -274,7 +274,7 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
 
 std::optional<std::string> token_status_for_session(ava::app::runtime::Session const& session)
 {
-  auto read_authority = session.read_authority();
+  auto read_authority = session.read_authority_1();
   if (!read_authority)
     return std::nullopt;
   auto entries = read_authority->load();
@@ -288,7 +288,7 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
 
 ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::Session const& session)
 {
-  auto read_authority = session.read_authority();
+  auto read_authority = session.read_authority_1();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   auto entries = read_authority->load();

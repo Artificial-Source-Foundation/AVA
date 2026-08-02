@@ -31,7 +31,7 @@ bool contains_ascii_case_insensitive(std::string_view text, std::string_view que
 
 ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session)
 {
-  auto read_authority = session.read_authority();
+  auto read_authority = session.read_authority_1();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   return read_authority->load();

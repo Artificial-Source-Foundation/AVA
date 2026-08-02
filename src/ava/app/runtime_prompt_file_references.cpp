@@ -92,13 +92,13 @@ ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session,
                                  .mode = session.mode(),
                                  .permission_resolver = options.permission_resolver,
                                  .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   return ava::agent::append_permission_decision(session.owner_append_route(), event);
+                                   return ava::agent::append_permission_decision(session.owner_append_route_1(), event);
                                  },
                                  .cancel_requested = options.cancel_requested,
                                  .permission_tool_name = "file_reference",
                                  .permission_actor = "user",
                                  .anchor_set = session.anchor_set(),
-                                 .ava_authority_roots = session.ava_authority_roots(),
+                                 .ava_authority_roots = session.ava_authority_roots_1(),
                                  .exact_file_access = options.exact_file_access,
                                  .command_executor = options.command_executor,
                                  .session_id = session.store.session_id(),

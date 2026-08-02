@@ -1010,7 +1010,7 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
                                                                      .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session_w->owner_append_route(),
+  MutatingSummaryTransport transport(session_w->owner_append_route_1(),
                                      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE SUMMARY\"}"},
                                       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"RETRIED SUMMARY\"}"},
                                       sse_response(final_text_sse("retry after stale"))});
@@ -1069,7 +1069,7 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
                                                                      .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  MutatingSummaryTransport transport(session_w->owner_append_route(),
+  MutatingSummaryTransport transport(session_w->owner_append_route_1(),
                                      {ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE ONE\"}"},
                                       ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"STALE TWO\"}"}},
                                      2);

@@ -170,7 +170,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
     return fail_run(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
   if (!guard.active())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime prompt admission is inactive"));
-  auto session_read_authority = session.read_authority();
+  auto session_read_authority = session.read_authority_1();
   if (!session_read_authority)
     return fail_run(std::move(session_read_authority.error()));
   if (auto transitioned = guard.transition(RunPhase::BuildingContext); !transitioned)
@@ -350,7 +350,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
               .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
               .redact_permission_audit_arguments = runtime_options.redact_permission_audit_arguments,
               .require_explicit_file_permissions = runtime_options.require_explicit_file_permissions,
-              .ava_authority_roots = session.ava_authority_roots(),
+              .ava_authority_roots = session.ava_authority_roots_1(),
               .exact_file_access = runtime_options.exact_file_access,
               .command_executor = runtime_options.command_executor,
           },

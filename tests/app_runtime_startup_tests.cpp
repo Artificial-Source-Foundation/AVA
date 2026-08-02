@@ -288,7 +288,7 @@ void test_app_active_context_status_tracks_compaction_projection()
                                                                                                                  .data_json = "{\"text\":\"recent\"}"})
                                                    : ava::core::VoidResult(std::unexpected(appended_compaction.error()));
   auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(*session_w) : std::nullopt;
-  auto authority = session_w->read_authority();
+  auto authority = session_w->read_authority_1();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
   auto const active_tokens =
       entries ? ava::session::estimate_active_context_tokens(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
@@ -813,7 +813,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                           : std::move(committed);
     auto partial_result = committed
                               ? ava::agent::append_tool_result(
-                                    seeded_w->owner_append_route(),
+                                    seeded_w->owner_append_route_1(),
                                     ava::agent::ToolDispatchResult{
                                         .call_id = "reconcile-call-one", .name = "read_file", .success = true, .result_text = R"({"ok":true,"path":"note.txt"})"},
                                     "reconcile-function-one")
@@ -973,7 +973,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                                                                                                .data_json = "{\"text\":\"later input\"}"})
                                          : std::move(invalid_committed);
     invalid_result = invalid_committed
-                        ? ava::agent::append_tool_result(invalid_w->owner_append_route(),
+                        ? ava::agent::append_tool_result(invalid_w->owner_append_route_1(),
                                                          {.call_id = "invalid-window-call", .name = "read_file", .success = true, .result_text = "late"},
                                                          "invalid-window-function")
                         : ava::core::VoidResult(std::unexpected(invalid_committed.error()));

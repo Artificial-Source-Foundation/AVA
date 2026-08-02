@@ -351,7 +351,7 @@ void test_idle_delivery_and_terminal_before_registration()
   auto snapshot = fixture.coordinator->snapshot(fixture.session->store.session_id(), started.job.identity.job_id);
   expect(snapshot && snapshot->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && snapshot->job.committed_turn_id,
          "terminal-before-registration delivery is acknowledged only with a committed assistant transaction");
-  auto history = fixture.session->read_authority();
+  auto history = fixture.session->read_authority_1();
   auto entries = history ? history->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(history.error()));
   std::size_t marker_count = 0;
   if (entries)
@@ -421,7 +421,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
     return;
 
   auto terminal = fixture.coordinator->wait(parent_id, started.job.identity.job_id, std::chrono::seconds(2));
-  auto authority = fixture.session->read_authority();
+  auto authority = fixture.session->read_authority_1();
   auto before = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
   bool marker_before_boundary = false;
   if (before)
@@ -783,7 +783,7 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
     return;
   expect(state->wait_completed(2), "delivery retries after a failed run that committed only its synthetic user marker");
   auto snapshot = coordinator->snapshot(session_w->store.session_id(), started->job.identity.job_id);
-  auto authority = session_w->read_authority();
+  auto authority = session_w->read_authority_1();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
   std::size_t markers = 0;
   if (entries)
@@ -826,7 +826,7 @@ void test_two_pending_deliveries_survive_coordinator_retention()
       break;
     std::this_thread::yield();
   }
-  auto authority = fixture.session->read_authority();
+  auto authority = fixture.session->read_authority_1();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
   std::size_t synthetic_markers = 0;
   std::vector<std::string> committed_turn_ids;
@@ -870,12 +870,12 @@ void test_forged_text_marker_cannot_ack_delivery()
   auto const fingerprint = terminal ? delivery_prompt_fingerprint(terminal->job) : std::string{};
   auto attempt = fixture.coordinator->record_delivery_attempt(fixture.session->store.session_id(), started.job.identity.job_id, "attempt_forged", fingerprint);
   auto const marker = "[AVA_SUBAGENT_DELIVERY_V1 delivery_id=" + started.job.identity.delivery_id + "]";
-  auto forged_user = ava::agent::append_user_message(fixture.session->owner_append_route(), marker);
+  auto forged_user = ava::agent::append_user_message(fixture.session->owner_append_route_1(), marker);
   ava::agent::ParsedAssistantTurn forged_turn;
   forged_turn.text = "user-forged marker response";
   forged_turn.finish_reason = ava::provider::ProviderFinishReason::Completed;
   forged_turn.ordered_items.push_back(ava::agent::OrderedAssistantItem{.item = ava::agent::AssistantTextItem{.text = forged_turn.text}});
-  auto forged_commit = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), forged_turn, fixture.session->model().provider_id,
+  auto forged_commit = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route_1(), forged_turn, fixture.session->model().provider_id,
                                                          fixture.session->model().model_id, {}, std::nullopt);
   expect(terminal && attempt && forged_user && forged_commit, "forged-marker fixture commits ordinary user text and a corresponding assistant turn");
 
@@ -911,13 +911,13 @@ void test_same_process_reconciliation_acks_existing_commit_without_rerun()
   expect(attempt.has_value(), "reconciliation fixture records the delivery attempt before acknowledgement");
 
   auto appended_user = ava::agent::append_user_message(
-      fixture.session->owner_append_route(), marker, {},
+      fixture.session->owner_append_route_1(), marker, {},
       ava::session::SyntheticDeliveryProvenance{.delivery_id = started.job.identity.delivery_id, .prompt_fingerprint = "stable"});
   ava::agent::ParsedAssistantTurn turn;
   turn.text = "already integrated";
   turn.finish_reason = ava::provider::ProviderFinishReason::Completed;
   turn.ordered_items.push_back(ava::agent::OrderedAssistantItem{.item = ava::agent::AssistantTextItem{.text = "already integrated"}});
-  auto persisted = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route(), turn, fixture.session->model().provider_id,
+  auto persisted = ava::agent::append_assistant_turn(fixture.session->owner_append_batch_route_1(), turn, fixture.session->model().provider_id,
                                                      fixture.session->model().model_id, {}, std::nullopt);
   expect(appended_user && persisted, "reconciliation fixture commits marker and assistant transaction before acknowledgement");
 

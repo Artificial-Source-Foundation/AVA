@@ -979,7 +979,7 @@ ava::core::Result<ParsedAddRule> parse_permission_add_rule(std::vector<std::stri
 
 ava::core::Result<std::vector<ava::session::SessionEntry>> load_permission_history(runtime::Session const& session)
 {
-  auto read_authority = session.read_authority();
+  auto read_authority = session.read_authority_1();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   return read_authority->load();

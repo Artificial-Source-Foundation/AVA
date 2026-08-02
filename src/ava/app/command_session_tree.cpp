@@ -118,7 +118,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   if (requested_session_id == session.store.session_id())
   {
     target_id = session.store.session_id();
-    metadata = session.append_metadata(std::move(update));
+    metadata = session.append_metadata_1(std::move(update));
   }
   else
   {
@@ -127,7 +127,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
       return std::unexpected(std::move(unlocked_target_result.error()));
     runtime::session_ts::wat target_w(*unlocked_target_result);
     target_id = target_w->store.session_id();
-    metadata = target_w->append_metadata(std::move(update));
+    metadata = target_w->append_metadata_1(std::move(update));
   }
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
@@ -188,7 +188,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   update.labels = next_labels;
   update.actor = "tui";
   std::string const target_id = target_w->store.session_id();
-  auto metadata = target_w->append_metadata(std::move(update));
+  auto metadata = target_w->append_metadata_1(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -247,7 +247,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
   ava::session::SessionMetadataUpdate update;
   update.archived = archived;
   update.actor = "tui";
-  auto metadata = target_w->append_metadata(std::move(update));
+  auto metadata = target_w->append_metadata_1(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 

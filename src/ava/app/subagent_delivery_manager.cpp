@@ -262,7 +262,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
 {
   if (!session.run_controller())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot retain a parent without a run controller"));
-  auto authority = session.read_authority();
+  auto authority = session.read_authority_1();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
@@ -324,7 +324,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(ru
       return {};
     retained = found->second;
   }
-  auto authority = session.read_authority();
+  auto authority = session.read_authority_1();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
@@ -450,7 +450,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
   }
   auto attached_result = [&]() -> ava::core::Result<runtime::Session> {
     runtime::session_ts::rat session_r(capsule->session);
-    auto authority = session_r->read_authority();
+    auto authority = session_r->read_authority_1();
     if (!authority)
       return std::unexpected(std::move(authority.error()));
     ava::session::SessionLease lease;
@@ -556,7 +556,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
 
   auto entries = [&]() -> ava::core::Result<ava::session::SessionReadAuthority> {
     runtime::session_ts::rat session_r(selected_capsule->session);
-    return session_r->read_authority();
+    return session_r->read_authority_1();
   }();
   if (!entries)
     return;

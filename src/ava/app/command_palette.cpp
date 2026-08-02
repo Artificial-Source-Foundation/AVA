@@ -554,7 +554,7 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
                                       std::vector<WorkspacePathCandidate> const& path_completions, ava::session::SessionTreeIndex const* session_tree)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   if (!path_completions.empty())
   {
     if (auto index = find_item_index(items, "/read"))
@@ -1154,7 +1154,7 @@ ava::core::Result<std::optional<std::string>> ApplicationCatalogCoordinator::chi
   return session_selector_child_target(*cache_.session_tree, session_id, sort, include_archived);
 }
 
-std::vector<tui::SlashCommandItem> command_catalog_slash_items(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+std::vector<tui::SlashCommandItem> command_catalog_slash_items_1(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto cache = build_application_catalog_cache(session, hotkeys);
   return std::move(cache.slash_commands);
@@ -1202,7 +1202,7 @@ tui::SelectListView model_selector_view(ava::config::ModelRegistry const& regist
   return view;
 }
 
-tui::SelectListView model_selector_view(runtime::Session const& session, std::string footer_hint)
+tui::SelectListView model_selector_view_1(runtime::Session const& session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
@@ -1263,7 +1263,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
   return view;
 }
 
-tui::SelectListView scoped_model_selector_view(runtime::Session const& session, std::string footer_hint)
+tui::SelectListView scoped_model_selector_view_1(runtime::Session const& session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
@@ -1417,6 +1417,7 @@ tui::SelectListView session_selector_view(ApplicationCatalogCache const& cache, 
                              .footer_hint = std::move(footer_hint)};
 }
 
+#if 0 // Nothing is calling this function.
 tui::SelectListView session_selector_view(runtime::Session const& session, SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
                                           bool show_archived, bool show_label_time)
 {
@@ -1441,6 +1442,7 @@ tui::SelectListView session_selector_view(runtime::Session const& session, Sessi
                              .empty_text = "No sessions match",
                              .footer_hint = std::move(footer_hint)};
 }
+#endif
 
 std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id)
 {

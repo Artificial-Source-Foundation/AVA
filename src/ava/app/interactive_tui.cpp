@@ -425,8 +425,8 @@ int run_tui(ShellState real_state)
         application_catalog.refresh_values(state.session, hotkeys);
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
       },
-      .model_selector_view = [&state]() { return ava::app::model_selector_view(state.session, "Enter switch model · type to filter · Esc cancel"); },
-      .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view(state.session, scoped_model_selector_footer_hint()); },
+      .model_selector_view = [&state]() { return ava::app::model_selector_view_1(state.session, "Enter switch model · type to filter · Esc cancel"); },
+      .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view_1(state.session, scoped_model_selector_footer_hint()); },
       .session_selector_view =
           [&session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
            &session_selector_show_label_time, &session_selector_snapshot]() {

@@ -499,7 +499,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto const usage = [&]() {
     add_output(result, missing_argument("/plugins "
                                         "<list|inspect|install|remove|enable|disable|validate|failures|prompts|prompt|skills|skill|dynamic-prompts|dynamic-"
@@ -880,7 +880,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, C
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));
   if (!run_args)
   {

@@ -95,7 +95,7 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   {
     auto slash_snapshot = cache.slash_commands;
     auto reference_snapshot = cache.file_references;
-    auto model_view = ava::app::model_selector_view(*session_w, {});
+    auto model_view = ava::app::model_selector_view_1(*session_w, {});
     static_cast<void>(slash_snapshot);
     static_cast<void>(reference_snapshot);
     static_cast<void>(model_view);

@@ -23,7 +23,7 @@ namespace {
 
 constexpr std::size_t kMaxCompactionPromptEntryBytes = 8192;
 
-ava::event::RuntimeEventMetadata runtime_event_metadata(runtime::Session const& session, runtime::RunOptions const& options)
+ava::event::RuntimeEventMetadata runtime_event_metadata_1(runtime::Session const& session, runtime::RunOptions const& options)
 {
   auto build = [&] {
     return ava::event::RuntimeEventMetadata{
@@ -674,7 +674,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       retry_diagnostics.threshold_tokens = threshold_tokens;
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata(session, options),
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options),
                                        ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
           !emitted)
       {
@@ -696,7 +696,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     start_payload.retained_tokens = prepared->retained_tokens;
     if (auto emitted = ava::event::emit_event(
             options.event_sink,
-            ava::event::RuntimeEvent{runtime_event_metadata(session, options), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
+            ava::event::RuntimeEvent{runtime_event_metadata_1(session, options), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
         !emitted)
     {
       return std::unexpected(std::move(emitted.error()));
@@ -772,7 +772,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       end_payload.summary_bytes = summary->size();
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata(session, options), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
           !emitted)
       {
         return std::unexpected(std::move(emitted.error()));
@@ -792,7 +792,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       retry_diagnostics.current_entries = last_current_entries;
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata(session, options),
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options),
                                        ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
           !emitted)
       {

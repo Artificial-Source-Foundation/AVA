@@ -1008,7 +1008,7 @@ ava::core::Result<session_ts> Session::open_similar(OpenContext const& base_cont
 CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
 {
   RegistryBuilder builder;
-  auto const resource_policy = make_extension_resource_policy(*this);
+  auto const resource_policy = make_extension_resource_policy_1(*this);
   if (options.include_builtins)
     load_builtin_commands(builder);
   if (options.include_prompt_commands)
@@ -1025,7 +1025,7 @@ CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
 ava::core::VoidResult Session::refresh_parent_configuration() const
 {
   auto const& manager = subagent_delivery_manager();
-  return manager ? manager->refresh_parent_configuration(*this) : ava::core::VoidResult{};
+  return manager ? manager->refresh_parent_configuration_1(*this) : ava::core::VoidResult{};
 }
 
 ava::core::VoidResult Session::replace_with(Session&& replacement)

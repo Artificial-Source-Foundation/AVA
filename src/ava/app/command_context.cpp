@@ -331,7 +331,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto const project_lsp_config = session.workspace_dir() / ".ava" / "lsp.json";
   auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = resource_policy.global_lsp_config_file,

@@ -239,7 +239,7 @@ class PluginEventObserverState final
 PluginEventObserverOptions plugin_event_observer_options(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver,
                                                          std::mutex* /*session_mutex*/)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   return PluginEventObserverOptions{
       .workspace_dir = session.workspace_dir(),
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,

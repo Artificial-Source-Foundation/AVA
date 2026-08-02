@@ -135,14 +135,14 @@ void retarget_application_session(ApplicationCatalogCache& cache, std::string_vi
 [[nodiscard]] SessionSelectorSort next_session_selector_sort(SessionSelectorSort sort) noexcept;
 [[nodiscard]] std::string session_selector_sort_label(SessionSelectorSort sort);
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<CommandHotkey> const& hotkeys = {});
-[[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys = {});
+[[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items_1(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::vector<tui::FileReferenceItem> file_reference_items(runtime::Session const& session);
 [[nodiscard]] tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
                                                       std::string footer_hint = {});
-[[nodiscard]] tui::SelectListView model_selector_view(runtime::Session const& session, std::string footer_hint = {});
+[[nodiscard]] tui::SelectListView model_selector_view_1(runtime::Session const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
                                                              std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint = {});
-[[nodiscard]] tui::SelectListView scoped_model_selector_view(runtime::Session const& session, std::string footer_hint = {});
+[[nodiscard]] tui::SelectListView scoped_model_selector_view_1(runtime::Session const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id = {},
                                                         SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {},
                                                         bool show_paths = false);
@@ -152,9 +152,11 @@ void retarget_application_session(ApplicationCatalogCache& cache, std::string_vi
 [[nodiscard]] tui::SelectListView session_selector_view(ApplicationCatalogCache const& cache, SessionSelectorSort sort = SessionSelectorSort::Recent,
                                                         std::string footer_hint = {}, bool named_only = false, bool show_paths = false,
                                                         bool show_archived = false, bool show_label_time = false);
+#if 0 // Nothing is calling this function.
 [[nodiscard]] tui::SelectListView session_selector_view(runtime::Session const& session, SessionSelectorSort sort = SessionSelectorSort::Recent,
                                                         std::string footer_hint = {}, bool named_only = false, bool show_paths = false,
                                                         bool show_archived = false, bool show_label_time = false);
+#endif
 [[nodiscard]] std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id);
 [[nodiscard]] std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id,
                                                                        SessionSelectorSort sort = SessionSelectorSort::Recent, bool include_archived = false);

@@ -30,7 +30,7 @@ ExtensionResourcePolicy make_extension_resource_policy(ava::config::XdgPaths con
   };
 }
 
-ExtensionResourcePolicy make_extension_resource_policy(Session const& session)
+ExtensionResourcePolicy make_extension_resource_policy_1(Session const& session)
 {
   return make_extension_resource_policy(session.paths(), session.workspace_dir(), project_resources_trusted(session.project_trust()));
 }

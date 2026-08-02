@@ -36,7 +36,7 @@ using namespace ava::tests;
 void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, ava::config::XdgPaths const& paths, std::filesystem::path const& workspace,
                                          std::vector<ava::app::CommandHotkey> const& custom_hotkeys)
 {
-  auto const slash_items = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+  auto const slash_items = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
   auto const file_reference_items = ava::app::file_reference_items(*session);
   auto has_alias = [](ava::tui::SlashCommandItem const& item, std::string_view value) { return std::ranges::find(item.aliases, value) != item.aliases.end(); };
   auto has_file_reference = [&file_reference_items](std::string_view value) {
@@ -459,7 +459,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   expect(permissions_audit_empty && permissions_audit_empty->handled && !permissions_audit_empty->output.empty() &&
              permissions_audit_empty->output[0].find("No permission audit entries match") != std::string::npos,
          "command dispatcher /permissions audit reports empty filtered results");
-  auto slash_items_after_permission_rule = ava::app::command_catalog_slash_items(*session, custom_hotkeys);
+  auto slash_items_after_permission_rule = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
   auto const permission_completion_available = std::ranges::any_of(slash_items_after_permission_rule, [&](auto const& item) {
     return item.command == "/permissions" && tui_test_support::has_slash_argument_completion(&item, 1, permission_rule_id, {"explain"}) &&
            tui_test_support::has_slash_argument_completion(&item, 1, permission_rule_id, {"remove"});

@@ -338,7 +338,7 @@ bool contains_value(std::vector<std::string> const& values, std::string_view val
 
 std::vector<std::string> registered_model_cycle_values(ava::app::runtime::Session const& session)
 {
-  auto view = ava::app::scoped_model_selector_view(session, {});
+  auto view = ava::app::scoped_model_selector_view_1(session, {});
   std::vector<std::string> values;
   for (auto const& item : view.items)
   {
@@ -410,7 +410,7 @@ ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectLi
 
 ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::Session const& session, ava::tui::SelectListView const& previous)
 {
-  return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view(session, scoped_model_selector_footer_hint()), previous);
+  return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view_1(session, scoped_model_selector_footer_hint()), previous);
 }
 
 ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,

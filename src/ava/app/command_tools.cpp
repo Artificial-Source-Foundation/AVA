@@ -147,7 +147,7 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 
 ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = resource_policy.global_lsp_config_file,
       .project_config_file = resource_policy.project_lsp_config_file,

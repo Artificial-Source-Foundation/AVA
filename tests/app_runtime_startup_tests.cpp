@@ -122,7 +122,7 @@ void test_app_runtime_open_session_and_context_prompt()
 
     expect(session_r->created && session_r->mode() == ava::agent::Mode::Plan && session_r->model().model_id == "gpt-5.5",
            "runtime session records created state, mode, and model");
-    auto const resource_policy = ava::app::runtime::make_extension_resource_policy(*session_r);
+    auto const resource_policy = ava::app::runtime::make_extension_resource_policy_1(*session_r);
     expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
                resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
            "runtime session extension resource policy overload derives paths and the fail-closed trust decision");

@@ -834,7 +834,7 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
 
 ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto plugin_diagnostics =
       ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session.workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
@@ -900,7 +900,7 @@ ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext cons
 ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry,
                                                   std::string_view argument_text)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
     return std::unexpected(std::move(config.error()));

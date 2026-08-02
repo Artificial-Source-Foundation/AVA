@@ -4,6 +4,7 @@
 #include "serialization_detail.h"
 #include "serialization_json.h"
 #include "serialization_models.h"
+#include "ava/app/command_session_support_internal.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/session_tree.h"
@@ -29,14 +30,6 @@ std::string joined_output(std::vector<std::string> const& output)
     text += output[index];
   }
   return text;
-}
-
-ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session)
-{
-  auto read_authority = session.read_authority();
-  if (!read_authority)
-    return std::unexpected(std::move(read_authority.error()));
-  return read_authority->load();
 }
 
 bool json_bool_field(std::string_view object, std::string_view key)
@@ -703,7 +696,7 @@ ava::core::Result<std::string> MessagesResultSerializer::run() &&
 // hold pointers into it for the rest of the pipeline.
 ava::core::VoidResult MessagesResultSerializer::load_and_project()
 {
-  auto entries = load_runtime_entries(session_);
+  auto entries = session_command_support::load_runtime_entries(session_);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   auto projected = ava::session::project_logical_session_history(*entries);
@@ -1010,7 +1003,7 @@ ava::core::Result<std::string> SessionResultSerializer::list_models_result_json(
 
 ava::core::Result<std::string> SessionResultSerializer::session_stats_result_json() const
 {
-  auto entries = load_runtime_entries(session_);
+  auto entries = session_command_support::load_runtime_entries(session_);
   if (!entries)
     return std::unexpected(entries.error());
   auto stats_result = ava::session::compute_session_stats(*entries);
@@ -1127,7 +1120,7 @@ ava::core::Result<std::string> SessionResultSerializer::session_stats_result_jso
 
 ava::core::Result<std::string> SessionResultSerializer::session_validation_result_json() const
 {
-  auto entries = load_runtime_entries(session_);
+  auto entries = session_command_support::load_runtime_entries(session_);
   if (!entries)
     return std::unexpected(entries.error());
   auto const validation = ava::session::validate_session_replay(*entries);

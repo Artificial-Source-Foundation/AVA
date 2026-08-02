@@ -143,7 +143,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::Session& session, Comm
   if (args.empty())
     return usage();
 
-  auto const resource_policy = runtime::make_extension_resource_policy(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
   auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
   {

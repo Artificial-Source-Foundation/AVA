@@ -478,7 +478,7 @@ void test_app_runtime_plugin_install_remove_commands()
   expect(enable && enable->handled && !enable->output.empty() && enable->output[0].find("Enabled global plugin com.example.installed") != std::string::npos,
          "installed global plugin can be enabled after install");
 
-  auto const slash_items = ava::app::command_catalog_slash_items(*session_w);
+  auto const slash_items = ava::app::command_catalog_slash_items_1(*session_w);
   auto const* plugin_item = tui_test_support::find_slash_command_item(slash_items, "/plugin");
   expect(tui_test_support::has_slash_argument_completion(plugin_item, 1, "com.example.installed", {"run"}) &&
              tui_test_support::has_slash_argument_completion(plugin_item, 2, "status", {"run", "com.example.installed"}) && !std::filesystem::exists(marker),

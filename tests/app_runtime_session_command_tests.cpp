@@ -404,7 +404,7 @@ void test_app_session_metadata_commands()
              metadata_after_labels->labels[1] == "bug" && metadata_after_labels->actor == "tui",
          "slash /label alias appends current-session label metadata without losing the session name");
 
-  auto const slash_items = ava::app::command_catalog_slash_items(*session_w);
+  auto const slash_items = ava::app::command_catalog_slash_items_1(*session_w);
   auto has_session_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
                                    std::string_view description_fragment, std::vector<std::string> previous_args = {}) {
     return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {

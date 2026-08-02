@@ -28,6 +28,6 @@ struct ExtensionResourcePolicy
 
 [[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
                                                                      bool include_project_resources);
-[[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy(Session const& session);
+[[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy_1(Session const& session);
 
 }  // namespace ava::app::runtime

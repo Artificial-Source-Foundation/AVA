@@ -314,7 +314,7 @@ bool SubagentDeliveryManager::parent_needed(std::string_view session_id) const
   return pending && !pending->empty();
 }
 
-ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runtime::Session const& session)
+ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(runtime::Session const& session)
 {
   std::shared_ptr<ParentCapsule> retained;
   {

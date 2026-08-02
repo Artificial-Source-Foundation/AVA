@@ -17,7 +17,7 @@ namespace debug::hidden_dummies::ava_utils {
 } // namespace debug::hidden_dummies::ava_utils
 namespace debug::hidden_dummies::utils {
   [[maybe_unused]] inline constexpr int print_pointer = 0;              // Defined in namespace utils by "utils/print_pointer.h".
-} // namespace debug::hidden_dummies::utils {
+} // namespace debug::hidden_dummies::utils
 namespace debug::hidden_dummies::debug {
   [[maybe_unused]] inline constexpr int print_string = 0;               // Defined in NAMESPACE_DEBUG by "cwds/debug_ostream_operators.h".
   [[maybe_unused]] inline constexpr int __write__ = 0;                  // Defined in NAMESPACE_DEBUG by "ava/debug/debug_ostream_operators.h".

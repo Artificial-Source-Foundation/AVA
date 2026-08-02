@@ -26,6 +26,7 @@
 #include <vector>
 #include <unistd.h>
 
+namespace ava::app {
 namespace {
 
 namespace version = ava::core::version;
@@ -206,8 +207,6 @@ void print_exit_card(ava::app::runtime::Session const& session, int status)
 }
 
 }  // namespace
-
-namespace ava::app {
 
 int run(int argc, char** argv)
 {

@@ -22,6 +22,10 @@ Start with [usage](core/usage.md), then [configuration](core/configuration.md), 
 - [Session format](session-format.md): normative append-only persisted-session contract.
 - [Plugin compatibility policy](plugin-compatibility-policy.md): normative plugin and MCP compatibility rules.
 - [Theme schema](schema/README.md): machine-readable theme contract.
+- [Session architecture](development/session-architecture.md): conceptual overview of sessions, `SessionStore`, leases, authorities, and sessionless mode.
+- [Session run controller](development/internals/session-run-controller.md): run-controller and append-routing contract.
+- [Run observer](development/internals/run-observer.md): trace events and the non-authoritative observation attachment on `SessionStore`.
+- [Backend implementation ledger](history/backend-implementation-ledger.md): historical backend milestone and implementation ledger.
 
 These fixed contract paths remain at the `docs/` root (or their established schema/security locations) so external consumers do not need to follow taxonomy changes.
 

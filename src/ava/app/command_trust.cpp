@@ -48,7 +48,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& se
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
   session.trust_state().project_trust = std::move(next_trust);
-  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_prompt_state(std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust()));
 }

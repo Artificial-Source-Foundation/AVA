@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/diagnostics/runtime_diagnostics.h"
 #include "ava/app/acp_mode.h"
 #include "ava/app/app.h"
 #include "ava/app/connect_openai.h"
@@ -11,9 +12,8 @@
 #include "ava/agent/mode.h"
 #include "ava/tui/composer.h"
 #include "ava/config/xdg_paths.h"
-#include "ava/diagnostics/runtime_diagnostics.h"
-#include "ava/core/version.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/version.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -79,10 +79,10 @@ bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
-         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" || arg == "--append-system-prompt" ||
-         arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" || arg == "--allow" ||
-         arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" || arg == "--no-builtin-tools" || arg == "-nbt" ||
-         arg == "--no-tools" || arg == "-nt";
+         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" ||
+         arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" ||
+         arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
+         arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
 }
 
 bool is_cli_file_argument(std::string_view arg)
@@ -762,31 +762,33 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  ava::app::runtime::OpenOptions open_options;
+  ava::app::runtime::OpenContext open_context;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
   {
     std::cerr << cwd.error().format() << '\n';
     return 1;
   }
-  open_options.workspace_dir = std::move(*cwd);
-  open_options.current_dir = open_options.workspace_dir;
-  open_options.requested_session_id = requested_session_id;
-  open_options.fork_session_id = fork_session_id;
-  open_options.initial_session_name = initial_session_name;
-  open_options.continue_last_session = continue_last_session;
-  open_options.sessionless = sessionless;
-  open_options.mode = mode;
-  open_options.tool_visibility = std::move(tool_visibility);
-  open_options.paths = runtime_paths;
-  open_options.prompt_overrides = std::move(prompt_overrides);
-  open_options.initial_reasoning_level = std::move(initial_reasoning_level);
-  open_options.offline = offline;
-  open_options.diagnostics = *diagnostics;
+  open_context.workspace_dir = std::move(*cwd);
+  open_context.current_dir = open_context.workspace_dir;
+  open_context.mode = mode;
+  open_context.tool_visibility = std::move(tool_visibility);
+  open_context.paths = runtime_paths;
+  open_context.prompt_overrides = std::move(prompt_overrides);
+  open_context.offline = offline;
+  open_context.diagnostics = *diagnostics;
+  ava::app::runtime::SessionLifecycleRequest lifecycle_request;
+  lifecycle_request.sessionless = sessionless;
+  lifecycle_request.requested_session_id = std::move(requested_session_id);
+  lifecycle_request.fork_session_id = std::move(fork_session_id);
+  lifecycle_request.initial_session_name = std::move(initial_session_name);
+  lifecycle_request.continue_last_session = continue_last_session;
+  lifecycle_request.initial_reasoning_level = std::move(initial_reasoning_level);
 
   if (print_mode)
   {
-    return ava::app::run_print_mode(ava::app::PrintModeOptions{.open_options = open_options,
+    return ava::app::run_print_mode(ava::app::PrintModeOptions{.open_context = open_context,
+                                                               .lifecycle_request = lifecycle_request,
                                                                .explicit_prompt = print_prompt,
                                                                .read_stdin = !stdin_is_tty(),
                                                                .output_format = print_output_format,
@@ -798,21 +800,26 @@ int run(int argc, char** argv)
 
   if (rpc_mode)
   {
-    return ava::app::run_rpc_mode(ava::app::RpcModeOptions{.open_options = open_options, .permission_policy = std::move(headless_permission_policy)}, std::cin,
-                                  std::cout, std::cerr, ava::app::rpc::RpcInputWake{});
+    return ava::app::run_rpc_mode(
+        ava::app::RpcModeOptions{
+            .open_context = open_context, .lifecycle_request = lifecycle_request, .permission_policy = std::move(headless_permission_policy)},
+        std::cin, std::cout, std::cerr, ava::app::rpc::RpcInputWake{});
   }
 
-  auto session = ava::app::open_runtime_session(open_options);
-  if (!session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context, lifecycle_request);
+  if (!unlocked_session_result)
   {
-    std::cerr << session.error().format() << '\n';
+    std::cerr << unlocked_session_result.error().format() << '\n';
     return 1;
   }
 
   bool const print_farewell = stdin_is_tty() && stdout_is_tty();
-  int const status = run_interactive(*session);
+  int const status = run_interactive(*unlocked_session_result);
   if (print_farewell)
-    print_exit_card(*session, status);
+  {
+    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    print_exit_card(*session_r, status);
+  }
   return status;
 }
 

@@ -4,6 +4,7 @@
 #include "ava/app/command_palette.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
@@ -25,7 +26,7 @@ struct ShellState
 {
  public:
   // Lifetime contract: the borrowed session must outlive each run loop invocation.
-  runtime::Session& session;
+  runtime::session_ts& session;
 
   // Runtime sessions can contain provider credentials and must not be debug-printed.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

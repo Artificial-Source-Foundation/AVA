@@ -9,7 +9,6 @@
 #include "ava/app/print_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission.h"
@@ -342,15 +341,16 @@ void test_app_print_text_mode_outputs_final_text_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print text test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print text test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -364,7 +364,7 @@ void test_app_print_text_mode_outputs_final_text_only()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "hello print", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "hello print", provider, transport, run_options, out, err);
   expect(result && result->final_text == "print answer", "print text mode returns agent result");
   expect(out.str() == "print answer" && err.str().empty(), "print text mode writes only final text to stdout");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("hello print") != std::string::npos,
@@ -379,15 +379,16 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print terminal sanitize test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print terminal sanitize test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -404,16 +405,17 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
                                                   .sanitize_terminal_diagnostics = true};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "hello terminal sanitize", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "hello terminal sanitize", provider, transport, run_options, out, err);
   expect(result && result->final_text.find("\x1b]52;c;QUJD\a") != std::string::npos,
          "print terminal sanitize test keeps raw model text in the returned agent result");
   expect(out.str() == "safe ?]52;c;QUJD? text\nnext  line" && out.str().find('\x1b') == std::string::npos && err.str().empty(),
          "print text mode strips terminal controls from tty-bound final output while preserving line breaks");
 
-  auto error_session = ava::app::open_runtime_session(open_options);
-  expect(error_session.has_value(), "print terminal sanitize error test opens runtime session");
-  if (!error_session)
+  auto unlocked_error_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_error_session_result.has_value(), "print terminal sanitize error test opens runtime session");
+  if (!unlocked_error_session_result)
     return;
+  ava::app::runtime::session_ts::wat error_session_w(*unlocked_error_session_result);
   ava::tests::FakeTransport error_transport({ava::http::HttpResponse{
       .status_code = 200,
       .headers = {},
@@ -422,7 +424,7 @@ void test_app_print_text_mode_sanitizes_terminal_output_and_diagnostics_when_req
   }});
   std::ostringstream error_out;
   std::ostringstream error_err;
-  auto error_result = ava::app::run_print_prompt(*error_session, "bad terminal sanitize", provider, error_transport, run_options, error_out, error_err);
+  auto error_result = ava::app::run_print_prompt(*error_session_w, "bad terminal sanitize", provider, error_transport, run_options, error_out, error_err);
   expect(!error_result && error_out.str().empty() && error_err.str().find('\x1b') == std::string::npos &&
              error_err.str().find("provider streaming diagnostic omitted") != std::string::npos && error_err.str().find("RElBRw==") == std::string::npos &&
              error_err.str().find('\a') == std::string::npos,
@@ -437,15 +439,16 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print text streaming test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print text streaming test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"live \"}\n\n",
@@ -455,7 +458,7 @@ void test_app_print_text_mode_with_streaming_keeps_stdout_final_only()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "hello streaming print", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "hello streaming print", provider, transport, run_options, out, err);
   expect(result && result->final_text == "live answer", "print text streaming mode returns final agent result");
   expect(out.str() == "live answer" && err.str().empty(), "print text streaming mode keeps stdout final-answer-only");
 }
@@ -468,15 +471,16 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print text stdout failure test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print text stdout failure test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -491,7 +495,7 @@ void test_app_print_text_mode_reports_stdout_write_failure()
   FailingStreambuf failing_buffer;
   std::ostream out(&failing_buffer);
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "hello print", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "hello print", provider, transport, run_options, out, err);
   expect(!result && result.error().category() == ava::core::ErrorCategory::Io && result.error().message() == "failed to write print output",
          "print text mode reports stdout write failures");
 }
@@ -509,15 +513,16 @@ void test_app_print_mode_uses_headless_permission_policy()
     file << "outside print policy";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print policy test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print policy test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -550,7 +555,7 @@ void test_app_print_mode_uses_headless_permission_policy()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "read outside in print", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "read outside in print", provider, transport, run_options, out, err);
   expect(result && result->final_text == "policy allowed" && result->tool_calls == 1, "print mode uses supplied headless permission resolver for tool asks");
   expect(transport.requests().size() == 2 && transport.requests()[1].body.find("outside print policy") != std::string::npos,
          "print mode continuation includes allow-tool-approved read_file result");
@@ -569,15 +574,16 @@ void test_app_print_mode_default_permission_denial_is_actionable()
     file << "outside print deny";
   }
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print permission denial test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print permission denial test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -606,7 +612,7 @@ void test_app_print_mode_default_permission_denial_is_actionable()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "read outside without permission policy", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "read outside without permission policy", provider, transport, run_options, out, err);
   auto const diagnostic = err.str();
   expect(result && result->final_text == "denied handled" && result->tool_calls == 1,
          "print mode continues the turn after returning a denied tool result to the provider");
@@ -617,24 +623,25 @@ void test_app_print_mode_default_permission_denial_is_actionable()
          "print mode emits actionable permission denial diagnostics to stderr");
 }
 
-void test_runtime_command_authority_roots_are_shared_with_direct_tool_context()
+void test_runtime_ava_authority_roots_are_shared_with_direct_tool_context()
 {
   auto const root = create_empty_root("app-runtime-command-authority-roots");
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "runtime authority-root test opens a session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "runtime authority-root test opens a session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto const roots = ava::app::command_authority_roots_for_session(*session);
-  auto const direct_context = ava::app::make_tool_context(*session, nullptr);
+  auto const roots = session_w->ava_authority_roots();
+  auto const direct_context = ava::app::make_tool_context(*session_w, nullptr);
   auto const contains = [&roots](std::filesystem::path const& path) {
     auto const normalized = path.lexically_normal();
     return std::ranges::any_of(roots, [&normalized](std::filesystem::path const& root_path) {
@@ -656,40 +663,41 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "print model-command persistent Deny fixture keeps sealed planning roots owner-only");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print model-command persistent Deny test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print model-command persistent Deny test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto added = ava::permissions::add_persistent_permission_rule(
-      session->permission_rule_store(),
-      ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
-                                            .action = ava::permissions::PermissionAction::Deny,
-                                            .operation = ava::permissions::Operation::RunCommand,
-                                            .mode = ava::permissions::PermissionRuleMode::Build,
-                                            .tool_name = "bash",
-                                            .target_path = {},
-                                            .command = "ls",
-                                            .command_recipe_key = {},
-                                            .recipe_display = {},
-                                            .critical_acknowledged = false,
-                                            .reason = "external exact model-command deny",
-                                            .actor = "test"});
+  auto added = ava::permissions::add_persistent_permission_rule(session_w->permission_rule_store(),
+                                                                ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                      .action = ava::permissions::PermissionAction::Deny,
+                                                                                                      .operation = ava::permissions::Operation::RunCommand,
+                                                                                                      .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                      .tool_name = "bash",
+                                                                                                      .target_path = {},
+                                                                                                      .command = "ls",
+                                                                                                      .command_recipe_key = {},
+                                                                                                      .recipe_display = {},
+                                                                                                      .critical_acknowledged = false,
+                                                                                                      .reason = "external exact model-command deny",
+                                                                                                      .actor = "test"});
   expect(added.has_value(), "print model-command persistent Deny test stores an external exact Deny");
   if (!added)
     return;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
-                                                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
-                                                    "data: [DONE]\n\n"),
-                                       sse_response(final_text_sse("persistent model deny handled"))});
+  ava::tests::FakeTransport transport(
+      {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_print_bash\",\"name\":\"bash\"}\n\n"
+                    "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_print_bash\",\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n"
+                    "data: {\"type\":\"response.function_call.done\",\"call_id\":\"call_print_bash\"}\n\n"
+                    "data: [DONE]\n\n"),
+       sse_response(final_text_sse("persistent model deny handled"))});
   int interactive_prompts = 0;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
@@ -701,19 +709,18 @@ void test_app_print_mode_model_command_persistent_deny_preflight()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "model tries ls", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "model tries ls", provider, transport, run_options, out, err);
 
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   bool saw_preflight_deny = false;
   if (entries)
   {
     for (auto const& entry : *entries)
     {
-      saw_preflight_deny = saw_preflight_deny ||
-                            (entry.type == ava::session::EntryType::PermissionDecision &&
-                             ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
-                             ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
-                             ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
+      saw_preflight_deny = saw_preflight_deny || (entry.type == ava::session::EntryType::PermissionDecision &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution") == "deny" &&
+                                                  ava::core::json::string_field(entry.data_json, "resolution_source") == "persistent_rule" &&
+                                                  ava::core::json::string_field(entry.data_json, "rule_id") == added->rule_id);
     }
   }
   expect(result && result->final_text == "persistent model deny handled" && result->tool_calls == 1 && interactive_prompts == 0 &&
@@ -731,16 +738,17 @@ void test_app_print_mode_uses_persistent_permission_rules()
   auto const outside_path = root / "outside-print-rule.txt";
   write_app_test_file(outside_path, "outside print persistent rule note");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print persistent permission rule test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print persistent permission rule test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
-  auto const store = session->permission_rule_store();
+  auto const store = session_w->permission_rule_store();
   auto added =
       ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
                                                                                                     .action = ava::permissions::PermissionAction::Allow,
@@ -766,9 +774,9 @@ void test_app_print_mode_uses_persistent_permission_rules()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Text, .runtime_options = std::move(runtime_options)};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "read outside with persistent print rule", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "read outside with persistent print rule", provider, transport, run_options, out, err);
 
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   auto audits = entries ? permission_entries(*entries) : std::vector<ava::session::SessionEntry>{};
   bool persistent_audited = false;
   for (auto const& audit : audits)
@@ -813,10 +821,10 @@ void test_app_print_mode_refreshes_expired_oauth_before_provider_request()
                                        }});
 
   ava::app::PrintModeOptions options;
-  options.open_options.workspace_dir = workspace;
-  options.open_options.current_dir = workspace;
-  options.open_options.mode = ava::agent::Mode::Build;
-  options.open_options.paths = paths;
+  options.open_context.workspace_dir = workspace;
+  options.open_context.current_dir = workspace;
+  options.open_context.mode = ava::agent::Mode::Build;
+  options.open_context.paths = paths;
   options.explicit_prompt = "hello refreshed print";
   options.provider_override = std::cref(provider);
   options.transport_override = std::ref(transport);
@@ -856,11 +864,11 @@ void test_app_print_offline_fails_before_auth_refresh_or_provider_request()
   ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"}});
 
   ava::app::PrintModeOptions options;
-  options.open_options.workspace_dir = workspace;
-  options.open_options.current_dir = workspace;
-  options.open_options.mode = ava::agent::Mode::Build;
-  options.open_options.paths = paths;
-  options.open_options.offline = true;
+  options.open_context.workspace_dir = workspace;
+  options.open_context.current_dir = workspace;
+  options.open_context.mode = ava::agent::Mode::Build;
+  options.open_context.paths = paths;
+  options.open_context.offline = true;
   options.explicit_prompt = "hello offline print";
   options.provider_override = std::cref(provider);
   options.transport_override = std::ref(transport);
@@ -1044,15 +1052,16 @@ void test_app_print_json_mode_outputs_runtime_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print json test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print json test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -1066,7 +1075,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json, .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "json prompt", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "json prompt", provider, transport, run_options, out, err);
   auto const jsonl = out.str();
   auto const last_break = jsonl.size() > 1 ? jsonl.rfind('\n', jsonl.size() - 2) : std::string::npos;
   auto const last_line = jsonl.substr(last_break == std::string::npos ? 0 : last_break + 1);
@@ -1078,10 +1087,11 @@ void test_app_print_json_mode_outputs_runtime_events()
              jsonl.find("\"payload\":{\"text\":\"json answer\"}") != std::string::npos && last_line.find("\"name\":\"done\"") != std::string::npos,
          "print json mode writes JSONL event envelopes ending in done");
 
-  auto error_session = ava::app::open_runtime_session(open_options);
-  expect(error_session.has_value(), "print json error test opens runtime session");
-  if (!error_session)
+  auto unlocked_error_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_error_session_result.has_value(), "print json error test opens runtime session");
+  if (!unlocked_error_session_result)
     return;
+  ava::app::runtime::session_ts::wat error_session_w(*unlocked_error_session_result);
   ava::tests::FakeTransport error_transport({ava::http::HttpResponse{
       .status_code = 500,
       .headers = {},
@@ -1090,7 +1100,7 @@ void test_app_print_json_mode_outputs_runtime_events()
   }});
   std::ostringstream error_out;
   std::ostringstream error_err;
-  auto error_result = ava::app::run_print_prompt(*error_session, "json error", provider, error_transport, run_options, error_out, error_err);
+  auto error_result = ava::app::run_print_prompt(*error_session_w, "json error", provider, error_transport, run_options, error_out, error_err);
   auto const error_jsonl = error_out.str();
   auto const error_last_break = error_jsonl.size() > 1 ? error_jsonl.rfind('\n', error_jsonl.size() - 2) : std::string::npos;
   auto const error_last_line = error_jsonl.substr(error_last_break == std::string::npos ? 0 : error_last_break + 1);
@@ -1113,15 +1123,16 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "print json streaming test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "print json streaming test opens runtime session");
+  if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ChunkedStreamingTransport transport({"data: {\"type\":\"response.output_text.delta\",\"delta\":\"json \"}\n\n",
@@ -1131,7 +1142,7 @@ void test_app_print_json_mode_streams_provider_deltas_before_final_message()
   ava::app::PrintModeRunOptions const run_options{.output_format = ava::app::PrintOutputFormat::Json, .runtime_options = runtime_options};
   std::ostringstream out;
   std::ostringstream err;
-  auto result = ava::app::run_print_prompt(*session, "json streaming prompt", provider, transport, run_options, out, err);
+  auto result = ava::app::run_print_prompt(*session_w, "json streaming prompt", provider, transport, run_options, out, err);
   auto const jsonl = out.str();
   auto const update_position = jsonl.find("\"name\":\"message_update\"");
   auto const final_position = jsonl.find("\"name\":\"assistant_message\"");
@@ -1153,7 +1164,7 @@ void run_app_print_tests()
   test_app_print_text_mode_reports_stdout_write_failure();
   test_app_print_mode_uses_headless_permission_policy();
   test_app_print_mode_default_permission_denial_is_actionable();
-  test_runtime_command_authority_roots_are_shared_with_direct_tool_context();
+  test_runtime_ava_authority_roots_are_shared_with_direct_tool_context();
   test_app_print_mode_model_command_persistent_deny_preflight();
   test_app_print_mode_uses_persistent_permission_rules();
   test_app_print_mode_refreshes_expired_oauth_before_provider_request();

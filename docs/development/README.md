@@ -8,6 +8,7 @@ These current maintainer references describe the source checkout and engineering
 - [Documentation policy](documentation-policy.md): information authority, style, freshness, and validation.
 - [C++ safety rules](cpp-safety-rules.md): ownership, errors, concurrency, and systems-programming constraints.
 - [Side-effect safety checklist](side-effect-safety-checklist.md): required review questions for mutating or external operations.
+- [Session architecture](session-architecture.md): conceptual overview of stores, leases, lease-bound authorities, and ephemeral sessions.
 - [Session versioning](session-versioning.md): normative maintainer policy for persisted-session compatibility.
 - [Internals index](internals/README.md): focused runtime ownership references.
 - [`docs/AGENTS.md`](../AGENTS.md): documentation maintenance instructions for humans and agents.

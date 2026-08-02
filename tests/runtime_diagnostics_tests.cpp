@@ -359,19 +359,27 @@ class CollectingObserver final : public ava::observability::RunObserver
   std::size_t events_ = 0;
 };
 
-ava::core::Result<ava::app::runtime::Session> open_diagnostic_session(std::filesystem::path const& root,
+ava::core::Result<ava::app::runtime::session_ts> open_diagnostic_session(std::filesystem::path const& root,
                                                                       std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics)
 {
   auto const paths = app_test_paths(root);
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions options;
+  ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
-  options.sessionless = true;
   options.diagnostics = std::move(diagnostics);
-  return ava::app::open_runtime_session(options);
+  auto unlocked_session_result = ava::app::runtime::Session::open(options, {.sessionless = true,
+                                                   .requested_session_id = std::nullopt,
+                                                   .fork_session_id = std::nullopt,
+                                                   .initial_session_name = std::nullopt,
+                                                   .continue_last_session = false,
+                                                   .initial_reasoning_level = std::nullopt,
+                                                   .expected_original_cwd = std::nullopt});
+  if (!unlocked_session_result)
+    return std::unexpected(std::move(unlocked_session_result.error()));
+  return unlocked_session_result;
 }
 
 void test_runtime_failure_boundaries_and_observation_precedence()
@@ -382,41 +390,52 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   auto const canceled_root = diagnostics_root("runtime-diagnostics-canceled");
   auto const canceled_paths = app_test_paths(canceled_root);
   auto canceled_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(canceled_paths, false);
-  auto canceled_session = canceled_diagnostics ? open_diagnostic_session(canceled_root, *canceled_diagnostics)
-                                               : ava::core::Result<ava::app::runtime::Session>(std::unexpected(canceled_diagnostics.error()));
+  auto unlocked_canceled_session_result = canceled_diagnostics ? open_diagnostic_session(canceled_root, *canceled_diagnostics)
+                                                               : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(canceled_diagnostics.error()));
   ava::tests::FakeTransport canceled_transport({});
   ava::app::runtime::RunOptions canceled_options;
   canceled_options.access_token = "token";
   canceled_options.cancel_requested = [] { return true; };
-  auto canceled = canceled_session ? ava::app::run_prompt(*canceled_session, "cancel", provider, canceled_transport, canceled_options)
-                                   : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(canceled_session.error()));
-  expect(!canceled && canceled_session &&
-             ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session->anchor_set()).state ==
-                 ava::diagnostics::StoredRecordState::Absent,
-         "runtime cancellation does not create a last-failure artifact");
+  bool runtime_cancellation_does_not_create_a_last_failure_artifact = false;
+  if (unlocked_canceled_session_result)
+  {
+    ava::app::runtime::session_ts::wat canceled_session_w(*unlocked_canceled_session_result);
+    auto canceled = ava::app::run_prompt(*canceled_session_w, "cancel", provider, canceled_transport, canceled_options);
+    runtime_cancellation_does_not_create_a_last_failure_artifact =
+        !canceled && ava::diagnostics::read_last_failure_record(canceled_paths,
+            *canceled_session_w->anchor_set()).state == ava::diagnostics::StoredRecordState::Absent;
+  }
+  expect(runtime_cancellation_does_not_create_a_last_failure_artifact, "runtime cancellation does not create a last-failure artifact");
 
   auto const provider_root = diagnostics_root("runtime-diagnostics-provider-failure");
   auto const provider_paths = app_test_paths(provider_root);
   auto provider_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(provider_paths, false);
-  auto provider_session = provider_diagnostics ? open_diagnostic_session(provider_root, *provider_diagnostics)
-                                               : ava::core::Result<ava::app::runtime::Session>(std::unexpected(provider_diagnostics.error()));
+  auto unlocked_provider_session_result = provider_diagnostics ? open_diagnostic_session(provider_root, *provider_diagnostics)
+                                                               : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(provider_diagnostics.error()));
   ava::tests::FakeTransport provider_transport({ava::http::HttpResponse{.status_code = 500, .headers = {}, .body = std::string(provider_canary)}});
   ava::app::runtime::RunOptions provider_options;
   provider_options.access_token = "token";
-  auto provider_result = provider_session ? ava::app::run_prompt(*provider_session, "fail", provider, provider_transport, provider_options)
-                                          : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(provider_session.error()));
-  auto provider_failure = provider_session ? ava::diagnostics::read_last_failure_record(provider_paths, *provider_session->anchor_set())
-                                           : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
-  auto const provider_body = read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json");
-  expect(!provider_result && provider_failure.record && provider_failure.record->failure.component == ava::diagnostics::ComponentClass::Provider &&
-             provider_body.find(provider_canary) == std::string::npos,
-         "central runtime provider failure persists a strict message-free record");
+  bool central_runtime_provider_failure_persists_a_strict_message_free_record = false;
+  if (unlocked_provider_session_result)
+  {
+    ava::app::runtime::session_ts::wat provider_session_w(*unlocked_provider_session_result);
+    auto provider_result = ava::app::run_prompt(*provider_session_w, "fail", provider, provider_transport, provider_options);
+    if (!provider_result)
+    {
+      auto provider_failure = ava::diagnostics::read_last_failure_record(provider_paths, *provider_session_w->anchor_set());
+      std::string const provider_body = read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json");
+      central_runtime_provider_failure_persists_a_strict_message_free_record =
+        provider_failure.record && provider_failure.record->failure.component == ava::diagnostics::ComponentClass::Provider &&
+        provider_body.find(provider_canary) == std::string::npos;
+    }
+  }
+  expect(central_runtime_provider_failure_persists_a_strict_message_free_record, "central runtime provider failure persists a strict message-free record");
 
   auto const tool_root = diagnostics_root("runtime-diagnostics-tool-failure");
   auto const tool_paths = app_test_paths(tool_root);
   auto tool_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(tool_paths, true);
-  auto tool_session = tool_diagnostics ? open_diagnostic_session(tool_root, *tool_diagnostics)
-                                       : ava::core::Result<ava::app::runtime::Session>(std::unexpected(tool_diagnostics.error()));
+  auto unlocked_tool_session_result = tool_diagnostics ? open_diagnostic_session(tool_root, *tool_diagnostics)
+                                                       : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(tool_diagnostics.error()));
   auto supplied_observer = std::make_shared<CollectingObserver>();
   ava::app::runtime::RunOptions tool_options;
   tool_options.access_token = "token";
@@ -425,39 +444,63 @@ void test_runtime_failure_boundaries_and_observation_precedence()
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "TOOL_FAILURE_CANARY_PRIVATE_6202"));
   };
   ava::tests::FakeTransport tool_transport({});
-  auto tool_result = tool_session ? ava::app::run_prompt(*tool_session, "tool failure", provider, tool_transport, tool_options)
-                                  : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(tool_session.error()));
-  auto tool_failure = tool_session ? ava::diagnostics::read_last_failure_record(tool_paths, *tool_session->anchor_set())
-                                   : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
-  expect(!tool_result && tool_failure.record && tool_failure.record->failure.component == ava::diagnostics::ComponentClass::Tool,
+  bool central_runtime_tool_failure_persists_the_typed_tool_terminal_class = false;
+  if (unlocked_tool_session_result)
+  {
+    ava::app::runtime::session_ts::wat tool_session_w(*unlocked_tool_session_result);
+    auto tool_result = ava::app::run_prompt(*tool_session_w, "tool failure", provider, tool_transport, tool_options);
+    if (!tool_result)
+    {
+      auto tool_failure = ava::diagnostics::read_last_failure_record(tool_paths, *tool_session_w->anchor_set());
+      central_runtime_tool_failure_persists_the_typed_tool_terminal_class =
+          tool_failure.record && tool_failure.record->failure.component == ava::diagnostics::ComponentClass::Tool;
+    }
+  }
+  expect(central_runtime_tool_failure_persists_the_typed_tool_terminal_class,
          "central runtime tool failure persists the typed tool terminal class");
-  expect(supplied_observer->events() == 0, "enabled production diagnostics overrides an explicitly supplied programmatic observation");
+  expect(supplied_observer->events() == 0,
+      "enabled production diagnostics overrides an explicitly supplied programmatic observation");
 
   auto const session_root = diagnostics_root("runtime-diagnostics-session-failure");
   auto const session_paths = app_test_paths(session_root);
   auto session_diagnostics = ava::diagnostics::RuntimeDiagnostics::create(session_paths, false);
-  auto failed_session = session_diagnostics ? open_diagnostic_session(session_root, *session_diagnostics)
-                                            : ava::core::Result<ava::app::runtime::Session>(std::unexpected(session_diagnostics.error()));
+  auto unlocked_failed_session_result = session_diagnostics ? open_diagnostic_session(session_root, *session_diagnostics)
+                                                            : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(session_diagnostics.error()));
   ava::app::runtime::RunOptions session_options;
   session_options.access_token = "token";
   session_options.event_sink = [](ava::event::RuntimeEvent const&) -> ava::core::VoidResult {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "SESSION_FAILURE_CANARY_PRIVATE_6203"));
   };
   ava::tests::FakeTransport session_transport({});
-  auto session_result = failed_session ? ava::app::run_prompt(*failed_session, "session failure", provider, session_transport, session_options)
-                                       : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(failed_session.error()));
-  auto session_failure = failed_session ? ava::diagnostics::read_last_failure_record(session_paths, *failed_session->anchor_set())
-                                        : ava::diagnostics::StoredRecord<ava::diagnostics::LastFailureRecord>{};
-  expect(!session_result && session_failure.record && session_failure.record->failure.component == ava::diagnostics::ComponentClass::Session,
+  bool central_runtime_persistence_failure_persists_the_typed_session_terminal_class = false;
+  if (unlocked_failed_session_result)
+  {
+    ava::app::runtime::session_ts::wat failed_session_w(*unlocked_failed_session_result);
+    auto session_result = ava::app::run_prompt(*failed_session_w, "session failure", provider, session_transport, session_options);
+    if (!session_result)
+    {
+      auto session_failure = ava::diagnostics::read_last_failure_record(session_paths, *failed_session_w->anchor_set());
+      central_runtime_persistence_failure_persists_the_typed_session_terminal_class =
+          session_failure.record && session_failure.record->failure.component == ava::diagnostics::ComponentClass::Session;
+    }
+  }
+  expect(central_runtime_persistence_failure_persists_the_typed_session_terminal_class,
          "central runtime persistence failure persists the typed session terminal class");
 
   auto const preserved = read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json");
   auto disabled_observer = std::make_shared<CollectingObserver>();
   provider_options.observation = std::make_shared<ava::observability::RunObservation>(disabled_observer);
   ava::tests::FakeTransport success_transport({sse_response(final_text_sse("ok"))});
-  auto success = provider_session ? ava::app::run_prompt(*provider_session, "success", provider, success_transport, provider_options)
-                                  : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(provider_session.error()));
-  expect(success && read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json") == preserved,
+  bool subsequent_successful_runtime_does_not_overwrite_the_latest_failure = false;
+  if (unlocked_provider_session_result)
+  {
+    ava::app::runtime::session_ts::wat provider_session_w(*unlocked_provider_session_result);
+    auto success = ava::app::run_prompt(*provider_session_w, "success", provider, success_transport, provider_options);
+    if (success)
+      subsequent_successful_runtime_does_not_overwrite_the_latest_failure =
+          read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json") == preserved;
+  }
+  expect(subsequent_successful_runtime_does_not_overwrite_the_latest_failure,
          "a subsequent successful runtime does not overwrite the latest failure");
   expect(disabled_observer->events() > 0, "disabled production diagnostics preserves an explicitly supplied programmatic observation");
 

@@ -361,7 +361,6 @@ ava::core::Result<SessionMetadataView> append_session_metadata_ephemeral(Session
                                       [&](SessionEntry const& entry) { return store.append_ephemeral(entry); });
 }
 
-// FIXME: this should become a member function of SessionMetadataView.
 std::string session_metadata_json(SessionMetadataView const& metadata)
 {
   std::string json = "{";

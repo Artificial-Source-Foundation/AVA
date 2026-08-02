@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/agent/tool_scheduler.h"
 
 #include <algorithm>
@@ -162,7 +163,7 @@ std::optional<ava::core::Error> launch_epoch_worker(std::span<ToolScheduleSlot c
 {
   try
   {
-    auto thread = std::jthread([&executor, &state, epoch, offset](std::stop_token stop_token) {
+    auto thread = ava::core::make_jthread("tool_scheduler", [&executor, &state, epoch, offset](std::stop_token stop_token) {
       auto result = execute_parallel_worker(executor, epoch[offset], stop_token);
       bool const failed = !result;
       {

@@ -26,6 +26,7 @@ namespace {
 using ava::core::normalized_absolute_path;
 using detail::append_authority_error;
 using detail::append_commit_state_text;
+using detail::append_epoch_for_path;
 using detail::append_mutex_for_path;
 using detail::AppendCommitState;
 using detail::has_append_commit_state;
@@ -316,6 +317,41 @@ SessionAppendTarget::SessionAppendTarget(SessionStore store, std::optional<Sessi
 {
 }
 
+std::atomic<std::uint64_t>& SessionAppendTarget::append_epoch_ref() const
+{
+  if (lease_)
+    return append_epoch_for_path(lease_->canonical_path());
+  return store_.ephemeral_state_->append_epoch;
+}
+
+ava::core::VoidResult SessionAppendTarget::refresh_state_if_stale()
+{
+  auto const current = append_epoch_ref().load(std::memory_order_acquire);
+  if (current == last_seen_append_epoch_)
+    return {};
+  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  if (!history)
+    return std::unexpected(std::move(history.error()));
+  auto refreshed = AssistantOutputAppendState::from_validated_history(*history);
+  if (!refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  assistant_output_state_ = std::move(*refreshed);
+  last_seen_append_epoch_ = current;
+  return {};
+}
+
+std::uint64_t SessionAppendTarget::advance_append_epoch()
+{
+  auto& epoch = append_epoch_ref();
+  last_seen_append_epoch_ = epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+  return last_seen_append_epoch_;
+}
+
+void SessionAppendTarget::bump_append_epoch()
+{
+  append_epoch_ref().fetch_add(1, std::memory_order_acq_rel);
+}
+
 ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_persistent(SessionStore const& store, SessionLease const& lease,
                                                                                                SessionReadLimits read_limits)
 {
@@ -444,17 +480,25 @@ ava::core::VoidResult SessionAppendTarget::append(SessionEntry const& entry)
   else
     serialization_lock.emplace(store_.ephemeral_state_->mutation_mutex);
 
-  auto history = lease_ ? store_.load(*lease_) : store_.load();
-  if (!history)
-    return std::unexpected(std::move(history.error()));
-  auto current_state = AssistantOutputAppendState::from_validated_history(*history);
-  if (!current_state)
-    return std::unexpected(std::move(current_state.error()));
-
+  // The append target keeps the live assistant-output state in the
+  // assistant_output_state_ member, rebuilt only at creation (create_persistent
+  // / create_ephemeral) and after a torn-write recovery (recover). Preflight
+  // against that cache instead of reloading and re-projecting the whole history
+  // on every append (which was O(n) per append, i.e. O(n^2) for a sequence).
+  //
+  // The per-path serialization lock acquired above is held across the stale
+  // check, preflight, and write, so a second target built from an older
+  // snapshot cannot advance the file underneath us. If another writer DID
+  // advance the file since we last folded it into the cache, the shared append
+  // epoch will differ from last_seen_append_epoch_ and refresh_state_if_stale
+  // reloads from storage before the preflight. A partial/unknown write latches
+  // recovery_required_ and bumps the epoch so other targets also reload.
+  if (auto refreshed = refresh_state_if_stale(); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
   AssistantOutputAppendState next_state;
   try
   {
-    next_state = *current_state;
+    next_state = assistant_output_state_;
     if (auto preflight = next_state.apply_candidate(entry); !preflight)
       return std::unexpected(std::move(preflight.error()));
   }
@@ -470,12 +514,21 @@ ava::core::VoidResult SessionAppendTarget::append(SessionEntry const& entry)
   {
     auto error = std::move(appended.error());
     if (append_partial_or_unknown(error))
+    {
       recovery_required_ = true;
+      bump_append_epoch();
+    }
     else if (append_committed_to_leased_inode(error))
+    {
+      // The entry was durably committed even though a later step (e.g. close)
+      // failed, so the cache advances to match storage and owns the new epoch.
       assistant_output_state_ = std::move(next_state);
+      advance_append_epoch();
+    }
     return std::unexpected(std::move(error));
   }
   assistant_output_state_ = std::move(next_state);
+  advance_append_epoch();
   return {};
 }
 
@@ -523,22 +576,21 @@ ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry
     serialized_bytes += serialized->size() + 1;
   }
 
-  // The same persistent-path or shared ephemeral mutation lock spans the
-  // authoritative history snapshot, v4 preflight, and every write. A second
-  // target constructed from an old snapshot therefore cannot commit stale
-  // state after this target advances the session.
+  // The same persistent-path or shared ephemeral mutation lock spans the v4
+  // preflight and every write. A second target constructed from an old snapshot
+  // therefore cannot commit stale state after this target advances the session.
   std::optional<std::unique_lock<std::mutex>> serialization_lock;
   if (lease_)
     serialization_lock.emplace(append_mutex_for_path(lease_->canonical_path()));
   else
     serialization_lock.emplace(store_.ephemeral_state_->mutation_mutex);
-  auto history = lease_ ? store_.load(*lease_) : store_.load();
-  if (!history)
-    return std::unexpected(std::move(history.error()));
-  auto current_state = AssistantOutputAppendState::from_validated_history(*history);
-  if (!current_state)
-    return std::unexpected(std::move(current_state.error()));
-  if (!current_state->ready())
+  // As in append(), preflight against the cached assistant_output_state_
+  // instead of reloading and re-projecting the whole history (which would be
+  // O(n) per batch). Reload only when another writer advanced the shared
+  // append epoch since we last folded it into the cache.
+  if (auto refreshed = refresh_state_if_stale(); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  if (!assistant_output_state_.ready())
   {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::Session, "session append batch requires a ready assistant-output state with no staged transaction"));
@@ -547,7 +599,7 @@ ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry
   AssistantOutputAppendState final_state;
   try
   {
-    final_state = *current_state;
+    final_state = assistant_output_state_;
     for (auto const& entry : entries)
     {
       if (auto preflight = final_state.apply_candidate(entry); !preflight)
@@ -579,13 +631,23 @@ ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry
       if (partial_or_unknown || persisted_entries != 0)
       {
         recovery_required_ = true;
+        // Some batch records may be durable; advance the epoch so other targets
+        // reload and see them. This target's cache is left stale on purpose
+        // (recovery_required_ blocks further appends until recover() rebuilds).
+        bump_append_epoch();
         error = batch_partial_failure(error, store_.session_path(), persisted_entries);
       }
       return std::unexpected(std::move(error));
     }
     ++persisted_entries;
+    // Each durable entry advances the file; the epoch is finalized to our cache
+    // only after the whole batch commits below.
+    bump_append_epoch();
   }
   assistant_output_state_ = std::move(final_state);
+  // The cache now reflects every durably written batch entry, so claim the
+  // current epoch as the generation it represents.
+  last_seen_append_epoch_ = append_epoch_ref().load(std::memory_order_acquire);
   return {};
 }
 
@@ -619,6 +681,10 @@ ava::core::VoidResult SessionAppendTarget::recover()
     return std::unexpected(std::move(rebuilt_state.error()));
   assistant_output_state_ = std::move(*rebuilt_state);
   recovery_required_ = false;
+  // Recovery may have truncated or completed the file, so advance the shared
+  // epoch (forcing other targets to reload) and record that this target's
+  // freshly rebuilt cache now owns the new generation.
+  advance_append_epoch();
   return {};
 }
 

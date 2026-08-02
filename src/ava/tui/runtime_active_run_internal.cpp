@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/agent/question.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime_actions_internal.h"
@@ -420,7 +421,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   {
     permission_resolver = prompt_coordinator.permission_resolver();
     question_resolver = prompt_coordinator.question_resolver();
-    auto submit_future = std::async(std::launch::async, [&]() {
+    auto submit_future = ava::core::make_async("tui_submit", [&]() {
       auto take_steering_messages = active_queues ? active_queues->take_steering_messages : std::function<ava::core::Result<std::vector<std::string>>()>{};
       auto skip_active_steering = active_queues ? active_queues->skip_active_steering : std::function<ava::core::VoidResult(std::string_view)>{};
       auto take_next_follow_up = active_queues ? active_queues->take_next_follow_up : std::function<std::optional<TuiQueuedFollowUp>()>{};

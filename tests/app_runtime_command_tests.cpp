@@ -6,7 +6,7 @@
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/OpenOptions.h"
+#include "ava/app/runtime/OpenContext.h"
 #include "ava/agent/mode.h"
 
 #include <filesystem>
@@ -107,16 +107,17 @@ void test_app_command_dispatcher()
   expect(trusted.has_value(),
          trusted ? "command dispatcher test trusts project resources" : "command dispatcher test trusts project resources: " + trusted.error().format());
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Plan;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "command dispatcher test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Plan;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "command dispatcher test opens runtime session");
+  if (!unlocked_session_result)
     return;
-  auto const plan_system_prompt = session->system_prompt();
+  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  auto const plan_system_prompt = session_w->system_prompt();
   {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
     file << "dispatcher context changed after session open\n";
@@ -150,11 +151,11 @@ void test_app_command_dispatcher()
       ava::app::CommandHotkey{.action = "submit", .description = "Submit custom", .keys = "Ctrl+M"},
       ava::app::CommandHotkey{.action = "variant_cycle", .description = "Cycle variants", .keys = "Ctrl+T"}};
 
-  app_command_dispatcher_ui_part(&*session, paths, workspace, custom_hotkeys);
-  app_command_dispatcher_catalog_part(&*session, paths, workspace, custom_hotkeys);
-  app_command_dispatcher_auth_part(&*session, plan_system_prompt);
-  app_command_dispatcher_tool_part(&*session, workspace);
-  app_command_dispatcher_session_part(&*session, workspace);
+  app_command_dispatcher_ui_part(&*session_w, paths, workspace, custom_hotkeys);
+  app_command_dispatcher_catalog_part(&*session_w, paths, workspace, custom_hotkeys);
+  app_command_dispatcher_auth_part(&*session_w, plan_system_prompt);
+  app_command_dispatcher_tool_part(&*session_w, workspace);
+  app_command_dispatcher_session_part(&*session_w, workspace);
 }
 
 }  // namespace ava::tests::app_runtime_tests

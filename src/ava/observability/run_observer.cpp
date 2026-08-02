@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/observability/run_observer.h"
 #include "ava/core/json.h"
 
@@ -643,7 +644,7 @@ QueuedJsonlRunObserver::QueuedJsonlRunObserver(QueuedJsonlObserverOptions option
 {
   options_.max_queue_events = std::max<std::size_t>(1, options_.max_queue_events);
   options_.max_queue_bytes = std::max(options_.max_event_bytes, options_.max_queue_bytes);
-  worker_ = std::jthread([this](std::stop_token stop) { run(stop); });
+  worker_ = ava::core::make_jthread("run_observer", [this](std::stop_token stop) { run(stop); });
 }
 QueuedJsonlRunObserver::~QueuedJsonlRunObserver() noexcept
 {

@@ -38,11 +38,11 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "RPC direct command fixture workspace is owner-only for sealed command planning");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command test opens runtime session");
   if (!session)
     return;
@@ -56,7 +56,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
 
@@ -103,11 +103,11 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "RPC direct command denial fixture workspace is owner-only for sealed command planning");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command denial test opens runtime session");
   if (!session)
     return;
@@ -121,7 +121,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
 
@@ -169,11 +169,11 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0,
          "RPC direct command cancellation fixture workspace is owner-only for sealed command planning");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC direct command cancellation test opens runtime session");
   if (!session)
     return;
@@ -191,7 +191,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   };
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
   auto const sleep_marker = workspace / "sleep-started";
@@ -227,11 +227,11 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC compact failure test opens runtime session");
   if (!session)
     return;
@@ -248,7 +248,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");
   bool const failed = output_buffer.wait_contains("compaction summary request failed with status 500", std::chrono::seconds(2));
@@ -272,11 +272,11 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC compact cancellation test opens runtime session");
   if (!session)
     return;
@@ -290,7 +290,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
   runtime_options.cancel_requested = [] { return true; };
 
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = out.str();
   auto entries = session_r->store.load();

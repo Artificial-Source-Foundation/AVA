@@ -1166,7 +1166,7 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
     return std::unexpected(std::move(metadata.error()));
 
   ava::session::SessionSummary summary{.session_id = metadata->session_id,
-                                       .path = session.store.session_path(), // FIXME: race condition? Shouldn't this come from metadata too?
+                                       .path = session.store.session_path(), // This is the store’s stable logical pathname; it does not change during the store’s lifetime.
                                        .last_updated = entries->empty() ? std::string{} : entries->back().timestamp,
                                        .entry_count = entries->size(),
                                        .original_cwd = metadata->original_cwd,

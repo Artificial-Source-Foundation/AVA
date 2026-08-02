@@ -50,11 +50,11 @@ void test_app_rpc_model_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC model command test opens runtime session");
   if (!session)
     return;
@@ -71,7 +71,7 @@ void test_app_rpc_model_commands()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC model command loop completes successfully");
   expect(jsonl.find("\"id\":\"list\"") != std::string::npos && jsonl.find("\"models\"") != std::string::npos &&
@@ -88,20 +88,20 @@ void test_app_rpc_model_commands()
          "RPC cycle_model advances to the next configured provider model");
   ava::app::runtime::session_ts::wat session_w(unlocked_session);
   expect(session_w->model().provider_id == "deepseek", "RPC cycle_model updates active session model");
-  auto previous = ava::app::rpc::previous_runtime_model(*session_w);
+  auto previous = ava::app::rpc::previous_runtime_model(session_w);
   expect(previous && previous->provider_id == "anthropic" && previous->model_id == "claude-sonnet-4-5",
          "runtime previous model helper returns the configured predecessor for TUI reverse cycling");
   session_w->model_selection().scoped_model_cycle = std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"};
-  auto scoped_next = ava::app::rpc::next_runtime_model(*session_w);
+  auto scoped_next = ava::app::rpc::next_runtime_model(session_w);
   expect(scoped_next && scoped_next->provider_id == "anthropic" && scoped_next->model_id == "claude-sonnet-4-5",
          "runtime next model helper starts at the first scoped model when current model is outside the scoped cycle");
   if (scoped_next)
     session_w->model_selection().model = *scoped_next;
-  auto scoped_previous = ava::app::rpc::previous_runtime_model(*session_w);
+  auto scoped_previous = ava::app::rpc::previous_runtime_model(session_w);
   expect(scoped_previous && scoped_previous->provider_id == "openai" && scoped_previous->model_id == "gpt-5.5",
          "runtime previous model helper wraps within the session-scoped model cycle");
   session_w->model_selection().scoped_model_cycle = std::vector<std::string>{};
-  auto empty_scoped_next = ava::app::rpc::next_runtime_model(*session_w);
+  auto empty_scoped_next = ava::app::rpc::next_runtime_model(session_w);
   expect(!empty_scoped_next && empty_scoped_next.error().message().find("enabled for cycling") != std::string::npos,
          "runtime model cycling fails visibly when the session-scoped model cycle is empty");
 }
@@ -114,11 +114,11 @@ void test_app_rpc_reasoning_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC reasoning command test opens runtime session");
   if (!session)
     return;
@@ -135,7 +135,7 @@ void test_app_rpc_reasoning_commands()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
@@ -170,11 +170,11 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC reasoning serialization test opens runtime session");
   if (!session)
     return;
@@ -189,7 +189,7 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
   auto const jsonl = out.str();
 
@@ -219,27 +219,30 @@ void test_app_rpc_protocol_version_and_session_commands()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
-  expect(session.has_value(), "RPC protocol/session test opens runtime session");
-  if (!session)
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "RPC protocol/session test opens runtime session");
+  if (!unlocked_session_result)
     return;
 
   ava::session::SessionMetadataUpdate metadata_update;
   metadata_update.name = "Stats audit";
   metadata_update.actor = "test";
-  auto const initial_id = session->store.session_id();
-  auto appended_metadata = session->append_runtime_session_metadata(std::move(metadata_update));
+  std::string initial_id;
+  {
+    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    initial_id = session_w->store.session_id();
+  auto appended_metadata = session_w->append_metadata(std::move(metadata_update));
 
-  auto appended_user = session->append_owned(ava::session::SessionEntry{.id = "entry_user",
+  auto appended_user = session_w->append_owned(ava::session::SessionEntry{.id = "entry_user",
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::UserMessage,
                                                                         .timestamp = ava::session::now_timestamp(),
                                                                         .data_json = "{\"text\":\"hello\"}"});
-  auto appended_internal_replay = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_internal_replay = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                    .parent_id = "",
                                                                                    .type = ava::session::EntryType::UserMessage,
                                                                                    .timestamp = ava::session::now_timestamp(),
@@ -247,7 +250,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                 "\"internal_replay\":true,"
                                                                                                 "\"replay_of\":\"entry_user\","
                                                                                                 "\"reason\":\"test\"}"});
-  auto appended_assistant = session->append_owned(ava::session::SessionEntry{.id = "entry_assistant",
+  auto appended_assistant = session_w->append_owned(ava::session::SessionEntry{.id = "entry_assistant",
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::AssistantMessage,
                                                                              .timestamp = ava::session::now_timestamp(),
@@ -255,7 +258,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                           "\"output_tokens\":1,\"total_tokens\":2,"
                                                                                           "\"cost_usd\":0.001,"
                                                                                           "\"source\":\"provider\"}}"});
-  auto appended_unpriced_assistant = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_unpriced_assistant = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::AssistantMessage,
                                                                                       .timestamp = ava::session::now_timestamp(),
@@ -263,7 +266,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                    "\"input_tokens\":1,\"cache_read_tokens\":1,"
                                                                                                    "\"total_tokens\":1,"
                                                                                                    "\"source\":\"provider\"}}"});
-  auto appended_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_reasoning = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                              .parent_id = "",
                                                                              .type = ava::session::EntryType::ReasoningBlock,
                                                                              .timestamp = ava::session::now_timestamp(),
@@ -272,7 +275,7 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                           "\"format\":\"openai_responses\","
                                                                                           "\"text\":\"visible reasoning\","
                                                                                           "\"signature\":\"rpc-secret-signature\"}"});
-  auto appended_redacted_reasoning = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_redacted_reasoning = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                       .parent_id = "",
                                                                                       .type = ava::session::EntryType::ReasoningBlock,
                                                                                       .timestamp = ava::session::now_timestamp(),
@@ -282,22 +285,22 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                    "\"text\":\"hidden redacted rpc reasoning\","
                                                                                                    "\"signature\":\"rpc-redacted-secret-signature\","
                                                                                                    "\"redacted\": true }"});
-  auto appended_mode = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_mode = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::ModeChange,
                                                                         .timestamp = ava::session::now_timestamp(),
                                                                         .data_json = "{\"mode\":\"build\"}"});
-  auto appended_compaction = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_compaction = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                               .parent_id = "",
                                                                               .type = ava::session::EntryType::Compaction,
                                                                               .timestamp = ava::session::now_timestamp(),
                                                                               .data_json = "{\"summary\":\"prior\"}"});
-  auto appended_cancel = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_cancel = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                           .parent_id = "",
                                                                           .type = ava::session::EntryType::Cancel,
                                                                           .timestamp = ava::session::now_timestamp(),
                                                                           .data_json = "{}"});
-  auto appended_branch_summary = session->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+  auto appended_branch_summary = session_w->append_owned(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                                                   .parent_id = "",
                                                                                   .type = ava::session::EntryType::BranchSummary,
                                                                                   .timestamp = ava::session::now_timestamp(),
@@ -339,28 +342,28 @@ void test_app_rpc_protocol_version_and_session_commands()
                                                                                                                   .model = "gpt-5.5",
                                                                                                                   .finish_reason = "tool_calls",
                                                                                                                   .usage_json = std::nullopt});
-  auto appended_v4_text = v4_text_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_text",
+  auto appended_v4_text = v4_text_data && session_w->append_owned(ava::session::SessionEntry{.id = "rpc_v4_text",
                                                                                            .parent_id = "",
                                                                                            .type = ava::session::EntryType::AssistantOutputItem,
                                                                                            .timestamp = ava::session::now_timestamp(),
                                                                                            .data_json = *v4_text_data});
-  auto appended_v4_reasoning = v4_reasoning_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_reasoning",
+  auto appended_v4_reasoning = v4_reasoning_data && session_w->append_owned(ava::session::SessionEntry{.id = "rpc_v4_reasoning",
                                                                                                      .parent_id = "",
                                                                                                      .type = ava::session::EntryType::AssistantOutputItem,
                                                                                                      .timestamp = ava::session::now_timestamp(),
                                                                                                      .data_json = *v4_reasoning_data});
-  auto appended_v4_function = v4_function_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_function",
+  auto appended_v4_function = v4_function_data && session_w->append_owned(ava::session::SessionEntry{.id = "rpc_v4_function",
                                                                                                    .parent_id = "",
                                                                                                    .type = ava::session::EntryType::AssistantOutputItem,
                                                                                                    .timestamp = ava::session::now_timestamp(),
                                                                                                    .data_json = *v4_function_data});
-  auto appended_v4_commit = v4_commit_data && session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_commit",
+  auto appended_v4_commit = v4_commit_data && session_w->append_owned(ava::session::SessionEntry{.id = "rpc_v4_commit",
                                                                                                .parent_id = "",
                                                                                                .type = ava::session::EntryType::AssistantTurnCommit,
                                                                                                .timestamp = ava::session::now_timestamp(),
                                                                                                .data_json = *v4_commit_data});
   auto appended_v4_result =
-      session->append_owned(ava::session::SessionEntry{.id = "rpc_v4_result",
+      session_w->append_owned(ava::session::SessionEntry{.id = "rpc_v4_result",
                                                        .parent_id = "",
                                                        .type = ava::session::EntryType::ToolResult,
                                                        .timestamp = ava::session::now_timestamp(),
@@ -371,6 +374,7 @@ void test_app_rpc_protocol_version_and_session_commands()
              appended_mode.has_value() && appended_compaction.has_value() && appended_cancel.has_value() && appended_branch_summary.has_value() &&
              appended_v4_text && appended_v4_reasoning && appended_v4_function && appended_v4_commit && appended_v4_result.has_value(),
          "RPC protocol/session test appends legacy and committed v4 message history");
+  }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -385,8 +389,8 @@ void test_app_rpc_protocol_version_and_session_commands()
   std::ostringstream out;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
-  ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const current_entry_version = std::string("\"version\":") + std::to_string(ava::session::kCurrentSessionEntryVersion);
   expect(result.has_value(), "RPC protocol/session loop completes successfully");
@@ -439,12 +443,12 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::filesystem::permissions(root, std::filesystem::perms::owner_all);
 
   auto open_session = [&](std::string_view name) {
-    ava::app::runtime::OpenOptions options;
+    ava::app::runtime::OpenContext options;
     options.workspace_dir = workspace / std::string(name);
     options.current_dir = options.workspace_dir;
     options.paths = app_test_paths(root / std::string(name));
     std::filesystem::create_directories(options.workspace_dir);
-    return ava::app::open_runtime_session(options);
+    return ava::app::runtime::Session::open(options);
   };
   auto append_v4_text_turn = [](ava::app::runtime::Session& session, std::size_t index, std::string text) {
     auto const turn_id = "rpc_cap_turn_" + std::to_string(index);
@@ -474,13 +478,18 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   };
 
   auto single_session = open_session("single");
-  bool const appended_single = single_session && append_v4_text_turn(*single_session, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
+  bool appended_single = false;
   std::optional<std::string> single_json;
-  if (appended_single)
+  if (single_session)
   {
-    auto serialized = single_session->messages_result_json();
-    if (serialized)
-      single_json = std::move(*serialized);
+    ava::app::runtime::session_ts::wat single_session_w(*single_session);
+    appended_single = append_v4_text_turn(*single_session_w, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
+    if (appended_single)
+    {
+      auto serialized = single_session_w->messages_result_json();
+      if (serialized)
+        single_json = std::move(*serialized);
+    }
   }
   expect(single_json && single_json->find("RPC_SINGLE_") != std::string::npos && single_json->find("\"tool_calls\":0") != std::string::npos &&
              single_json->find("\"ordered_output\"") == std::string::npos && single_json->find("\"message_count\":1") != std::string::npos &&
@@ -488,15 +497,20 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
          "RPC keeps a 5--8 KiB v1 assistant payload when additive ordered output exceeds its per-entry cap");
 
   auto near_cap_session = open_session("near-cap");
-  bool appended_near_cap = near_cap_session.has_value();
-  for (std::size_t index = 0; appended_near_cap && index < 190; ++index)
-    appended_near_cap = append_v4_text_turn(*near_cap_session, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));
+  bool appended_near_cap = false;
   std::optional<std::string> near_cap_json;
-  if (appended_near_cap)
+  if (near_cap_session)
   {
-    auto serialized = near_cap_session->messages_result_json();
-    if (serialized)
-      near_cap_json = std::move(*serialized);
+    ava::app::runtime::session_ts::wat near_cap_session_w(*near_cap_session);
+    appended_near_cap = true;
+    for (std::size_t index = 0; appended_near_cap && index < 190; ++index)
+      appended_near_cap = append_v4_text_turn(*near_cap_session_w, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));
+    if (appended_near_cap)
+    {
+      auto serialized = near_cap_session_w->messages_result_json();
+      if (serialized)
+        near_cap_json = std::move(*serialized);
+    }
   }
   auto const near_cap_count = near_cap_json ? ava::core::json::integer_field(*near_cap_json, "message_count") : std::nullopt;
   expect(near_cap_json && near_cap_json->size() <= ava::app::rpc::kMaxRpcMessagesResponseBytes && near_cap_count && *near_cap_count > 150 &&
@@ -513,11 +527,11 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC protocol error test opens runtime session");
   if (!session)
     return;
@@ -538,7 +552,7 @@ void test_app_rpc_protocol_version_and_resolver_reply_errors()
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
-      ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC protocol error loop recovers after unsupported commands");
   expect(jsonl.find("unsupported RPC protocol version") != std::string::npos && jsonl.find("RPC protocol_version must be an integer") != std::string::npos &&
@@ -565,11 +579,11 @@ void test_app_rpc_mcp_command_responses()
   expect(trusted.has_value(),
          trusted ? "RPC MCP command test trusts project config" : "RPC MCP command test trusts project config: " + trusted.error().format());
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC MCP command test opens runtime session");
   if (!session)
     return;
@@ -591,7 +605,7 @@ void test_app_rpc_mcp_command_responses()
       "{\"id\":\"mcp-restart\",\"type\":\"restart_mcp_server\",\"server_id\":\"demo\"}\n");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   auto const has_id = [&jsonl](std::string_view id) { return jsonl.find("\"id\":\"" + std::string(id) + "\"") != std::string::npos; };
@@ -629,11 +643,11 @@ void test_app_rpc_command_responses_for_context_compact_export()
   expect(trusted.has_value(),
          trusted ? "RPC command test trusts project plugin resources" : "RPC command test trusts project plugin resources: " + trusted.error().format());
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC command test opens runtime session");
   if (!session)
     return;
@@ -656,7 +670,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push(std::string("{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n") +
                     "{\"id\":\"plugin-enable\",\"type\":\"enable_plugin\",\"plugin_id\":\"com.example.rpc\"}\n"

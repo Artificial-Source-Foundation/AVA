@@ -24,7 +24,7 @@ struct TrustedAccount
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Called for every session from construct_runtime_session.
+// Called for every session from construct.
 // Only reads HOME the first time that it is called; after that this is a no-op.
 [[nodiscard]] ava::core::VoidResult load_account_once_and_freeze();
 

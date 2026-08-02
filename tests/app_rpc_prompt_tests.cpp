@@ -49,12 +49,12 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC prompt test opens runtime session");
   if (!session)
     return;
@@ -75,7 +75,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc\"}\n");
   bool const completed = output_buffer.wait_contains("rpc answer", std::chrono::seconds(2));
@@ -99,13 +99,13 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  open_options.offline = true;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  open_context.offline = true;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC offline test opens runtime session");
   if (!session)
     return;
@@ -121,7 +121,7 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"proto\",\"type\":\"get_protocol\"}\n");
   bool const protocol_completed = output_buffer.wait_contains("\"id\":\"proto\"", std::chrono::seconds(2));
@@ -149,12 +149,12 @@ void test_app_rpc_prompt_imports_image_attachments()
   auto const image_path = workspace / "screen.png";
   write_app_test_file(image_path, rpc_tiny_png_bytes());
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC image prompt test opens runtime session");
   if (!session)
     return;
@@ -175,7 +175,7 @@ void test_app_rpc_prompt_imports_image_attachments()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-img\",\"type\":\"prompt\",\"message\":\"describe\",\"attachments\":[\"" + ava::core::json::escape(image_path.string()) +
                     "\"]}\n");
@@ -206,12 +206,12 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC inline image upload prompt test opens runtime session");
   if (!session)
     return;
@@ -232,7 +232,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-upload\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
                     ava::provider::base64_encode(rpc_tiny_png_bytes()) + "\",\"mimeType\":\"image/png\"}]}\n");
@@ -264,12 +264,12 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC inline image MIME mismatch test opens runtime session");
   if (!session)
     return;
@@ -283,7 +283,7 @@ void test_app_rpc_prompt_rejects_inline_image_upload_mime_mismatch()
   std::ostringstream out;
 
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC inline image MIME mismatch loop completes after error response");
   expect(jsonl.find("\"id\":\"p-upload-bad\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
@@ -300,12 +300,12 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC streaming prompt test opens runtime session");
   if (!session)
     return;
@@ -322,7 +322,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc stream\"}\n");
   bool const completed = output_buffer.wait_contains("\"success\":true", std::chrono::seconds(2));
@@ -346,12 +346,12 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC retry-cancel prompt test opens runtime session");
   if (!session)
     return;
@@ -371,7 +371,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-cancel\",\"type\":\"prompt\",\"message\":\"cancel during retry\"}\n");
   bool const retry_started = output_buffer.wait_contains("\"name\":\"retry\"", std::chrono::seconds(2));
@@ -398,12 +398,12 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC idle-cancel prompt test opens runtime session");
   if (!session)
     return;
@@ -424,7 +424,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"cancel-idle\",\"type\":\"cancel\"}\n");
   bool const canceled = output_buffer.wait_contains("\"id\":\"cancel-idle\"", std::chrono::seconds(2));
@@ -455,12 +455,12 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
                                                                                           .source_path = {}});
   expect(stored.has_value(), "RPC OAuth refresh test stores expired credential");
 
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.mode = ava::agent::Mode::Build;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC OAuth refresh test opens runtime session");
   if (!session)
     return;
@@ -487,7 +487,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   std::jthread rpc_thread([&] {
-    result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello refreshed rpc\"}\n");

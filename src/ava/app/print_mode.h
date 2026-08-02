@@ -39,7 +39,8 @@ struct PrintModeRunOptions
 
 struct PrintModeOptions
 {
-  runtime::OpenOptions open_options;
+  runtime::OpenContext open_context;
+  runtime::SessionLifecycleRequest lifecycle_request;
   std::optional<std::string> explicit_prompt;
   bool read_stdin = false;
   PrintOutputFormat output_format = PrintOutputFormat::Text;

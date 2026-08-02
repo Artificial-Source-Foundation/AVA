@@ -58,37 +58,12 @@ std::string shorten_middle(std::string text, std::size_t max_columns)
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
 }
 
-ava::core::Result<runtime::Session> reopen_session(runtime::Session const& current, std::string_view session_id)
+ava::core::Result<runtime::session_ts> reopen_session(runtime::Session const& current, std::string_view session_id)
 {
-  runtime::OpenOptions options;
-  options.workspace_dir = current.workspace_dir();
-  options.current_dir = current.current_dir();
-  options.requested_session_id = std::string(session_id);
-  options.continue_last_session = false;
-  options.sessionless = current.sessionless();
-  options.mode = current.mode();
-  options.tool_visibility = current.tool_visibility();
-  options.paths = current.paths();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  return open_runtime_session(options);
-}
-
-runtime::OpenOptions owned_replacement_options(runtime::Session const& current)
-{
-  runtime::OpenOptions options;
-  options.workspace_dir = current.workspace_dir();
-  options.current_dir = current.current_dir();
-  options.mode = current.mode();
-  options.tool_visibility = current.tool_visibility();
-  options.paths = current.paths();
-  options.prompt_overrides = current.prompt_overrides();
-  options.offline = current.is_offline();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  return options;
+  auto context = current.replacement_open_context({});
+  runtime::SessionLifecycleRequest request;
+  request.requested_session_id = std::string(session_id);
+  return runtime::Session::open(context, request);
 }
 
 }  // namespace ava::app::session_command_support

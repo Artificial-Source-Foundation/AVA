@@ -30,7 +30,7 @@ Suggested Codex command:
 | CLI parse | `src/ava/app/app.cpp` |
 | Commands | `src/ava/app/commands.cpp`, `src/ava/app/command_catalog.cpp`, `src/ava/app/command_sessions.cpp`, `src/ava/app/command_palette.cpp` |
 | RPC | `src/ava/app/rpc/handlers.cpp`, `src/ava/app/rpc/protocol.h`, `docs/headless-protocol.md` |
-| Runtime session | `src/ava/app/runtime_session.cpp`, `src/ava/app/runtime_submit.cpp` |
+| Runtime session | `src/ava/app/runtime/Session.cpp`, `src/ava/app/runtime_submit.cpp` |
 | Session store | `src/ava/session/session_store.cpp`, `src/ava/session/session_branch.cpp`, `src/ava/session/session_tree.cpp`, `src/ava/session/export.cpp` |
 | TUI selector | `src/ava/tui/runtime.cpp`, `src/ava/tui/composer_select_list.cpp` |
 | Tests | `tests/session_tests.cpp`, `tests/app_runtime_tests.cpp`, `tests/app_rpc_tests.cpp`, `tests/tui_composer_tests.cpp`, `tests/cli_headless_*.cmake` |

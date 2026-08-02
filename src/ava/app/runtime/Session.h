@@ -3,12 +3,15 @@
 #include "BasePromptMetadata.h"
 #include "ContextSourceMetadata.h"
 #include "FreshnessSourceMetadata.h"
+#include "OpenContext.h"
 #include "PromptOverrides.h"
 #include "ReasoningSelection.h"
+#include "SessionLifecycleRequest.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/session_run_controller.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -38,9 +41,9 @@ namespace ava::app::runtime {
 
 // Invocation inputs.
 //
-// Mirrors of OpenOptions describing how this session was opened. None of
+// Mirrors of OpenContext describing how this session was opened. None of
 // these are restored from the store on resume; each is sourced from the
-// OpenOptions of the current process invocation.
+// OpenContext of the current process invocation.
 //
 struct InvocationInputs
 {
@@ -66,11 +69,11 @@ struct InvocationInputs
 // session: base-prompt metadata, contributing context and freshness sources,
 // the ordinary system prompt, and its ambient-extension-free runtime variant.
 // This whole bundle is recomputed
-// whenever the mode or model changes (see apply_runtime_prompt_state and
-// switch_runtime_model) and is otherwise the session's live resolved state.
+// whenever the mode or model changes (see apply_prompt_state and
+// switch_model) and is otherwise the session's live resolved state.
 //
 // It is field-compatible with the transient PromptState returned by
-// load_runtime_prompt_state, which apply_runtime_prompt_state moves into this
+// load_runtime_prompt_state, which apply_prompt_state moves into this
 // member as a single object rather than copying fields one at a time.
 struct ResolvedPromptState
 {
@@ -187,10 +190,68 @@ class Session : protected Session_aggregate_base
 
   // Move constructors.
   Session(Session&& session) = default;
+
+ private:
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
+
+  static ava::core::Result<session_ts> construct(
+      OpenContext const& context, SessionLifecycleRequest const& request,
+      ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
+      bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
+      std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
+
+ public:
+  // Open a runtime session using stable `context` and the one-shot lifecycle
+  // `request`.
+  //
+  // An empty request creates a persistent session. Returns failure when selectors
+  // conflict or the selected session cannot be created, recovered, or opened.
+  static ava::core::Result<session_ts> open(OpenContext const& context, SessionLifecycleRequest const& request = {});
+
+  // Consume an already-owned persistent store and its lease without reopening by path.
+  // Inputs remain intact on failure so callers can roll back by stable identity.
+  static ava::core::Result<session_ts> open_owned(
+      OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
+
+  // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
+  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root,
+                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request);
+
+  // Create a persistent session at `workspace_root` and `current_dir`, overriding
+  // those locations in `context`.
+  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root,
+                                                              std::filesystem::path const& current_dir);
+
+  // Create a persistent session inheriting active state from `current` and
+  // frontend-only policy from `base_context`.
+  ava::core::Result<session_ts> create_similar(OpenContext const& base_context) const;
+
+  // Open a session using `request`, inheriting active state from `current` and
+  // frontend-only policy from `base_context`.
+  ava::core::Result<session_ts> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
+
+  Session create_detached(
+    ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
+
+  ava::core::Result<session_ts> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
+  {
+    SessionLifecycleRequest request;
+    request.requested_session_id = std::string(requested_session_id);
+    return open_similar(base_context, std::move(request));
+  }
+
+  // Return the AVA-owned filesystem roots that command planning and model
+  // ToolContexts are pre-authorized to access.
+  //
+  // This is the single bounded source for the `ava_authority_roots` field: AVA's
+  // config, state, and sessions directories, the active auth file and its legacy
+  // credential fallbacks, plus this session's store parent as a fallback for
+  // custom/test path layouts. The list is short, stable, and deduplicated; keep
+  // it in sync across direct command planning and ToolContext construction.
+  std::vector<std::filesystem::path> ava_authority_roots() const;
 
   // Accessors.
 
@@ -304,27 +365,50 @@ class Session : protected Session_aggregate_base
   [[nodiscard]] ava::core::VoidResult refresh_parent_configuration() const;
 
   // Stop background work and replace this session's contents with `replacement`,
-  // rebinding the application-scoped subagent coordinator/delivery and title
-  // coordinator shared services that cannot round-trip through disk.
+  // rebinding the application-scoped subagent coordinator/delivery, title
+  // coordinator, and diagnostics services that cannot round-trip through disk.
   //
   // This is the visible-session detach boundary: when `replacement` targets a
   // different session the previously visible parent is released so another AVA
   // process may activate it. Always succeeds.
-  [[nodiscard]] ava::core::VoidResult replace_with(runtime::Session&& replacement);
+  [[nodiscard]] ava::core::VoidResult replace_with(Session&& replacement);
+
+  // Recover torn-tail and incomplete-assistant-output suffix entries from the
+  // session identified by `source_session_id` so a follow-up mutation
+  // (fork/clone/branch summary) reads a clean source.
+  //
+  // When `source_session_id` names this session, recovery runs against the
+  // current store and lease. Otherwise a separate SessionStore is opened and the
+  // acquired lease is emplaced into `temporary_source_lease`, which the caller
+  // must keep alive for the duration of the mutation. Returns failure when the
+  // source store cannot be opened, the lease cannot be acquired, or a recovery
+  // stage rejects. Leaves `temporary_source_lease` untouched when recovering this
+  // session.
+  [[nodiscard]] ava::core::VoidResult recover_source_for_mutation(std::string const& source_session_id,
+                                                                  std::optional<ava::session::SessionLease>& temporary_source_lease);
+
+  // Build replacement OpenContext from this session and `base_context`.
+  //
+  // Runtime context, filesystem policy, resolved read limits, and shared
+  // application services are inherited from this session. Frontend policy in
+  // `base_context`, including model pinning and exact-ID behavior, is retained.
+  // An ephemeral session's AnchorSet is not inherited because its temporary
+  // spill root cannot authorize a new persistent or ephemeral store.
+  [[nodiscard]] OpenContext replacement_open_context(OpenContext const& base_context) const;
 
   // Append session metadata through the runtime owner's serialized route.
-  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_runtime_session_metadata(ava::session::SessionMetadataUpdate update);
+  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> append_metadata(ava::session::SessionMetadataUpdate update);
 
   // Append a mode change entry through the runtime owner's serialized route.
   //
   // Records an EntryType::ModeChange entry carrying the given `mode` so the
   // transition survives session resume. Returns failure when the append route
   // rejects the entry (for example, a latched controller).
-  [[nodiscard]] ava::core::VoidResult append_runtime_mode_change(ava::agent::Mode mode);
+  [[nodiscard]] ava::core::VoidResult append_mode_change(ava::agent::Mode mode);
 
   // Apply a CLI-supplied initial reasoning level to a freshly opened session.
   //
-  // Accepts the raw --thinking level token from OpenOptions; an empty or
+  // Accepts the raw --thinking level token from SessionLifecycleRequest; an empty or
   // whitespace-only value is rejected. "off" clears the active selection;
   // any other token must resolve to a level the active model supports.
   // Returns failure when the level is empty, unsupported, or the underlying
@@ -336,7 +420,7 @@ class Session : protected Session_aggregate_base
   //
   // `prompt_state` is consumed regardless of failure. Returns failure only when
   // refresh_parent_configuration rejects the configuration update.
-  [[nodiscard]] ava::core::VoidResult apply_runtime_prompt_state(runtime::PromptState prompt_state);
+  [[nodiscard]] ava::core::VoidResult apply_prompt_state(PromptState prompt_state);
 
   // Switch the active model to `model`, re-deriving the prompt state for the
   // current mode and clearing any active reasoning selection.
@@ -344,7 +428,7 @@ class Session : protected Session_aggregate_base
   // Returns false (without writing) when `model` already matches the active
   // provider/model pair. Returns failure when prompt-state loading, the model
   // change append, or the parent configuration refresh rejects the switch.
-  [[nodiscard]] ava::core::Result<bool> switch_runtime_model(ava::config::ModelInfo model);
+  [[nodiscard]] ava::core::Result<bool> switch_model(ava::config::ModelInfo model);
 
   // Set the active reasoning selection, resolving it against the current model.
   //
@@ -352,17 +436,17 @@ class Session : protected Session_aggregate_base
   // and resolved through the model's supported levels. Returns false (without
   // writing) when the resolved selection equals the active one. Returns failure
   // when the model rejects the level or the append/refresh route rejects the change.
-  [[nodiscard]] ava::core::Result<bool> set_runtime_reasoning(std::optional<runtime::ReasoningSelection> selection);
+  [[nodiscard]] ava::core::Result<bool> set_reasoning(std::optional<ReasoningSelection> selection);
 
-  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_runtime_metadata() const;
+  [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_metadata() const;
 
   [[nodiscard]] std::string state_result_json(bool cancel_requested) const;
   [[nodiscard]] ava::core::Result<std::string> messages_result_json() const;
   [[nodiscard]] ava::core::Result<std::string> list_sessions_result_json() const;
-  [[nodiscard]] ava::core::Result<std::string> session_tree_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> tree_result_json() const;
   [[nodiscard]] ava::core::Result<std::string> list_models_result_json() const;
-  [[nodiscard]] ava::core::Result<std::string> session_stats_result_json() const;
-  [[nodiscard]] ava::core::Result<std::string> session_validation_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> stats_result_json() const;
+  [[nodiscard]] ava::core::Result<std::string> validation_result_json() const;
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(Session_aggregate_base)
 };

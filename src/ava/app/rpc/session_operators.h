@@ -2,6 +2,8 @@
 #include "protocol.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/Session.h"
+#include "ava/app/runtime/session_ts.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
@@ -26,8 +28,7 @@ struct ProviderHandle
                                                                                    runtime::RunOptions options, ava::http::Transport& auth_transport,
                                                                                    std::string_view purpose);
 
-[[nodiscard]] ava::core::Result<runtime::Session> create_new_session(runtime::Session const& current, runtime::OpenOptions const& base_options);
-[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::Session const& session, RpcCommand const& command);
+[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::session_ts::rat const& session_r, RpcCommand const& command);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
                                                                            ava::provider::Provider const& injected_provider);
 [[nodiscard]] bool is_plugin_rpc_command(std::string_view type);

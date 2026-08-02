@@ -9,7 +9,6 @@
 #include "runtime_reasoning.h"
 #include "runtime_retry.h"
 #include "runtime_run_outcomes.h"
-#include "runtime_sessions.h"
 #include "session_title_coordinator.h"
 #include "subagent_delivery_manager.h"
 #include "ava/diagnostics/runtime_diagnostics.h"
@@ -360,7 +359,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
               .announce_execution_after_permission = runtime_options.announce_execution_after_permission,
               .redact_permission_audit_arguments = runtime_options.redact_permission_audit_arguments,
               .require_explicit_file_permissions = runtime_options.require_explicit_file_permissions,
-              .ava_authority_roots = command_authority_roots_for_session(session),
+              .ava_authority_roots = session.ava_authority_roots(),
               .exact_file_access = runtime_options.exact_file_access,
               .command_executor = runtime_options.command_executor,
           },

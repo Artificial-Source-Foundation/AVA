@@ -1,10 +1,10 @@
 #include "sys.h"
+#include "ava/core/thread.h"
 #include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime/session_ts.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
@@ -119,28 +119,6 @@ runtime::RunOptions detached_run_options(runtime::RunOptions const& source)
   result.offline = source.offline;
   result.expand_prompt_file_references = false;
   return result;
-}
-
-runtime::Session detached_session(runtime::Session const& source, ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
-                                  std::shared_ptr<SubagentDeliveryManager> manager)
-{
-  runtime::SessionResources session_resources{.lease = std::move(lease),
-                                              .anchor_set = source.anchor_set(),
-                                              .run_controller = source.run_controller(),
-                                              .append_target = source.append_target(),
-                                              .bound_read_authority = std::move(authority),
-                                              .subagent_coordinator = source.subagent_coordinator(),
-                                              .subagent_delivery_manager = std::move(manager),
-                                              .session_title_coordinator = source.session_title_coordinator(),
-                                              .diagnostics = source.diagnostics(),
-                                              .mcp_config = source.mcp_config()};
-  return runtime::Session(runtime::Session_aggregate_base{.invocation_inputs_ = source.invocation_inputs(),
-                                                          .resolved_prompt_state_ = source.resolve_prompt_state(),
-                                                          .model_selection_ = source.model_selection(),
-                                                          .trust_state_ = source.trust_state(),
-                                                          .resources_ = std::move(session_resources),
-                                                          .store = source.store,
-                                                          .created = source.created});
 }
 
 std::string delivery_marker(ava::agent::SubagentJobIdentity const& identity)
@@ -266,7 +244,7 @@ void SubagentDeliveryManager::start()
     if (auto manager = weak.lock())
       manager->enqueue(snapshot);
   });
-  worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
+  worker_ = ava::core::make_jthread("SA_delivery", [this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
 SubagentDeliveryManager::~SubagentDeliveryManager()
@@ -295,7 +273,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = detached_session(session, std::move(lease), *authority, nullptr);
+  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
   auto safe_options = detached_run_options(options);
   auto const id = session.store.session_id();
   CapsuleGeneration published_generation = 0;
@@ -357,7 +335,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = detached_session(session, std::move(lease), *authority, nullptr);
+  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
   auto retained_options = retained->run_options;
   {
     std::lock_guard lock(mutex_);
@@ -483,7 +461,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
         return std::unexpected(std::move(duplicated.error()));
       lease = std::move(*duplicated);
     }
-    return detached_session(*session_r, std::move(lease), *authority, shared_from_this());
+    return session_r->create_detached(std::move(lease), *authority, shared_from_this());
   }();
   if (!attached_result)
     return std::unexpected(std::move(attached_result.error()));

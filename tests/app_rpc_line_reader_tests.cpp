@@ -229,11 +229,11 @@ void test_app_rpc_unterminated_final_command_executes()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC unterminated final command test opens runtime session");
   if (!session)
     return;
@@ -244,7 +244,7 @@ void test_app_rpc_unterminated_final_command_executes()
   std::istringstream in("{\"id\":\"protocol\",\"type\":\"get_protocol\"}");
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   expect(result && jsonl.find("\"id\":\"protocol\",\"type\":\"response\",\"success\":true") != std::string::npos,
@@ -258,11 +258,11 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   auto const workspace = root / "workspace";
   auto const paths = app_test_paths(root);
   std::filesystem::create_directories(workspace);
-  ava::app::runtime::OpenOptions open_options;
-  open_options.workspace_dir = workspace;
-  open_options.current_dir = workspace;
-  open_options.paths = paths;
-  auto session = ava::app::open_runtime_session(open_options);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto session = ava::app::runtime::Session::open(open_context);
   expect(session.has_value(), "RPC oversized-line recovery test opens runtime session");
   if (!session)
     return;
@@ -275,7 +275,7 @@ void test_app_rpc_newline_terminated_oversized_line_recovers()
   std::istringstream in(std::move(input));
   std::ostringstream out;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  auto result = ava::app::run_rpc_loop(unlocked_session, open_options, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
 
   expect(result && count_substrings(jsonl, "\"id\":\"\",\"type\":\"response\",\"success\":false") == 1 &&

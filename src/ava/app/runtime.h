@@ -1,7 +1,8 @@
 #pragma once
-#include "runtime/OpenOptions.h"
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
+#include "runtime/OpenContext.h"
+#include "runtime/SessionLifecycleRequest.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"
 #include "ava/app/session_run_controller.h"
@@ -42,17 +43,10 @@ struct PreparedCompactionContext
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::Result<runtime::Session> open_runtime_session(runtime::OpenOptions const& options);
-
-// Consume an already-owned persistent store and its lease without reopening by path.
-// Inputs remain intact on failure so callers can roll back by stable identity.
-[[nodiscard]] ava::core::Result<runtime::Session> open_owned_runtime_session(runtime::OpenOptions const& options, ava::session::SessionStore& store,
-                                                                             ava::session::SessionLease& lease, bool created);
-
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                               std::string_view model_id);
+                                                                              std::string_view model_id);
 
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::http::Transport& transport,
@@ -85,7 +79,5 @@ struct PreparedCompactionContext
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                                          ava::http::Transport& transport, runtime::RunOptions const& options);
-
-[[nodiscard]] std::string to_string(runtime::FreshnessSourceKind kind);
 
 }  // namespace ava::app

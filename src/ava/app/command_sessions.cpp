@@ -16,26 +16,17 @@
 
 namespace ava::app {
 using session_command_support::labels_text;
-using session_command_support::owned_replacement_options;
 using session_command_support::reopen_session;
 using session_command_support::trim_ascii;
 
 namespace {
 
-ava::core::Result<runtime::Session> create_fresh_session(runtime::Session const& current)
+ava::core::Result<runtime::session_ts> create_fresh_session(runtime::Session const& current)
 {
-  runtime::OpenOptions options;
-  options.workspace_dir = current.workspace_dir();
-  options.current_dir = current.current_dir();
-  options.continue_last_session = false;
-  options.sessionless = current.sessionless();
-  options.mode = current.mode();
-  options.tool_visibility = current.tool_visibility();
-  options.paths = current.paths();
-  options.subagent_coordinator = current.subagent_coordinator();
-  options.subagent_delivery_manager = current.subagent_delivery_manager();
-  options.session_title_coordinator = current.session_title_coordinator();
-  return open_runtime_session(options);
+  auto context = current.replacement_open_context({});
+  runtime::SessionLifecycleRequest request;
+  request.sessionless = current.sessionless();
+  return runtime::Session::open(context, request);
 }
 
 ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, std::string_view name, ava::session::SessionBranchMode mode,
@@ -73,17 +64,20 @@ ava::core::Result<CommandResult> run_branch_command(runtime::Session& session, s
 
   auto const created_session_id = branched->store.session_id();
   auto const resolved_branch_from_entry_id = branched->branch_from_entry_id;
-  auto owned_options = owned_replacement_options(session);
-  auto opened = open_owned_runtime_session(owned_options, branched->store, branched->lease, true);
-  if (!opened)
+  auto owned_options = session.replacement_open_context({});
+  auto unlocked_opened_result = runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
+  if (!unlocked_opened_result)
   {
-    auto error = std::move(opened.error());
+    auto error = std::move(unlocked_opened_result.error());
     ava::session::rollback_created_session_with_context(branched->store, branched->lease, error);
     return std::unexpected(std::move(error));
   }
-  opened->created = true;
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+  {
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    opened_w->created = true;
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
 
   result.session_tree_changed = true;
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
@@ -116,26 +110,30 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
 
   auto const previous_session_id = session.store.session_id();
   auto previous_session_title = std::string("Untitled session");
-  if (auto metadata = session.load_runtime_metadata(); metadata && !metadata->effective_title().empty())
+  if (auto metadata = session.load_metadata(); metadata && !metadata->effective_title().empty())
     previous_session_title = sanitize_inline_text(metadata->effective_title());
 
   auto const trimmed_name = trim_ascii(name);
   auto const created_session_title = trimmed_name.empty() ? std::string("Untitled session") : sanitize_inline_text(trimmed_name);
-  auto opened = create_fresh_session(session);
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
+  auto unlocked_opened_result = create_fresh_session(session);
+  if (!unlocked_opened_result)
+    return std::unexpected(std::move(unlocked_opened_result.error()));
 
-  auto const created_session_id = opened->store.session_id();
-  if (!trimmed_name.empty())
+  std::string created_session_id;
   {
-    auto metadata =
-        opened->append_runtime_session_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
-    if (!metadata)
-      return std::unexpected(std::move(metadata.error()));
-  }
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    created_session_id = opened_w->store.session_id();
+    if (!trimmed_name.empty())
+    {
+      auto metadata =
+          opened_w->append_metadata(ava::session::SessionMetadataUpdate{.name = std::optional<std::string>(trimmed_name), .actor = "tui"});
+      if (!metadata)
+        return std::unexpected(std::move(metadata.error()));
+    }
 
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
 
   result.session_tree_changed = true;
   std::string output = "started session \"" + created_session_title + "\" · id " + created_session_id;
@@ -157,12 +155,15 @@ ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, s
     return result;
   }
 
-  auto opened = reopen_session(session, trimmed_session_id);
-  if (!opened)
-    return std::unexpected(std::move(opened.error()));
+  auto unlocked_opened_result = reopen_session(session, trimmed_session_id);
+  if (!unlocked_opened_result)
+    return std::unexpected(std::move(unlocked_opened_result.error()));
 
-  if (auto replaced = session.replace_with(std::move(*opened)); !replaced)
-    return std::unexpected(std::move(replaced.error()));
+  {
+    runtime::session_ts::wat opened_w(*unlocked_opened_result);
+    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+      return std::unexpected(std::move(replaced.error()));
+  }
   add_output(result, "resumed session " + session.store.session_id());
   return result;
 }
@@ -183,7 +184,7 @@ ava::core::Result<CommandResult> run_name_command(runtime::Session& session, std
   ava::session::SessionMetadataUpdate update;
   update.name = clear_name ? std::optional<std::string>(std::string{}) : std::optional<std::string>(trimmed_name);
   update.actor = "tui";
-  auto metadata = session.append_runtime_session_metadata(std::move(update));
+  auto metadata = session.append_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -203,7 +204,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   auto const parts = split_command_arguments(labels);
   if (parts.empty())
   {
-    auto metadata = session.load_runtime_metadata();
+    auto metadata = session.load_metadata();
     if (!metadata)
       return std::unexpected(std::move(metadata.error()));
     auto text = metadata->labels.empty() ? std::string("session labels: <none>") : std::string("session labels: ") + labels_text(metadata->labels);
@@ -222,7 +223,7 @@ ava::core::Result<CommandResult> run_labels_command(runtime::Session& session, s
   ava::session::SessionMetadataUpdate update;
   update.labels = next_labels;
   update.actor = "tui";
-  auto metadata = session.append_runtime_session_metadata(std::move(update));
+  auto metadata = session.append_metadata(std::move(update));
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
@@ -242,11 +243,11 @@ ava::core::Result<CommandResult> run_mode_command(runtime::Session& session)
   auto prompt_state = select_runtime_prompt_state(session, new_mode);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  if (auto appended = session.append_runtime_mode_change(new_mode); !appended)
+  if (auto appended = session.append_mode_change(new_mode); !appended)
   {
     return std::unexpected(std::move(appended.error()));
   }
-  if (auto refreshed = session.apply_runtime_prompt_state(std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = session.apply_prompt_state(std::move(*prompt_state)); !refreshed)
     return std::unexpected(std::move(refreshed.error()));
   add_output(result, "mode switched to " + ava::agent::to_string(session.mode()));
   return result;

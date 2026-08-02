@@ -12,7 +12,6 @@
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime_sessions.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/session_user_turns.h"
 #include "ava/app/subagent_workspace.h"
@@ -36,10 +35,28 @@
 
 namespace ava::app::line_shell_internal {
 
+// THIS IS A HACK.
+// I didn't want to change too much of this code because I think Igo is working on it too;
+// We need to replace `state.session` with a temporarily unlocked Session reference however.
+// Doing that by redefining `state` at the top of every function.
+struct FakeState
+{
+  ShellState& real_state_;
+  ava::app::runtime::session_ts::wat session_w;
+  ava::app::runtime::Session& session;
+  operator ShellState&() { return real_state_; }
+
+  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.session), session(*session_w) { }
+};
+
 namespace version = ava::core::version;
 
-int run_tui(ShellState state)
+int run_tui(ShellState real_state)
 {
+  FakeState state{real_state};
+
+
+
   auto key_bindings = ava::tui::default_key_bindings();
   std::string keybind_status;
   if (auto loaded = ava::tui::load_key_bindings(state.session.paths().ava_config_dir / "keybinds.json"); loaded)
@@ -84,17 +101,7 @@ int run_tui(ShellState state)
     }
     return themes;
   };
-  auto runtime_open_options = [&state]() {
-    ava::app::runtime::OpenOptions options;
-    options.workspace_dir = state.session.workspace_dir();
-    options.current_dir = state.session.current_dir();
-    options.mode = state.session.mode();
-    options.tool_visibility = state.session.tool_visibility();
-    options.paths = state.session.paths();
-    options.sessionless = state.session.sessionless();
-    options.offline = state.session.is_offline();
-    return options;
-  };
+  auto runtime_open_context = [&state]() { return state.session.replacement_open_context({}); };
   auto capture_title_catalog_changes = [&state, &application_catalog]() {
     auto const cursor = application_catalog.title_catalog_cursor();
     return state.session.session_title_coordinator() ? state.session.session_title_coordinator()->catalog_changes_since(cursor)
@@ -143,7 +150,7 @@ int run_tui(ShellState state)
                                             session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
                                             session_selector_show_label_time);
   };
-  auto open_session_selector_target = [&state, &runtime_open_options, &state_snapshot, &application_catalog, &hotkeys](
+  auto open_session_selector_target = [&state, &runtime_open_context, &state_snapshot, &application_catalog, &hotkeys](
                                           std::string target_session_id, std::string status_prefix) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
     if (target_session_id.empty())
     {
@@ -154,11 +161,14 @@ int run_tui(ShellState state)
       application_catalog.retarget_session(state.session.store.session_id());
       return state_snapshot(status_prefix + target_session_id + " (already open)");
     }
-    auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), target_session_id);
-    if (!opened)
-      return std::unexpected(std::move(opened.error()));
-    if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
+    auto unlocked_opened_result = state.session.open_requested(runtime_open_context(), target_session_id);
+    if (!unlocked_opened_result)
+      return std::unexpected(std::move(unlocked_opened_result.error()));
+    {
+      ava::app::runtime::session_ts::wat opened_w(*unlocked_opened_result);
+      if (auto replaced = state.session.replace_with(std::move(*opened_w)); !replaced)
+        return std::unexpected(std::move(replaced.error()));
+    }
     application_catalog.retarget_session(state.session.store.session_id());
     application_catalog.refresh_values(state.session, hotkeys);
     return state_snapshot(status_prefix + target_session_id);
@@ -348,10 +358,10 @@ int run_tui(ShellState state)
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> { return ava::app::cycle_runtime_reasoning(state.session); },
       .on_cycle_model = [&state, &state_snapshot](bool forward) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        auto model = forward ? ava::app::rpc::next_runtime_model(state.session) : ava::app::rpc::previous_runtime_model(state.session);
+        auto model = forward ? ava::app::rpc::next_runtime_model(state.session_w) : ava::app::rpc::previous_runtime_model(state.session_w);
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = state.session.switch_runtime_model(std::move(*model));
+        auto switched = state.session.switch_model(std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model cycled" : "model already selected");
@@ -545,7 +555,7 @@ int run_tui(ShellState state)
         auto model = ava::app::resolve_runtime_model(state.session.paths(), value.substr(0, separator), value.substr(separator + 1));
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = state.session.switch_runtime_model(std::move(*model));
+        auto switched = state.session.switch_model(std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
@@ -553,7 +563,7 @@ int run_tui(ShellState state)
       .on_reasoning_selected = [&state, &state_snapshot](std::optional<std::string> level) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (!level)
         {
-          auto changed = state.session.set_runtime_reasoning(std::nullopt);
+          auto changed = state.session.set_reasoning(std::nullopt);
           if (!changed)
             return std::unexpected(std::move(changed.error()));
           return state_snapshot(*changed ? "thinking mode set to Default" : "thinking mode already Default");
@@ -561,7 +571,7 @@ int run_tui(ShellState state)
         auto selection = ava::app::reasoning_selection_for_level(state.session.model(), *level);
         if (!selection)
           return std::unexpected(std::move(selection.error()));
-        auto changed = state.session.set_runtime_reasoning(std::move(*selection));
+        auto changed = state.session.set_reasoning(std::move(*selection));
         if (!changed)
           return std::unexpected(std::move(changed.error()));
         auto const label = ava::app::reasoning_level_label(*level);
@@ -640,7 +650,7 @@ int run_tui(ShellState state)
       .on_scoped_model_reorder = [&state](ava::tui::SelectListView const& previous, std::string_view value, bool up)
           -> ava::core::Result<ava::tui::SelectListView> { return reorder_scoped_model(state.session, previous, value, up); },
       .on_scoped_model_save = [&state]() -> ava::core::Result<std::string> { return save_scoped_model_cycle(state.session); },
-      .on_session_selected = [&state, &runtime_open_options, &state_snapshot, &application_catalog,
+      .on_session_selected = [&state, &runtime_open_context, &state_snapshot, &application_catalog,
                               &hotkeys](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value.empty())
         {
@@ -651,11 +661,14 @@ int run_tui(ShellState state)
           application_catalog.retarget_session(state.session.store.session_id());
           return state_snapshot("session already open");
         }
-        auto opened = ava::app::rpc::open_requested_session(state.session, runtime_open_options(), value);
-        if (!opened)
-          return std::unexpected(std::move(opened.error()));
-        if (auto replaced = state.session.replace_with(std::move(*opened)); !replaced)
-          return std::unexpected(std::move(replaced.error()));
+        auto unlocked_opened_result = state.session.open_requested(runtime_open_context(), value);
+        if (!unlocked_opened_result)
+          return std::unexpected(std::move(unlocked_opened_result.error()));
+        {
+          ava::app::runtime::session_ts::wat opened_w(*unlocked_opened_result);
+          if (auto replaced = state.session.replace_with(std::move(*opened_w)); !replaced)
+            return std::unexpected(std::move(replaced.error()));
+        }
         application_catalog.retarget_session(state.session.store.session_id());
         application_catalog.refresh_values(state.session, hotkeys);
         return state_snapshot("session opened");

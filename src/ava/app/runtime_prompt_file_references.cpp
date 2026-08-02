@@ -2,7 +2,6 @@
 #include "runtime/RunOptions.h"
 #include "runtime/Session.h"
 #include "runtime_prompt_file_references.h"
-#include "runtime_sessions.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/tools/file_tools.h"
@@ -99,7 +98,7 @@ ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session,
                                  .permission_tool_name = "file_reference",
                                  .permission_actor = "user",
                                  .anchor_set = session.anchor_set(),
-                                 .ava_authority_roots = command_authority_roots_for_session(session),
+                                 .ava_authority_roots = session.ava_authority_roots(),
                                  .exact_file_access = options.exact_file_access,
                                  .command_executor = options.command_executor,
                                  .session_id = session.store.session_id(),

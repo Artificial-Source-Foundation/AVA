@@ -1,3 +1,4 @@
+#include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/runtime.h"

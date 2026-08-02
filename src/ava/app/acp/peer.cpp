@@ -2,6 +2,7 @@
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/peer.h"
 #include "ava/core/ids.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -433,12 +434,13 @@ class JsonRpcPeer::State
   void start_threads()
   {
     accepting_.store(true, std::memory_order_release);
-    writer_ = std::thread([this] { writer_loop(); });
-    deadline_thread_ = std::thread([this] { deadline_loop(); });
+    writer_ = ava::core::make_thread("acp_writer", [this] { writer_loop(); });
+    deadline_thread_ = ava::core::make_thread("acp_deadline", [this] { deadline_loop(); });
     std::lock_guard workers_lock(workers_mutex_);
     workers_.reserve(kWorkerCount);
     worker_count_ = kWorkerCount;
-    for (std::size_t index = 0; index < kWorkerCount; ++index) workers_.emplace_back([this](std::stop_token token) { worker_loop(token); });
+    for (std::size_t index = 0; index < kWorkerCount; ++index)
+      workers_.emplace_back(ava::core::make_jthread("acp_worker", [this](std::stop_token token) { worker_loop(token); }));
   }
 
   void request_worker_stop() noexcept

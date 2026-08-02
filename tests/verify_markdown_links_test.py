@@ -70,6 +70,7 @@ class MarkdownLinkVerifierTests(unittest.TestCase):
         self.write("README.md", "[excluded reference](docs/reference-code/missing.md)\n")
         excluded_markdown = (
             ".git/README.md",
+            ".gitache/libcwd/README.md",
             "build/README.md",
             "build-debug/README.md",
             "cmake-build-release/README.md",

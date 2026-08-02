@@ -42,6 +42,7 @@ BACKTICK_RUN_RE = re.compile(r"`+")
 # accidentally hiding similarly named first-party directories elsewhere.
 SOURCE_EXCLUDED_PREFIXES = (
     (".git",),
+    (".gitache",),
     (".plans",),
     ("cmake", "aicxx"),
     ("cwds",),

@@ -272,7 +272,8 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
     return;
 
   constexpr char kPromptLeak[] = "SECRET_PROMPT_SHOULD_NOT_LEAK_IN_JOBS_OUTPUT";
-  constexpr char kBoundedSummary[] = "BOUNDED_SUMMARY_UNIQUE_TOKEN";
+  // static: captureless BackgroundJobWorker lambda ODR-uses this when building final_text.
+  static constexpr char kBoundedSummary[] = "BOUNDED_SUMMARY_UNIQUE_TOKEN";
 
   // Deterministic completed fixture: list/show must omit terminal summary; result includes it.
   auto completed_start = coordinator->start_background(

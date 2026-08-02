@@ -62,6 +62,16 @@ struct ToolDispatchServices
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
   std::vector<SubagentDefinition> subagents = {};
 
+#ifdef CWDEBUG
+  // OPT_OUT keeps callbacks/launch metadata out of generated printing; this
+  // hand-written print_on is only for Debug nesting under generated parents and
+  // emits a fixed opaque token (no callbacks, coordinator, subagents, or pointers).
+  void print_on(std::ostream& os) const
+  {
+    os << "{ToolDispatchServices}";
+  }
+#endif
+
   // Carries callbacks and private launch metadata; never auto-print it.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

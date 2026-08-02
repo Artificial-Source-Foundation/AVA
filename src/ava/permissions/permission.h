@@ -155,6 +155,16 @@ struct PermissionResolutionDecision
   PermissionResolutionDecision(PermissionResolution resolution_in);
   PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in);
 
+#ifdef CWDEBUG
+  // OPT_OUT keeps user_guidance and free-form text out of generated printing; this
+  // hand-written print_on is only for Debug nesting under generated parents and
+  // emits a bounded opaque representation (no reason/user_guidance/rule text).
+  void print_on(std::ostream& os) const
+  {
+    os << "{resolution:" << static_cast<int>(resolution) << ",authoritative:" << authoritative << '}';
+  }
+#endif
+
   // user_guidance must never appear in debug/log representations.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

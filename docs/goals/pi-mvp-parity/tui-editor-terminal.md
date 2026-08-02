@@ -57,7 +57,7 @@ AVA already has a strong native ncurses TUI with editor, palettes, tool cards, p
 | Accessibility | Keyboard-only operation works for all flows; plain/no-color mode preserves information; no critical state is color-only; headless alternatives exist for automation. |
 | Performance | Large transcript, large tool output, narrow terminal, resize, and active-run rendering stay bounded with tests or smoke evidence. |
 | Deterministic terminal tests | AVA has either a virtual-terminal-style screen model or a documented decision to rely on renderer tests plus PTY smokes, with gaps listed. |
-| Docs | `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, and product ledgers describe current TUI behavior and smoke commands. |
+| Docs | `docs/core/usage.md`, `docs/core/configuration.md`, `docs/operations/testing.md`, and product ledgers describe current TUI behavior and smoke commands. |
 
 ## Implementation Slices
 
@@ -128,7 +128,7 @@ git --no-pager diff --check
   - Terminal capabilities: Kitty keyboard push/query/pop, xterm modifyOtherKeys fallback, bracketed paste, SGR/legacy mouse, resize, OSC52 copy, OSC8 hyperlinks, Kitty/iTerm2 images with tmux/plain fallback, `NO_COLOR`, `COLORFGBG` inference, and terminal cleanup have deterministic or opt-in smoke evidence. Pixel-level image validation in a real Kitty/iTerm2 app remains manual supplemental evidence.
   - Accessibility/performance: keyboard-only flows and headless/RPC alternatives exist, `NO_COLOR`/plain mode preserves critical permission/tool/settings text, print-mode TTY output now sanitizes terminal control bytes, and large transcript/tool-output/render budgets are covered. Broader screen-reader review and release-workload profiling remain future polish.
   - Startup/onboarding: AVA's auth-first onboarding (`/connect`/`/login`, provider env/auth guidance) is the MVP equivalent. Pi-style analytics/theme wizard behavior is excluded because telemetry/self-update/marketplace behavior is not an AVA MVP goal.
-- 2026-07-03: Changes/evidence for this area are documented in `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md`. Relevant code/test changes in the current tree include `src/ava/tui/composer.h`, `src/ava/tui/runtime.{h,cpp}`, `src/ava/tui/tool_cards.cpp`, `src/ava/app/print_mode.{h,cpp}`, `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, and `tests/app_print_tests.cpp`.
+- 2026-07-03: Changes/evidence for this area are documented in `docs/core/usage.md`, `docs/core/configuration.md`, `docs/operations/testing.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md`. Relevant code/test changes in the current tree include `src/ava/tui/composer.h`, `src/ava/tui/runtime.{h,cpp}`, `src/ava/tui/tool_cards.cpp`, `src/ava/app/print_mode.{h,cpp}`, `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, and `tests/app_print_tests.cpp`.
 - 2026-07-03: Validation run:
   - `cmake --preset dev` passed.
   - `cmake --build --preset dev` passed.

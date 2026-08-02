@@ -5,12 +5,15 @@
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
+#include "ava/tui/theme.h"
 
 #include <algorithm>
+#include <chrono>
 #include <clocale>
 #include <cstddef>
 #include <cstdio>
@@ -23,6 +26,9 @@
 #include <utility>
 #include <vector>
 #include <curses.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 namespace {
@@ -354,7 +360,7 @@ void run_tui_terminal_input_tests_part_1()
           ava::tui::terminal_escape_sequence_key("[<65;12;9M") == ava::tui::Key::MouseWheelDown &&
           ava::tui::terminal_escape_sequence_key("[<68;12;9M") == ava::tui::Key::MouseWheelUp &&
           ava::tui::terminal_escape_sequence_key("[<69;12;9M") == ava::tui::Key::MouseWheelDown &&
-          ava::tui::terminal_escape_sequence_key("[<0;12;9M") == ava::tui::Key::MouseLeftClick &&
+          ava::tui::terminal_escape_sequence_key("[<0;12;9M") == ava::tui::Key::MouseLeftPress &&
           ava::tui::terminal_escape_sequence_key("[<32;12;9M") == ava::tui::Key::MouseLeftDrag &&
           ava::tui::terminal_escape_sequence_key("[<64;12;9m") == ava::tui::Key::Unknown &&
           ava::tui::terminal_escape_sequence_key("[<65;12;9m") == ava::tui::Key::Unknown &&
@@ -408,23 +414,54 @@ void run_tui_terminal_input_tests_part_1()
     sequence.push_back(static_cast<char>(row + 32U));
     return sequence;
   };
-  auto const sgr_click = ava::tui::terminal_escape_sequence_event("[<0;12;9M");
-  auto const sgr_release = ava::tui::terminal_escape_sequence_event("[<0;12;9m");
-  auto const sgr_drag = ava::tui::terminal_escape_sequence_event("[<32;12;9M");
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const sgr_hover = ava::tui::terminal_escape_sequence_event("[<32;12;9M");
+  auto const sgr_press = ava::tui::terminal_escape_sequence_event("[<0;12;9M");
+  auto const sgr_drag = ava::tui::terminal_escape_sequence_event("[<32;14;10M");
+  auto const sgr_release = ava::tui::terminal_escape_sequence_event("[<0;14;10m");
+  auto const sgr_post_release_hover = ava::tui::terminal_escape_sequence_event("[<32;15;10M");
+  auto const sgr_shift_press = ava::tui::terminal_escape_sequence_event("[<4;12;9M");
+  auto const sgr_shift_motion = ava::tui::terminal_escape_sequence_event("[<36;14;10M");
   auto const sgr_wheel = ava::tui::terminal_escape_sequence_event("[<65;21;7M");
-  auto const legacy_click = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(0, 12, 9));
-  auto const legacy_release = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(3, 12, 9));
-  auto const legacy_drag = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 12, 9));
+  auto const sgr_shift_wheel = ava::tui::terminal_escape_sequence_event("[<69;22;8M");
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const legacy_hover = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 12, 9));
+  auto const legacy_press = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(0, 12, 9));
+  auto const legacy_drag = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 14, 10));
+  auto const legacy_release = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(3, 14, 10));
+  auto const legacy_post_release_hover = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(32, 15, 10));
   auto const legacy_wheel = ava::tui::terminal_escape_sequence_event(legacy_mouse_sequence(64, 21, 7));
-  expect(sgr_click.key == ava::tui::Key::MouseLeftClick && sgr_click.mouse_column == 12 && sgr_click.mouse_row == 9 &&
-             sgr_release.key == ava::tui::Key::MouseLeftRelease && sgr_release.mouse_column == 12 && sgr_release.mouse_row == 9 &&
-             sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 12 && sgr_drag.mouse_row == 9 &&
+  expect(sgr_hover.key == ava::tui::Key::Unknown && sgr_press.key == ava::tui::Key::MouseLeftPress && sgr_press.mouse_column == 12 &&
+             sgr_press.mouse_row == 9 && sgr_drag.key == ava::tui::Key::MouseLeftDrag && sgr_drag.mouse_column == 14 && sgr_drag.mouse_row == 10 &&
+             sgr_release.key == ava::tui::Key::MouseLeftRelease && sgr_release.mouse_column == 14 && sgr_release.mouse_row == 10 &&
+             sgr_post_release_hover.key == ava::tui::Key::Unknown && sgr_shift_press.key == ava::tui::Key::MousePointerCancel &&
+             sgr_shift_press.mouse_column == 12 && sgr_shift_press.mouse_row == 9 && sgr_shift_motion.key == ava::tui::Key::MousePointerCancel &&
              sgr_wheel.key == ava::tui::Key::MouseWheelDown && sgr_wheel.mouse_column == 21 && sgr_wheel.mouse_row == 7 &&
-             legacy_click.key == ava::tui::Key::MouseLeftClick && legacy_click.mouse_column == 12 && legacy_click.mouse_row == 9 &&
-             legacy_release.key == ava::tui::Key::MouseLeftRelease && legacy_release.mouse_column == 12 && legacy_release.mouse_row == 9 &&
-             legacy_drag.key == ava::tui::Key::MouseLeftDrag && legacy_drag.mouse_column == 12 && legacy_drag.mouse_row == 9 &&
-             legacy_wheel.key == ava::tui::Key::MouseWheelUp && legacy_wheel.mouse_column == 21 && legacy_wheel.mouse_row == 7,
-         "terminal escape parser preserves SGR and legacy mouse click, drag, release, and wheel coordinates");
+             sgr_shift_wheel.key == ava::tui::Key::MouseWheelDown && sgr_shift_wheel.mouse_column == 22 && sgr_shift_wheel.mouse_row == 8 &&
+             legacy_hover.key == ava::tui::Key::Unknown && legacy_press.key == ava::tui::Key::MouseLeftPress &&
+             legacy_drag.key == ava::tui::Key::MouseLeftDrag && legacy_release.key == ava::tui::Key::MouseLeftRelease &&
+             legacy_post_release_hover.key == ava::tui::Key::Unknown && legacy_wheel.key == ava::tui::Key::MouseWheelUp && legacy_wheel.mouse_column == 21 &&
+             legacy_wheel.mouse_row == 7,
+         "terminal mouse protocols preserve real press-drag-release lifecycles, ignore hover, cancel on Shift, and preserve wheels");
+#ifdef NCURSES_MOUSE_VERSION
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const ncurses_hover = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 3, 4);
+  auto const ncurses_press = ava::tui::terminal_ncurses_mouse_event(BUTTON1_PRESSED, 3, 4);
+  auto const ncurses_drag = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 5, 6);
+  auto const ncurses_release = ava::tui::terminal_ncurses_mouse_event(BUTTON1_RELEASED, 5, 6);
+  auto const ncurses_after_release = ava::tui::terminal_ncurses_mouse_event(REPORT_MOUSE_POSITION, 7, 8);
+  auto const ncurses_click = ava::tui::terminal_ncurses_mouse_event(BUTTON1_CLICKED, 9, 10);
+#ifdef BUTTON_SHIFT
+  auto const ncurses_shift_press = ava::tui::terminal_ncurses_mouse_event(BUTTON1_PRESSED | BUTTON_SHIFT, 3, 4);
+  auto const ncurses_shift_ok = ncurses_shift_press.key == ava::tui::Key::MousePointerCancel;
+#else
+  auto const ncurses_shift_ok = true;
+#endif
+  expect(ncurses_hover.key == ava::tui::Key::Unknown && ncurses_press.key == ava::tui::Key::MouseLeftPress &&
+             ncurses_drag.key == ava::tui::Key::MouseLeftDrag && ncurses_release.key == ava::tui::Key::MouseLeftRelease &&
+             ncurses_after_release.key == ava::tui::Key::Unknown && ncurses_click.key == ava::tui::Key::MouseLeftClick && ncurses_shift_ok,
+         "ncurses mouse reports preserve owned left-button lifecycle, click fallback, and Shift pointer cancel");
+#endif
   expect(ava::tui::terminal_escape_sequence_complete("[13;2u") && ava::tui::terminal_escape_sequence_complete("[?25l") &&
              ava::tui::terminal_escape_sequence_complete("[45;5u") && ava::tui::terminal_escape_sequence_complete("[3;3~") &&
              ava::tui::terminal_escape_sequence_complete("[<0;12;9M") && ava::tui::terminal_escape_sequence_complete(legacy_mouse_sequence(0, 12, 9)) &&
@@ -598,8 +635,8 @@ void run_tui_terminal_input_tests_part_2()
              draft.kill_buffer == "\n",
          "tui draft editor joins the next line when deleting at line end");
   expect(ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) && draft.text == "join" && draft.cursor == 4 &&
-             draft.kill_buffer == "line",
-         "tui draft editor deletes following text after a line-end join");
+             draft.kill_buffer == "\nline",
+         "tui draft editor accumulates consecutive forward kills into one kill-ring entry");
   ava::tui::reset_composer_draft(draft, "last", 4);
   expect(!ava::tui::apply_composer_draft_action(draft, ava::tui::TuiAction::DeleteToLineEnd) && draft.text == "last" && draft.cursor == 4,
          "tui draft editor leaves final line end unchanged when there is nothing to delete");
@@ -664,16 +701,27 @@ void run_tui_terminal_input_tests_part_2()
              ring_draft.kill_buffer == "gamma",
          "tui draft editor records killed text in a ring");
   expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.text == "alpha " &&
-             ring_draft.kill_buffer == "beta ",
-         "tui draft editor keeps the most recent kill at the front of the ring");
-  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.text == "alpha beta ",
-         "tui draft editor yanks the newest kill-ring entry");
-  expect(
-      ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.text == "alpha gamma" && ring_draft.kill_buffer == "gamma",
-      "tui draft editor yank-pop swaps the previous yank with the next kill-ring entry");
-  expect(
-      ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.text == "alpha beta " && ring_draft.kill_buffer == "beta ",
-      "tui draft editor yank-pop cycles through the kill ring");
+             ring_draft.kill_buffer == "beta gamma" && ring_draft.kill_ring.size() == 1 && ring_draft.kill_ring.front() == "beta gamma",
+         "tui draft editor prepends consecutive backward kills into one kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.text == "alpha beta gamma",
+         "tui draft editor yanks the accumulated kill-ring entry");
+  ava::tui::reset_composer_draft(ring_draft, "one two three");
+  ring_draft.kill_ring.clear();
+  ring_draft.kill_buffer.clear();
+  ring_draft.kill_sequence = ava::tui::ComposerKillSequence::None;
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.kill_buffer == "three" &&
+             ring_draft.kill_ring.size() == 1,
+         "tui draft editor seeds a fresh kill-ring entry after reset");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::CursorLeft) &&
+             ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::DeleteWordBackward) && ring_draft.kill_buffer == "two" &&
+             ring_draft.kill_ring.size() == 2 && ring_draft.kill_ring.front() == "two" && ring_draft.kill_ring[1] == "three",
+         "tui draft editor breaks kill accumulation after cursor movement");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::Yank) && ring_draft.kill_buffer == "two",
+         "tui draft editor yanks the newest kill-ring entry after a broken sequence");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.kill_buffer == "three",
+         "tui draft editor yank-pop swaps the previous yank with the next kill-ring entry");
+  expect(ava::tui::apply_composer_draft_action(ring_draft, ava::tui::TuiAction::YankPop) && ring_draft.kill_buffer == "two",
+         "tui draft editor yank-pop cycles through the kill ring");
 
   std::vector<std::string> input_history;
   expect(!ava::tui::push_composer_input_history(input_history, "   \t  "), "tui input history ignores empty and whitespace-only submissions");
@@ -822,6 +870,302 @@ void run_tui_terminal_input_tests_part_2()
              ava::tui::expanded_composer_draft_text(paste_draft) == long_single_line,
          "tui large single-line paste collapses by byte count and expands for submit");
 
+  // Wave A editor fidelity: cluster-aware editing, typing undo groups, kill accumulation.
+  auto const combining_acute = std::string("\xCC\x81");
+  auto const e_combining = std::string("e") + combining_acute;
+  auto const regional_c = std::string("\xF0\x9F\x87\xA8");
+  auto const regional_n = std::string("\xF0\x9F\x87\xB3");
+  auto const flag_cn = regional_c + regional_n;
+  auto const thumbs_up = std::string("\xF0\x9F\x91\x8D");
+  auto const light_skin_tone = std::string("\xF0\x9F\x8F\xBB");
+  auto const skin_tone_thumbs = thumbs_up + light_skin_tone;
+  auto const man = std::string("\xF0\x9F\x91\xA8");
+  auto const woman = std::string("\xF0\x9F\x91\xA9");
+  auto const girl = std::string("\xF0\x9F\x91\xA7");
+  auto const zwj = std::string("\xE2\x80\x8D");
+  auto const family_zwj = man + zwj + woman + zwj + girl;
+  auto const malformed_bytes = std::string("a") + std::string("\x80\xFF", 2) + "b";
+
+  expect(ava::tui::detail::terminal_text_cluster_bytes(e_combining, 0) == e_combining.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(flag_cn, 0) == flag_cn.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(skin_tone_thumbs, 0) == skin_tone_thumbs.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(family_zwj, 0) == family_zwj.size() &&
+             ava::tui::detail::terminal_text_cluster_bytes(malformed_bytes, 1) == 1,
+         "tui shared cluster helper covers combining marks, flags, skin tones, ZWJ families, and malformed bytes");
+
+  ava::tui::ComposerDraftState cluster_draft;
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + e_combining.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0,
+         "tui draft editor moves left over base+combining clusters atomically");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 + e_combining.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == cluster_draft.text.size(),
+         "tui draft editor moves right over base+combining clusters atomically");
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == std::string("x") + e_combining &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "x" &&
+             cluster_draft.kill_buffer.empty(),
+         "tui draft editor backspaces base+combining clusters without updating the kill ring");
+  ava::tui::reset_composer_draft(cluster_draft, std::string("x") + e_combining + "y", 1);
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text == "xy" && cluster_draft.cursor == 1,
+         "tui draft editor forward-deletes base+combining clusters atomically");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + flag_cn + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + flag_cn.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text == "ab",
+         "tui draft editor treats regional-indicator flag pairs as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + skin_tone_thumbs + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + skin_tone_thumbs.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "ab",
+         "tui draft editor treats emoji skin-tone modifier sequences as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, std::string("a") + family_zwj + "b");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 1 + family_zwj.size() &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "ab",
+         "tui draft editor treats family ZWJ emoji sequences as one atomic cluster");
+
+  ava::tui::reset_composer_draft(cluster_draft, malformed_bytes);
+  expect(cluster_draft.text.size() == 4 && cluster_draft.cursor == 4, "tui draft editor loads malformed utf-8 draft at end");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) &&
+             cluster_draft.text == std::string("a") + std::string("\x80\xFF", 2) && cluster_draft.cursor == 3,
+         "tui draft editor backspaces trailing ascii after malformed utf-8");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) &&
+             cluster_draft.text == std::string("a") + std::string("\x80", 1) && cluster_draft.cursor == 2,
+         "tui draft editor backspaces the 0xFF malformed byte");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteBackward) && cluster_draft.text == "a" && cluster_draft.cursor == 1,
+         "tui draft editor backspaces the 0x80 malformed byte");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) && cluster_draft.text.empty(),
+         "tui draft editor forward-deletes the remaining ascii after malformed cleanup");
+  ava::tui::reset_composer_draft(cluster_draft, malformed_bytes, 1);
+  expect(cluster_draft.cursor == 1, "tui draft editor keeps the cursor on orphan utf-8 continuation bytes");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::DeleteForward) &&
+             cluster_draft.text == std::string("a") + std::string("\xFF", 1) + "b" && cluster_draft.cursor == 1,
+         "tui draft editor forward-deletes malformed utf-8 one byte at a time");
+  expect(ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorLeft) && cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 1 &&
+             ava::tui::apply_composer_draft_action(cluster_draft, ava::tui::TuiAction::CursorRight) && cluster_draft.cursor == 2,
+         "tui draft editor moves across malformed utf-8 one byte at a time");
+
+  auto const large_paste_for_atomic = std::string("line01\nline02\nline03\nline04\nline05\nline06\nline07\nline08\nline09\nline10\nline11");
+  ava::tui::ComposerDraftState paste_atomic_draft;
+  expect(ava::tui::insert_composer_draft_text(paste_atomic_draft, "A") && ava::tui::insert_composer_paste_text(paste_atomic_draft, large_paste_for_atomic) &&
+             ava::tui::insert_composer_draft_text(paste_atomic_draft, "B"),
+         "tui draft editor builds a paste-marker draft for atomicity checks");
+  auto const paste_marker_size = paste_atomic_draft.text.size() - 2;
+  paste_atomic_draft.cursor = paste_atomic_draft.text.size();
+  expect(ava::tui::apply_composer_draft_action(paste_atomic_draft, ava::tui::TuiAction::DeleteBackward) &&
+             paste_atomic_draft.text.size() == 1 + paste_marker_size &&
+             ava::tui::apply_composer_draft_action(paste_atomic_draft, ava::tui::TuiAction::DeleteBackward) && paste_atomic_draft.text == "A",
+         "tui draft editor deletes recorded paste markers as one atomic unit");
+
+  ava::tui::ComposerDraftState undo_group_draft;
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, "h") && ava::tui::insert_composer_draft_text(undo_group_draft, "i") &&
+             ava::tui::insert_composer_draft_text(undo_group_draft, "!") && undo_group_draft.text == "hi!" && undo_group_draft.undo_stack.size() == 1,
+         "tui draft editor coalesces contiguous ordinary typing into one undo group");
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, " ") && undo_group_draft.text == "hi! " && undo_group_draft.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups at whitespace");
+  expect(ava::tui::insert_composer_draft_text(undo_group_draft, "y") && ava::tui::insert_composer_draft_text(undo_group_draft, "o") &&
+             undo_group_draft.text == "hi! yo" && undo_group_draft.undo_stack.size() == 3,
+         "tui draft editor starts a new coalesced word-run undo group after whitespace");
+  expect(ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text == "hi! " &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text == "hi!" &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Undo) && undo_group_draft.text.empty(),
+         "tui draft editor undoes coalesced word runs and whitespace boundaries as separate groups");
+  expect(ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi!" &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi! " &&
+             ava::tui::apply_composer_draft_action(undo_group_draft, ava::tui::TuiAction::Redo) && undo_group_draft.text == "hi! yo",
+         "tui draft editor redo reapplies coalesced typing groups exactly");
+
+  ava::tui::ComposerDraftState newline_undo_draft;
+  expect(ava::tui::insert_composer_draft_text(newline_undo_draft, "ab") && ava::tui::insert_composer_draft_text(newline_undo_draft, "\n") &&
+             ava::tui::insert_composer_draft_text(newline_undo_draft, "cd") && newline_undo_draft.undo_stack.size() == 3,
+         "tui draft editor breaks typing undo groups at newlines");
+
+  ava::tui::ComposerDraftState cursor_break_draft;
+  expect(ava::tui::insert_composer_draft_text(cursor_break_draft, "ab") && cursor_break_draft.undo_stack.size() == 1,
+         "tui draft editor records one undo group for an initial word run");
+  expect(ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::CursorLeft) &&
+             ava::tui::insert_composer_draft_text(cursor_break_draft, "X") && cursor_break_draft.text == "aXb" && cursor_break_draft.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups after cursor movement");
+  expect(ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::Undo) && cursor_break_draft.text == "ab" &&
+             ava::tui::apply_composer_draft_action(cursor_break_draft, ava::tui::TuiAction::Undo) && cursor_break_draft.text.empty(),
+         "tui draft editor undoes post-cursor-break inserts separately from the earlier word run");
+
+  ava::tui::ComposerDraftState undo_cap_draft;
+  for (int index = 0; index < 120; ++index)
+  {
+    static_cast<void>(ava::tui::insert_composer_draft_text(undo_cap_draft, "x"));
+    static_cast<void>(ava::tui::insert_composer_draft_text(undo_cap_draft, " "));
+  }
+  expect(undo_cap_draft.undo_stack.size() == 100, "tui draft editor caps undo history at 100 snapshots");
+
+  ava::tui::ComposerDraftState forward_kill_draft;
+  ava::tui::reset_composer_draft(forward_kill_draft, "alpha beta gamma", 0);
+  expect(ava::tui::apply_composer_draft_action(forward_kill_draft, ava::tui::TuiAction::DeleteWordForward) && forward_kill_draft.kill_buffer == "alpha" &&
+             ava::tui::apply_composer_draft_action(forward_kill_draft, ava::tui::TuiAction::DeleteWordForward) &&
+             forward_kill_draft.kill_buffer == "alpha beta" && forward_kill_draft.kill_ring.size() == 1,
+         "tui draft editor appends consecutive forward kills into one kill-ring entry");
+
+  ava::tui::ComposerDraftState kill_cap_ring;
+  for (int index = 0; index < 20; ++index)
+  {
+    auto piece = "w" + std::to_string(index);
+    kill_cap_ring.text = piece;
+    kill_cap_ring.cursor = piece.size();
+    kill_cap_ring.kill_sequence = ava::tui::ComposerKillSequence::None;
+    static_cast<void>(ava::tui::apply_composer_draft_action(kill_cap_ring, ava::tui::TuiAction::DeleteWordBackward));
+    // Break the kill sequence so each word becomes its own ring entry.
+    static_cast<void>(ava::tui::apply_composer_draft_action(kill_cap_ring, ava::tui::TuiAction::CursorLeft));
+  }
+  expect(kill_cap_ring.kill_ring.size() == 16 && kill_cap_ring.kill_ring.front() == "w19" && kill_cap_ring.kill_ring.back() == "w4",
+         "tui draft editor caps the kill ring at 16 entries");
+
+  // Cluster-invariant word movement/deletion and vertical snap regressions.
+  auto const nbsp = std::string("\xC2\xA0");
+  auto const ideographic_space = std::string("\xE3\x80\x80");
+  ava::tui::ComposerDraftState word_cluster_draft;
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("pre ").size() + family_zwj.size() + 1 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("pre ").size() &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(word_cluster_draft, word_cluster_draft.cursor) == word_cluster_draft.cursor,
+         "tui draft editor word-left treats a ZWJ family cluster as one word unit");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_cluster_draft.cursor == std::string("pre ").size() + family_zwj.size() &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(word_cluster_draft, word_cluster_draft.cursor) == word_cluster_draft.cursor,
+         "tui draft editor word-right advances over a whole ZWJ family cluster");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordBackward) &&
+             word_cluster_draft.text == std::string("pre ") + family_zwj + " " && word_cluster_draft.kill_buffer == "post" &&
+             word_cluster_draft.text.find(family_zwj) != std::string::npos,
+         "tui draft editor word-backspace deletes the trailing word without splitting a preceding ZWJ family");
+  // Break the kill sequence so the next word-delete is observed independently.
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorLineStart) &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorLineEnd),
+         "tui draft editor can reposition after the first word-delete");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordBackward) && word_cluster_draft.text == "pre " &&
+             word_cluster_draft.kill_buffer == family_zwj + " " && word_cluster_draft.text.find(zwj) == std::string::npos &&
+             word_cluster_draft.kill_buffer.find(man) != std::string::npos && word_cluster_draft.kill_buffer.find(woman) != std::string::npos &&
+             word_cluster_draft.kill_buffer.find(girl) != std::string::npos,
+         "tui draft editor word-backspace removes a ZWJ family cluster intact with no orphan joiners");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("pre ") + family_zwj + " post", std::string("pre ").size());
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordForward) && word_cluster_draft.text == "pre  post" &&
+             word_cluster_draft.kill_buffer == family_zwj && word_cluster_draft.kill_buffer.find(zwj) != std::string::npos &&
+             word_cluster_draft.text.find(zwj) == std::string::npos,
+         "tui draft editor forward word-delete removes a ZWJ family cluster as one unit");
+
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("aa") + e_combining + "bb");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) && word_cluster_draft.cursor == 0 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordRight) &&
+             word_cluster_draft.cursor == word_cluster_draft.text.size(),
+         "tui draft editor word movement keeps base+combining clusters inside one word run");
+  ava::tui::reset_composer_draft(word_cluster_draft, std::string("x ") + e_combining + " y");
+  expect(ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("x ").size() + e_combining.size() + 1 &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::CursorWordLeft) &&
+             word_cluster_draft.cursor == std::string("x ").size() &&
+             ava::tui::apply_composer_draft_action(word_cluster_draft, ava::tui::TuiAction::DeleteWordForward) && word_cluster_draft.text == "x  y" &&
+             word_cluster_draft.kill_buffer == e_combining && word_cluster_draft.kill_buffer.find(combining_acute) != std::string::npos,
+         "tui draft editor word-delete removes base+combining as one unit with no orphan mark");
+
+  // Uneven logical lines: sticky byte column intersects a multibyte codepoint and a cluster.
+  auto const cjk = std::string("\xE7\x95\x8C");
+  auto const vertical_text = std::string("abcdef") + "\n" + cjk + e_combining + family_zwj;
+  ava::tui::ComposerDraftState vertical_draft;
+  ava::tui::reset_composer_draft(vertical_draft, vertical_text, 4);  // column 4 on "abcdef"
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorDown), "tui draft editor can move down onto an uneven unicode line");
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor,
+         "tui draft editor vertical movement never leaves the cursor inside a compact cluster");
+  auto const down_cursor = vertical_draft.cursor;
+  // Target byte column 4 lands inside/after the leading CJK cell on the second line; snap must be a cluster edge.
+  expect(down_cursor == 0 + std::string("abcdef\n").size() || down_cursor == std::string("abcdef\n").size() + cjk.size() ||
+             down_cursor == std::string("abcdef\n").size() + cjk.size() + e_combining.size() || down_cursor == vertical_text.size(),
+         "tui draft editor snaps vertical targets to whole CJK/combining/ZWJ cluster boundaries");
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorUp) && vertical_draft.cursor == 4,
+         "tui draft editor preserves sticky byte-column policy when returning to the previous logical line");
+
+  // Shift-selection simulation: anchor + CursorDown must yield whole-cluster bounds (no partial substrings).
+  ava::tui::reset_composer_draft(vertical_draft, vertical_text, 1);
+  auto const selection_anchor = vertical_draft.cursor;
+  expect(ava::tui::apply_composer_draft_action(vertical_draft, ava::tui::TuiAction::CursorDown),
+         "tui draft editor extends vertically for selection simulation");
+  auto const selection_start = std::min(selection_anchor, vertical_draft.cursor);
+  auto const selection_end = std::max(selection_anchor, vertical_draft.cursor);
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, selection_start) == selection_start &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, selection_end) == selection_end,
+         "tui draft editor vertical selection bounds stay on compact cluster boundaries");
+  {
+    std::size_t walk = selection_start;
+    bool selection_cluster_aligned = selection_start < selection_end;
+    while (walk < selection_end)
+    {
+      auto const step = std::max<std::size_t>(ava::tui::detail::terminal_text_cluster_bytes(vertical_draft.text, walk), 1);
+      if (walk + step > selection_end)
+      {
+        selection_cluster_aligned = false;
+        break;
+      }
+      walk += step;
+    }
+    expect(selection_cluster_aligned && walk == selection_end, "tui draft editor vertical selection spans whole compact clusters only");
+    auto const selected = vertical_draft.text.substr(selection_start, selection_end - selection_start);
+    expect(selected.find(zwj) == std::string::npos || selected.find(family_zwj) != std::string::npos,
+           "tui draft editor vertical selection never keeps a ZWJ without its full family cluster");
+  }
+
+  // reset/replace with an interior cluster offset must snap before any edit observes the cursor.
+  ava::tui::reset_composer_draft(vertical_draft, std::string("x") + family_zwj + "y", 1 + 3);
+  expect(ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor &&
+             (vertical_draft.cursor == 1 || vertical_draft.cursor == 1 + family_zwj.size()),
+         "tui draft editor reset snaps arbitrary offsets out of ZWJ cluster interiors");
+  expect(ava::tui::replace_composer_draft(vertical_draft, std::string("x") + e_combining + "y", 2) &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(vertical_draft, vertical_draft.cursor) == vertical_draft.cursor &&
+             (vertical_draft.cursor == 1 || vertical_draft.cursor == 1 + e_combining.size()),
+         "tui draft editor replace snaps arbitrary offsets out of base+combining interiors");
+
+  // Range replace / selection-style deletion must snap stale interior bounds and never emit partial clusters.
+  ava::tui::ComposerDraftState range_draft;
+  ava::tui::reset_composer_draft(range_draft, std::string("a") + family_zwj + "b");
+  expect(ava::tui::replace_composer_draft_range(range_draft, 1 + 2, 1 + family_zwj.size(), "") && range_draft.text == "ab" &&
+             range_draft.text.find(zwj) == std::string::npos && range_draft.cursor == 1,
+         "tui draft editor range replace snaps an interior start through the ZWJ cluster end without splitting");
+  ava::tui::reset_composer_draft(range_draft, std::string("a") + e_combining + "b");
+  expect(ava::tui::replace_composer_draft_range(range_draft, 2, 1 + e_combining.size(), "X") && range_draft.text == "aXb" &&
+             range_draft.text.find(combining_acute) == std::string::npos,
+         "tui draft editor range replace snaps a mark-interior start so selection deletion keeps base+combining atomic");
+
+  // Unicode space codepoints break typing undo coalescing like ASCII whitespace.
+  ava::tui::ComposerDraftState unicode_space_undo;
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, "ab") && unicode_space_undo.undo_stack.size() == 1,
+         "tui draft editor records one undo group before a unicode space boundary");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, nbsp) && unicode_space_undo.undo_stack.size() == 2,
+         "tui draft editor breaks typing undo groups on NBSP");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, "cd") && unicode_space_undo.undo_stack.size() == 3,
+         "tui draft editor starts a new typing undo group after NBSP");
+  expect(ava::tui::insert_composer_draft_text(unicode_space_undo, ideographic_space) && unicode_space_undo.undo_stack.size() == 4 &&
+             ava::tui::insert_composer_draft_text(unicode_space_undo, "ef") && unicode_space_undo.undo_stack.size() == 5,
+         "tui draft editor breaks typing undo groups on ideographic space");
+  expect(ava::tui::apply_composer_draft_action(unicode_space_undo, ava::tui::TuiAction::Undo) &&
+             unicode_space_undo.text == std::string("ab") + nbsp + "cd" + ideographic_space &&
+             ava::tui::apply_composer_draft_action(unicode_space_undo, ava::tui::TuiAction::Redo) &&
+             unicode_space_undo.text == std::string("ab") + nbsp + "cd" + ideographic_space + "ef",
+         "tui draft editor undo/redo across unicode space boundaries remains exact");
+
+  // Mid-action stale interior cursor is corrected before word deletion.
+  ava::tui::ComposerDraftState stale_cursor_draft;
+  ava::tui::reset_composer_draft(stale_cursor_draft, std::string("a") + family_zwj + "b");
+  stale_cursor_draft.cursor = 1 + 4;  // deliberately inside the family cluster
+  expect(ava::tui::apply_composer_draft_action(stale_cursor_draft, ava::tui::TuiAction::DeleteWordForward) && stale_cursor_draft.text == "a" &&
+             stale_cursor_draft.text.find(zwj) == std::string::npos && stale_cursor_draft.kill_buffer.find(zwj) != std::string::npos &&
+             ava::tui::clamp_composer_draft_cursor_to_atomic_boundary(stale_cursor_draft, stale_cursor_draft.cursor) == stale_cursor_draft.cursor,
+         "tui draft editor corrects interior cluster cursors before word deletion and leaves no orphan ZWJ");
+
   auto const split_empty = ava::tui::split_lines("");
   expect(split_empty.size() == 1 && split_empty.front().empty(), "tui split keeps empty input as one line");
   auto const split_trailing = ava::tui::split_lines("a\n");
@@ -858,6 +1202,8 @@ struct VirtualTerminalResult
   bool processing_footer_output_is_quiet = false;
   bool processing_footer_output_is_plain = false;
   bool cursor_forced_visible_for_teardown = false;
+  bool checked_builtin_dark_default_screen_bg = false;
+  bool builtin_dark_stdscr_background_is_default = false;
 };
 
 std::optional<std::string> ncurses_screen_row(std::size_t row)
@@ -906,6 +1252,12 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
   if (screen)
   {
     static_cast<void>(set_term(screen));
+    // Match production color setup before drawing so default-background pairs resolve.
+    if (has_colors())
+    {
+      static_cast<void>(start_color());
+      static_cast<void>(use_default_colors());
+    }
     int rows = 0;
     int columns = 0;
     getmaxyx(stdscr, rows, columns);
@@ -927,6 +1279,16 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
     auto const canvas = ava::tui::composer_canvas_layout(snapshot);
     auto const expected_column = canvas.left + ava::tui::detail::input_cursor_column(snapshot, canvas.content_width);
     result.base_drawn = ava::tui::draw_screen(snapshot);
+    // initialize_color_pairs caches statically across SCREENs; assert default screen bg once on the dark baseline.
+    if (!profile.no_color && profile.name == "xterm baseline" && has_colors())
+    {
+      result.checked_builtin_dark_default_screen_bg = true;
+      short foreground = 0;
+      short background = 0;
+      auto const bkgd_cell = getbkgd(stdscr);
+      auto const pair = static_cast<short>(PAIR_NUMBER(bkgd_cell));
+      result.builtin_dark_stdscr_background_is_default = pair_content(pair, &foreground, &background) == OK && background == -1;
+    }
 
     auto modal_snapshot = snapshot;
     modal_snapshot.select_list = ava::tui::SelectListView{.title = "Terminal profile",
@@ -1184,6 +1546,7 @@ void test_ncurses_newterm_smoke_without_real_tty()
        .wezterm_exec = "/usr/bin/wezterm"}};
 
   std::size_t exercised = 0;
+  bool checked_default_screen_bg = false;
   for (auto const& profile : profiles)
   {
     auto const result = exercise_virtual_terminal_profile(profile);
@@ -1192,12 +1555,17 @@ void test_ncurses_newterm_smoke_without_real_tty()
     expect(result.screen_created, "ncurses smoke test creates a screen without a real terminal for " + profile.name);
     expect(result.base_drawn && result.modal_drawn && result.cursor_restored_after_modal && result.cached_row_draw_preserves_unchanged_lower_row &&
                result.graphic_overlay_cache_stable && result.processing_footer_updates_stable && result.processing_footer_output_is_quiet &&
-               result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown,
+               result.processing_footer_output_is_plain && result.cursor_forced_visible_for_teardown &&
+               (!result.checked_builtin_dark_default_screen_bg || result.builtin_dark_stdscr_background_is_default),
            "ncurses smoke test draws base/modal frames, preserves unchanged rows, suppresses identical graphic payloads while retransmitting changes and "
            "invalidations and deleting removed Kitty images, updates processing footers without terminal clears, cursor toggles, graphics, or NO_COLOR bold "
-           "styling, and forces the cursor visible for teardown for " +
+           "styling, forces the cursor visible for teardown, and keeps the built-in dark stdscr background pair at terminal default (-1) for " +
                profile.name);
+    if (result.checked_builtin_dark_default_screen_bg)
+      checked_default_screen_bg = true;
   }
+  expect(checked_default_screen_bg,
+         "ncurses smoke test verifies built-in dark stdscr background uses terminal default color on one supported baseline profile");
   expect(exercised == profiles.size(),
          "ncurses smoke test covers xterm and screen terminfo plus tmux, kitty, wezterm, and ssh-like environment "
          "variables");
@@ -1208,4 +1576,1216 @@ void test_ncurses_newterm_smoke_without_real_tty()
 void run_tui_terminal_virtual_smoke_tests()
 {
   test_ncurses_newterm_smoke_without_real_tty();
+}
+
+namespace {
+
+std::string osc11_response(std::string_view payload, bool use_st = false)
+{
+  std::string sequence = "]11;";
+  sequence.append(payload);
+  if (use_st)
+  {
+    sequence.push_back('\x1b');
+    sequence.push_back('\\');
+  }
+  else
+  {
+    sequence.push_back('\a');
+  }
+  return sequence;
+}
+
+bool color_eq(std::optional<ava::tui::TerminalBackgroundColor> const& color, int red, int green, int blue)
+{
+  return color && color->red == red && color->green == green && color->blue == blue;
+}
+
+void push_bytes_to_curses(std::string_view bytes)
+{
+  for (auto it = bytes.rbegin(); it != bytes.rend(); ++it)
+  {
+    auto const value = static_cast<unsigned char>(*it);
+    expect(unget_wch(static_cast<wchar_t>(value)) != ERR, "osc11 tests can unget terminal bytes into ncurses");
+  }
+}
+
+void test_osc11_background_parser()
+{
+  expect(ava::tui::terminal_background_query_sequence() == std::string_view("\x1b]11;?\x1b\\"),
+         "terminal background probe emits OSC 11 query terminated with ST");
+
+  expect(color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:f/f/f")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:ff/ff/ff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:fff/fff/fff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:ffff/ffff/ffff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:0000/0000/0000")), 0, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:8080/8080/8080")), 128, 128, 128) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgb:Ab/Cd/Ef")), 171, 205, 239) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgba:ff/ff/ff/80")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("rgba:ffff/0000/0000/8000")), 255, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#ffffff")), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#000000")), 0, 0, 0) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#FFFFFFFFFFFF", true)), 255, 255, 255) &&
+             color_eq(ava::tui::terminal_osc11_background_response(osc11_response("#8080ffff0000")), 128, 255, 0),
+         "OSC 11 parser accepts rgb/rgba/# forms across hex widths and case with BEL or ST");
+
+  auto const light = ava::tui::terminal_osc11_background_response(osc11_response("rgb:eeee/eeee/eeee"));
+  auto const dark = ava::tui::terminal_osc11_background_response(osc11_response("#202020"));
+  expect(light && dark && (((light->red * 299) + (light->green * 587) + (light->blue * 114)) / 1000) >= 180 &&
+             (((dark->red * 299) + (dark->green * 587) + (dark->blue * 114)) / 1000) < 180,
+         "OSC 11 parser preserves channel values that classify above and below luminance 180");
+
+  std::string oversized = "]11;rgb:";
+  oversized.append(300, 'f');
+  oversized.push_back('\a');
+  expect(!ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff\a") && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/ff") &&
+             !ava::tui::terminal_osc11_background_response("]12;rgb:ff/ff/ff\a") && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/fff/ff\a") &&
+             !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/fg\a") && !ava::tui::terminal_osc11_background_response("]11;rgba:ff/ff/ff/zz\a") &&
+             !ava::tui::terminal_osc11_background_response("]11;#fff\a") && !ava::tui::terminal_osc11_background_response("]11;#gg0000\a") &&
+             !ava::tui::terminal_osc11_background_response(oversized) && !ava::tui::terminal_osc11_background_response("]11;rgb:ff/ff/ff/ff\a"),
+         "OSC 11 parser rejects malformed, oversized, wrong-OSC, missing-terminator, unequal-width, and bad-alpha replies");
+}
+
+void test_osc11_theme_precedence_and_reset()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  expect(ava::tui::tui_theme_needs_terminal_background_probe(), "automatic theme selection requests an OSC 11 terminal-background probe");
+
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  auto active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "OSC 11" && active.detail == "terminal background appears dark from OSC 11" &&
+             active.revision == "osc11-dark",
+         "detected OSC 11 dark appearance beats disagreeing COLORFGBG light inference without exposing raw color data");
+
+  {
+    ScopedEnvVar explicit_light("AVA_TUI_THEME", "light");
+    expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "explicit AVA_TUI_THEME disables the OSC 11 probe");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "AVA_TUI_THEME",
+           "explicit AVA_TUI_THEME light wins over disagreeing OSC 11 detection");
+  }
+
+  {
+    ScopedEnvVar explicit_dark("AVA_TUI_THEME", "dark");
+    ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "AVA_TUI_THEME",
+           "explicit AVA_TUI_THEME dark wins over disagreeing OSC 11 light detection");
+  }
+
+  {
+    ScopedEnvVar explicit_plain("AVA_TUI_THEME", "plain");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Plain && active.badge == "AVA_TUI_THEME", "explicit plain theme wins over OSC 11 detection");
+  }
+
+  {
+    ScopedEnvVar no_color_on("NO_COLOR", "1");
+    expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "NO_COLOR disables the OSC 11 probe");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Plain && active.badge == "NO_COLOR", "NO_COLOR still outranks OSC 11 detection");
+  }
+
+  ava::tui::set_tui_config_theme("light");
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "configured display.json theme disables the OSC 11 probe");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "display.json", "configured light theme wins over disagreeing OSC 11 detection");
+
+  ava::tui::TuiCustomTheme custom{
+      .name = "sunrise",
+      .path = "/tmp/sunrise.json",
+      .palette = ava::tui::TuiThemePalette{.text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255},
+      .revision = "custom-rev"};
+  ava::tui::set_tui_config_theme("sunrise", custom);
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Dark);
+  expect(!ava::tui::tui_theme_needs_terminal_background_probe(), "configured custom theme disables the OSC 11 probe");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Custom && active.name == "sunrise" && active.badge == "display.json",
+         "configured custom theme wins over OSC 11 detection");
+
+  ava::tui::set_tui_config_theme(std::nullopt);
+  {
+    ScopedEnvVar unknown_theme("AVA_TUI_THEME", "auto");
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "unknown/auto AVA_TUI_THEME keeps automatic probe semantics");
+    ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "OSC 11", "unknown/auto AVA_TUI_THEME falls through to OSC 11 detection");
+  }
+
+  ava::tui::reset_detected_terminal_background_appearance();
+  expect(!ava::tui::detected_terminal_background_appearance(), "reset clears session-scoped OSC 11 detection");
+  active = ava::tui::active_tui_theme();
+  expect(active.kind == ava::tui::TuiThemeKind::Light && active.badge == "COLORFGBG", "after OSC 11 reset, COLORFGBG inference remains the next fallback");
+
+  {
+    ScopedEnvVar clear_colorfgbg("COLORFGBG", "");
+    active = ava::tui::active_tui_theme();
+    expect(active.kind == ava::tui::TuiThemeKind::Dark && active.badge == "built-in", "without OSC 11 or COLORFGBG the built-in dark fallback is unchanged");
+  }
+
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+}
+
+void test_startup_input_fifo_order_and_cap()
+{
+  ava::tui::runtime_input::clear_startup_input_queue();
+  expect(ava::tui::runtime_input::startup_input_queue_size() == 0, "startup input queue begins empty");
+
+  auto key = [](ava::tui::Key k) {
+    return ava::tui::runtime_input::RuntimeInput{.event = ava::tui::InputEvent{.key = k, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
+                                                 .text = {},
+                                                 .bracketed_paste = false,
+                                                 .resize = false};
+  };
+  auto character = [](char ch) {
+    return ava::tui::runtime_input::RuntimeInput{
+        .event = ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = ch, .text = std::string(1, ch), .mouse_column = 0, .mouse_row = 0},
+        .text = std::string(1, ch),
+        .bracketed_paste = false,
+        .resize = false};
+  };
+  auto paste = ava::tui::runtime_input::RuntimeInput{
+      .event = ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'p', .text = "pasted", .mouse_column = 0, .mouse_row = 0},
+      .text = "pasted",
+      .bracketed_paste = true,
+      .resize = false};
+  auto resize = ava::tui::runtime_input::RuntimeInput{
+      .event = ava::tui::InputEvent{.key = ava::tui::Key::Unknown, .character = '\0', .text = {}, .mouse_column = 0, .mouse_row = 0},
+      .text = {},
+      .bracketed_paste = false,
+      .resize = true};
+
+  expect(ava::tui::runtime_input::enqueue_startup_input(character('a')) && ava::tui::runtime_input::enqueue_startup_input(resize) &&
+             ava::tui::runtime_input::enqueue_startup_input(key(ava::tui::Key::Enter)) && ava::tui::runtime_input::enqueue_startup_input(std::move(paste)) &&
+             ava::tui::runtime_input::startup_input_queue_size() == 4,
+         "startup input queue preserves insertion order for key, resize, and complete paste events");
+
+  auto first = ava::tui::runtime_input::poll_curses_input();
+  auto second = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(0));
+  expect(first && first->event.key == ava::tui::Key::Character && first->text == "a" && second && second->resize &&
+             ava::tui::runtime_input::startup_input_queue_size() == 2,
+         "poll and timeout reads drain the startup FIFO before touching ncurses");
+
+  // Blocking drain of remaining queued events does not require a live curses screen.
+  auto third = ava::tui::runtime_input::read_curses_input();
+  auto fourth = ava::tui::runtime_input::read_curses_input();
+  expect(
+      third.event.key == ava::tui::Key::Enter && fourth.bracketed_paste && fourth.text == "pasted" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+      "blocking reads drain remaining startup FIFO events in order");
+
+  for (std::size_t index = 0; index < 64; ++index)
+  {
+    expect(ava::tui::runtime_input::enqueue_startup_input(character(static_cast<char>('0' + (index % 10)))), "startup input queue accepts up to 64 events");
+  }
+  expect(!ava::tui::runtime_input::enqueue_startup_input(character('x')) && ava::tui::runtime_input::startup_input_queue_size() == 64,
+         "startup input queue rejects events beyond the 64-event cap");
+  ava::tui::runtime_input::clear_startup_input_queue();
+  expect(ava::tui::runtime_input::startup_input_queue_size() == 0, "clear empties the startup input queue between sessions");
+}
+
+void test_osc11_handler_arming_and_virtual_probe()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto const light_reply = osc11_response("rgb:ffff/ffff/ffff");
+  expect(!ava::tui::terminal_background_response_handle(light_reply) && !ava::tui::detected_terminal_background_appearance(),
+         "disarmed OSC 11 replies never mutate theme state");
+
+  ava::tui::arm_terminal_background_response_handler();
+  expect(ava::tui::terminal_background_response_handler_armed(), "OSC 11 response handler can be armed");
+  expect(!ava::tui::terminal_background_response_handle("]12;rgb:ff/ff/ff\a") && !ava::tui::detected_terminal_background_appearance(),
+         "armed handler ignores non-OSC-11 control replies without mutation");
+  expect(!ava::tui::terminal_background_response_handle("]11;rgb:ff/ff\a") && !ava::tui::detected_terminal_background_appearance(),
+         "armed handler ignores malformed OSC 11 payloads without mutation");
+  expect(ava::tui::terminal_background_response_handle(light_reply) &&
+             ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light,
+         "armed handler accepts a valid light OSC 11 reply");
+  ava::tui::disarm_terminal_background_response_handler();
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  expect(input != nullptr && output != nullptr, "OSC 11 virtual probe can create temporary streams");
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, "OSC 11 virtual probe creates an ncurses screen");
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  static_cast<void>(set_term(screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+
+  // OSC 11 light reply (chunk-assembled by the ordinary escape reader), a Kitty
+  // keyboard flags reply, then a plain typed key. Bytes are ungot in reverse so
+  // the probe observes them in this order.
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += light_reply;
+  feed.push_back('\x1b');
+  feed += "[?5u";
+  feed.push_back('z');
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto const active = ava::tui::active_tui_theme();
+  expect(ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light && active.kind == ava::tui::TuiThemeKind::Light &&
+             active.badge == "OSC 11" && active.detail.find("OSC 11") != std::string::npos && active.detail.find("ffff") == std::string::npos,
+         "virtual probe applies OSC 11 light theme without exposing raw reply bytes");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  expect(queued && queued->event.key == ava::tui::Key::Character && queued->text == "z" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         "virtual probe preserves a key typed during OSC 11 drain and discards Kitty protocol replies");
+
+  // Ensure no raw OSC payload leaked into the queued event text.
+  expect(!queued->text.contains("]11") && !queued->text.contains("rgb:"), "startup FIFO never surfaces raw OSC 11 reply contents");
+
+  auto const snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                   .provider = "openai",
+                                                   .model = "gpt-5.5",
+                                                   .session_id = "session_osc11",
+                                                   .input = queued->text,
+                                                   .status = "ready",
+                                                   .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "osc11 contrast"}},
+                                                   .width = 80,
+                                                   .height = 14,
+                                                   .input_cursor = queued->text.size()};
+  expect(ava::tui::draw_screen(snapshot), "first rendered frame after OSC 11 detection draws successfully");
+  if (has_colors())
+  {
+    short foreground = 0;
+    short background = 0;
+    auto const bkgd_cell = getbkgd(stdscr);
+    auto const pair = static_cast<short>(PAIR_NUMBER(bkgd_cell));
+    expect(pair_content(pair, &foreground, &background) == OK && background == -1,
+           "OSC 11 light selection keeps the ordinary screen canvas on terminal-default background");
+  }
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+}
+
+void test_osc11_tmux_skip_semantics()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+
+  expect(ava::tui::tui_theme_needs_terminal_background_probe(), "probe remains desired when theme selection is automatic");
+
+  // Pure environment gate: TMUX / TERM=tmux* suppress; direct xterm and absent/empty allow.
+  expect(!ava::tui::terminal_background_probe_environment_allows_query("/tmp/tmux-1000/default,1,0", "xterm-256color"),
+         "non-empty TMUX suppresses the OSC 11 query");
+  expect(!ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, "tmux-256color"), "TERM=tmux* suppresses the OSC 11 query");
+  expect(!ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, "tmux"),
+         "empty TMUX with TERM=tmux still suppresses via TERM prefix");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, "xterm-256color"), "direct xterm TERM allows the OSC 11 query");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, "xterm-256color"),
+         "empty TMUX is intentional allow with direct TERM");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::nullopt, std::nullopt), "absent TMUX and TERM intentionally allow the OSC 11 query");
+  expect(ava::tui::terminal_background_probe_environment_allows_query(std::string_view{}, std::string_view{}),
+         "empty TMUX and TERM intentionally allow the OSC 11 query");
+
+  {
+    ScopedEnvVar tmux_guard("TMUX", "/tmp/tmux-1000/default,1,0");
+    ScopedEnvVar term_guard("TERM", "xterm-256color");
+    // Environment skip is enforced by the pure gate; the probe-need predicate stays
+    // about theme automation only. Document the split here so tmux smoke stays aligned.
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "TMUX does not change automatic theme selection; runtime skips the query separately");
+  }
+
+  {
+    ScopedEnvVar tmux_guard("TMUX", "");
+    ScopedEnvVar term_guard("TERM", "tmux-256color");
+    expect(ava::tui::tui_theme_needs_terminal_background_probe(), "TERM=tmux* still leaves theme selection automatic while runtime skips the OSC 11 query");
+  }
+
+  ava::tui::set_detected_terminal_background_appearance(ava::tui::TerminalBackgroundAppearance::Light);
+  auto active = ava::tui::active_tui_theme();
+  expect(active.badge == "OSC 11", "prior detection remains visible until session reset");
+  ava::tui::reset_detected_terminal_background_appearance();
+  active = ava::tui::active_tui_theme();
+  expect(active.badge == "built-in", "session reset clears OSC 11 detection so the next session cannot inherit it");
+}
+
+std::string read_tmpfile_bytes(FILE* file)
+{
+  expect(file != nullptr && std::fseek(file, 0, SEEK_SET) == 0, "query writer tests can rewind the temporary stream");
+  std::string bytes;
+  char buffer[64];
+  while (true)
+  {
+    auto const n = std::fread(buffer, 1, sizeof(buffer), file);
+    if (n == 0)
+      break;
+    bytes.append(buffer, n);
+  }
+  return bytes;
+}
+
+void test_osc11_query_writer_and_environment_gate_seam()
+{
+  auto const expected_query = std::string(ava::tui::terminal_background_query_sequence());
+  expect(expected_query == "\x1b]11;?\x1b\\", "query writer seam uses the ST-terminated OSC 11 probe bytes");
+
+  FILE* allowed = std::tmpfile();
+  expect(allowed != nullptr, "query writer tests can create an allowed temporary stream");
+  if (!allowed)
+    return;
+
+  expect(ava::tui::write_terminal_background_query(allowed), "query writer reports success after writing the OSC 11 probe");
+  expect(read_tmpfile_bytes(allowed) == expected_query, "query writer emits exact OSC 11 query bytes");
+  expect(!ava::tui::write_terminal_background_query(nullptr), "query writer fails closed on a null stream");
+
+  FILE* skipped_tmux = std::tmpfile();
+  FILE* skipped_term = std::tmpfile();
+  FILE* allowed_emit = std::tmpfile();
+  expect(skipped_tmux != nullptr && skipped_term != nullptr && allowed_emit != nullptr, "query gate seam tests can create temporary streams");
+  if (!skipped_tmux || !skipped_term || !allowed_emit)
+  {
+    static_cast<void>(std::fclose(allowed));
+    if (skipped_tmux)
+      static_cast<void>(std::fclose(skipped_tmux));
+    if (skipped_term)
+      static_cast<void>(std::fclose(skipped_term));
+    if (allowed_emit)
+      static_cast<void>(std::fclose(allowed_emit));
+    return;
+  }
+
+  expect(!ava::tui::emit_terminal_background_query_if_environment_allows("/tmp/tmux-1000/default,1,0", "xterm-256color", skipped_tmux) &&
+             read_tmpfile_bytes(skipped_tmux).empty(),
+         "emit seam writes nothing when TMUX suppresses the query");
+  expect(
+      !ava::tui::emit_terminal_background_query_if_environment_allows(std::nullopt, "tmux-256color", skipped_term) && read_tmpfile_bytes(skipped_term).empty(),
+      "emit seam writes nothing when TERM=tmux* suppresses the query");
+  expect(ava::tui::emit_terminal_background_query_if_environment_allows(std::nullopt, "xterm-256color", allowed_emit) &&
+             read_tmpfile_bytes(allowed_emit) == expected_query,
+         "emit seam writes exact OSC 11 bytes for a direct xterm environment");
+
+  static_cast<void>(std::fclose(allowed));
+  static_cast<void>(std::fclose(skipped_tmux));
+  static_cast<void>(std::fclose(skipped_term));
+  static_cast<void>(std::fclose(allowed_emit));
+}
+
+struct VirtualOsc11Screen
+{
+  SCREEN* screen = nullptr;
+  FILE* input = nullptr;
+  FILE* output = nullptr;
+  std::string previous_locale;
+
+  explicit operator bool() const { return screen != nullptr; }
+};
+
+VirtualOsc11Screen enter_virtual_osc11_screen(char const* purpose)
+{
+  VirtualOsc11Screen state;
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  state.previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  state.input = std::tmpfile();
+  state.output = std::tmpfile();
+  expect(state.input != nullptr && state.output != nullptr, std::string(purpose) + " can create temporary streams");
+  if (!state.input || !state.output)
+  {
+    if (state.input)
+      static_cast<void>(std::fclose(state.input));
+    if (state.output)
+      static_cast<void>(std::fclose(state.output));
+    state.input = nullptr;
+    state.output = nullptr;
+    static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+    return state;
+  }
+
+  state.screen = newterm(nullptr, state.output, state.input);
+  expect(state.screen != nullptr, std::string(purpose) + " creates an ncurses screen");
+  if (!state.screen)
+  {
+    static_cast<void>(std::fclose(state.input));
+    static_cast<void>(std::fclose(state.output));
+    state.input = nullptr;
+    state.output = nullptr;
+    static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+    return state;
+  }
+
+  static_cast<void>(set_term(state.screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  return state;
+}
+
+void leave_virtual_osc11_screen(VirtualOsc11Screen& state)
+{
+  if (state.screen)
+  {
+    static_cast<void>(endwin());
+    delscreen(state.screen);
+    state.screen = nullptr;
+  }
+  if (state.input)
+  {
+    static_cast<void>(std::fclose(state.input));
+    state.input = nullptr;
+  }
+  if (state.output)
+  {
+    static_cast<void>(std::fclose(state.output));
+    state.output = nullptr;
+  }
+  static_cast<void>(std::setlocale(LC_ALL, state.previous_locale.c_str()));
+}
+
+void test_osc11_reply_inside_startup_bracketed_paste(bool use_st)
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto screen = enter_virtual_osc11_screen(use_st ? "OSC 11 ST paste interleave" : "OSC 11 BEL paste interleave");
+  if (!screen)
+    return;
+
+  auto const light_reply = osc11_response("rgb:ffff/ffff/ffff", use_st);
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += "[200~";
+  feed += "hello";
+  feed.push_back('\x1b');
+  feed += light_reply;
+  feed += "world";
+  feed.push_back('\x1b');
+  feed += "[201~";
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  expect(ava::tui::detected_terminal_background_appearance() == ava::tui::TerminalBackgroundAppearance::Light,
+         use_st ? "ST OSC 11 reply inside startup paste sets light appearance" : "BEL OSC 11 reply inside startup paste sets light appearance");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  expect(queued && queued->bracketed_paste && queued->text == "helloworld" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         use_st ? "ST OSC 11 reply is stripped from one complete startup paste with contiguous user text"
+                : "BEL OSC 11 reply is stripped from one complete startup paste with contiguous user text");
+  expect(queued && !queued->text.contains("]11") && !queued->text.contains("rgb:") && !queued->text.contains("ffff"),
+         "startup paste never surfaces raw OSC 11 reply contents");
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  leave_virtual_osc11_screen(screen);
+}
+
+void test_non_owned_escape_inside_startup_bracketed_paste_is_preserved()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+  ava::tui::reset_detected_terminal_background_appearance();
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::disarm_terminal_background_response_handler();
+
+  auto screen = enter_virtual_osc11_screen("non-owned paste escape");
+  if (!screen)
+    return;
+
+  // Armed handler must not silently eat non-OSC-11 escape content inside paste.
+  std::string feed;
+  feed.push_back('\x1b');
+  feed += "[200~";
+  feed += "ab";
+  feed.push_back('\x1b');
+  feed += "]12;rgb:ff/ff/ff";
+  feed.push_back('\a');
+  feed += "cd";
+  feed.push_back('\x1b');
+  feed += "[201~";
+  push_bytes_to_curses(feed);
+
+  ava::tui::arm_terminal_background_response_handler();
+  ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+  ava::tui::disarm_terminal_background_response_handler();
+
+  expect(!ava::tui::detected_terminal_background_appearance(), "non-OSC-11 escape inside startup paste does not mutate appearance");
+
+  auto const queued = ava::tui::runtime_input::poll_curses_input();
+  // ESC/BEL are stripped by paste normalization; printable OSC body remains so the
+  // sequence is not silently discarded under protocol ownership.
+  expect(queued && queued->bracketed_paste && queued->text == "ab]12;rgb:ff/ff/ffcd" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+         "malformed/non-owned escape content inside startup paste is preserved under ordinary normalization");
+
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::reset_detected_terminal_background_appearance();
+  leave_virtual_osc11_screen(screen);
+}
+
+void test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_semantics()
+{
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ava::tui::set_tui_config_theme(std::nullopt);
+
+  {
+    ava::tui::reset_detected_terminal_background_appearance();
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::disarm_terminal_background_response_handler();
+
+    auto screen = enter_virtual_osc11_screen("disarmed OSC 11 paste");
+    if (!screen)
+      return;
+
+    // Valid OSC 11 while disarmed is not protocol-owned: paste keeps ordinary semantics.
+    auto const light_reply = osc11_response("rgb:ffff/ffff/ffff");
+    std::string feed;
+    feed.push_back('\x1b');
+    feed += "[200~";
+    feed += "pre";
+    feed.push_back('\x1b');
+    feed += light_reply;
+    feed += "post";
+    feed.push_back('\x1b');
+    feed += "[201~";
+    push_bytes_to_curses(feed);
+
+    ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+
+    expect(!ava::tui::detected_terminal_background_appearance(), "disarmed OSC 11 reply inside startup paste does not mutate appearance");
+    auto const queued = ava::tui::runtime_input::poll_curses_input();
+    expect(queued && queued->bracketed_paste && queued->text == "pre]11;rgb:ffff/ffff/ffffpost" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+           "disarmed valid OSC 11 inside paste is preserved under ordinary normalization");
+
+    ava::tui::runtime_input::clear_startup_input_queue();
+    leave_virtual_osc11_screen(screen);
+  }
+
+  {
+    ava::tui::reset_detected_terminal_background_appearance();
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::disarm_terminal_background_response_handler();
+
+    auto screen = enter_virtual_osc11_screen("malformed OSC 11 paste");
+    if (!screen)
+      return;
+
+    // Armed handler still must not claim malformed OSC 11 payloads.
+    std::string feed;
+    feed.push_back('\x1b');
+    feed += "[200~";
+    feed += "x";
+    feed.push_back('\x1b');
+    feed += "]11;rgb:ff/ff";
+    feed.push_back('\a');
+    feed += "y";
+    feed.push_back('\x1b');
+    feed += "[201~";
+    push_bytes_to_curses(feed);
+
+    ava::tui::arm_terminal_background_response_handler();
+    ava::tui::runtime_input::drain_startup_probe_input(std::chrono::milliseconds(50));
+    ava::tui::disarm_terminal_background_response_handler();
+
+    expect(!ava::tui::detected_terminal_background_appearance(), "malformed OSC 11 inside startup paste does not mutate appearance");
+    auto const queued = ava::tui::runtime_input::poll_curses_input();
+    expect(queued && queued->bracketed_paste && queued->text == "x]11;rgb:ff/ffy" && ava::tui::runtime_input::startup_input_queue_size() == 0,
+           "malformed OSC 11 inside paste is preserved under ordinary normalization");
+
+    // A second complete paste after the probe drain still works: bracketed paste stays enabled.
+    std::string second;
+    second.push_back('\x1b');
+    second += "[200~";
+    second += "again";
+    second.push_back('\x1b');
+    second += "[201~";
+    push_bytes_to_curses(second);
+    auto const follow_up = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(50));
+    expect(follow_up && follow_up->bracketed_paste && follow_up->text == "again", "bracketed paste remains enabled after OSC 11 paste interleave handling");
+
+    ava::tui::runtime_input::clear_startup_input_queue();
+    ava::tui::reset_detected_terminal_background_appearance();
+    leave_virtual_osc11_screen(screen);
+  }
+}
+
+struct SequenceCapture
+{
+  std::vector<std::string> sequences;
+};
+
+SequenceCapture* g_sequence_capture = nullptr;
+
+void capture_terminal_sequence(std::string_view sequence)
+{
+  if (g_sequence_capture != nullptr)
+    g_sequence_capture->sequences.emplace_back(sequence);
+}
+
+int g_flushinp_calls = 0;
+int g_tcflush_calls = 0;
+int g_tcflush_last_fd = -1;
+int g_tcflush_last_selector = -1;
+std::vector<char> g_flush_order;
+
+void capture_flushinp() noexcept
+{
+  ++g_flushinp_calls;
+  g_flush_order.push_back('i');
+}
+
+int capture_tcflush(int fd, int queue_selector) noexcept
+{
+  ++g_tcflush_calls;
+  g_tcflush_last_fd = fd;
+  g_tcflush_last_selector = queue_selector;
+  g_flush_order.push_back('t');
+  return 0;
+}
+
+void reset_lifecycle_test_seams()
+{
+  ava::tui::detail::reset_terminal_sequence_writer_for_test();
+  ava::tui::detail::reset_terminal_input_flush_hooks_for_test();
+  ava::tui::detail::reset_terminal_protocol_ownership_for_test();
+  g_sequence_capture = nullptr;
+  g_flushinp_calls = 0;
+  g_tcflush_calls = 0;
+  g_tcflush_last_fd = -1;
+  g_tcflush_last_selector = -1;
+  g_flush_order.clear();
+}
+
+std::size_t count_sequence(std::vector<std::string> const& sequences, std::string_view needle)
+{
+  return static_cast<std::size_t>(std::count(sequences.begin(), sequences.end(), std::string(needle)));
+}
+
+bool sequences_contain(std::vector<std::string> const& sequences, std::string_view needle)
+{
+  return std::find(sequences.begin(), sequences.end(), std::string(needle)) != sequences.end();
+}
+
+void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
+{
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  expect(ava::tui::terminal_bracketed_paste_enable_sequence() == std::string_view("\x1b[?2004h") &&
+             ava::tui::terminal_bracketed_paste_disable_sequence() == std::string_view("\x1b[?2004l") &&
+             ava::tui::terminal_mouse_enable_sequence() == std::string_view("\x1b[?1003l\x1b[?1000h\x1b[?1002h\x1b[?1006h") &&
+             ava::tui::terminal_mouse_disable_sequence() == std::string_view("\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l"),
+         "terminal lifecycle exposes bracketed paste and button-motion SGR mouse enable/disable sequences");
+
+  // enter -> arm
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             !ownership.modify_other_keys_desired && !ownership.kitty_keyboard_supported && !ownership.keyboard_protocol_kitty_response_seen,
+         "enter arms paste/mouse/Kitty push+query without enabling modifyOtherKeys yet");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 1 &&
+             !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
+         "enter emits one Kitty query push and paste enable and never OSC 11");
+
+  // Negotiate modifyOtherKeys fallback (Kitty flags 0).
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?0u"), "lifecycle test injects a Kitty flags=0 negotiation reply");
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.keyboard_protocol_kitty_response_seen && !ownership.kitty_keyboard_supported && ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired && count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 1,
+         "flags=0 negotiation enables modifyOtherKeys and remembers it as desired");
+
+  auto const after_enter = capture.sequences.size();
+
+  // handoff release (shared by suspend and external editor)
+  ava::tui::release_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(!ownership.kitty_keyboard_pushed && !ownership.bracketed_paste_enabled && !ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired && ownership.keyboard_protocol_kitty_response_seen,
+         "handoff disables live protocols while retaining negotiated modifyOtherKeys desire");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_disable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_disable_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()) == 1 &&
+             !sequences_contain(std::vector<std::string>(capture.sequences.begin() + static_cast<std::ptrdiff_t>(after_enter), capture.sequences.end()),
+                                ava::tui::terminal_background_query_sequence()),
+         "handoff emits balanced pop/disable sequences without OSC 11");
+
+  // idempotent second release
+  auto const after_release = capture.sequences.size();
+  ava::tui::release_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_release, "second handoff release is a no-op");
+
+  // resume re-arm
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && ownership.mouse_enabled && ownership.modify_other_keys_enabled &&
+             ownership.modify_other_keys_desired,
+         "resume re-arms paste/mouse/Kitty push and negotiated modifyOtherKeys");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_bracketed_paste_enable_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 2 &&
+             !sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()),
+         "resume uses push-only Kitty re-arm, re-enables paste/modifyOtherKeys, and never re-queries or probes OSC 11");
+
+  // repeated re-arm must not grow Kitty stack or re-emit
+  auto const after_rearm = capture.sequences.size();
+  ava::tui::rearm_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_rearm && ava::tui::terminal_protocol_ownership().kitty_keyboard_pushed,
+         "idempotent resume does not push Kitty again");
+
+  // second handoff + resume cycle
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::rearm_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1,
+         "repeated handoff/resume keeps Kitty push/pop balanced without extra query pushes");
+
+  // final restore clears negotiation memory
+  ava::tui::restore_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(!ownership.kitty_keyboard_pushed && !ownership.bracketed_paste_enabled && !ownership.mouse_enabled && !ownership.modify_other_keys_enabled &&
+             !ownership.modify_other_keys_desired && !ownership.keyboard_protocol_kitty_response_seen && !ownership.kitty_keyboard_supported,
+         "final restore releases protocols and clears negotiation memory");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 3 &&
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) ==
+                 count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()) &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) +
+                     count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) ==
+                 count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()),
+         "final restore keeps total Kitty pushes equal to pops (no stack growth)");
+
+  // partial/idempotent restore when already released
+  auto const after_restore = capture.sequences.size();
+  ava::tui::restore_owned_terminal_protocols();
+  expect(capture.sequences.size() == after_restore, "restore is idempotent after protocols are already down");
+
+  reset_lifecycle_test_seams();
+}
+
+void test_terminal_protocol_lifecycle_kitty_supported_path()
+{
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?5u"), "lifecycle test injects Kitty flags>0 reply");
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_supported && ownership.keyboard_protocol_kitty_response_seen && !ownership.modify_other_keys_desired &&
+             !ownership.modify_other_keys_enabled,
+         "Kitty-supported negotiation leaves modifyOtherKeys off");
+
+  // Force-enable then ensure a later positive Kitty reply disables and forgets desire.
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?0u") && ava::tui::terminal_protocol_ownership().modify_other_keys_desired,
+         "flags=0 can enable modifyOtherKeys mid-session");
+  expect(ava::tui::terminal_keyboard_protocol_handle_response("[?5u") && !ava::tui::terminal_protocol_ownership().modify_other_keys_desired &&
+             !ava::tui::terminal_protocol_ownership().modify_other_keys_enabled,
+         "later Kitty support disables modifyOtherKeys and clears desire");
+
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.kitty_keyboard_pushed && ownership.bracketed_paste_enabled && !ownership.modify_other_keys_enabled &&
+             count_sequence(capture.sequences, ava::tui::terminal_modify_other_keys_enable_sequence()) == 1,
+         "Kitty-supported resume re-pushes keyboard protocol without re-enabling modifyOtherKeys");
+  expect(!sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()), "Kitty-supported handoff/resume never emits OSC 11");
+
+  ava::tui::restore_owned_terminal_protocols();
+  reset_lifecycle_test_seams();
+}
+
+void test_terminal_input_flush_ordering_seam()
+{
+  reset_lifecycle_test_seams();
+  ava::tui::detail::set_terminal_input_flush_hooks_for_test(&capture_flushinp, &capture_tcflush);
+
+  ava::tui::discard_pending_terminal_input();
+  expect(g_flushinp_calls == 1 && g_tcflush_calls == 1 && g_tcflush_last_fd == STDIN_FILENO && g_tcflush_last_selector == TCIFLUSH &&
+             g_flush_order.size() == 2 && g_flush_order[0] == 'i' && g_flush_order[1] == 't',
+         "final input flush calls flushinp then tcflush(TCIFLUSH) exactly once each");
+
+  ava::tui::discard_pending_terminal_input();
+  expect(g_flushinp_calls == 2 && g_tcflush_calls == 2 && g_flush_order == std::vector<char>({'i', 't', 'i', 't'}),
+         "input flush remains ordered and fail-soft across repeated restore-safe calls");
+
+  reset_lifecycle_test_seams();
+}
+
+void test_external_editor_and_suspend_share_handoff_sequence()
+{
+  // Deterministic stand-in for both RuntimeActionController handoff paths: the
+  // production suspend/editor code calls release before endwin and rearm after
+  // reset_prog_mode + geometry refresh. Prove the shared sequence contract here.
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  static_cast<void>(ava::tui::terminal_keyboard_protocol_handle_response("[?0u"));
+
+  // external-editor style handoff
+  ava::tui::release_owned_terminal_protocols();
+  // editor runs here
+  ava::tui::rearm_owned_terminal_protocols();
+  auto ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.bracketed_paste_enabled && ownership.modify_other_keys_enabled && ownership.kitty_keyboard_pushed,
+         "external-editor handoff resume restores paste and negotiated keyboard modes");
+
+  // suspend style handoff with resize-while-stopped represented by geometry refresh no-op seam
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::refresh_terminal_geometry_from_kernel();  // fail-soft without a TTY
+  ava::tui::rearm_owned_terminal_protocols();
+  ownership = ava::tui::terminal_protocol_ownership();
+  expect(ownership.bracketed_paste_enabled && ownership.modify_other_keys_enabled &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 2 &&
+             count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 2,
+         "suspend-style second handoff stays balanced and does not re-issue Kitty query");
+  expect(!sequences_contain(capture.sequences, ava::tui::terminal_background_query_sequence()), "shared handoff helper never re-probes OSC 11");
+
+  ava::tui::restore_owned_terminal_protocols();
+  reset_lifecycle_test_seams();
+}
+
+bool write_all_fd(int fd, std::string_view bytes)
+{
+  auto const* cursor = bytes.data();
+  auto remaining = bytes.size();
+  while (remaining != 0)
+  {
+    auto const written = ::write(fd, cursor, remaining);
+    if (written < 0)
+      return false;
+    cursor += written;
+    remaining -= static_cast<std::size_t>(written);
+  }
+  return true;
+}
+
+bool looks_like_leaked_sgr_mouse_payload(ava::tui::runtime_input::RuntimeInput const& input)
+{
+  if (input.event.key != ava::tui::Key::Character && input.event.key != ava::tui::Key::Space)
+    return false;
+  auto const& text = input.text.empty() ? input.event.text : input.text;
+  if (text.empty())
+    return false;
+  // Residual SGR bodies after a bare KEY_MOUSE (ESC[<) look like "0;10;5M" / "65;20;8M".
+  return text.find_first_of("0123456789;Mm") != std::string::npos;
+}
+
+std::optional<ava::tui::runtime_input::RuntimeInput> read_direct_mouse_event(std::string_view label)
+{
+  auto input = ava::tui::runtime_input::read_curses_input_with_timeout(std::chrono::milliseconds(100));
+  expect(input.has_value(), std::string("direct-terminal mouse PTY produced an event for ") + std::string(label));
+  return input;
+}
+
+void expect_no_residual_mouse_payload(std::string_view label)
+{
+  auto residual = ava::tui::runtime_input::poll_curses_input();
+  while (residual)
+  {
+    expect(!looks_like_leaked_sgr_mouse_payload(*residual), std::string("direct-terminal mouse path must not leak SGR payload characters after ") +
+                                                                std::string(label) + " (got text '" +
+                                                                (residual->text.empty() ? residual->event.text : residual->text) + "')");
+    // Unknown/empty after KEY_MOUSE getmouse failure is also a leak symptom; allow only true absence.
+    expect(false, std::string("direct-terminal mouse path left unexpected residual input after ") + std::string(label));
+    residual = ava::tui::runtime_input::poll_curses_input();
+  }
+}
+
+// Deterministic openpty/newterm regression for direct terminfo where kmous=ESC[<.
+// Virtual unget_wch tests cannot reproduce ncurses KEY_MOUSE matching + getmouse.
+void test_direct_terminal_ncurses_mouse_sgr_no_composer_leak()
+{
+#ifdef NCURSES_MOUSE_VERSION
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  // Prefer Ghostty terminfo when present; otherwise the confirmed xterm-256color kmous=ESC[< path.
+  char const* term_name = "xterm-256color";
+  if (::access("/usr/share/terminfo/x/xterm-ghostty", R_OK) == 0)
+    term_name = "xterm-ghostty";
+
+  ScopedEnvVar term_guard("TERM", term_name);
+  ScopedEnvVar tmux_guard("TMUX", "");
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "");
+
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+  ava::tui::terminal_reset_mouse_tracking();
+  ava::tui::runtime_input::clear_startup_input_queue();
+
+  int master_fd = ::posix_openpt(O_RDWR | O_NOCTTY);
+  expect(master_fd >= 0, "direct-terminal mouse PTY can open a master");
+  if (master_fd < 0)
+  {
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  if (::grantpt(master_fd) != 0 || ::unlockpt(master_fd) != 0)
+  {
+    expect(false, "direct-terminal mouse PTY can grant/unlock the slave");
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  char* slave_name = ::ptsname(master_fd);
+  expect(slave_name != nullptr, "direct-terminal mouse PTY exposes a slave name");
+  if (slave_name == nullptr)
+  {
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  int slave_fd = ::open(slave_name, O_RDWR | O_NOCTTY);
+  expect(slave_fd >= 0, "direct-terminal mouse PTY can open the slave");
+  if (slave_fd < 0)
+  {
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  winsize size{};
+  size.ws_row = 24;
+  size.ws_col = 80;
+  static_cast<void>(::ioctl(slave_fd, TIOCSWINSZ, &size));
+
+  int output_fd = ::dup(slave_fd);
+  FILE* input = ::fdopen(slave_fd, "r+");
+  FILE* output = output_fd >= 0 ? ::fdopen(output_fd, "w") : nullptr;
+  expect(input != nullptr && output != nullptr, "direct-terminal mouse PTY can fdopen slave streams");
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    else
+      static_cast<void>(::close(slave_fd));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    else if (output_fd >= 0)
+      static_cast<void>(::close(output_fd));
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, std::string("direct-terminal mouse PTY creates an ncurses screen under TERM=") + term_name);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    static_cast<void>(::close(master_fd));
+    reset_lifecycle_test_seams();
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  static_cast<void>(set_term(screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  static_cast<void>(meta(stdscr, TRUE));
+  static_cast<void>(wtimeout(stdscr, 100));
+
+  char const* kmous = tigetstr("kmous");
+  bool const kmous_is_sgr_prefix = kmous != nullptr && kmous != reinterpret_cast<char*>(-1) && std::string_view(kmous) == "\x1b[<";
+  expect(kmous_is_sgr_prefix, std::string("direct-terminal mouse regression requires kmous=ESC[< under TERM=") + term_name);
+
+  // Production enter path must initialize ncurses mouse ownership via mousemask
+  // even though has_mouse() is still false before the first nonzero mask.
+  expect(!has_mouse(), "direct terminfo starts with has_mouse() false before production mouse arm");
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  expect(ava::tui::terminal_protocol_ownership().mouse_enabled, "production enter arms mouse ownership");
+  expect(count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) == 1,
+         "production enter still emits portable SGR mouse enable sequences");
+  expect(has_mouse(), "production mouse arm initializes the ncurses mouse driver (has_mouse becomes true)");
+
+  auto feed = [&](std::string_view label, std::string_view sequence) {
+    expect(write_all_fd(master_fd, sequence), std::string("direct-terminal mouse PTY can write ") + std::string(label));
+  };
+
+  auto expect_mouse = [&](std::string_view label, ava::tui::Key key, std::size_t column, std::size_t row) {
+    auto input_event = read_direct_mouse_event(label);
+    if (!input_event)
+      return;
+    expect(input_event->event.key == key && input_event->event.mouse_column == column && input_event->event.mouse_row == row && input_event->text.empty() &&
+               input_event->event.text.empty() && !input_event->bracketed_paste,
+           std::string("direct-terminal mouse delivers ") + std::string(label) + " without residual text");
+    expect_no_residual_mouse_payload(label);
+  };
+
+  // Feed serially: ncurses mouse FIFO is shallow; batching drops intermediate reports.
+  feed("press", "\x1b[<0;10;5M");
+  expect_mouse("left press", ava::tui::Key::MouseLeftPress, 10, 5);
+
+  feed("drag", "\x1b[<32;12;6M");
+  expect_mouse("left drag", ava::tui::Key::MouseLeftDrag, 12, 6);
+
+  feed("release", "\x1b[<0;12;6m");
+  expect_mouse("left release", ava::tui::Key::MouseLeftRelease, 12, 6);
+
+  feed("wheel up", "\x1b[<64;20;8M");
+  expect_mouse("wheel up", ava::tui::Key::MouseWheelUp, 20, 8);
+
+  feed("wheel down", "\x1b[<65;20;8M");
+  expect_mouse("wheel down", ava::tui::Key::MouseWheelDown, 20, 8);
+
+  feed("shift press", "\x1b[<4;15;9M");
+  expect_mouse("shift press cancel", ava::tui::Key::MousePointerCancel, 15, 9);
+
+  // Ordinary text must still reach the composer path after mouse traffic.
+  feed("plain z", "z");
+  auto plain = read_direct_mouse_event("plain z");
+  if (plain)
+  {
+    expect(plain->event.key == ava::tui::Key::Character && plain->text == "z",
+           "direct-terminal mouse arm preserves ordinary character input after SGR traffic");
+  }
+  expect_no_residual_mouse_payload("plain z");
+
+  // Raw SGR parser (tmux/multiplexer path) remains authoritative for full sequences.
+  ava::tui::terminal_reset_mouse_tracking();
+  auto const raw_press = ava::tui::terminal_escape_sequence_event("[<0;11;7M");
+  auto const raw_drag = ava::tui::terminal_escape_sequence_event("[<32;13;8M");
+  auto const raw_release = ava::tui::terminal_escape_sequence_event("[<0;13;8m");
+  auto const raw_wheel_up = ava::tui::terminal_escape_sequence_event("[<64;21;9M");
+  auto const raw_wheel_down = ava::tui::terminal_escape_sequence_event("[<65;21;9M");
+  auto const raw_shift = ava::tui::terminal_escape_sequence_event("[<4;11;7M");
+  expect(raw_press.key == ava::tui::Key::MouseLeftPress && raw_drag.key == ava::tui::Key::MouseLeftDrag && raw_release.key == ava::tui::Key::MouseLeftRelease &&
+             raw_wheel_up.key == ava::tui::Key::MouseWheelUp && raw_wheel_down.key == ava::tui::Key::MouseWheelDown &&
+             raw_shift.key == ava::tui::Key::MousePointerCancel,
+         "raw SGR mouse parser (tmux/multiplexer path) still classifies press/drag/release/wheel/shift");
+
+  ava::tui::restore_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_mouse_enable_sequence()) ==
+             count_sequence(capture.sequences, ava::tui::terminal_mouse_disable_sequence()),
+         "direct-terminal mouse regression keeps enable/disable protocol balance");
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(::close(master_fd));
+  ava::tui::runtime_input::clear_startup_input_queue();
+  ava::tui::terminal_reset_mouse_tracking();
+  reset_lifecycle_test_seams();
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+#else
+  expect(true, "ncurses mouse support unavailable; direct-terminal mouse PTY regression skipped");
+#endif
+}
+
+}  // namespace
+
+void run_tui_terminal_osc11_theme_tests()
+{
+  test_osc11_background_parser();
+  test_osc11_theme_precedence_and_reset();
+  test_startup_input_fifo_order_and_cap();
+  test_osc11_handler_arming_and_virtual_probe();
+  test_osc11_tmux_skip_semantics();
+  test_osc11_query_writer_and_environment_gate_seam();
+  test_osc11_reply_inside_startup_bracketed_paste(false);
+  test_osc11_reply_inside_startup_bracketed_paste(true);
+  test_non_owned_escape_inside_startup_bracketed_paste_is_preserved();
+  test_disarmed_and_malformed_osc11_inside_startup_bracketed_paste_preserve_semantics();
+}
+
+void run_tui_terminal_lifecycle_protocol_tests()
+{
+  test_terminal_protocol_lifecycle_enter_handoff_resume_restore();
+  test_terminal_protocol_lifecycle_kitty_supported_path();
+  test_terminal_input_flush_ordering_seam();
+  test_external_editor_and_suspend_share_handoff_sequence();
+  test_direct_terminal_ncurses_mouse_sgr_no_composer_leak();
 }

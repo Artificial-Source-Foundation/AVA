@@ -3,6 +3,7 @@
 #include "ava/tui/runtime_state_internal.h"
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include "debug.h"
@@ -20,6 +21,8 @@ class RuntimeActionController;
 class RuntimeNavigationController;
 class RuntimePromptCoordinator;
 class RuntimeRenderer;
+class RuntimeSubagentWorkspaceController;
+class TranscriptSearchController;
 enum class TuiAction;
 struct InputEvent;
 
@@ -61,6 +64,32 @@ enum class ActiveRunInputReadDecision
 
 [[nodiscard]] ActiveRunInputReadDecision active_run_input_read_decision(bool input_buffered, bool frame_due);
 
+enum class PendingPromptServiceResult
+{
+  None,
+  Serviced,
+  Failed,
+};
+
+enum class RetainedInputDispatchResult
+{
+  PromptServiced,
+  InputHandled,
+  Failed,
+};
+
+[[nodiscard]] RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(
+    std::function<PendingPromptServiceResult()> const& service_pending_prompt, std::function<bool()> const& dispatch_input);
+
+enum class ActiveRunCancelDisposition
+{
+  ClearDraftSelection,
+  ClearTranscriptSelection,
+  RequestStop,
+};
+
+[[nodiscard]] ActiveRunCancelDisposition active_run_cancel_disposition(bool has_draft_selection, bool has_transcript_selection) noexcept;
+
 }  // namespace detail
 
 struct RuntimeActiveRunOutcome
@@ -76,13 +105,15 @@ class RuntimeActiveRunController final
  public:
   RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                              RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator, RuntimeNavigationController& navigation,
-                             RuntimeActionController& action_controller);
+                             RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
+                             RuntimeSubagentWorkspaceController& subagent_workspace);
   RuntimeActiveRunController(RuntimeActiveRunController const&) = delete;
   RuntimeActiveRunController& operator=(RuntimeActiveRunController const&) = delete;
 
   [[nodiscard]] RuntimeActiveRunOutcome run(std::string submitted);
 
  private:
+  [[nodiscard]] std::optional<bool> handle_transcript_search_input(runtime_input::RuntimeInput const& input);
   [[nodiscard]] bool handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& input);
   [[nodiscard]] RuntimeEventDrainResult drain_events(RuntimeActiveRunState& state);
   [[nodiscard]] bool request_stop(RuntimeActiveRunState& state);
@@ -126,6 +157,8 @@ class RuntimeActiveRunController final
   RuntimePromptCoordinator& prompt_coordinator_;
   RuntimeNavigationController& navigation_;
   RuntimeActionController& action_controller_;
+  TranscriptSearchController& transcript_search_;
+  RuntimeSubagentWorkspaceController& subagent_workspace_;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

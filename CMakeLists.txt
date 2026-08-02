@@ -182,7 +182,7 @@ add_subdirectory(src)
 add_subdirectory(enchantum)
 
 install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/release-artifact-readme.md"
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/release-artifact-readme.md"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}"
   RENAME README.md
   COMPONENT ava
@@ -196,27 +196,63 @@ install(
 )
 install(
   FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/USAGE.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIG.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/TESTING.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/headless-protocol.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/rpc-protocol.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/mcp.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/session-format.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/plugin-system.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/plugin-compatibility-policy.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/release-checklist.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp-support.json"
-  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/usage.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/configuration.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/context-resources.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/environment-variables.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/providers.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/subagents.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/thinking-modes.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/tools.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/core"
+  COMPONENT ava
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/interfaces/themes-keybindings.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/interfaces"
   COMPONENT ava
 )
 install(
   FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/engineering/session-versioning.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/docs/engineering/side-effect-safety-checklist.md"
-  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/engineering"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/testing.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/terminal-setup.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/troubleshooting.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/diagnostics.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/operations/release-checklist.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/operations"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/extensions/lsp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/extensions/mcp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/extensions/plugin-system.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/extensions"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/security/sandboxing.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/security/containment.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/security"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/development/session-versioning.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/development/side-effect-safety-checklist.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/development"
+  COMPONENT ava
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/headless-protocol.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/rpc-protocol.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/acp-support.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/session-format.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/plugin-compatibility-policy.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs"
   COMPONENT ava
 )
 install(

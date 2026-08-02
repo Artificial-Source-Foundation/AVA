@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/event/events.h"
 #include "ava/app/interactive_run_queue.h"
+#include "ava/app/line_shell_internal.h"
 #include "ava/core/json.h"
 
 #include <string>
@@ -591,6 +592,66 @@ void test_interactive_run_queue_runs_follow_up_lifecycle()
          "interactive run queue retargets active correlation when a follow-up starts");
 }
 
+void test_interactive_tui_stops_follow_ups_at_session_transition()
+{
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_old", "request_active", [&events](ava::event::EventEnvelope const& envelope) {
+    events.push_back(envelope);
+    return ava::core::VoidResult{};
+  });
+  static_cast<void>(queue.queue_follow_up("/new"));
+  static_cast<void>(queue.queue_follow_up("OLD-FOLLOW-UP-MUST-NOT-RUN"));
+
+  ava::tui::TuiSubmitContext context;
+  context.skip_active_steering = [&queue](std::string_view reason) { return queue.skip_active_steering(reason); };
+  context.take_next_follow_up = [&queue]() -> std::optional<ava::tui::TuiQueuedFollowUp> {
+    auto next = queue.take_next_follow_up();
+    if (!next)
+      return std::nullopt;
+    return ava::tui::TuiQueuedFollowUp{.request_id = next->request_id, .message = next->message};
+  };
+  context.mark_follow_up_started = [&queue](ava::tui::TuiQueuedFollowUp const& follow_up) {
+    return queue.mark_follow_up_started(
+        ava::app::InteractiveQueuedMessage{.request_id = follow_up.request_id, .correlation_id = follow_up.request_id, .message = follow_up.message});
+  };
+
+  auto session_id = std::string("session_old");
+  auto result = ava::app::line_shell_internal::LineResult{
+      .ordinary_turn_committed = true,
+      .output = {"OLD-OUTPUT-MUST-NOT-SURVIVE"},
+      .tool_timeline = {{.name = "old_tool"}},
+  };
+  bool workspace_catalog_reload = false;
+  std::vector<std::string> executed;
+  std::vector<std::string> executed_request_ids;
+  auto const transitioned = ava::app::line_shell_internal::run_queued_follow_ups_until_session_transition(
+      result, workspace_catalog_reload, "session_old", context, [&session_id]() { return session_id; },
+      [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
+        executed.push_back(follow_up.message);
+        executed_request_ids.push_back(follow_up.request_id);
+        if (follow_up.message == "/new")
+        {
+          session_id = "session_new";
+          return ava::app::line_shell_internal::LineResult{
+              .session_tree_changed = true,
+              .output = {"NEW-SESSION-RECEIPT"},
+              .tool_timeline = {{.name = "transition_tool"}},
+          };
+        }
+        return ava::app::line_shell_internal::LineResult{.output = {"OLD-LATE-OUTPUT"}, .tool_timeline = {{.name = "old_late_tool"}}};
+      });
+  auto const finished = queue.finish(false);
+
+  expect(transitioned && finished.has_value() && executed == std::vector<std::string>{"/new"} && executed_request_ids.size() == 1 && events.size() >= 3 &&
+             executed_request_ids.front() == events[2].request_id && result.session_tree_changed && result.ordinary_turn_committed &&
+             result.output == std::vector<std::string>{"NEW-SESSION-RECEIPT"} && result.tool_timeline.size() == 1 &&
+             result.tool_timeline.front().name == "transition_tool" && events.size() == 4 && events[2].name == "follow_up_started" &&
+             events[3].name == "follow_up_skipped" && events[3].payload_json.find("OLD-FOLLOW-UP-MUST-NOT-RUN") != std::string::npos &&
+             events[3].payload_json.find("run_completed_before_safe_point") != std::string::npos,
+         "interactive TUI follow-ups stop at the first authoritative session change, retain only the transition receipt/tool fallback, preserve control flags, "
+         "and let normal queue finish skip the old-session remainder");
+}
+
 void test_interactive_run_queue_skips_pending_messages_on_finish()
 {
   std::vector<ava::event::EventEnvelope> events;
@@ -680,6 +741,7 @@ void run_app_event_bus_tests()
   test_lifecycle_event_serialization_and_payload_mapping();
   test_interactive_run_queue_emits_steer_queued_and_applied_events();
   test_interactive_run_queue_runs_follow_up_lifecycle();
+  test_interactive_tui_stops_follow_ups_at_session_transition();
   test_interactive_run_queue_skips_pending_messages_on_finish();
   test_interactive_run_queue_restores_latest_pending_message();
   test_interactive_run_queue_bounds_and_truncates_event_payloads();

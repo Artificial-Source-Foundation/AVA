@@ -205,31 +205,43 @@ package_name="ava-${version}-linux-${arch}"
 stage="$work_root/stage/$package_name"
 doc_root="$stage/share/doc/ava"
 doc_sources=(
-  docs/USAGE.md
-  docs/CONFIG.md
-  docs/TESTING.md
-  docs/diagnostics.md
+  docs/core/usage.md
+  docs/core/configuration.md
+  docs/core/context-resources.md
+  docs/core/environment-variables.md
+  docs/core/providers.md
+  docs/core/subagents.md
+  docs/core/thinking-modes.md
+  docs/core/tools.md
+  docs/interfaces/themes-keybindings.md
+  docs/operations/testing.md
+  docs/operations/terminal-setup.md
+  docs/operations/troubleshooting.md
+  docs/operations/diagnostics.md
+  docs/operations/release-checklist.md
+  docs/extensions/lsp.md
+  docs/extensions/mcp.md
+  docs/extensions/plugin-system.md
+  docs/security/sandboxing.md
+  docs/security/containment.md
+  docs/development/session-versioning.md
+  docs/development/side-effect-safety-checklist.md
   docs/headless-protocol.md
   docs/rpc-protocol.md
   docs/acp.md
-  docs/mcp.md
+  docs/acp-support.json
   docs/session-format.md
-  docs/plugin-system.md
   docs/plugin-compatibility-policy.md
-  docs/release-checklist.md
-  docs/engineering/session-versioning.md
-  docs/engineering/side-effect-safety-checklist.md
   docs/interop/evidence/README.md
   docs/interop/evidence/zed-1.9.0-2026-07-14.md
   docs/product/mvp-coverage-ledger.md
-  docs/acp-support.json
   docs/schema/theme.schema.json
 )
 
 if [[ $binary_supplied == false ]]; then
   cmake --install "$release_build" --prefix "$stage" --component ava
 else
-  install -D -m 0644 -- "$repo_root/docs/release-artifact-readme.md" "$doc_root/README.md"
+  install -D -m 0644 -- "$repo_root/docs/operations/release-artifact-readme.md" "$doc_root/README.md"
   install -D -m 0644 -- "$repo_root/LICENSE" "$doc_root/LICENSE"
   install -D -m 0644 -- "$repo_root/THIRD_PARTY_NOTICES.md" "$doc_root/THIRD_PARTY_NOTICES.md"
   for source in "${doc_sources[@]}"; do

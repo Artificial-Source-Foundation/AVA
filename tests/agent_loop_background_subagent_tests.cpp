@@ -6,6 +6,7 @@
 #include "ava/http/transport.h"
 #include "ava/app/command_jobs.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/subagent_inspector.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/session_store.h"
 #include "ava/provider/openai_provider.h"
@@ -497,4 +498,91 @@ void test_agent_loop_coordinator_start_failure_rolls_back_child()
   expect(saw_failure, "coordinator start failure is returned to the parent tool continuation");
   expect(session_files == 1, "proven-unpublished start failure rolls back the newly created child session file");
   expect((*coordinator)->list("parent-start-failure").empty(), "start failure prevents live worker publication");
+}
+
+void test_agent_loop_background_task_publishes_inspection_source()
+{
+  auto const root = create_empty_root("agent-task-background-inspect");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const session_root = root / "sessions";
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-inspect"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  auto coordinator_result = ava::agent::SubagentCoordinator::create();
+  expect(coordinator_result.has_value(), "background inspect fixture creates coordinator");
+  if (!coordinator_result)
+    return;
+  auto coordinator = *coordinator_result;
+  auto background_state = std::make_shared<BlockingBackgroundTransport::State>();
+  ava::tests::FakeTransport transport({sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_task\",\"name\":\"task\"}\n\n"
+                                                    "data: "
+                                                    "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_task\",\"delta\":\"{"
+                                                    "\\\"description\\\":\\\"Inspect child\\\",\\\"prompt\\\":\\\"Say hello from child.\\\","
+                                                    "\\\"subagent_type\\\":\\\"general\\\",\\\"background\\\":true}\"}\n\n"
+                                                    "data: [DONE]\n\n"),
+                                       sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"queued\"}\n\n"
+                                                    "data: [DONE]\n\n")});
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .model = agent_loop_test::model_invocation_options(),
+      .access_token = "token",
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .background_provider_factory = []() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        std::unique_ptr<ava::provider::Provider> provider = std::make_unique<ava::provider::OpenAIProvider>("https://api.example.test");
+        return provider;
+      },
+      .background_transport_factory = [background_state]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+        std::unique_ptr<ava::http::Transport> transport = std::make_unique<BlockingBackgroundTransport>(
+            background_state, sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"child hello\"}\n\n"
+                                           "data: [DONE]\n\n"));
+        return transport;
+      },
+      .subagent_coordinator = coordinator,
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+
+  auto result = loop.run_turn("delegate background inspect", store, provider, transport);
+  expect(result && result->final_text == "queued", "background inspect parent turn completes");
+  auto jobs = coordinator->list(store.session_id());
+  expect(jobs.size() == 1, "background inspect job is published");
+  if (jobs.empty())
+    return;
+
+  // While the child is running, the coordinated source must already expose the
+  // committed user prompt prefix without leaking session paths through inspect.
+  auto live = coordinator->inspect(store.session_id(), jobs.front().job.identity.job_id);
+  expect(live && !(*live)->unavailable && !(*live)->terminal && !(*live)->messages.empty(),
+         "coordinated background task publishes an inspection source before completion");
+  if (live && !(*live)->messages.empty())
+  {
+    bool saw_prompt = false;
+    for (auto const& message : (*live)->messages)
+    {
+      if (message.role == ava::agent::SubagentLiveMessageRole::User && message.text.find("Say hello from child.") != std::string::npos)
+        saw_prompt = true;
+    }
+    expect(saw_prompt, "live inspect projects the committed child user prompt prefix");
+  }
+
+  expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "background child reaches provider");
+  background_state->release_success();
+  auto terminal = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::seconds(2));
+  expect(terminal && !terminal->timed_out && terminal->job.execution == ava::agent::SubagentExecutionState::Completed,
+         "background inspect child reaches terminal completion");
+  auto frozen = coordinator->inspect(store.session_id(), jobs.front().job.identity.job_id);
+  expect(frozen && (*frozen)->terminal && !(*frozen)->unavailable,
+         "terminal background child freezes a path-free inspection frame");
+  if (frozen)
+  {
+    bool saw_assistant = false;
+    for (auto const& message : (*frozen)->messages)
+      if (message.role == ava::agent::SubagentLiveMessageRole::Assistant && message.text.find("child hello") != std::string::npos)
+        saw_assistant = true;
+    expect(saw_assistant, "frozen frame includes committed assistant transcript text only");
+  }
 }

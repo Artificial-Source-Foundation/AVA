@@ -143,7 +143,7 @@ std::string permission_prompt_status(bool allow_session_available, bool allow_re
   std::string status = "permission required: A=allow once";
   if (allow_session_available)
     status += " S=allow session";
-  status += " D=reject";
+  status += " D=reject G=guide rejection";
   if (remember_available)
     status += " R=remember";
   status += " Tab/Left/Right choose Enter confirm Esc reject";
@@ -154,7 +154,9 @@ ActiveRunHint active_run_hint_for(TuiKeyBindings const& bindings)
 {
   return ActiveRunHint{.submit_or_queue = first_key_display(bindings, TuiAction::Submit),
                        .follow_up = first_key_display(bindings, TuiAction::MessageFollowUp),
-                       .dequeue = first_key_display(bindings, TuiAction::MessageDequeue)};
+                       .dequeue = first_key_display(bindings, TuiAction::MessageDequeue),
+                       .interrupt = first_key_display(bindings, TuiAction::Cancel),
+                       .jump_to_bottom = first_key_display(bindings, TuiAction::JumpToBottom)};
 }
 
 std::string compact_path_leaf(std::string path)
@@ -257,20 +259,24 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
   view.items.reserve(help_items.size());
   for (auto const& item : help_items)
   {
-    auto badge = std::string("active");
+    // Prefer human label, then bound keys (+ shared marker), then machine id so keys stay visible at narrow widths.
+    auto badge = item.keys;
     for (auto const& key : split_key_display(item.keys))
     {
       if (shared_key_count(help_items, key) > 1)
       {
-        badge = "shared key";
+        if (!badge.empty())
+          badge += " · ";
+        badge += "shared";
         break;
       }
     }
+    auto const human_label = item.label.empty() ? item.action : item.label;
     view.items.push_back(SelectListItemView{.value = item.action,
-                                            .label = item.action,
-                                            .description = item.description,
+                                            .label = human_label,
+                                            .description = item.action,
                                             .group = "Hotkeys",
-                                            .detail = item.keys,
+                                            .detail = {},
                                             .badge = std::move(badge),
                                             .current = false,
                                             .enabled = true,

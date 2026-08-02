@@ -66,7 +66,7 @@ Frontend/TUI scope includes:
 - `src/ava/tui/` runtime, composer, editor, palettes, selectors, transcript, markdown/text rendering, tool cards, permission/question UI, terminal protocol handling, themes, keybindings, and display settings.
 - TUI-facing command flows from `src/ava/app/` when they are required for visible terminal behavior.
 - Tests under `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_kitty_image_smoke.py`, and `tests/tui_osc8_smoke.py`.
-- Docs in `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` where they describe frontend/TUI behavior.
+- Docs in `docs/core/usage.md`, `docs/core/configuration.md`, `docs/operations/testing.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` where they describe frontend/TUI behavior.
 
 The frontend/TUI phase must not stop at code tests. It must visually verify AVA through tmux/PTY evidence and inspect the resulting logs/captures.
 

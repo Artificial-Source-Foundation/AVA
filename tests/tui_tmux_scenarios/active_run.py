@@ -238,7 +238,9 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         lambda screen: transcript_rows(screen) != active_live_rows and "tmux active follow-up" in screen and "second line" in screen,
         "active-run physical Ghostty arrow transcript movement",
     )
-    if any(text in active_arrow_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    # /help intentionally lists the jump_to_bottom action name; only the
+    # removed detached-banner phrases indicate stale product chrome.
+    if any(text in active_arrow_scrolled for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"active-run arrow scroll surfaced deleted detached chrome\nscreen:\n{active_arrow_scrolled}")
     send_literal(tmux_exe, active_session, "X")
     active_multiline_cursor = wait_for(
@@ -264,7 +266,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         lambda screen: transcript_rows(screen) != active_wheel_live_rows and "tmux active follow-up" in screen and "second lineX" in screen,
         "active-run mouse wheel transcript movement",
     )
-    if any(text in active_wheel_scrolled for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    if any(text in active_wheel_scrolled for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"active-run wheel scroll surfaced deleted detached chrome\nscreen:\n{active_wheel_scrolled}")
     # A harmless non-wheel ordering boundary at the end of the draft resets the
     # physical-wheel burst governor without changing the draft or cursor.

@@ -19,7 +19,8 @@ inline constexpr std::size_t kMaxSessionImportEntries = 16384;
 void set_after_session_import_open_for_test(std::function<void()> hook);
 
 [[nodiscard]] ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session, std::string_view query = {});
-[[nodiscard]] ava::core::Result<CommandResult> run_fork_command(runtime::Session& session, std::string_view name = {});
+[[nodiscard]] ava::core::Result<CommandResult> run_fork_command(runtime::Session& session, std::string_view name = {},
+                                                                std::string_view branch_from_entry_id = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_clone_command(runtime::Session& session, std::string_view name = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_new_session_command(runtime::Session& session, std::string_view name = {});
 [[nodiscard]] ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, std::string_view session_id);

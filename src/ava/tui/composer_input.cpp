@@ -140,7 +140,7 @@ void append_input_text_segment(std::string& line, std::string_view text, bool se
   line += std::string(kSgrText);
   if (selected)
     line += std::string(kReverseVideo);
-  line += sanitize_terminal_text(text) + std::string(kSgrReset) + std::string(kSgrComposerBg);
+  line += sanitize_terminal_text(text) + std::string(kSgrReset) + std::string(kSgrScreenBg);
 }
 
 void append_input_text(std::string& line, ComposerSnapshot const& snapshot, std::string_view text, std::size_t line_start)
@@ -188,7 +188,7 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
         return;
       auto styled_model = std::string(kSgrBold) + std::string(kSgrText) + model + std::string(kSgrReset);
       line += fit_line_preserving_sgr(std::move(styled_model), model_budget);
-      line += std::string(kSgrComposerBg);
+      line += std::string(kSgrScreenBg);
     };
 
     if (!active_context_status || active_context_status->empty())
@@ -208,11 +208,11 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
     {
       append_fitted_model(content_budget - context_columns - separator_columns);
       if (separator_columns == kSeparatorColumns)
-        line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " ";
+        line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrScreenBg) + " ";
       else
         line += ' ';
     }
-    auto styled_context = std::string(kSgrMuted) + context_label + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    auto styled_context = std::string(kSgrMuted) + context_label + std::string(kSgrReset) + std::string(kSgrScreenBg);
     line += fit_line_preserving_sgr(std::move(styled_context), std::min(content_budget, context_columns));
     return fit_line_preserving_sgr(std::move(line), budget);
   };
@@ -220,40 +220,40 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
   auto line = build_left_status(width);
   if (snapshot.processing)
   {
-    auto const spinner =
-        std::string(kSgrAccent) + std::string(processing_indicator_frame(snapshot.spinner_frame)) + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    auto const meter = processing_indicator_styled(snapshot.spinner_frame);
     constexpr auto kRightGap = std::size_t{2};
     constexpr auto kRightMargin = std::size_t{2};
     auto const left_columns = terminal_text_columns(line);
-    auto const spinner_columns = terminal_text_columns(spinner);
-    if (left_columns + spinner_columns + kRightGap + kRightMargin <= width)
+    auto const meter_columns = terminal_text_columns(meter);
+    if (left_columns + meter_columns + kRightGap + kRightMargin <= width)
     {
-      line += std::string(width - left_columns - spinner_columns - kRightMargin, ' ');
-      line += spinner;
+      line += std::string(width - left_columns - meter_columns - kRightMargin, ' ');
+      line += meter;
       line += std::string(kRightMargin, ' ');
     }
     else
     {
       constexpr auto kMinimumGap = std::size_t{1};
-      if (width > spinner_columns + kMinimumGap)
+      if (width > meter_columns + kMinimumGap)
       {
-        auto const left_budget = width - spinner_columns - kMinimumGap;
+        auto const left_budget = width - meter_columns - kMinimumGap;
         line = build_left_status(left_budget);
         auto const fitted_columns = terminal_text_columns(line);
-        line += std::string(kSgrComposerBg);
+        line += std::string(kSgrScreenBg);
         if (fitted_columns < left_budget)
           line.append(left_budget - fitted_columns, ' ');
         line += ' ';
-        line += spinner;
+        line += meter;
       }
       else
       {
-        line = fit_line_preserving_sgr(spinner, width);
+        // Keep the fixed four-cell meter width even on tiny terminals; fit_line clips only if forced.
+        line = fit_line_preserving_sgr(meter, width);
       }
     }
   }
 
-  return composer_surface_line(std::move(line), width);
+  return screen_surface_line(std::move(line), width);
 }
 
 std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t width)
@@ -261,20 +261,20 @@ std::string render_input_line(ComposerSnapshot const& snapshot, std::size_t widt
   std::string line = composer_gutter();
   if (snapshot.input.empty())
   {
-    line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) + std::string(kSgrComposerBg);
+    line += std::string(kSgrTextDimmed) + "Type a message..." + std::string(kSgrReset) + std::string(kSgrScreenBg);
   }
   else
   {
     append_input_text(line, snapshot, snapshot.input, 0);
   }
-  return composer_surface_line(std::move(line), width);
+  return screen_surface_line(std::move(line), width);
 }
 
 std::string render_input_fragment_line(ComposerSnapshot const& snapshot, std::string_view text, bool /*first_line*/, std::size_t width, std::size_t line_start)
 {
   std::string line = composer_gutter();
   append_input_text(line, snapshot, text, line_start);
-  return composer_surface_line(std::move(line), width);
+  return screen_surface_line(std::move(line), width);
 }
 
 std::size_t effective_input_cursor(ComposerSnapshot const& snapshot)
@@ -368,7 +368,7 @@ std::vector<std::string> render_composer_block(ComposerSnapshot const& snapshot,
   auto const layout = composer_input_layout(input_lines.size(), max_lines, snapshot.draft_scroll_offset, policy.composer_top_padding_lines);
   while (lines.size() < layout.top_padding)
   {
-    lines.push_back(composer_surface_line(composer_gutter(), width));
+    lines.push_back(screen_surface_line(composer_gutter(), width));
   }
   auto const last_visible = std::min(input_lines.size(), layout.first_visible + layout.visible_input_lines);
   for (std::size_t index = layout.first_visible; index < last_visible; ++index)

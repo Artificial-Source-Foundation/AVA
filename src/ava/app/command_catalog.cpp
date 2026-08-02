@@ -34,6 +34,8 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/settings", .description = "Open TUI settings", .category = "General"},
       CommandCatalogEntry{.command = "/sidebar", .description = "Open the current session overview", .category = "General"},
       CommandCatalogEntry{
+          .command = "/search", .description = "Find literal text in currently rendered TUI transcript items", .hint = "[query]", .category = "General"},
+      CommandCatalogEntry{
           .command = "/theme", .description = "Persist the TUI display theme", .hint = "[dark|light|plain|custom-name|reset]", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details",
@@ -46,8 +48,9 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .hint = "[query]",
                           .category = "General"},
       CommandCatalogEntry{.command = "/diff", .description = "Show the latest or matching tool diff in the TUI", .hint = "[query]", .category = "General"},
-      CommandCatalogEntry{
-          .command = "/copy", .description = "Copy the latest AVA message, matching tool, diff, or permission details in the TUI", .category = "General"},
+      CommandCatalogEntry{.command = "/copy",
+                          .description = "Copy the latest AVA message, a public user turn, or matching tool, diff, or permission details in the TUI",
+                          .category = "General"},
       CommandCatalogEntry{.command = "/share",
                           .description = "Share a session export",
                           .category = "Deferred",
@@ -65,7 +68,9 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .category = "Deferred",
                           .enabled = false,
                           .disabled_reason = "package install/update is deferred pending local-source, provenance, trust, rollback, and compatibility policy"},
-      CommandCatalogEntry{.command = "/thinking", .description = "Toggle inline thinking block visibility", .category = "General"},
+      CommandCatalogEntry{.command = "/thinking",
+                          .description = "Toggle inline thinking visibility, or use /thinking details for the latest long thinking block",
+                          .category = "General"},
       CommandCatalogEntry{
           .command = "/attach", .aliases = {"/image"}, .description = "Attach an image to the next TUI prompt", .hint = "<path>", .category = "Files"},
       CommandCatalogEntry{
@@ -82,8 +87,9 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .hint = "[show|wait|result|cancel|promote] <id> [timeout_ms]",
                           .category = "Sessions"},
       CommandCatalogEntry{.command = "/fork", .description = "Fork the current session at its latest entry", .hint = "[name]", .category = "Sessions"},
+      CommandCatalogEntry{.command = "/fork-from", .description = "Fork from a selected public user turn in the TUI", .category = "Sessions"},
       CommandCatalogEntry{.command = "/clone", .description = "Clone the full current session", .hint = "[name]", .category = "Sessions"},
-      CommandCatalogEntry{.command = "/new", .description = "Start a new session", .hint = "[name]", .category = "Sessions"},
+      CommandCatalogEntry{.command = "/new", .aliases = {"/clear"}, .description = "Start a new session", .hint = "[name]", .category = "Sessions"},
       CommandCatalogEntry{.command = "/resume", .description = "Resume a session", .hint = "<id>", .category = "Sessions"},
       CommandCatalogEntry{
           .command = "/name", .aliases = {"/rename"}, .description = "Set or clear the current session name", .hint = "<name|--clear>", .category = "Sessions"},

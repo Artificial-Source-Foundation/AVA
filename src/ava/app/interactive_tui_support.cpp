@@ -3,6 +3,7 @@
 #include "ava/app/line_shell.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
+#include "ava/agent/todo.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/theme.h"
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -56,7 +58,8 @@ std::vector<ava::app::CommandHotkey> command_hotkeys_from_key_bindings(ava::tui:
   std::vector<ava::app::CommandHotkey> hotkeys;
   for (auto const& item : ava::tui::key_binding_help_items(key_bindings))
   {
-    hotkeys.push_back(ava::app::CommandHotkey{.action = item.action, .description = item.description, .keys = item.keys});
+    // description carries the concise human action label for palette completions.
+    hotkeys.push_back(ava::app::CommandHotkey{.action = item.action, .description = item.label.empty() ? item.action : item.label, .keys = item.keys});
   }
   return hotkeys;
 }
@@ -257,6 +260,14 @@ std::optional<std::string> format_context_window_percent(long long tokens, std::
   return output.str();
 }
 
+std::string format_active_context_status_value(long long tokens, std::optional<long long> context_window_tokens)
+{
+  auto const count = format_compact_token_count(tokens);
+  if (auto const percent = format_context_window_percent(tokens, context_window_tokens))
+    return count + " (" + *percent + ')';
+  return "~" + count;
+}
+
 std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats, std::optional<long long> context_window_tokens)
 {
   auto const tokens = compact_token_total(stats);
@@ -286,6 +297,40 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   return compact_token_status(*stats, session.model().context_window_tokens);
 }
 
+ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
+{
+  switch (status)
+  {
+    case ava::agent::TodoStatus::Pending:
+      return ava::tui::TodoStatus::Pending;
+    case ava::agent::TodoStatus::InProgress:
+      return ava::tui::TodoStatus::InProgress;
+    case ava::agent::TodoStatus::Completed:
+      return ava::tui::TodoStatus::Completed;
+  }
+  return ava::tui::TodoStatus::Pending;
+}
+
+std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session)
+{
+  auto read_authority = session.read_authority_1();
+  if (!read_authority)
+    return {};
+  auto entries = read_authority->load();
+  if (!entries)
+    return {};
+  auto snapshot = ava::agent::latest_committed_todowrite_snapshot(*entries);
+  if (!snapshot)
+    return {};
+  std::vector<ava::tui::TodoItem> todos;
+  todos.reserve(snapshot->todos.size());
+  for (auto const& item : snapshot->todos)
+  {
+    todos.push_back(ava::tui::TodoItem{.id = item.id, .content = item.content, .status = to_tui_todo_status(item.status)});
+  }
+  return todos;
+}
+
 ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::Session const& session)
 {
   auto read_authority = session.read_authority_1();
@@ -303,9 +348,7 @@ ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime
   auto const total_tokens = *active_tokens > maximum - system_prompt_tokens ? maximum : *active_tokens + system_prompt_tokens;
   auto const display_tokens = total_tokens > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max()
                                                                                                              : static_cast<long long>(total_tokens);
-  if (auto const percent = format_context_window_percent(display_tokens, session.model().context_window_tokens))
-    return *percent;
-  return "~" + format_compact_token_count(display_tokens);
+  return format_active_context_status_value(display_tokens, session.model().context_window_tokens);
 }
 
 std::optional<std::string> active_context_status_for_session(ava::app::runtime::Session const& session)
@@ -604,6 +647,59 @@ bool workspace_catalog_reload_requested(std::string_view submitted)
     return true;
   auto const end = arguments.find_first_of(" \t\r\n", first);
   return arguments.substr(first, end - first) == "all";
+}
+
+bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
+                                                    ava::tui::TuiSubmitContext const& context, std::function<std::string()> const& current_session_id,
+                                                    std::function<LineResult(ava::tui::TuiQueuedFollowUp const&)> const& run_follow_up)
+{
+  if (current_session_id() != initial_session_id)
+    return true;
+
+  while (!result.quit && (!context.cancel_requested || !context.cancel_requested()))
+  {
+    if (context.skip_active_steering)
+    {
+      if (auto skipped = context.skip_active_steering("run_completed_before_safe_point"); !skipped)
+      {
+        add_output(result, skipped.error().format());
+        break;
+      }
+    }
+    if (!context.take_next_follow_up)
+      break;
+    auto follow_up = context.take_next_follow_up();
+    if (!follow_up)
+      break;
+    if (context.mark_follow_up_started)
+    {
+      if (auto started = context.mark_follow_up_started(*follow_up); !started)
+      {
+        add_output(result, started.error().format());
+        break;
+      }
+    }
+
+    workspace_catalog_reload = workspace_catalog_reload || workspace_catalog_reload_requested(follow_up->message);
+    auto next = run_follow_up(*follow_up);
+    auto const session_changed = current_session_id() != initial_session_id;
+    if (session_changed)
+    {
+      next.quit = next.quit || result.quit;
+      next.session_tree_changed = next.session_tree_changed || result.session_tree_changed;
+      next.ordinary_turn_committed = next.ordinary_turn_committed || result.ordinary_turn_committed;
+      result = std::move(next);
+      return true;
+    }
+
+    result.quit = result.quit || next.quit;
+    result.session_tree_changed = result.session_tree_changed || next.session_tree_changed;
+    result.ordinary_turn_committed = result.ordinary_turn_committed || next.ordinary_turn_committed;
+    result.output.insert(result.output.end(), std::make_move_iterator(next.output.begin()), std::make_move_iterator(next.output.end()));
+    result.tool_timeline.insert(result.tool_timeline.end(), std::make_move_iterator(next.tool_timeline.begin()),
+                                std::make_move_iterator(next.tool_timeline.end()));
+  }
+  return false;
 }
 
 }  // namespace ava::app::line_shell_internal

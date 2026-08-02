@@ -2,6 +2,7 @@
 #include "ava/http/transport.h"
 #include "ava/agent/agent_turn_executor_internal.h"
 #include "ava/agent/job_control.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
 
@@ -46,6 +47,7 @@ ToolVisibilityOptions subagent_tool_visibility(ToolVisibilityOptions parent, Sub
 {
   add_excluded_tool(parent, "task");
   add_excluded_tool(parent, "job");
+  add_excluded_tool(parent, "todowrite");
   if (tool_preset != SubagentToolPreset::ReadOnly)
     return parent;
 
@@ -206,6 +208,12 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
   child_options.on_tool_event = nullptr;
   child_options.on_tool_progress = nullptr;
   child_options.on_stream_event = nullptr;
+  // Preserve the child invocation's configured display for any future nested
+  // task ownership, but never route child launches into the parent's private
+  // observer. Recursive task/job tools are currently hidden below as well.
+  child_options.subagent_launch.sink = nullptr;
+  child_options.subagent_launch.request_id.clear();
+  child_options.subagent_launch.correlation_id.clear();
   child_options.take_steering_messages = nullptr;
   child_options.compact_context = nullptr;
   child_options.background_provider_factory = nullptr;
@@ -303,6 +311,16 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
                                             .subagent_type = request.subagent_type,
                                             .child_session_id = task_id,
                                             .child_session_path = session_path};
+    // Build the inspection source from an exact copy of the child authority
+    // before coordinator start/publication. No raw authority escapes start().
+    auto inspection_source = SubagentLiveInspectionSource::create(*run_state->child_options.session_read_authority);
+    if (!inspection_source)
+    {
+      auto error = std::move(inspection_source.error());
+      if (!request.task_id)
+        ava::session::rollback_created_session_with_context(run_state->child_store, run_state->child_lease, error);
+      return std::unexpected(std::move(error));
+    }
     BackgroundJobWorker worker = [run_state](BackgroundJobContext const& context) mutable {
       struct FinishInteractionGate final
       {
@@ -332,8 +350,12 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
       return completion;
     };
 
-    auto coordinated = options_.subagent_coordinator->start(store_.session_id(), request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
-                                                            std::move(start_options), std::move(worker), interaction_gate);
+    auto coordinated = options_.subagent_coordinator->start(
+        SubagentCoordinatorStartRequest{.parent_session_id = store_.session_id(),
+                                        .mode = request.background ? SubagentJobMode::Background : SubagentJobMode::Foreground,
+                                        .job = std::move(start_options),
+                                        .launch_display = run_state->child_options.subagent_launch.display},
+        std::move(worker), interaction_gate, std::move(*inspection_source));
     if (!coordinated)
     {
       auto error = std::move(coordinated.error());

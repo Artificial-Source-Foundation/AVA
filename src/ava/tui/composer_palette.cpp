@@ -589,7 +589,7 @@ std::vector<SlashCommandItem> filter_slash_argument_completions(std::string_view
     matches.push_back(SlashCommandItem{.command = completion.value,
                                        .display_label = completion.display_label,
                                        .description = completion.description,
-                                       .hint = completion.append_space ? "" : "[complete]",
+                                       .hint = {},
                                        .category = completion.category.empty() ? command->category : completion.category,
                                        .enabled = command->enabled && completion.enabled,
                                        .disabled_reason = command->enabled ? completion.disabled_reason : command->disabled_reason,
@@ -728,7 +728,7 @@ SlashCommandItem completion_display_item(FileReferenceItem const& reference, Com
 
 std::string palette_prefix()
 {
-  return composer_gutter();
+  return composer_gutter(kSgrComposerBg);
 }
 
 std::size_t palette_content_width(std::size_t width)

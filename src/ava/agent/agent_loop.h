@@ -9,6 +9,7 @@
 #include "ava/agent/run_phase.h"
 #include "ava/agent/subagent_config.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/agent/tool_execution_options.h"
 #include "ava/agent/tool_resources.h"
 #include "ava/agent/tool_visibility.h"
@@ -120,6 +121,10 @@ struct AgentLoopOptions
   std::function<void(ToolTimelineEntry const&)> on_tool_event = nullptr;
   std::function<ava::core::VoidResult(ToolProgressEntry const&)> on_tool_progress = nullptr;
   std::function<ava::core::VoidResult(ava::provider::StreamEvent const&)> on_stream_event = nullptr;
+  // Private process-local task-card association. The display is normalized by
+  // the runtime before loop construction; request/correlation ids are captured
+  // for this run. This callback is never part of RuntimeEvent publication.
+  SubagentLaunchObserver subagent_launch = {};
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   // Deny-only, non-interactive policy check used before model-initiated
   // backend auto-Allow decisions. Mirrors ToolContext::auto_allow_deny_preflight

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -11,7 +12,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include "debug.h"
 
 namespace ava::tui {
 
@@ -20,6 +20,7 @@ struct RuntimeDraftState
   [[nodiscard]] std::size_t max_draft_scroll_offset(ComposerSnapshot const& snapshot, std::size_t height) const;
 
   void clear_selection();
+  void reset_for_session_transition();
   [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> selection_bounds() const;
   bool replace_selection(std::string_view replacement);
   bool delete_selection();
@@ -42,6 +43,7 @@ struct RuntimeDraftState
   std::size_t draft_scroll_offset = 0;
   std::size_t draft_selection_anchor = std::string::npos;
   std::size_t draft_selection_cursor = std::string::npos;
+  bool mouse_selecting = false;
   bool pending_escape_clear = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text.h"
@@ -66,6 +68,8 @@ struct ToolTimelineItem
   std::string call_id = {};
   std::string request_id = {};
   std::string correlation_id = {};
+  // Private process-local presentation attached only by the live TUI reducer.
+  std::optional<ava::agent::SubagentLaunchDisplay> subagent_launch_display = std::nullopt;
   ToolLifecycleState lifecycle = ToolLifecycleState::ExecutionStarted;
   std::optional<bool> details_visible = std::nullopt;
   std::vector<std::string> permission_request_ids = {};
@@ -90,7 +94,7 @@ struct ToolTimelineItem
   std::string spill_path = {};
   bool spill_truncated = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptItem
@@ -101,13 +105,17 @@ struct TranscriptItem
   std::string meta = {};
   std::string thinking = {};
   Text thinking_model = {};
+  // Presentation-only: completed long thinking defaults to a bounded preview.
+  // Live append-only pending reasoning ignores this and always renders fully.
+  // Expansion is not persisted across process/session reload.
+  bool thinking_expanded = false;
   std::optional<ToolTimelineItem> tool = std::nullopt;
   // Runtime event snapshots set this only when they can prove that one stable
   // stream item retains its complete previous source prefix.
   std::string stream_id = {};
   bool append_only_stream = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SidebarActivityItem
@@ -125,6 +133,22 @@ struct SidebarModifiedFile
   std::string path = {};
   std::optional<int> added = std::nullopt;
   std::optional<int> removed = std::nullopt;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+enum class TodoStatus
+{
+  Pending,
+  InProgress,
+  Completed,
+};
+
+struct TodoItem
+{
+  std::string id = {};
+  std::string content = {};
+  TodoStatus status = TodoStatus::Pending;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -174,7 +198,7 @@ struct ComposerFrame
   std::vector<std::string> lines;
   std::vector<TerminalGraphicOverlay> graphics;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SlashCommandArgumentCompletion
@@ -197,6 +221,7 @@ struct SidebarSnapshot
 {
   std::vector<SidebarActivityItem> activity = {};
   std::vector<SidebarModifiedFile> modified_files = {};
+  std::vector<TodoItem> todos = {};
   std::string session_id = {};
   std::string mode = {};
   std::string provider = {};
@@ -289,8 +314,11 @@ struct PermissionPromptInputResult
 {
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
   PermissionPromptInputAction action = PermissionPromptInputAction::None;
+  bool guidance_mode = false;
+  std::string guidance_text = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // guidance_text must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct PermissionPromptRememberAvailability
@@ -318,9 +346,12 @@ struct PermissionPromptView
   std::string workspace_recipe_key = {};
   std::string effective_allowed_scopes = {};
   PermissionPromptChoice selected_choice = PermissionPromptChoice::Deny;
+  bool guidance_mode = false;
+  std::string guidance_text = {};
   std::string request_id = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // guidance_text must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct QuestionPromptOptionView
@@ -370,6 +401,11 @@ struct QuestionPromptView
 
 struct SelectListItemView
 {
+  // Rendered as a muted suffix but deliberately omitted from selector matching.
+  std::string non_searchable_suffix = {};
+  // Renderer-reserved authority/status text. When present, the primary row
+  // truncates the label before this field and optional details.
+  std::string priority_suffix = {};
   std::string value;
   std::string label;
   std::string description;
@@ -380,7 +416,7 @@ struct SelectListItemView
   bool enabled = true;
   std::string disabled_reason;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 enum class SelectListInputAction
@@ -427,8 +463,29 @@ struct SelectListView
   std::string placeholder = "Search";
   std::string empty_text = "No matches";
   std::string footer_hint;
+  // When set, RuntimeRenderer freezes the pre-modal transcript layout cache for draws
+  // while this selector is shown, even if the modal canvas width differs.
+  bool freeze_underlying_transcript_layout = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct SubagentWorkspaceView
+{
+  std::string title;
+  std::string status;
+  std::string notice;
+  // Private selector-derived presentation; never part of child message text.
+  std::string launch_detail;
+  std::vector<ava::agent::SubagentLiveMessage> messages;
+  std::size_t scroll_offset = 0;
+  bool terminal = false;
+  bool freeze_pending = false;
+  bool unavailable = false;
+  bool evicted = false;
+  bool refresh_unavailable = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ActiveRunHint
@@ -436,6 +493,10 @@ struct ActiveRunHint
   std::string submit_or_queue = {};
   std::string follow_up = {};
   std::string dequeue = {};
+  // First configured Cancel binding; active-run stop uses Cancel, not Interrupt.
+  std::string interrupt = {};
+  // First configured JumpToBottom binding; may be empty when unbound.
+  std::string jump_to_bottom = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -476,6 +537,7 @@ struct ComposerSnapshot
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
   std::optional<SelectListView> select_list = std::nullopt;
+  std::optional<SubagentWorkspaceView> subagent_workspace = std::nullopt;
   std::size_t selected_slash_command_index = 0;
   bool slash_palette_suppressed = false;
   bool path_completion_force_active = false;
@@ -486,6 +548,15 @@ struct ComposerSnapshot
   std::size_t input_cursor = std::string::npos;
   std::size_t input_selection_start = std::string::npos;
   std::size_t input_selection_end = std::string::npos;
+  // Rendered transcript drag-selection endpoints (content-relative). Values use
+  // std::string::npos item indices when inactive. See
+  // runtime_transcript_selection_internal.h for the message_starts origin contract.
+  std::size_t transcript_selection_anchor_item = std::string::npos;
+  std::size_t transcript_selection_anchor_line = 0;
+  std::size_t transcript_selection_anchor_column = 0;
+  std::size_t transcript_selection_focus_item = std::string::npos;
+  std::size_t transcript_selection_focus_line = 0;
+  std::size_t transcript_selection_focus_column = 0;
   std::optional<SidebarSnapshot> sidebar = std::nullopt;
   bool sidebar_drawer_visible = false;
   std::size_t sidebar_drawer_scroll_offset = 0;
@@ -496,7 +567,7 @@ struct ComposerSnapshot
   bool thinking_visible = true;
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ComposerCanvasLayout
@@ -596,6 +667,8 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout(ComposerSnapshot const& snapshot);
 [[nodiscard]] ComposerFrame render_composer_frame(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::vector<std::string> render_composer(ComposerSnapshot const& snapshot);
+[[nodiscard]] std::vector<std::string> render_subagent_workspace(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
+[[nodiscard]] std::size_t subagent_workspace_max_scroll_offset(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
@@ -607,6 +680,9 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoice selected_choice, InputEvent event,
                                                                          bool allow_session_available = false, bool allow_remember_available = false,
                                                                          bool deny_remember_available = false);
+// Full-view overload: supports optional one-shot denial-guidance editing while
+// preserving the choice-only overload for source/test compatibility.
+[[nodiscard]] PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptView const& prompt, InputEvent event);
 [[nodiscard]] QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const& prompt, InputEvent event);
 [[nodiscard]] QuestionPromptInputResult activate_question_option(QuestionPromptView const& prompt, std::size_t option_index);
 [[nodiscard]] std::vector<std::size_t> filter_select_list_items(SelectListView const& view);

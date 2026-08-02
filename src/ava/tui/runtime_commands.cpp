@@ -60,8 +60,9 @@ bool exact_command(std::string_view submitted, std::string_view command)
 
 bool session_switching_command(std::string_view submitted)
 {
-  return starts_with_command_submission(submitted, "/new") || starts_with_command_submission(submitted, "/resume") ||
-         starts_with_command_submission(submitted, "/fork") || starts_with_command_submission(submitted, "/clone");
+  return starts_with_command_submission(submitted, "/new") || starts_with_command_submission(submitted, "/clear") ||
+         starts_with_command_submission(submitted, "/resume") || starts_with_command_submission(submitted, "/fork") ||
+         starts_with_command_submission(submitted, "/clone");
 }
 
 std::optional<std::string> reload_command_argument(std::string_view submitted)
@@ -118,6 +119,34 @@ std::optional<std::string> diff_command_argument(std::string_view submitted)
   if (submitted.starts_with(kDiff) && submitted.size() > kDiff.size() && std::isspace(static_cast<unsigned char>(submitted[kDiff.size()])) != 0)
   {
     return trim_view_to_string(submitted.substr(kDiff.size() + 1));
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> search_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kSearch = "/search";
+  if (submitted == kSearch)
+    return std::string{};
+  if (submitted.starts_with(kSearch) && submitted.size() > kSearch.size() && std::isspace(static_cast<unsigned char>(submitted[kSearch.size()])) != 0)
+  {
+    return trim_view_to_string(submitted.substr(kSearch.size() + 1));
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> fork_from_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kForkFrom = "/fork-from";
+  if (submitted == kForkFrom)
+    return std::string{};
+  if (submitted.starts_with(kForkFrom) && submitted.size() > kForkFrom.size() && std::isspace(static_cast<unsigned char>(submitted[kForkFrom.size()])) != 0)
+  {
+    return trim_view_to_string(submitted.substr(kForkFrom.size() + 1));
   }
   return std::nullopt;
 }

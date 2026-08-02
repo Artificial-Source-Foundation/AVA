@@ -1,0 +1,105 @@
+# Subagents and background jobs
+
+AVA can delegate a bounded unit of work to a `task` subagent and run it in a separate child session. This page is the canonical user and operator guide for launching that work, controlling live jobs, and understanding what survives process exit.
+
+## Available subagents
+
+AVA always provides two built-ins:
+
+- `general` inherits the parent's visible tools, except that recursive `task` delegation is hidden.
+- `explore` is read-only: it exposes `read_file`, `list_directory`, `glob`, and `grep`, and hides mutation, shell, network, LSP, and recursive `task` tools.
+
+Trusted custom subagents are Markdown definitions with frontmatter plus an instruction body. Global definitions come from AVA, Agents, and Claude configuration roots; project definitions are loaded only for a trusted project. See [CONFIG.md](configuration.md#subagents) for exact paths and fields, and [context-resources.md](context-resources.md#subagents) for discovery, prompt visibility, trust, and reload behavior. Those references, rather than this operational page, define the file grammar.
+
+A custom definition is trusted instruction content. Review it before installing it globally or trusting a project's definitions. Custom definitions cannot replace `general` or `explore`, and every child has `task` removed from its visible tools.
+
+## Foreground and background execution
+
+The model-visible `task` tool takes a short `description`, a complete `prompt`, a listed `subagent_type`, and an optional `mode`:
+
+- **Foreground is the default.** The parent turn blocks until the child finishes, fails, is canceled, or is promoted. The completed result returns directly to the parent model.
+- **Background is explicit.** `mode: "background"` returns a `job_id` and `task_id` promptly while the child continues in this AVA process. The legacy `background` boolean is accepted only when it agrees with `mode`.
+
+Each launch creates a durable child-session JSONL file with parent/subagent metadata. For foreground follow-up work, the model can pass the returned child session `task_id` to continue that child; background launches cannot resume an existing `task_id`. A child cannot recursively dispatch another `task`.
+
+## Permissions and interaction
+
+Starting `task` is automatically allowed and audited by the default policy unless an exact persisted deny matches the `task` tool and requested `subagent_type`. Launch approval is not blanket authority for the child: each sensitive file, command, network, plugin, MCP, or other operation still passes through the child's inherited visibility and normal permission policy.
+
+A foreground child can route an `Ask` permission decision or the model's `question` tool to the parent interactive UI. A background child has no interactive resolver, so operations or questions that require `Ask` fail closed. Promotion also removes foreground interaction access; a foreground job cannot be promoted while an interaction is outstanding.
+
+See [CONFIG.md](configuration.md#permission-rules) and [security-sandboxing.md](../security/sandboxing.md) for persistent rules, headless behavior, and the external-sandbox boundary.
+
+## Observe and control jobs
+
+Job IDs are exact, opaque, process-local control identifiers bound to the parent session that launched them. A job from another parent is reported as not found; prefixes are not control authority.
+
+Three control surfaces are available:
+
+- The model-visible `job` tool supports `list`, `status`, `wait`, `result`, and `cancel`. It does **not** support promotion.
+- Interactive `/jobs` lists jobs. `/jobs show`, `wait`, `result`, `cancel`, and `promote` accept an exact ID. In the TUI, bare `/jobs` opens a searchable selector; Enter opens the child workspace, C cancels, and P promotes when eligible.
+- RPC provides `list_jobs`, `get_job`, `wait_job`, `get_job_result`, `cancel_job`, and `promote_job`; see [rpc-protocol.md](../rpc-protocol.md#subagent-job-snapshot).
+
+The TUI child workspace is inspection-only. It projects bounded committed child User/Assistant messages and live/final availability, but has no composer or tool controls and does not expose reasoning, paths, session IDs, or full job IDs in the rendered workspace.
+
+While a task belongs to the current AVA process, its task card shows a separate `launch:` row, the `/jobs` selector shows a compact launch suffix, and the child workspace shows a `Launch:` line. This is AVA's configured launch request (the proven display model name when available plus the selected AVA thinking level), not provider-confirmed serving identity. Launch display metadata is presentation-only and process-local: it is excluded from task/job results, public `/jobs` text and JSON, RPC, events, sessions, exports, search, filtering, details queries, and clipboard text. Replayed or historical task cards therefore omit the row after restart.
+
+`status`/`show` can inspect running or terminal state. `wait` waits only for its finite timeout and may return a still-running snapshot; it does not cancel the job. `result` is available only after terminal completion. `cancel` is cooperative: it records a cancellation request and signals the worker, so the snapshot can briefly remain running before reaching `canceled`. Completed, failed, canceled, and interrupted work is terminal; repeat controls return the current terminal state or an invalid-transition/not-found error as appropriate.
+
+## Promote foreground work
+
+Eligible running foreground work can be changed to background work with TUI `/jobs ... promote` (including P in the child workspace) or RPC `promote_job`. Promotion does not restart the worker, create a new child, or change its `task_id`/`job_id`; the blocked foreground `task` call returns a promoted/running result and the same child continues in the background.
+
+Only a running foreground job that has not been canceled can be promoted. Promotion fails while a foreground permission/question interaction is outstanding. Already-background work does not need promotion. The model-visible `job` tool intentionally has no promote action.
+
+## Completion delivery
+
+When background or promoted work reaches a terminal state, AVA schedules a short completion summary for the owning parent. Delivery waits until the parent run controller is idle, then runs as a synthetic parent turn; it never interrupts or appends inside an active ordinary turn. A committed delivery turn is acknowledged, and AVA checks durable parent history before retrying so a completion is not intentionally delivered twice.
+
+Delivery is bounded and best-effort. Transient admission, provider, transport, or acknowledgement failures can be retried; the production defaults are three attempts with a 30-second deadline per attempt. Duplicate notifications are coalesced by delivery identity, and a full advisory queue is rediscovered from still-pending coordinator state while the process remains alive. Exhausted delivery remains available through job controls until ordinary retention removes it, but no further automatic summary is promised.
+
+This mechanism is **process-local**. Closing AVA, a crash, or a restart loses running workers, live job snapshots/results, and pending automatic delivery. It does not reconstruct jobs by scanning sessions.
+
+## Durability and limits
+
+The child-session JSONL is durable session history and remains available through normal session tooling after the process exits. The live coordinator record is different: job state, retained final result, cancel state, and pending delivery exist only in memory. A durable child session therefore does not imply that `/jobs`, RPC job controls, or automatic delivery can recover the former job after restart.
+
+Current production defaults and public caps are:
+
+| Boundary | Current value |
+| --- | --- |
+| Concurrent running jobs | 8 |
+| Retained finished execution records | 64 |
+| Retained job description | 8 KiB, truncated when necessary |
+| Retained final task text | 64 KiB, truncated when necessary |
+| Public `list` result | at most 64 latest entries |
+| Public `wait` | 1-second default; 30-second maximum |
+| Automatic delivery advisory queue | 64 entries by default |
+| Retained parent delivery capsules | 64 by default |
+| Automatic delivery | 3 attempts by default; 30-second deadline per attempt |
+
+The `task` dispatcher's input bounds can be narrower than retention bounds (for example, its short description is capped before launch). The delivery queue, parent retention, attempt count, and deadline are operational defaults from application options, not persisted format guarantees. Public job snapshots are bounded and redact child paths and internal context.
+
+## Failure and shutdown expectations
+
+Launch can fail before publication because the subagent type, input, permission, child session, credentials/provider setup, or concurrency limit is invalid or unavailable. Once a job is published, worker exceptions and child-run failures become a terminal failed snapshot with a sanitized error. Cancellation and application shutdown request cooperative stop; they cannot guarantee that an external descendant which escapes AVA's verified process-group boundary is contained. See [security-sandboxing.md](../security/sandboxing.md) for that limitation.
+
+If the child session remains, inspect it with normal session commands even when its former process-local job record is gone. Use `result` for a retained terminal result and inspect diagnostics/session history when a launch or delivery error needs investigation.
+
+## Authoritative source and focused tests
+
+The operational contracts are implemented in:
+
+- [`src/ava/agent/agent_turn_subagents.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/agent/agent_turn_subagents.cpp) and [`tool_dispatch_task.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/agent/tool_dispatch_task.cpp): child creation, foreground/background behavior, continuation, and launch permission;
+- [`background_job_registry.h`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/agent/background_job_registry.h), [`subagent_coordinator.h`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/agent/subagent_coordinator.h), and [`job_control.h`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/agent/job_control.h): lifecycle, ownership, promotion, public controls, and limits;
+- [`subagent_delivery_manager.h`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/app/subagent_delivery_manager.h): automatic-delivery defaults and process-local boundary;
+- [`command_jobs.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/app/command_jobs.cpp) and [`rpc/session_commands.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/app/rpc/session_commands.cpp): interactive and RPC surfaces.
+
+Run the focused deterministic suites without a live provider:
+
+```sh
+scripts/run-tests.sh --build-dir build --jobs 4 \
+  -R '^ava_tests\.(agent_loop|agent_tool_dispatcher|subagent_coordinator|subagent_delivery_manager)$'
+```
+
+Related coverage also lives in [`tests/agent_tool_dispatcher_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/agent_tool_dispatcher_tests.cpp), [`tests/app_command_registry_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/app_command_registry_tests.cpp), and [`tests/app_rpc_commands_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/app_rpc_commands_tests.cpp).

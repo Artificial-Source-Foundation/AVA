@@ -5,7 +5,9 @@
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <cwchar>
+#include <deque>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,10 +19,12 @@ namespace {
 
 constexpr std::size_t kMaxBracketedPasteBytes = 1024 * 1024;
 constexpr std::size_t kMaxEscapeSequenceBytes = 16 * 1024;
+constexpr std::size_t kStartupInputQueueCap = 64;
 
-bool mouse_state_matches(mmask_t state, mmask_t mask)
+std::deque<RuntimeInput>& startup_input_queue_storage()
 {
-  return (state & mask) != 0;
+  static std::deque<RuntimeInput> queue;
+  return queue;
 }
 
 RuntimeInput key_input(Key key)
@@ -32,18 +36,6 @@ RuntimeInput key_input(Key key)
 RuntimeInput event_input(InputEvent event)
 {
   return RuntimeInput{.event = std::move(event), .text = {}, .bracketed_paste = false, .resize = false};
-}
-
-RuntimeInput mouse_key_input(Key key, const MEVENT& mouse)
-{
-  return RuntimeInput{.event = InputEvent{.key = key,
-                                          .character = '\0',
-                                          .text = {},
-                                          .mouse_column = static_cast<std::size_t>(mouse.x + 1),
-                                          .mouse_row = static_cast<std::size_t>(mouse.y + 1)},
-                      .text = {},
-                      .bracketed_paste = false,
-                      .resize = false};
 }
 
 RuntimeInput unknown_input()
@@ -94,62 +86,11 @@ std::optional<wchar_t> read_plain_wide_character()
   return static_cast<wchar_t>(value);
 }
 
-std::pair<bool, std::string> read_ascii_sequence(std::string_view expected)
+// Read the body of an escape/control sequence after ESC was already consumed.
+// Bounded by kMaxEscapeSequenceBytes; stops on complete sequence, timeout, or
+// non-backspace KEY_CODE. Caller owns the surrounding wtimeout budget.
+std::string read_escape_sequence_body()
 {
-  std::string consumed;
-  consumed.reserve(expected.size());
-  for (auto const expected_char : expected)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      return {false, consumed};
-    auto encoded = encode_wide_character(*character);
-    if (encoded)
-      consumed += *encoded;
-    if (*character != static_cast<unsigned char>(expected_char))
-      return {false, consumed};
-  }
-  return {true, consumed};
-}
-
-RuntimeInput read_bracketed_paste()
-{
-  std::string pasted;
-  static_cast<void>(wtimeout(stdscr, 1000));
-  while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes)
-  {
-    auto const character = read_plain_wide_character();
-    if (!character)
-      break;
-    if (*character == L'\x1b')
-    {
-      auto [matched_end, consumed] = read_ascii_sequence("[201~");
-      if (matched_end)
-        break;
-      pasted.push_back('\x1b');
-      if (pasted.size() + consumed.size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += consumed;
-      continue;
-    }
-    if (auto encoded = encode_wide_character(*character))
-    {
-      if (pasted.size() + encoded->size() > kMaxBracketedPasteBytes)
-      {
-        break;
-      }
-      pasted += *encoded;
-    }
-  }
-  static_cast<void>(wtimeout(stdscr, -1));
-  return character_input(normalize_composer_paste_text(pasted), true);
-}
-
-std::optional<RuntimeInput> read_escape_sequence_input()
-{
-  static_cast<void>(wtimeout(stdscr, 50));
   std::string consumed;
   consumed.reserve(32);
   while (consumed.size() < kMaxEscapeSequenceBytes)
@@ -176,21 +117,80 @@ std::optional<RuntimeInput> read_escape_sequence_input()
     if (terminal_escape_sequence_complete(consumed))
       break;
   }
+  return consumed;
+}
+
+RuntimeInput read_bracketed_paste()
+{
+  std::string pasted;
+  static_cast<void>(wtimeout(stdscr, 1000));
+  while (!terminal_signal_received() && pasted.size() < kMaxBracketedPasteBytes)
+  {
+    auto const character = read_plain_wide_character();
+    if (!character)
+      break;
+    if (*character == L'\x1b')
+    {
+      // Protocol ownership: assemble a complete bounded escape/control sequence
+      // after ESC. Paste-end ends the paste; an armed OSC 11 reply is handled and
+      // discarded without joining the paste payload; all other escape content is
+      // preserved under ordinary paste normalization and the byte cap.
+      auto const consumed = read_escape_sequence_body();
+      if (consumed == "[201~")
+        break;
+      if (terminal_background_response_handle(consumed))
+        continue;
+      pasted.push_back('\x1b');
+      if (pasted.size() + consumed.size() > kMaxBracketedPasteBytes)
+        break;
+      pasted += consumed;
+      continue;
+    }
+    if (auto encoded = encode_wide_character(*character))
+    {
+      if (pasted.size() + encoded->size() > kMaxBracketedPasteBytes)
+      {
+        break;
+      }
+      pasted += *encoded;
+    }
+  }
+  static_cast<void>(wtimeout(stdscr, -1));
+  return character_input(normalize_composer_paste_text(pasted), true);
+}
+
+std::optional<RuntimeInput> read_escape_sequence_input()
+{
+  static_cast<void>(wtimeout(stdscr, 50));
+  auto const consumed = read_escape_sequence_body();
   static_cast<void>(wtimeout(stdscr, -1));
 
   if (consumed.empty())
     return std::nullopt;
   if (terminal_keyboard_protocol_handle_response(consumed))
     return unknown_input();
+  if (terminal_background_response_handle(consumed))
+    return unknown_input();
   if (consumed == "[200~")
     return read_bracketed_paste();
-  if (auto event = terminal_escape_sequence_event(consumed); event.key != Key::Unknown)
+  auto event = terminal_escape_sequence_event(consumed);
+  if (event.key != Key::Unknown)
     return event_input(std::move(event));
   if (terminal_escape_sequence_should_discard(consumed) || !terminal_escape_sequence_complete(consumed))
   {
     return unknown_input();
   }
   return unknown_input();
+}
+
+std::optional<RuntimeInput> take_startup_input()
+{
+  auto& queue = startup_input_queue_storage();
+  if (queue.empty())
+    return std::nullopt;
+  auto input = std::move(queue.front());
+  queue.pop_front();
+  return input;
 }
 
 }  // namespace
@@ -231,7 +231,26 @@ std::optional<std::string> printable_jump_target(RuntimeInput const& input)
   return text.substr(0, length);
 }
 
-RuntimeInput read_curses_input()
+void clear_startup_input_queue()
+{
+  startup_input_queue_storage().clear();
+}
+
+std::size_t startup_input_queue_size()
+{
+  return startup_input_queue_storage().size();
+}
+
+bool enqueue_startup_input(RuntimeInput input)
+{
+  auto& queue = startup_input_queue_storage();
+  if (queue.size() >= kStartupInputQueueCap)
+    return false;
+  queue.push_back(std::move(input));
+  return true;
+}
+
+RuntimeInput read_curses_input_from_terminal()
 {
   wint_t value = 0;
   auto const result = wget_wch(stdscr, &value);
@@ -454,19 +473,8 @@ RuntimeInput read_curses_input()
         MEVENT mouse{};
         if (getmouse(&mouse) != OK)
           return unknown_input();
-        if (mouse_state_matches(mouse.bstate, BUTTON4_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelUp, mouse);
-        }
-        if (mouse_state_matches(mouse.bstate, BUTTON5_PRESSED))
-        {
-          return mouse_key_input(Key::MouseWheelDown, mouse);
-        }
-        if ((mouse.bstate & BUTTON1_CLICKED) != 0)
-        {
-          return mouse_key_input(Key::MouseLeftClick, mouse);
-        }
-        return unknown_input();
+        return event_input(terminal_ncurses_mouse_event(static_cast<std::uint64_t>(mouse.bstate), static_cast<std::size_t>(mouse.x + 1),
+                                                        static_cast<std::size_t>(mouse.y + 1)));
       }
 #endif
       default:
@@ -551,6 +559,13 @@ RuntimeInput read_curses_input()
   return unknown_input();
 }
 
+RuntimeInput read_curses_input()
+{
+  if (auto queued = take_startup_input())
+    return *queued;
+  return read_curses_input_from_terminal();
+}
+
 bool empty_curses_input(RuntimeInput const& input)
 {
   return !input.resize && input.event.key == Key::Unknown && input.text.empty() && !input.bracketed_paste;
@@ -558,8 +573,10 @@ bool empty_curses_input(RuntimeInput const& input)
 
 std::optional<RuntimeInput> poll_curses_input()
 {
+  if (auto queued = take_startup_input())
+    return queued;
   static_cast<void>(wtimeout(stdscr, 0));
-  auto input = read_curses_input();
+  auto input = read_curses_input_from_terminal();
   static_cast<void>(wtimeout(stdscr, -1));
   if (empty_curses_input(input))
   {
@@ -570,12 +587,37 @@ std::optional<RuntimeInput> poll_curses_input()
 
 std::optional<RuntimeInput> read_curses_input_with_timeout(std::chrono::milliseconds timeout)
 {
+  if (auto queued = take_startup_input())
+    return queued;
   static_cast<void>(wtimeout(stdscr, static_cast<int>(timeout.count())));
-  auto input = read_curses_input();
+  auto input = read_curses_input_from_terminal();
   static_cast<void>(wtimeout(stdscr, -1));
   if (empty_curses_input(input))
     return std::nullopt;
   return input;
+}
+
+void drain_startup_probe_input(std::chrono::milliseconds deadline)
+{
+  using clock = std::chrono::steady_clock;
+  auto const started = clock::now();
+  while (startup_input_queue_storage().size() < kStartupInputQueueCap)
+  {
+    auto const elapsed = clock::now() - started;
+    if (elapsed >= deadline)
+      break;
+    auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - elapsed);
+    if (remaining.count() <= 0)
+      break;
+
+    static_cast<void>(wtimeout(stdscr, static_cast<int>(remaining.count())));
+    auto input = read_curses_input_from_terminal();
+    static_cast<void>(wtimeout(stdscr, -1));
+    if (empty_curses_input(input))
+      continue;
+    if (!enqueue_startup_input(std::move(input)))
+      break;
+  }
 }
 
 }  // namespace ava::tui::runtime_input

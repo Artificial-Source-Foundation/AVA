@@ -2,13 +2,16 @@
 
 #include "ava/event/events.h"
 #include "ava/agent/question.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -76,6 +79,8 @@ struct TuiRuntimeStateSnapshot
   std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  // Presentation hydration for the latest committed todowrite snapshot.
+  std::vector<TodoItem> todos = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -91,7 +96,7 @@ struct TuiSubmitResult
   // output/status, which the TUI settles after rendering the completed turn.
   std::optional<TuiRuntimeStateSnapshot> state_snapshot = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiKeyBindingReloadResult
@@ -104,6 +109,9 @@ struct TuiKeyBindingReloadResult
 
 struct TuiSubmitContext
 {
+  // One exact identity for this submitted turn. The event envelope and backend
+  // RunOptions must both use it; queued follow-ups replace it before dispatch.
+  std::string request_id;
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
   ava::event::RuntimeEventSink event_sink;
@@ -112,9 +120,26 @@ struct TuiSubmitContext
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
+  ava::agent::SubagentLaunchSink on_subagent_launch;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// Narrow TUI outcomes for live subagent workspace controls. Mappers and
+// callbacks must never surface Error::format, ids, paths, or backend text.
+enum class SubagentWorkspaceCancelOutcome
+{
+  CancellationRequested,
+  AlreadyFinished,
+  CancelUnavailable,
+};
+
+enum class SubagentWorkspacePromoteOutcome
+{
+  CurrentlyBackground,
+  AlreadyFinished,
+  PromotionUnavailable,
 };
 
 struct TuiRuntimeOptions
@@ -136,6 +161,7 @@ struct TuiRuntimeOptions
   std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  std::vector<TodoItem> initial_todos = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
@@ -154,8 +180,23 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>()> on_reload_display_settings;
   std::function<ava::core::Result<std::optional<TuiRuntimeStateSnapshot>>()> on_maybe_reload_display_settings;
   std::function<SelectListView()> model_selector_view;
+  // The bool is true for the staged model-selection handoff, allowing an
+  // accurate "Esc keep default" footer. No value means no configurable mode.
+  std::function<std::optional<SelectListView>(bool)> reasoning_selector_view;
   std::function<SelectListView()> scoped_model_selector_view;
   std::function<SelectListView()> session_selector_view;
+  // Path-free, owner-bound live subagent workspace callbacks. Exact ids are
+  // accepted only as hidden selector values and callback authority. Cancel and
+  // promote return narrow typed TUI outcomes only — never free-form backend text.
+  std::function<ava::core::Result<SelectListView>()> list_subagents;
+  std::function<ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>>(std::string_view, std::optional<std::uint64_t>)> inspect_subagent;
+  std::function<SubagentWorkspaceCancelOutcome(std::string_view)> cancel_subagent;
+  std::function<SubagentWorkspacePromoteOutcome(std::string_view)> promote_subagent;
+  // Open searchable public user-turn pickers. Fail closed with Result when the
+  // bound session authority has no public user turns, is sessionless for fork-from,
+  // or cannot list them. Optional initial_query seeds the picker filter.
+  std::function<ava::core::Result<SelectListView>(std::string_view initial_query)> on_open_fork_user_turn_selector;
+  std::function<ava::core::Result<SelectListView>(std::string_view initial_query)> on_open_copy_user_turn_selector;
   std::function<SelectListView()> on_session_selector_sort_cycle;
   std::function<SelectListView()> on_session_selector_named_filter_toggle;
   std::function<SelectListView()> on_session_selector_path_display_toggle;
@@ -169,6 +210,12 @@ struct TuiRuntimeOptions
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
+  // No value clears the explicit AVA level and restores model/provider default.
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::optional<std::string>)> on_reasoning_selected;
+  // Fork at the selected public user entry id through the normal branch path.
+  std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view entry_id)> on_fork_user_turn_selected;
+  // Re-read exact public user-turn text by stable entry id at action time.
+  std::function<ava::core::Result<std::string>(std::string_view entry_id)> on_read_user_turn_text;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view)> on_scoped_model_toggled;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_enable_all;
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::vector<std::string>)> on_scoped_model_clear_all;
@@ -177,7 +224,7 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);

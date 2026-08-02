@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ava::config {
@@ -46,6 +47,10 @@ struct ModelInfo
   std::string provider_id;
   std::string model_id;
   std::string display_name;
+  // Process-local provenance only. display_name may fall back to model_id for
+  // ordinary UI compatibility; launch presentation may use it only when this
+  // bit proves a built-in or explicit configured name.
+  bool display_name_is_configured = false;
   std::string family;
   std::optional<long long> context_window_tokens = std::nullopt;
   std::optional<long long> max_output_tokens = std::nullopt;
@@ -81,6 +86,7 @@ struct ModelRegistry
 [[nodiscard]] ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths, std::optional<std::vector<std::string>> scoped_model_cycle);
 [[nodiscard]] std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id);
 [[nodiscard]] ModelInfo select_default_model(ModelRegistry const& registry);
+[[nodiscard]] std::string_view proven_configured_model_display_name(ModelInfo const& model) noexcept;
 [[nodiscard]] std::optional<ModelReasoningLevelMapping> find_reasoning_level_mapping(ModelInfo const& model, std::string_view level);
 [[nodiscard]] ModelReasoningLevelResolution resolve_reasoning_level(ModelInfo const& model, std::string_view level);
 [[nodiscard]] std::vector<std::string> supported_reasoning_levels(ModelInfo const& model);

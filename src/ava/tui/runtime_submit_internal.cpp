@@ -9,8 +9,10 @@
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/tool_cards.h"
 
@@ -25,10 +27,12 @@ using runtime_commands::attach_command_argument;
 using runtime_commands::copy_command_argument;
 using runtime_commands::diff_command_argument;
 using runtime_commands::exact_command;
+using runtime_commands::fork_from_command_argument;
 using runtime_commands::parse_copy_target;
 using runtime_commands::reload_command_argument;
 using runtime_commands::reload_target_from_argument;
 using runtime_commands::ReloadTarget;
+using runtime_commands::search_command_argument;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_to_terminal_clipboard;
@@ -43,7 +47,8 @@ using runtime_views::compact_path_leaf;
 
 RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                  RuntimeRenderer& renderer, RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                                                 RuntimeActiveRunController& active_run_controller, ActiveSelectList& active_select_list)
+                                                 RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
+                                                 RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -51,6 +56,8 @@ RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, Run
       navigation_(navigation),
       action_controller_(action_controller),
       active_run_controller_(active_run_controller),
+      transcript_search_(transcript_search),
+      subagent_workspace_(subagent_workspace),
       active_select_list_(active_select_list)
 {
 }
@@ -81,7 +88,8 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   else if (((exact_command(draft.text, "/models") || exact_command(draft.text, "/model")) && options_.model_selector_view) ||
            (exact_command(draft.text, "/scoped-models") && options_.scoped_model_selector_view) ||
            ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
-            options_.session_selector_view))
+            options_.session_selector_view) ||
+           exact_command(draft.text, "/jobs"))
   {
     immediate_slash_submission = expanded_composer_draft_text(draft);
   }
@@ -180,6 +188,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
   }
   auto submitted = immediate_slash_submission ? *immediate_slash_submission : expanded_composer_draft_text(draft);
+  renderer_.clear_transcript_selection();
   draft_state_.clear_selection();
   reset_composer_draft(draft);
   jump_mode = ComposerJumpMode::None;
@@ -190,6 +199,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   path_completion_force_active = false;
   if (!submitted.empty())
   {
+    if (exact_command(submitted, "/jobs"))
+    {
+      push_history(input_history, submitted);
+      static_cast<void>(subagent_workspace_.open_selector());
+      if (!renderer_.request_render())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
     if ((exact_command(submitted, "/models") || exact_command(submitted, "/model")) && options_.model_selector_view)
     {
       push_history(input_history, submitted);
@@ -212,6 +231,25 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       if (!action_controller_.open_session_selector())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
+    if (auto fork_from_query = fork_from_command_argument(submitted); fork_from_query && options_.on_open_fork_user_turn_selector)
+    {
+      push_history(input_history, submitted);
+      if (!action_controller_.open_fork_user_turn_selector(*fork_from_query))
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
+    if (auto search_query = search_command_argument(submitted))
+    {
+      push_history(input_history, submitted);
+      static_cast<void>(transcript_search_.open(std::move(*search_query)));
+      if (!renderer_.request_render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }
@@ -450,6 +488,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       auto const target = parse_copy_target(*copy_target);
+      // Exact target name "user" opens the public user-turn picker. No alias is
+      // accepted; remaining text becomes the selector's initial filter query.
+      if (target.name == "user" && options_.on_open_copy_user_turn_selector)
+      {
+        if (!action_controller_.open_copy_user_turn_selector(target.query))
+        {
+          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+        }
+        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+      }
       std::optional<std::string> copy_text;
       std::string copied_status;
       std::string missing_status;
@@ -479,11 +527,16 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         copied_status = target.query.empty() ? "copied latest permission details to clipboard" : "copied matching permission details to clipboard";
         missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
       }
+      else if (target.name == "user")
+      {
+        valid_target = false;
+        snapshot.status = "copy user-turn selector unavailable";
+      }
       else
       {
         valid_target = false;
-        snapshot.status =
-            "invalid_argument: unsupported copy target\n  target: " + target.name + "\n  supported: tool [query], diff [query], permission [query]";
+        snapshot.status = "invalid_argument: unsupported copy target\n  target: " + target.name +
+                          "\n  supported: user [query], tool [query], diff [query], permission [query]";
       }
 
       if (valid_target)
@@ -532,14 +585,41 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
-    if (submitted == "/thinking")
+    if (submitted == "/thinking" || submitted == "/thinking details")
     {
       push_history(input_history, submitted);
-      action_controller_.toggle_thinking_visibility();
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-      push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                               .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
-                                               .meta = assistant_meta_for_snapshot(snapshot)});
+      if (submitted == "/thinking details")
+      {
+        auto const item_index = navigation_.toggle_latest_thinking_details();
+        // Snapshot expansion before cmd/status pushes: at kMaxTranscriptItems, push
+        // truncates the head and shifts indices, so a post-push bool read is stale.
+        std::optional<bool> expanded_after_toggle;
+        if (item_index && *item_index < snapshot.transcript.size())
+          expanded_after_toggle = snapshot.transcript[*item_index].thinking_expanded;
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        if (expanded_after_toggle)
+        {
+          push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                   .text = *expanded_after_toggle ? "latest thinking details are now expanded"
+                                                                                  : "latest thinking details are now collapsed",
+                                                   .meta = assistant_meta_for_snapshot(snapshot)});
+        }
+        else
+        {
+          push_transcript(snapshot,
+                          TranscriptItem{.label = "ava", .text = "no completed long thinking block to expand", .meta = assistant_meta_for_snapshot(snapshot)});
+          snapshot.status = "no completed long thinking block to expand";
+          static_cast<void>(beep());
+        }
+      }
+      else
+      {
+        action_controller_.toggle_thinking_visibility();
+        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+        push_transcript(snapshot, TranscriptItem{.label = "ava",
+                                                 .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
+                                                 .meta = assistant_meta_for_snapshot(snapshot)});
+      }
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};

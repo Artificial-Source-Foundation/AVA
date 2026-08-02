@@ -35,8 +35,11 @@ class RuntimeActionController final
   void cycle_reasoning();
   void toggle_thinking_visibility();
   [[nodiscard]] bool open_model_selector();
+  [[nodiscard]] bool open_reasoning_selector(bool chained_from_model_selection = false);
   [[nodiscard]] bool open_scoped_model_selector();
   [[nodiscard]] bool open_session_selector();
+  [[nodiscard]] bool open_fork_user_turn_selector(std::string_view initial_query = {});
+  [[nodiscard]] bool open_copy_user_turn_selector(std::string_view initial_query = {});
   void cycle_model(bool forward);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

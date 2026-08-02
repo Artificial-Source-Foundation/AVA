@@ -237,9 +237,11 @@ std::string permission_dock_keys(bool allow_session_available, bool allow_rememb
   if (allow_remember_available || deny_remember_available)
     shortcuts += "  R remember";
   std::array const candidates = {
-      std::string("  ") + key_pill("↑/↓") + " move  " + key_pill("Enter") + " confirm  " + shortcuts + "  " + key_pill("Esc") + " reject",
-      std::string("  ") + key_pill("Enter") + " confirm  " + shortcuts + "  " + key_pill("Esc") + " reject",
-      std::string("  ") + key_pill("Enter") + " confirm  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("↑/↓") + " move  " + key_pill("Enter") + " confirm  " + shortcuts + "  G=guide rejection  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("Enter") + " confirm  " + shortcuts + "  G=guide rejection  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("Enter") + " confirm  G=guide  " + key_pill("Esc") + " reject",
+      std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject  G guide",
+      // Tiny docks keep A/D identity even when G no longer fits.
       std::string("  ") + key_pill("A") + " allow  " + key_pill("D") + " reject",
   };
   for (auto const& candidate : candidates)
@@ -248,6 +250,75 @@ std::string permission_dock_keys(bool allow_session_available, bool allow_rememb
       return std::string(kSgrMuted) + candidate + std::string(kSgrReset);
   }
   return fit_line_preserving_sgr(std::string(kSgrMuted) + candidates.back() + std::string(kSgrReset), width);
+}
+
+std::string permission_guidance_dock_keys(std::size_t width)
+{
+  std::array const candidates = {
+      std::string("  ") + key_pill("Enter") + " reject with guidance  " + key_pill("Esc") + " reject  type to guide",
+      std::string("  ") + key_pill("Enter") + " reject  " + key_pill("Esc") + " reject",
+      std::string("  Enter reject  Esc reject"),
+  };
+  for (auto const& candidate : candidates)
+  {
+    if (terminal_text_columns(candidate) <= width)
+      return std::string(kSgrMuted) + candidate + std::string(kSgrReset);
+  }
+  return fit_line_preserving_sgr(std::string(kSgrMuted) + candidates.back() + std::string(kSgrReset), width);
+}
+
+std::string permission_guidance_line(PermissionPromptView const& prompt, std::size_t width)
+{
+  auto text = std::string("  ") + std::string(kSgrWarning) + std::string(kSgrBold) + "Guidance:" + std::string(kSgrReset) + " ";
+  if (prompt.guidance_text.empty())
+    text += std::string(kSgrMuted) + "optional reason for the model" + std::string(kSgrReset);
+  else
+    text += std::string(kSgrText) + sanitize_terminal_text(prompt.guidance_text) + std::string(kSgrReset);
+  return fit_line_preserving_sgr(std::move(text), width);
+}
+
+std::string permission_remember_preview_text(PermissionPromptView const& prompt)
+{
+  if (!permission_choice_is_remember(prompt.selected_choice))
+    return {};
+
+  auto const action_label = permission_choice_is_allow(prompt.selected_choice) ? std::string_view("Always allow") : std::string_view("Always reject");
+  std::string basis;
+  auto const shell_subject = !prompt.command.empty() || !prompt.recipe_display.empty();
+  if (shell_subject)
+  {
+    if (!prompt.recipe_display.empty())
+      basis = "workspace recipe · " + sanitize_terminal_text(prompt.recipe_display);
+    else if (!prompt.command.empty())
+      basis = "workspace exact command · $ " + sanitize_terminal_text(prompt.command);
+    else
+      basis = "workspace exact request";
+  }
+  else if (!prompt.target.empty())
+  {
+    basis = "workspace exact path · " + sanitize_terminal_text(prompt.target);
+  }
+  else if (!prompt.operation.empty() || !prompt.tool_name.empty())
+  {
+    auto const label = !prompt.tool_name.empty() ? prompt.tool_name : prompt.operation;
+    basis = "workspace exact operation · " + sanitize_terminal_text(label);
+  }
+  else
+  {
+    basis = "workspace exact request";
+  }
+  // Never surface recipe hashes; recipe_display / subject text is the safe basis.
+  if (!prompt.workspace_recipe_key.empty() && basis.find(prompt.workspace_recipe_key) != std::string::npos)
+    basis = "workspace exact request";
+  return std::string(action_label) + ": " + std::move(basis);
+}
+
+std::string permission_remember_preview_line(PermissionPromptView const& prompt, std::size_t width)
+{
+  auto const preview = permission_remember_preview_text(prompt);
+  if (preview.empty())
+    return {};
+  return fit_line_preserving_sgr(std::string("  ") + std::string(kSgrMuted) + sanitize_terminal_text(preview) + std::string(kSgrReset), width);
 }
 
 void append_permission_diff_lines(std::vector<std::string>& lines, PermissionPromptView const& prompt, std::size_t width, std::size_t budget)
@@ -500,14 +571,118 @@ std::string question_dock_keys(QuestionPromptView const& prompt, std::size_t wid
 
 }  // namespace
 
+namespace {
+
+std::string strip_guidance_controls(std::string_view text)
+{
+  std::string cleaned;
+  cleaned.reserve(text.size());
+  for (std::size_t index = 0; index < text.size();)
+  {
+    auto const byte = static_cast<unsigned char>(text[index]);
+    if (byte < 0x20 || byte == 0x7F)
+    {
+      ++index;
+      continue;
+    }
+    auto const length = utf8_sequence_length(byte);
+    char32_t codepoint = 0;
+    if (!decode_utf8_codepoint(text, index, length, codepoint) || (codepoint >= 0x80 && codepoint <= 0x9F))
+    {
+      ++index;
+      continue;
+    }
+    cleaned.append(text.substr(index, length));
+    index += length;
+  }
+  return cleaned;
+}
+
+}  // namespace
+
+void append_permission_guidance_text(std::string& guidance, std::string_view addition)
+{
+  auto const cleaned = strip_guidance_controls(addition);
+  if (cleaned.empty())
+    return;
+  constexpr auto kMaxBytes = ava::permissions::kMaxPermissionUserGuidanceBytes;
+  std::size_t index = 0;
+  while (index < cleaned.size())
+  {
+    auto bytes = terminal_text_cluster_bytes(cleaned, index);
+    if (bytes == 0)
+      bytes = 1;
+    if (index + bytes > cleaned.size())
+      bytes = cleaned.size() - index;
+    if (guidance.size() + bytes > kMaxBytes)
+      break;
+    guidance.append(cleaned, index, bytes);
+    index += bytes;
+  }
+}
+
+void erase_last_permission_guidance_cluster(std::string& guidance)
+{
+  if (guidance.empty())
+    return;
+  auto previous = std::size_t{0};
+  for (std::size_t index = 0; index < guidance.size();)
+  {
+    previous = index;
+    auto step = std::max<std::size_t>(terminal_text_cluster_bytes(guidance, index), 1);
+    if (index + step > guidance.size())
+      step = guidance.size() - index;
+    index += step;
+  }
+  guidance.resize(previous);
+}
+
 std::vector<std::string> render_permission_prompt(PermissionPromptView const& prompt, std::size_t width, std::size_t max_lines)
 {
   std::vector<std::string> lines;
   if (max_lines == 0)
     return lines;
 
+  // Guidance mode forces one-shot Reject selection in the action row.
+  auto const selected = prompt.guidance_mode ? PermissionPromptChoice::Deny : prompt.selected_choice;
   auto const actions =
-      permission_dock_actions(prompt.selected_choice, prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
+      permission_dock_actions(selected, prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
+  auto const keys = prompt.guidance_mode
+                        ? permission_guidance_dock_keys(width)
+                        : permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
+  auto const guidance_line = prompt.guidance_mode ? permission_guidance_line(prompt, width) : std::string{};
+  auto const remember_preview = !prompt.guidance_mode ? permission_remember_preview_line(prompt, width) : std::string{};
+
+  if (prompt.guidance_mode)
+  {
+    // Tiny guidance docks keep identity + Guidance + reject controls before optional detail.
+    if (max_lines == 1)
+    {
+      lines.push_back(guidance_line);
+      return lines;
+    }
+    if (max_lines == 2)
+    {
+      lines.push_back(guidance_line);
+      lines.push_back(keys);
+      return lines;
+    }
+    lines.push_back(permission_dock_header(width));
+    if (max_lines == 3)
+    {
+      lines.push_back(guidance_line);
+      lines.push_back(keys);
+      return lines;
+    }
+    lines.push_back(permission_dock_compact_summary(prompt, width));
+    lines.push_back(guidance_line);
+    if (lines.size() < max_lines)
+      lines.push_back(actions);
+    if (lines.size() < max_lines)
+      lines.push_back(keys);
+    return lines;
+  }
+
   if (max_lines == 1)
   {
     lines.push_back(actions);
@@ -526,7 +701,7 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     lines.push_back(permission_dock_compact_summary(prompt, width));
     lines.push_back(actions);
     if (lines.size() < max_lines)
-      lines.push_back(permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width));
+      lines.push_back(keys);
     return lines;
   }
 
@@ -541,22 +716,26 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     lines.push_back(permission_dock_compact_summary(prompt, width));
   }
 
-  constexpr std::size_t kReservedActionLines = 2;
+  // Reserve action + keys, and optionally guidance/remember rows when present.
+  auto const reserved_tail = std::size_t{2} + (!remember_preview.empty() ? std::size_t{1} : std::size_t{0});
   auto const metadata_text = permission_metadata_text(prompt);
-  if (auto metadata = permission_dock_metadata(metadata_text, width); !metadata.empty() && max_lines > lines.size() + kReservedActionLines)
+  if (auto metadata = permission_dock_metadata(metadata_text, width); !metadata.empty() && max_lines > lines.size() + reserved_tail)
     lines.push_back(std::move(metadata));
 
-  if (!prompt.diff_preview.empty() && max_lines > lines.size() + kReservedActionLines)
+  if (!prompt.diff_preview.empty() && max_lines > lines.size() + reserved_tail)
   {
-    auto const diff_budget = max_lines - lines.size() - kReservedActionLines;
+    auto const diff_budget = max_lines - lines.size() - reserved_tail;
     std::vector<std::string> diff_lines;
     append_permission_diff_lines(diff_lines, prompt, width, diff_budget);
     lines.insert(lines.end(), diff_lines.begin(), diff_lines.end());
   }
 
+  if (!remember_preview.empty() && max_lines > lines.size() + 2)
+    lines.push_back(remember_preview);
+
   lines.push_back(actions);
   if (lines.size() < max_lines)
-    lines.push_back(permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width));
+    lines.push_back(keys);
   return lines;
 }
 
@@ -845,9 +1024,11 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
     case Key::ShiftEnd:
     case Key::ShiftCtrlHome:
     case Key::ShiftCtrlEnd:
+    case Key::MouseLeftPress:
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
+    case Key::MousePointerCancel:
     case Key::ShiftTab:
     case Key::ShiftL:
     case Key::ShiftT:
@@ -870,6 +1051,107 @@ PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptChoic
       break;
   }
   return {.selected_choice = selected_choice, .action = PermissionPromptInputAction::None};
+}
+
+PermissionPromptInputResult handle_permission_prompt_input(PermissionPromptView const& prompt, InputEvent event)
+{
+  PermissionPromptInputResult result{.selected_choice = prompt.selected_choice,
+                                     .action = PermissionPromptInputAction::None,
+                                     .guidance_mode = prompt.guidance_mode,
+                                     .guidance_text = prompt.guidance_text};
+
+  auto character_text = [&]() -> std::string {
+    if (!event.text.empty())
+      return event.text;
+    if (event.character != '\0')
+      return std::string(1, event.character);
+    return {};
+  };
+
+  if (result.guidance_mode)
+  {
+    switch (event.key)
+    {
+      case Key::Character: {
+        auto const text = character_text();
+        if (text.empty())
+          break;
+        auto previous = result.guidance_text;
+        detail::append_permission_guidance_text(result.guidance_text, text);
+        if (result.guidance_text != previous)
+          result.action = PermissionPromptInputAction::Redraw;
+        return result;
+      }
+      case Key::Space:
+        detail::append_permission_guidance_text(result.guidance_text, " ");
+        result.action = PermissionPromptInputAction::Redraw;
+        return result;
+      case Key::Enter:
+        result.selected_choice = PermissionPromptChoice::Deny;
+        result.action = PermissionPromptInputAction::ResolveDeny;
+        return result;
+      case Key::Escape:
+      case Key::CtrlC:
+      case Key::CtrlD:
+        result.selected_choice = PermissionPromptChoice::Deny;
+        result.guidance_text.clear();
+        result.action = PermissionPromptInputAction::ResolveDeny;
+        return result;
+      case Key::Backspace:
+      case Key::ShiftBackspace:
+      case Key::CtrlBackspace:
+      case Key::AltBackspace:
+        if (!result.guidance_text.empty())
+        {
+          detail::erase_last_permission_guidance_cluster(result.guidance_text);
+          result.action = PermissionPromptInputAction::Redraw;
+        }
+        return result;
+      case Key::Tab:
+      case Key::ShiftTab:
+      case Key::ArrowLeft:
+      case Key::ArrowRight:
+      case Key::ArrowUp:
+      case Key::ArrowDown:
+      case Key::MouseWheelUp:
+      case Key::MouseWheelDown:
+      case Key::PageUp:
+      case Key::PageDown:
+      case Key::Home:
+      case Key::End:
+        // Guidance mode must not navigate choices or authorize shortcuts.
+        return result;
+      default:
+        return result;
+    }
+    return result;
+  }
+
+  if (event.key == Key::Character)
+  {
+    auto const text = character_text();
+    if (text == "g" || text == "G" || event.character == 'g' || event.character == 'G')
+    {
+      result.selected_choice = PermissionPromptChoice::Deny;
+      result.guidance_mode = true;
+      result.guidance_text.clear();
+      result.action = PermissionPromptInputAction::Redraw;
+      return result;
+    }
+  }
+
+  auto choice_result = handle_permission_prompt_input(prompt.selected_choice, event, prompt.allow_session_available, prompt.allow_remember_available,
+                                                      prompt.deny_remember_available);
+  result.selected_choice = choice_result.selected_choice;
+  result.action = choice_result.action;
+  if (choice_result.action == PermissionPromptInputAction::ResolveDeny || choice_result.action == PermissionPromptInputAction::ResolveAllow ||
+      choice_result.action == PermissionPromptInputAction::ResolveAllowSession || choice_result.action == PermissionPromptInputAction::ResolveAllowRemember ||
+      choice_result.action == PermissionPromptInputAction::ResolveDenyRemember)
+  {
+    result.guidance_mode = false;
+    result.guidance_text.clear();
+  }
+  return result;
 }
 
 QuestionPromptInputResult activate_question_option(QuestionPromptView const& prompt, std::size_t option_index)
@@ -1263,9 +1545,11 @@ QuestionPromptInputResult handle_question_prompt_input(QuestionPromptView const&
     case Key::ShiftEnd:
     case Key::ShiftCtrlHome:
     case Key::ShiftCtrlEnd:
+    case Key::MouseLeftPress:
     case Key::MouseLeftClick:
     case Key::MouseLeftDrag:
     case Key::MouseLeftRelease:
+    case Key::MousePointerCancel:
     case Key::ShiftTab:
     case Key::ShiftL:
     case Key::ShiftT:

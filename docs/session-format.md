@@ -41,7 +41,7 @@ Records are newline-delimited. AVA rejects raw `\n` or `\r` bytes inside `data` 
 - Future versions are rejected with a session error rather than best-effort replay.
 - Payloads with independent compatibility use `data.schema_version`. `session_metadata`, `branch_summary`, `assistant_output_item`, and `assistant_turn_commit` use `schema_version:1`; `tool_result.data.structured_result` also uses `schema_version:1`. `compaction` predates that convention and currently has no `data.schema_version`.
 
-More versioning policy is in [`docs/engineering/session-versioning.md`](engineering/session-versioning.md).
+More versioning policy is in [`docs/development/session-versioning.md`](development/session-versioning.md).
 
 ## Entry Types
 

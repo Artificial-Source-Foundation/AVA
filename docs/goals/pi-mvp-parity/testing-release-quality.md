@@ -26,7 +26,7 @@ Suggested Codex command:
 | Topic | AVA paths |
 | --- | --- |
 | CTest config | `tests/CMakeLists.txt` |
-| Test docs | `docs/TESTING.md` |
+| Test docs | `docs/operations/testing.md` |
 | Product baseline | `docs/product/mvp-baseline.md`, `docs/product/mvp-coverage-ledger.md` |
 | C++ tests | `tests/*.cpp` |
 | CLI smokes | `tests/cli_headless_*.cmake` |
@@ -49,7 +49,7 @@ AVA has strong integration testing, safety testing, fake providers/servers, CMak
 | TUI evidence matrix | Renderer tests, PTY smokes, and any virtual-terminal/screen-model decision are documented. |
 | Performance thresholds | Startup, large transcript render, large tool output, search, and replay have deterministic tests or documented thresholds. |
 | Security/safety checklist | New side-effect classes have review checklist coverage. |
-| Docs consistency | `README.md`, `docs/USAGE.md`, `docs/CONFIG.md`, `docs/TESTING.md`, `docs/headless-protocol.md`, product docs, and this package agree with code. |
+| Docs consistency | `README.md`, `docs/core/usage.md`, `docs/core/configuration.md`, `docs/operations/testing.md`, `docs/headless-protocol.md`, product docs, and this package agree with code. |
 | Rerunnable release commands | Full build/test/diff-check commands are documented and pass or skip with clear prerequisites. |
 
 ## Implementation Slices
@@ -68,10 +68,10 @@ AVA has strong integration testing, safety testing, fake providers/servers, CMak
 | Checkpoint | Status | Notes |
 | --- | --- | --- |
 | Q1. Evidence audit | Complete | Reconciled checked testing/release rows against `docs/product/mvp-coverage-ledger.md` and added coverage rows for provider live-smoke, performance thresholds, and package trust/signing policy evidence. |
-| Q2. Provider smoke matrix | Complete | `docs/TESTING.md` records env vars, default model overrides, opt-in command, skip behavior, and result classifications for OpenAI, Anthropic API key/OAuth bearer, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter. |
+| Q2. Provider smoke matrix | Complete | `docs/operations/testing.md` records env vars, default model overrides, opt-in command, skip behavior, and result classifications for OpenAI, Anthropic API key/OAuth bearer, DeepSeek, Gemini, Kimi, Moonshot, and OpenRouter. |
 | Q3. TUI test decision | Complete | AVA keeps deterministic renderer/editor tests plus gated PTY/tmux/Kitty/OSC8 smokes for MVP instead of adding a Pi-style virtual-terminal parser now. |
-| Q4. Performance thresholds | Complete | `docs/TESTING.md` names the current large-render, 20,000-line tool-output, very-long transcript, tail-renderer, and headless startup/search/replay thresholds. |
-| Q5. Security/safety checklist | Complete | Added `docs/engineering/side-effect-safety-checklist.md` and linked it from release evidence. |
+| Q4. Performance thresholds | Complete | `docs/operations/testing.md` names the current large-render, 20,000-line tool-output, very-long transcript, tail-renderer, and headless startup/search/replay thresholds. |
+| Q5. Security/safety checklist | Complete | Added `docs/development/side-effect-safety-checklist.md` and linked it from release evidence. |
 | Q6. Docs consistency pass | Complete | Final whole-goal docs consistency and full verification were repeated after the remaining area files closed. |
 
 ## Non-Goals Unless Approved
@@ -109,16 +109,16 @@ AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output
 
 ## Progress Log
 
-- 2026-07-03: Inspected Pi test inventory shape under `docs/reference-code/pi/packages/ai/test/`, `packages/coding-agent/test/`, and `packages/tui/test/`, including provider, settings/package, export, key/input, markdown, and virtual-terminal references. Inspected AVA `tests/CMakeLists.txt`, `docs/TESTING.md`, product docs, CLI/TUI smoke registrations, provider live smoke tests, performance smoke, and CI workflow.
-- 2026-07-03: Added release-evidence organization to `docs/TESTING.md`: provider live-smoke matrix, AVA virtual-terminal decision, TUI evidence strategy, performance thresholds, and docs consistency rules. Updated `docs/product/mvp-baseline.md` and `docs/product/mvp-coverage-ledger.md` so checked release rows now map to evidence.
-- 2026-07-03: Added `docs/engineering/side-effect-safety-checklist.md` covering filesystem, shell, network, provider/auth, plugin, MCP, LSP, session, config, and package/resource side effects. Decision: this is release evidence for future side-effect classes; it does not weaken existing AVA permissions.
+- 2026-07-03: Inspected Pi test inventory shape under `docs/reference-code/pi/packages/ai/test/`, `packages/coding-agent/test/`, and `packages/tui/test/`, including provider, settings/package, export, key/input, markdown, and virtual-terminal references. Inspected AVA `tests/CMakeLists.txt`, `docs/operations/testing.md`, product docs, CLI/TUI smoke registrations, provider live smoke tests, performance smoke, and CI workflow.
+- 2026-07-03: Added release-evidence organization to `docs/operations/testing.md`: provider live-smoke matrix, AVA virtual-terminal decision, TUI evidence strategy, performance thresholds, and docs consistency rules. Updated `docs/product/mvp-baseline.md` and `docs/product/mvp-coverage-ledger.md` so checked release rows now map to evidence.
+- 2026-07-03: Added `docs/development/side-effect-safety-checklist.md` covering filesystem, shell, network, provider/auth, plugin, MCP, LSP, session, config, and package/resource side effects. Decision: this is release evidence for future side-effect classes; it does not weaken existing AVA permissions.
 - 2026-07-04: Final completion audit reclassified broad provider/TUI/settings follow-up items as implemented MVP rows or explicit deferrals, updated `docs/product/mvp-coverage-ledger.md` evidence for newly checked rows, and closed the docs-consistency checkpoint.
 - 2026-07-04: Testing/release closure re-audit found one coverage-ledger omission for the checked package trust/signing/source policy row. Added the missing evidence row; `docs/product/mvp-baseline.md` now has 86 checked rows mapped to 86 product evidence rows, and all 14 unchecked rows carry an explicit deferred disposition.
 
 ## Changed Files
 
-- `docs/TESTING.md`
-- `docs/engineering/side-effect-safety-checklist.md`
+- `docs/operations/testing.md`
+- `docs/development/side-effect-safety-checklist.md`
 - `docs/product/mvp-baseline.md`
 - `docs/product/mvp-coverage-ledger.md`
 - `docs/goals/pi-mvp-parity/testing-release-quality.md`
@@ -149,7 +149,7 @@ AVA_LIVE_PROVIDER_SMOKE=1 ctest --test-dir build -R provider_live_smoke --output
 ## Review Findings
 
 - Material review found that `provider_live_smoke` previously returned success instead of CTest skip when credentials/gate were absent. Fixed by adding a test-harness skip signal, returning exit code 77 for skipped single-suite runs, and setting `SKIP_RETURN_CODE 77` for `ava_tests.provider_live_smoke`.
-- Material review found that `docs/TESTING.md` misdescribed the large-render threshold as 120 messages. Fixed wording to the actual 900-item transcript at 120-column width across four redraw passes.
+- Material review found that `docs/operations/testing.md` misdescribed the large-render threshold as 120 messages. Fixed wording to the actual 900-item transcript at 120-column width across four redraw passes.
 - Final docs audit found stale README `/reload` wording and missing `docs/headless-protocol.md` Pi session aliases plus `/import` note. Fixed both and updated the coverage ledger/baseline to record final documentation consistency.
 - Testing/release closure review found that the checked package trust/signing/source policy row had supporting docs and disabled-package tests, but no product evidence row in `docs/product/mvp-coverage-ledger.md`. Added the explicit ledger row so the baseline-to-ledger count and review trace are mechanical.
 

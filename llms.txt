@@ -1,0 +1,37 @@
+# AVA documentation map
+
+- [Human documentation spine](docs/README.md)
+- [Documentation maintenance instructions](docs/AGENTS.md)
+
+## Current guides
+
+- [Core](docs/core/README.md)
+- [Interfaces](docs/interfaces/README.md)
+- [Extensions](docs/extensions/README.md)
+- [Operations](docs/operations/README.md)
+
+## Fixed normative contracts
+
+- [ACP](docs/acp.md) and [ACP support profile](docs/acp-support.json)
+- [RPC protocol](docs/rpc-protocol.md)
+- [Headless protocol](docs/headless-protocol.md)
+- [Session format](docs/session-format.md)
+- [Plugin compatibility policy](docs/plugin-compatibility-policy.md)
+- [Theme schema index](docs/schema/README.md)
+
+## Security and development
+
+- [Security](docs/security/README.md)
+- [Normative containment contract](docs/security/containment.md)
+- [Development](docs/development/README.md)
+- [Documentation policy](docs/development/documentation-policy.md)
+
+## Product direction and evidence
+
+- [Current product baseline](docs/product/README.md)
+- [Plans](docs/plans/README.md)
+- [Roadmaps](docs/roadmap/README.md)
+- [Goal packages](docs/goals/README.md)
+- [History](docs/history/README.md)
+- [Version journals](docs/versions/README.md)
+- [Interoperability evidence policy](docs/interop/evidence/README.md)

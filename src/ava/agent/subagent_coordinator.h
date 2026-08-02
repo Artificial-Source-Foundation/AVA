@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -19,6 +20,11 @@
 #include <vector>
 
 namespace ava::agent {
+
+// Opaque path-free live inspection types. Complete definitions live in
+// subagent_inspector.h so public coordinator fanout never pulls session types.
+class SubagentLiveInspectionSource;
+struct SubagentInspectorFrame;
 
 // Error context exposed by failed start() calls. Process-local publication is
 // atomic, so coordinator failures are always ProvenUnpublished. The uncertain
@@ -46,6 +52,18 @@ enum class SubagentWaitMode
 {
   Terminal,
   TerminalOrPromotion,
+};
+
+// Coordinator-owned launch request. Private launch presentation crosses the
+// ownership boundary here and never enters BackgroundJobStartOptions/registry.
+struct SubagentCoordinatorStartRequest
+{
+  std::string parent_session_id;
+  SubagentJobMode mode = SubagentJobMode::Foreground;
+  BackgroundJobStartOptions job;
+  SubagentLaunchDisplay launch_display = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // Owns foreground-only frontend callbacks. Promotion reserves this gate before
@@ -81,6 +99,16 @@ struct SubagentCoordinatorOptions
   // Deterministic test seam for process-local identity collision coverage.
   // Production leaves this empty and uses ava::core::make_id.
   std::function<std::string(std::string_view)> id_generator = nullptr;
+  // Deterministic test-only seam: after inspect captures the live source and
+  // source epoch, and before fingerprint/project work, invoke this hook so a
+  // test can complete/freeze the job while the inspector is paused. Production
+  // leaves this empty. Must not perform coordinator I/O under JobState locks.
+  std::function<void()> inspect_after_source_capture_for_test = nullptr;
+  // Deterministic test-only seam: after fingerprint + projection succeed and
+  // immediately before the final publish lock, invoke this hook so a test can
+  // interleave a concurrent inspect/publish while one inspector holds an older
+  // projection. Production leaves this empty. Outside JobState locks.
+  std::function<void()> inspect_before_publish_for_test = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -100,11 +128,17 @@ class SubagentCoordinator final
   SubagentCoordinator(SubagentCoordinator&&) = delete;
   SubagentCoordinator& operator=(SubagentCoordinator&&) = delete;
 
+  [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start(SubagentCoordinatorStartRequest request, BackgroundJobWorker worker,
+                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr,
+                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
+  // Compatibility surface for callers with no private launch presentation.
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start(std::string parent_session_id, SubagentJobMode mode, BackgroundJobStartOptions options,
                                                                         BackgroundJobWorker worker,
-                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr);
+                                                                        std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr,
+                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start_background(std::string parent_session_id, BackgroundJobStartOptions options,
-                                                                                   BackgroundJobWorker worker);
+                                                                                   BackgroundJobWorker worker,
+                                                                                   std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
   [[nodiscard]] std::vector<SubagentCoordinatorJobSnapshot> list(std::string_view parent_session_id) const;
   [[nodiscard]] ava::core::Result<std::vector<SubagentCoordinatorJobSnapshot>> pending_deliveries(std::string_view parent_session_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> snapshot(std::string_view parent_session_id, std::string_view job_id);
@@ -113,6 +147,12 @@ class SubagentCoordinator final
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> result(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> cancel(std::string_view parent_session_id, std::string_view job_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> promote(std::string_view parent_session_id, std::string_view job_id);
+  // Owner-bound path-free live inspection. known_generation yields not_modified
+  // only when it equals the current published content generation after a fresh
+  // fingerprint check (or a stable terminal frame). Never returns raw session
+  // path/load errors; refresh failures become path-free frame flags.
+  [[nodiscard]] ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> inspect(std::string_view parent_session_id, std::string_view job_id,
+                                                                                         std::optional<std::uint64_t> known_generation = std::nullopt);
 
   void set_terminal_sink(SubagentTerminalSink sink);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> record_delivery_attempt(std::string_view parent_session_id, std::string_view job_id,

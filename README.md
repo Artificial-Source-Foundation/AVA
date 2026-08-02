@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml)
 
-AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes OpenAI and Kimi-for-coding live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
+AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
+
+**Choose a path:** [use AVA](docs/core/usage.md), [configure AVA](docs/core/configuration.md), [delegate work](docs/core/subagents.md), [understand model tools](docs/core/tools.md), [troubleshoot](docs/operations/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the audience/task-oriented [documentation index](docs/README.md).
 
 ## Clone and Build
 
@@ -29,7 +31,7 @@ Build-only requirements:
 - `ncursesw` development headers/library
 - Git and configuration-time access to required dependency sources
 
-The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/desktop-qml.md`.
+The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/interfaces/desktop-qml.md`.
 
 ```sh
 cmake -S . -B build -DAVA_BUILD_TESTS=ON
@@ -65,7 +67,7 @@ scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 
 GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull requests targeting `develop`. Dependabot is enabled for GitHub Actions updates on `develop`.
 
-**For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/CONTRIBUTING.md).**
+**For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/development/contributing.md).**
 
 ### Linux host artifact
 
@@ -116,22 +118,16 @@ AVA follows XDG paths on Linux:
 - Sessions: `$XDG_STATE_HOME/ava/sessions/`, fallback `~/.local/state/ava/sessions/`
 - Project trust: `$XDG_STATE_HOME/ava/project-trust.json`, fallback `~/.local/state/ava/project-trust.json`
 
-OpenAI auth can be created with `ava connect openai`, which opens a login picker for ChatGPT Pro/Plus browser OAuth, ChatGPT Pro/Plus headless device OAuth, or an OpenAI API key. Browser OAuth opens the default browser and listens on `http://localhost:1455/auth/callback`; headless OAuth prints `https://auth.openai.com/codex/device` plus a user code. OAuth credentials are refreshed automatically before use when a refresh token is available. Auth files also support OAuth-style tokens and API keys:
+Use `ava connect` to choose a provider and supported login method. Provider credentials can also be configured in `auth.json`; see [configuration and authentication](docs/core/configuration.md#auth) for formats and secret-handling rules. Use `/providers` to inspect provider availability and credential status without revealing secrets, and `/models` to inspect or select configured models. See [provider and model status](docs/core/providers.md) for the current concise matrix rather than treating this README as a provider catalog.
 
-```json
-{"openai":{"type":"oauth","access_token":"...","refresh_token":"...","expires_at":1893456000}}
-```
+The default model is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
 
-```json
-{"openai":{"type":"api_key","api_key":"sk-..."}}
-```
+## Common interactive commands
 
-The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, or `openai/gpt-5.6-luna`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
-
-## Interactive Commands
+This is a curated set of common commands, not an exhaustive catalog. See [the current command reference](docs/core/usage.md#commands) for the complete list.
 
 - `/help`: show commands and hotkeys
-- `/hotkeys` or `/keybindings`: show effective TUI hotkeys
+- `/hotkeys` or `/keybindings`: show effective TUI hotkeys with human primary labels
 - `/keybindings init [--force]`: create or explicitly replace a validated keybindings starter file
 - `/keybindings import <path> [--force]`: validate and install a keybindings JSON file
 - `/keybindings set <action> <key>[,<key>...]`: validate and edit one keybinding action
@@ -145,18 +141,20 @@ The built-in default is `openai/gpt-5.5`; `/model` can also select `openai/gpt-5
 - Ctrl+V: import a PNG/JPEG/WebP/GIF image from the clipboard as a pending attachment when a supported clipboard helper is available
 - `/tool [query]`: toggle Expanded presentation for the latest or matching tool card in the TUI; `/tools` is an alias
 - `/diff [query]`: show the latest or matching unified tool diff in the TUI
-- `/copy [tool|diff|permission] [query]`: copy the latest AVA message, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
-- `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode
+- `/copy [user|tool|diff|permission] [query]`: copy the latest AVA message, a selected public user turn, safe latest or matching tool-card details, latest or matching unified diff, or explicit permission audit details in the TUI
+- `/search [query]`: open the TUI transcript finder over currently rendered message and tool-card items
+- `/thinking`: toggle inline thinking block visibility without changing provider reasoning mode; `/thinking details` expands or collapses the latest completed long thinking block
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image into session-owned attachment storage and send it with the next normal TUI prompt; `/image` is an alias
 
-The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json` including custom themes under `$XDG_CONFIG_HOME/ava/themes/*.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback.
+The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json` including custom themes under `$XDG_CONFIG_HOME/ava/themes/*.json`, then startup OSC 11 on direct terminals (skipped under tmux), then `COLORFGBG`, then the built-in dark fallback. Built-in light/dark keep the ordinary canvas at the terminal-default background; `/settings` can report source `OSC 11`.
 - `/connect`: open provider and login method modals; `/login` is an alias
 - `/models [query|provider/model]`: list configured models and capabilities; `/model` is an alias, Ctrl+L opens the TUI model selector, and Ctrl+P cycles to the next configured or scoped enabled model between turns
 - `/scoped-models`: open the TUI scoped model-cycle selector to enable, disable, and order the Ctrl+P cycle; Ctrl+S persists the saved cycle in `models.json`
 - `/sessions [--archived] [query|id]`, `/sessions rename <id> <name|--clear>`, `/sessions labels <id> <label...|--clear>`, `/sessions archive <id> --confirm`, or `/sessions unarchive <id>`: show the resumable session tree, rename/label sessions, or hide/restore sessions without deleting their JSONL files; `/tree` is an alias for the tree view
 - `/fork [name]`: fork the current session at its latest entry and switch to the branch
+- `/fork-from [query]`: fork from a selected public user turn in the TUI and switch to the branch (sessionless sessions refuse; `/copy user` still works)
 - `/clone [name]`: clone the full current session and switch to the copy
-- `/new [name]`: start a fresh session and switch to it
+- `/new [name]` (alias `/clear [name]`): start a fresh session and switch to it
 - `/resume [id]`: resume/switch to an existing session by exact id or unique prefix; exact `/resume` opens the TUI session selector, where PageUp/PageDown page through rows, Ctrl+S or Ctrl+T cycles recent/name/path sort, Ctrl+N toggles named sessions only, Ctrl+P toggles path display, Ctrl+A shows/hides archived sessions, Ctrl+R restores a rename command, Ctrl+L or Shift+L restores a labels command, Shift+T toggles label update timestamps, and Ctrl+D twice or Ctrl+Backspace twice archives or restores the highlighted session when the selector search is empty
 - `/name <name|--clear>`: set or clear the current session display name; `/rename` is an alias
 - `/labels <label...|--clear>`: set or clear current session labels; `/label` is an alias
@@ -166,7 +164,8 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 - `/export [markdown|html|jsonl] [path]`: export this session as Markdown, safe self-contained HTML, or sanitized portable AVA JSONL; `/export <file.html>` writes Pi-style HTML and `/export <file.jsonl>` writes re-importable JSONL through the permissioned file path, omitting provider-private reasoning replay metadata
 - `/import <path.jsonl> --confirm`: validate an AVA JSONL session archive, create a new local session, and switch to it; without `--confirm`, AVA only previews the entry count
 - `/stats`: show session counts, usage, cost, and resume/export hints; `/status` is an alias
-- `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; `/permission-rules` and `/perms` are aliases
+- `/permissions <list|audit|diagnose|explain|add|remove> ...`: inspect session permission audits and manage persistent permission rules; list/receipt/explain lead with human summaries while exact rule ids remain authority; `/permission-rules` and `/perms` are aliases
+- `/jobs [show|wait|result|cancel|promote] ...`: exact `/jobs` opens the TUI's searchable, latest-first owner-bound job selector during idle or an active parent run. Enter opens a full-width read-only child workspace containing only committed child User/Assistant messages; Esc returns, Tab/Shift+Tab cycle jobs, C cancels, and P promotes. Titles, status/mode/tool metadata, and duplicate-safe short references stay display-only; session/path/full-ID metadata remains hidden and exact owner-bound job IDs remain control authority. In non-TUI modes bare `/jobs` retains its human-readable list, valid subcommands remain `show`/`wait`/`result`/`cancel`/`promote`, and public model/RPC JSON is unchanged (see [`docs/rpc-protocol.md`](docs/rpc-protocol.md)).
 - `/read <path>`: read a file through permissions
 - `/write <path> <text>`: write a file through permissions using atomic replacement where practical
 - `/glob <pattern>`: list readable matching files
@@ -180,10 +179,22 @@ The TUI theme precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json
 
 ## Documentation
 
-- Start with [`docs/README.md`](docs/README.md) for the full docs map.
-- Use [`docs/USAGE.md`](docs/USAGE.md) for TUI commands, headless modes, tool visibility, and current limits.
-- Use [`docs/CONFIG.md`](docs/CONFIG.md) for XDG paths, auth, models, prompts, subagents, project trust, and local resource layout.
-- Use [`docs/TESTING.md`](docs/TESTING.md) for CTest, opt-in live smokes, terminal smokes, and release evidence.
-- Use [`docs/rpc-protocol.md`](docs/rpc-protocol.md) for proprietary AVA RPC v1; use [`docs/acp.md`](docs/acp.md) and [`docs/interop/evidence/README.md`](docs/interop/evidence/README.md) for ACP client setup and evidence; [`docs/headless-protocol.md`](docs/headless-protocol.md) summarizes shared print/RPC headless behavior.
-- Use [`docs/release-checklist.md`](docs/release-checklist.md) for the implemented local Linux host artifact and release-gate scope.
-- Product and parity status lives under [`docs/product/`](docs/product/), [`docs/roadmap/`](docs/roadmap/), and [`docs/goals/`](docs/goals/); historical release ledgers live under [`docs/versions/`](docs/versions/).
+The [documentation index](docs/README.md) is organized by audience and task.
+
+### Users and operators
+
+- [Usage](docs/core/usage.md), [configuration](docs/core/configuration.md), [environment variables](docs/core/environment-variables.md), and [provider status](docs/core/providers.md)
+- [Subagents and background jobs](docs/core/subagents.md), [built-in model tools](docs/core/tools.md), [LSP](docs/extensions/lsp.md), [terminal setup](docs/operations/terminal-setup.md), and [troubleshooting](docs/operations/troubleshooting.md)
+- [Diagnostics and support exports](docs/operations/diagnostics.md), [security/sandboxing](docs/security/sandboxing.md), and [support](SUPPORT.md)
+
+### Automation and extension authors
+
+- [Proprietary AVA RPC v1](docs/rpc-protocol.md), [ACP](docs/acp.md), its [evidence policy](docs/interop/evidence/README.md), and [shared headless behavior](docs/headless-protocol.md)
+- [Plugins](docs/extensions/plugin-system.md), [MCP](docs/extensions/mcp.md), and [session format](docs/session-format.md)
+
+### Contributors and maintainers
+
+- [Contributing](CONTRIBUTING.md), [development guide](docs/development/contributing.md), [build configuration](docs/operations/build-configuration.md), [testing](docs/operations/testing.md), [architecture](docs/development/architecture.md), [codebase guide](docs/development/codebase-guide.md), and [documentation policy](docs/development/documentation-policy.md)
+- [Release checklist](docs/operations/release-checklist.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
+
+Product status and future work live in the [product](docs/product/README.md), [plans](docs/plans/README.md), [roadmap](docs/roadmap/README.md), and [goals](docs/goals/README.md) indexes; historical release-position ledgers live under [versions](docs/versions/README.md). Plans and runtime version numbers are not evidence that a tag, artifact, package, or external release has been published.

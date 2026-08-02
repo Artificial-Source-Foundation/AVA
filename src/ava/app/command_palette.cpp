@@ -1,11 +1,15 @@
 #include "sys.h"
+#include "ava/app/command_format.h"
 #include "ava/app/command_models.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_permissions.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/session_user_turns.h"
+#include "ava/tui/keybindings.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -15,6 +19,7 @@
 #include "ava/session/session_tree.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/registry.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
 #include <cctype>
@@ -40,6 +45,92 @@ std::string hotkeys_for_action(std::vector<CommandHotkey> const& hotkeys, std::s
       return hotkey.keys;
   }
   return "";
+}
+
+// CommandHotkey.description carries the concise human action label for palette rows.
+std::string keybinding_action_display_label(CommandHotkey const& hotkey)
+{
+  if (!hotkey.description.empty())
+    return hotkey.description;
+  if (auto const action = ava::tui::key_binding_action_from_name(hotkey.action))
+  {
+    auto label = ava::tui::action_label(*action);
+    if (!label.empty())
+      return label;
+  }
+  return hotkey.action;
+}
+
+// Completion secondary text prioritizes effective keys, then the canonical machine id.
+std::string keybinding_action_completion_description(CommandHotkey const& hotkey)
+{
+  if (!hotkey.keys.empty() && !hotkey.action.empty() && hotkey.keys != hotkey.action)
+    return hotkey.keys + " · " + hotkey.action;
+  if (!hotkey.keys.empty())
+    return hotkey.keys;
+  return hotkey.action;
+}
+
+std::string_view human_job_execution_label(ava::agent::SubagentExecutionState state) noexcept
+{
+  switch (state)
+  {
+    case ava::agent::SubagentExecutionState::Starting:
+      return "Starting";
+    case ava::agent::SubagentExecutionState::Running:
+      return "Running";
+    case ava::agent::SubagentExecutionState::Completed:
+      return "Completed";
+    case ava::agent::SubagentExecutionState::Failed:
+      return "Failed";
+    case ava::agent::SubagentExecutionState::Canceled:
+      return "Canceled";
+    case ava::agent::SubagentExecutionState::Interrupted:
+      return "Interrupted";
+  }
+  return "Unknown";
+}
+
+std::string_view human_job_mode_label(ava::agent::SubagentJobMode mode) noexcept
+{
+  switch (mode)
+  {
+    case ava::agent::SubagentJobMode::Foreground:
+      return "Foreground";
+    case ava::agent::SubagentJobMode::Background:
+      return "Background";
+  }
+  return "Unknown";
+}
+
+// Process-local title first; never surface raw job ids or ordinals as the primary completion label.
+std::string job_completion_display_label(ava::agent::SubagentJobSnapshot const& job)
+{
+  if (!job.display_title.empty())
+    return sanitize_inline_text(job.display_title);
+  if (job.mode == ava::agent::SubagentJobMode::Background)
+    return "Background job";
+  return "Foreground job";
+}
+
+// Concise human status/mode/type plus a short unique ref — no prompts, summaries, or full authority ids.
+std::string job_completion_description(ava::agent::SubagentJobSnapshot const& job, std::string_view short_ref)
+{
+  std::string description;
+  description += human_job_execution_label(job.execution);
+  description += " · ";
+  description += human_job_mode_label(job.mode);
+  if (!job.display_subagent_type.empty())
+  {
+    description += " · ";
+    description += sanitize_inline_text(job.display_subagent_type);
+  }
+  if (!short_ref.empty())
+  {
+    description += " · ref ";
+    description += short_ref;
+  }
+  return description;
 }
 
 bool completion_exists(std::vector<tui::SlashCommandArgumentCompletion> const& completions, std::size_t argument_index,
@@ -147,7 +238,8 @@ std::vector<WorkspacePathCandidate> walk_workspace_path_candidates(runtime::Sess
     return candidates;
 
   std::size_t visited = 0;
-  for (std::filesystem::recursive_directory_iterator it(session.current_dir(), error), end; it != end && visited < kMaxPathCompletionVisited; it.increment(error))
+  for (std::filesystem::recursive_directory_iterator it(session.current_dir(), error), end; it != end && visited < kMaxPathCompletionVisited;
+       it.increment(error))
   {
     if (error)
     {
@@ -601,9 +693,11 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "validate", "Validate $XDG_CONFIG_HOME/ava/keybinds.json without reloading", "General", {}, false);
     for (auto const& hotkey : hotkeys)
     {
-      add_completion(item, 1, hotkey.action, hotkey.description + " (" + hotkey.keys + ")", "Keybindings", {"set"}, true);
-      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"reset"}, true);
-      add_completion(item, 1, hotkey.action, "Remove override for " + hotkey.description, "Keybindings", {"unset"}, true);
+      auto const label = keybinding_action_display_label(hotkey);
+      auto const description = keybinding_action_completion_description(hotkey);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"set"}, true, true, {}, label);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"reset"}, true, true, {}, label);
+      add_completion(item, 1, hotkey.action, description, "Keybindings", {"unset"}, true, true, {}, label);
     }
     add_completion(item, 1, "--force", "Replace an existing keybinds.json starter file", "General", {"init"}, false);
     add_completion(item, 2, "--force", "Replace the existing keybinds.json with the imported file", "General", {"import"}, false);
@@ -697,11 +791,19 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
     if (session.subagent_coordinator())
     {
-      for (auto const& job : session.subagent_coordinator()->list(session.store.session_id()))
+      auto const jobs = session.subagent_coordinator()->list(session.store.session_id());
+      std::vector<std::string> job_ids;
+      job_ids.reserve(jobs.size());
+      for (auto const& snapshot : jobs)
+        job_ids.push_back(snapshot.job.identity.job_id);
+      auto const job_refs = unique_short_id_refs(job_ids);
+      for (std::size_t job_index = 0; job_index < jobs.size(); ++job_index)
       {
-        auto const description = std::string(ava::agent::to_string(job.job.execution)) + " · " + std::string(ava::agent::to_string(job.job.mode));
+        auto const& snapshot = jobs[job_index];
+        auto const label = job_completion_display_label(snapshot.job);
+        auto const description = job_completion_description(snapshot.job, job_refs[job_index]);
         for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
-          add_completion(item, 1, job.job.identity.job_id, description, "Jobs", {action}, false);
+          add_completion(item, 1, snapshot.job.identity.job_id, description, "Jobs", {action}, false, true, {}, label);
       }
     }
   }
@@ -741,12 +843,19 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     };
     if (auto rules = ava::permissions::load_persistent_permission_rules(store))
     {
+      std::vector<std::string> rule_ids;
+      rule_ids.reserve(rules->size());
       for (auto const& rule : *rules)
+        rule_ids.push_back(rule.rule_id);
+      auto const rule_refs = unique_short_id_refs(rule_ids);
+      for (std::size_t rule_index = 0; rule_index < rules->size(); ++rule_index)
       {
-        auto description =
-            ava::permissions::to_string(rule.action) + " " + ava::permissions::to_string(rule.operation) + " " + ava::permissions::to_string(rule.scope);
-        add_completion(item, 1, rule.rule_id, description, "Safety", {"explain"}, false);
-        add_completion(item, 1, rule.rule_id, description, "Safety", {"remove"}, false);
+        auto const& rule = (*rules)[rule_index];
+        // Keep .value as the exact permrule id for authority; surface human summary + short unique ref only.
+        auto const summary = format_permission_rule_summary(rule, session.workspace_dir());
+        auto const ref_suffix = std::string(" · ref ") + rule_refs[rule_index];
+        add_completion(item, 1, rule.rule_id, "Explain rule" + ref_suffix, "Rules", {"explain"}, false, true, {}, summary);
+        add_completion(item, 1, rule.rule_id, "Remove rule" + ref_suffix, "Rules", {"remove"}, false, true, {}, summary);
       }
     }
   }
@@ -1474,6 +1583,58 @@ std::optional<std::string> session_selector_child_target(ava::session::SessionTr
       return child_id;
   }
   return std::nullopt;
+}
+
+tui::SelectListView user_turn_selector_view(std::vector<SessionUserTurn> turns, std::string title, std::string footer_hint, std::string initial_query,
+                                            bool truncated_before)
+{
+  // Newest first so Enter on the initial selection forks/copies the latest public user turn.
+  std::ranges::reverse(turns);
+
+  tui::SelectListView view{
+      .title = std::move(title),
+      .subtitle = truncated_before ? std::string("newest retained turns · older history omitted") : std::string{},
+      .items = {},
+      .selected_item_index = 0,
+      .query = std::move(initial_query),
+      .placeholder = "Search user turns",
+      .empty_text = "No user turns match",
+      .footer_hint = std::move(footer_hint),
+  };
+  view.items.reserve(turns.size());
+  for (auto& turn : turns)
+  {
+    auto label = turn.preview.empty() ? std::string("(empty user turn)") : std::move(turn.preview);
+    view.items.push_back(tui::SelectListItemView{
+        .value = std::move(turn.entry_id),
+        .label = std::move(label),
+        .description = {},
+        .group = {},
+        .detail = std::move(turn.timestamp),
+        .badge = {},
+        .current = false,
+        .enabled = true,
+        .disabled_reason = {},
+    });
+  }
+  if (!view.query.empty())
+    view.selected_item_index = tui::clamp_select_list_selection(view, 0);
+  return view;
+}
+
+ava::core::Result<tui::SelectListView> user_turn_selector_view(runtime::Session const& session, std::string title, std::string footer_hint,
+                                                               std::string initial_query)
+{
+  auto listed = list_session_user_turns(session);
+  if (!listed)
+    return std::unexpected(std::move(listed.error()));
+  if (listed->turns.empty())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "no public user turns available");
+    error.with_context("operation", "user_turn_selector_view");
+    return std::unexpected(std::move(error));
+  }
+  return user_turn_selector_view(std::move(listed->turns), std::move(title), std::move(footer_hint), std::move(initial_query), listed->truncated_before);
 }
 
 }  // namespace ava::app

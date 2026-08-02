@@ -126,7 +126,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     snapshot.permission_prompt->deny_remember_available = deny_remember_available;
     snapshot.status = allow_session_available || allow_remember_available || deny_remember_available
                           ? permission_prompt_status(allow_session_available, allow_remember_available, deny_remember_available)
-                          : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+                          : "permission required: A=allow D=reject G=guide rejection Tab/Left/Right choose Enter/Space confirm Esc reject";
   }
   static_cast<void>(beep());
   if (!render())
@@ -134,7 +134,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
   }
 
-  auto resolve_choice = [&](PermissionPromptChoice selected) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+  auto resolve_choice = [&](PermissionPromptChoice selected,
+                            std::string user_guidance = {}) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     auto const allow =
         selected == PermissionPromptChoice::Allow || selected == PermissionPromptChoice::AllowSession || selected == PermissionPromptChoice::AllowRemember;
     auto const remember = selected == PermissionPromptChoice::AllowRemember || selected == PermissionPromptChoice::DenyRemember;
@@ -256,6 +257,11 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       decision.reason = "remembered deny rule";
       decision.resolution_source = "persistent_rule_added";
       decision.rule_id = std::move(remembered_rule_id);
+      // Remembered deny stays separate from optional one-shot guidance.
+    }
+    else if (auto validated = ava::permissions::validated_permission_user_guidance(user_guidance))
+    {
+      decision.user_guidance = std::move(*validated);
     }
     return decision;
   };
@@ -320,11 +326,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       return resolve_choice(PermissionPromptChoice::Deny);
     }
 
-    auto input_result = snapshot.permission_prompt
-                            ? handle_permission_prompt_input(
-                                  snapshot.permission_prompt->selected_choice, choice_input->event, snapshot.permission_prompt->allow_session_available,
-                                  snapshot.permission_prompt->allow_remember_available, snapshot.permission_prompt->deny_remember_available)
-                            : PermissionPromptInputResult{};
+    auto input_result =
+        snapshot.permission_prompt ? handle_permission_prompt_input(*snapshot.permission_prompt, choice_input->event) : PermissionPromptInputResult{};
     if (input_result.action == PermissionPromptInputAction::ResolveAllow)
     {
       return resolve_choice(PermissionPromptChoice::Allow);
@@ -335,7 +338,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     if (input_result.action == PermissionPromptInputAction::ResolveDeny)
     {
-      return resolve_choice(PermissionPromptChoice::Deny);
+      return resolve_choice(PermissionPromptChoice::Deny, std::move(input_result.guidance_text));
     }
     if (input_result.action == PermissionPromptInputAction::ResolveAllowRemember)
     {
@@ -350,7 +353,11 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         if (snapshot.permission_prompt)
+        {
           snapshot.permission_prompt->selected_choice = input_result.selected_choice;
+          snapshot.permission_prompt->guidance_mode = input_result.guidance_mode;
+          snapshot.permission_prompt->guidance_text = std::move(input_result.guidance_text);
+        }
       }
       if (!render())
       {
@@ -363,13 +370,17 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
 
     {
       std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+      bool const guidance_active = snapshot.permission_prompt && snapshot.permission_prompt->guidance_mode;
       bool const has_extended =
           snapshot.permission_prompt && (snapshot.permission_prompt->allow_session_available || snapshot.permission_prompt->allow_remember_available ||
                                          snapshot.permission_prompt->deny_remember_available);
-      snapshot.status =
-          has_extended ? permission_prompt_status(snapshot.permission_prompt->allow_session_available, snapshot.permission_prompt->allow_remember_available,
-                                                  snapshot.permission_prompt->deny_remember_available)
-                       : "permission required: A=allow D=reject Tab/Left/Right choose Enter/Space confirm Esc reject";
+      if (guidance_active)
+        snapshot.status = "permission guidance: type optional reason Enter reject Esc reject";
+      else
+        snapshot.status =
+            has_extended ? permission_prompt_status(snapshot.permission_prompt->allow_session_available, snapshot.permission_prompt->allow_remember_available,
+                                                    snapshot.permission_prompt->deny_remember_available)
+                         : "permission required: A=allow D=reject G=guide rejection Tab/Left/Right choose Enter/Space confirm Esc reject";
     }
     if (!render())
     {
@@ -489,7 +500,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
     auto input_result = [&]() {
       if (!snapshot.question_prompt)
         return QuestionPromptInputResult{};
-      if (question_input->event.key == Key::MouseLeftClick)
+      if (question_input->event.key == Key::MouseLeftPress || question_input->event.key == Key::MouseLeftClick)
       {
         if (auto const clicked = question_option_for_screen_position(snapshot, question_input->event.mouse_row, question_input->event.mouse_column))
           return activate_question_option(*snapshot.question_prompt, *clicked);
@@ -623,37 +634,69 @@ void RuntimePromptCoordinator::fail_pending_requests()
   }
 }
 
-bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop)
+RuntimePromptCoordinator::ClaimedPromptRequest RuntimePromptCoordinator::claim_pending_request_locked()
 {
-  auto& prompt_request_mutex = prompt_request_mutex_;
-  auto& pending_permission_requests = pending_permission_requests_;
-  auto& pending_question_requests = pending_question_requests_;
-  std::shared_ptr<PendingPermissionRequest> permission_request;
-  std::shared_ptr<PendingQuestionRequest> question_request;
+  ClaimedPromptRequest request;
+  if (!pending_permission_requests_.empty())
   {
-    std::lock_guard<std::mutex> lock(prompt_request_mutex);
-    if (!pending_permission_requests.empty())
-    {
-      permission_request = std::move(pending_permission_requests.front());
-      pending_permission_requests.pop_front();
-    }
-    else if (!pending_question_requests.empty())
-    {
-      question_request = std::move(pending_question_requests.front());
-      pending_question_requests.pop_front();
-    }
+    request.permission = std::move(pending_permission_requests_.front());
+    pending_permission_requests_.pop_front();
   }
-  if (permission_request)
+  else if (!pending_question_requests_.empty())
   {
-    complete_permission_request(permission_request, resolve_permission_prompt(permission_request->prompt, stop_requested, request_stop));
-    return true;
+    request.question = std::move(pending_question_requests_.front());
+    pending_question_requests_.pop_front();
   }
-  if (question_request)
+  return request;
+}
+
+void RuntimePromptCoordinator::service_claimed_request(ClaimedPromptRequest request, std::function<bool()> const& stop_requested,
+                                                       std::function<bool()> const& request_stop, std::function<void()> const& before_prompt)
+{
+  if (before_prompt)
+    before_prompt();
+  if (request.permission)
   {
-    complete_question_request(question_request, resolve_question_prompt(question_request->prompt, stop_requested, request_stop));
-    return true;
+    complete_permission_request(request.permission, resolve_permission_prompt(request.permission->prompt, stop_requested, request_stop));
+    return;
   }
-  return false;
+  complete_question_request(request.question, resolve_question_prompt(request.question->prompt, stop_requested, request_stop));
+}
+
+bool RuntimePromptCoordinator::service_pending_request(std::function<bool()> const& stop_requested, std::function<bool()> const& request_stop,
+                                                       std::function<void()> const& before_prompt)
+{
+  ClaimedPromptRequest request;
+  {
+    std::lock_guard<std::mutex> lock(prompt_request_mutex_);
+    request = claim_pending_request_locked();
+  }
+  if (!request)
+    return false;
+  service_claimed_request(std::move(request), stop_requested, request_stop, before_prompt);
+  return true;
+}
+
+SearchInputPromptDispatchResult RuntimePromptCoordinator::dispatch_search_input_with_prompt_precedence(std::function<bool()> const& dispatch_search_input,
+                                                                                                       std::function<bool()> const& stop_requested,
+                                                                                                       std::function<bool()> const& request_stop,
+                                                                                                       std::function<void()> const& before_prompt)
+{
+  ClaimedPromptRequest request;
+  bool input_handled = false;
+  {
+    std::lock_guard<std::mutex> lock(prompt_request_mutex_);
+    request = claim_pending_request_locked();
+    // The caller restricts this callback to the bounded search-modal handler.
+    // It cannot run local commands, and prompt rendering/resolution starts only
+    // after this lock is released, preserving the prompt-before-UI lock order.
+    if (!request)
+      input_handled = dispatch_search_input();
+  }
+  if (!request)
+    return input_handled ? SearchInputPromptDispatchResult::InputHandled : SearchInputPromptDispatchResult::InputFailed;
+  service_claimed_request(std::move(request), stop_requested, request_stop, before_prompt);
+  return SearchInputPromptDispatchResult::PromptServiced;
 }
 
 ava::permissions::PermissionResolver RuntimePromptCoordinator::permission_resolver()

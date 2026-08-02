@@ -184,6 +184,108 @@ ava::core::Result<SessionReadAuthority> SessionReadAuthority::create_ephemeral(S
   }
 }
 
+namespace {
+
+std::uint64_t hash_tip(std::string_view id, std::string_view timestamp, std::size_t data_bytes) noexcept
+{
+  constexpr std::uint64_t kOffset = 14695981039346656037ULL;
+  constexpr std::uint64_t kPrime = 1099511628211ULL;
+  std::uint64_t hash = kOffset;
+  auto mix = [&](unsigned char byte) {
+    hash ^= byte;
+    hash *= kPrime;
+  };
+  for (char const ch : id) mix(static_cast<unsigned char>(ch));
+  mix(0);
+  for (char const ch : timestamp) mix(static_cast<unsigned char>(ch));
+  mix(0);
+  // Cast before shifting so 32-bit size_t never hits UB on shifts >= 32.
+  auto const bytes = static_cast<std::uint64_t>(data_bytes);
+  for (int shift = 0; shift < 64; shift += 8) mix(static_cast<unsigned char>((bytes >> shift) & 0xffU));
+  return hash;
+}
+
+}  // namespace
+
+std::string const& SessionReadAuthority::session_id() const noexcept
+{
+  static std::string const kEmpty;
+  return state_ ? state_->store.session_id() : kEmpty;
+}
+
+bool SessionReadAuthority::is_ephemeral() const noexcept
+{
+  return state_ && !state_->lease.has_value();
+}
+
+bool SessionReadAuthority::active() const noexcept
+{
+  return static_cast<bool>(state_);
+}
+
+SessionReadLimits SessionReadAuthority::read_limits() const noexcept
+{
+  return state_ ? state_->limits : SessionReadLimits{};
+}
+
+SessionReadLimits SessionReadAuthority::clamp_limits(SessionReadLimits request) const noexcept
+{
+  SessionReadLimits const& policy = state_->limits;
+  return SessionReadLimits{
+      .max_file_bytes = std::min(policy.max_file_bytes, request.max_file_bytes),
+      .max_line_bytes = std::min(policy.max_line_bytes, request.max_line_bytes),
+      .max_entries = std::min(policy.max_entries, request.max_entries),
+  };
+}
+
+ava::core::Result<SessionContentFingerprint> SessionReadAuthority::content_fingerprint() const
+{
+  if (!state_)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
+
+  SessionContentFingerprint fingerprint;
+  if (!state_->lease)
+  {
+    // Append-only summary of the shared in-memory tip. This is not a durable
+    // content identity and is insufficient for live inspection; coordinated
+    // subagent inspection rejects ephemeral sources before publication.
+    fingerprint.ephemeral = true;
+    if (!state_->store.ephemeral_state_)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "ephemeral read authority is missing shared state"));
+    std::lock_guard lock(state_->store.ephemeral_state_->entries_mutex);
+    auto const& entries = state_->store.ephemeral_state_->entries;
+    fingerprint.entry_count = entries.size();
+    if (!entries.empty())
+    {
+      auto const& tip = entries.back();
+      fingerprint.tip_hash = hash_tip(tip.id, tip.timestamp, tip.data_json.size());
+    }
+    return fingerprint;
+  }
+
+  if (!state_->lease->active())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent read authority lease is inactive"));
+
+  struct stat status{};
+  if (fstat(state_->lease->fd_, &status) != 0)
+    return std::unexpected(path_io_error("failed to fingerprint persistent read authority lease", state_->store.session_path(), errno));
+  if (!S_ISREG(status.st_mode))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "persistent read authority lease is not a regular file"));
+
+  fingerprint.ephemeral = false;
+  fingerprint.dev = static_cast<std::uint64_t>(status.st_dev);
+  fingerprint.ino = static_cast<std::uint64_t>(status.st_ino);
+  fingerprint.size = status.st_size < 0 ? 0 : static_cast<std::uint64_t>(status.st_size);
+#if defined(__linux__)
+  fingerprint.mtime_sec = static_cast<std::int64_t>(status.st_mtim.tv_sec);
+  fingerprint.mtime_nsec = static_cast<std::int64_t>(status.st_mtim.tv_nsec);
+#else
+  fingerprint.mtime_sec = static_cast<std::int64_t>(status.st_mtime);
+  fingerprint.mtime_nsec = 0;
+#endif
+  return fingerprint;
+}
+
 ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load() const
 {
   if (!state_)
@@ -195,16 +297,18 @@ ava::core::Result<std::vector<SessionEntry>> SessionReadAuthority::load_bounded(
 {
   if (!state_)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
-  return state_->lease ? state_->store.load_bounded(*state_->lease, limits, std::move(cancel_requested))
-                       : state_->store.load_bounded(limits, std::move(cancel_requested));
+  auto const effective = clamp_limits(limits);
+  return state_->lease ? state_->store.load_bounded(*state_->lease, effective, std::move(cancel_requested))
+                       : state_->store.load_bounded(effective, std::move(cancel_requested));
 }
 
 ava::core::Result<SessionSummary> SessionReadAuthority::inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
 {
   if (!state_)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session read authority is inactive"));
-  return state_->lease ? state_->store.inspect_bounded(*state_->lease, limits, std::move(cancel_requested))
-                       : state_->store.inspect_bounded(limits, std::move(cancel_requested));
+  auto const effective = clamp_limits(limits);
+  return state_->lease ? state_->store.inspect_bounded(*state_->lease, effective, std::move(cancel_requested))
+                       : state_->store.inspect_bounded(effective, std::move(cancel_requested));
 }
 
 SessionAppendTarget::SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state,

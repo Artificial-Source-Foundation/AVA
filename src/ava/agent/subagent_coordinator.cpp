@@ -1,11 +1,14 @@
 #include "sys.h"
 #include "ava/agent/job_control.h"
 #include "ava/agent/subagent_coordinator.h"
+#include "ava/agent/subagent_inspector.h"
+#include "ava/agent/subagent_inspector_source.h"
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <limits>
 #include <utility>
@@ -17,6 +20,9 @@ constexpr std::size_t kMaxIdBytes = 96;
 constexpr std::size_t kMaxSummaryBytes = 16U * 1024U;
 constexpr std::size_t kMaxErrorBytes = 4U * 1024U;
 constexpr std::size_t kMaxStopReasonBytes = 1024;
+// Matches the model task description bound; never stores the full prompt.
+constexpr std::size_t kMaxDisplayTitleBytes = 256;
+constexpr std::size_t kMaxDisplaySubagentTypeBytes = 128;
 constexpr std::size_t kMaxAccountingValue = 1024U * 1024U;
 constexpr std::size_t kMaxIdentityGenerationAttempts = 8;
 constexpr std::string_view kPublicationCommitStateContext = "subagent_publication_commit_state";
@@ -134,6 +140,38 @@ bool normalize_text(std::string& value, std::size_t max_bytes, std::string_view 
   return truncate_utf8(value, max_bytes) || changed;
 }
 
+// Process-local interactive display only. Replaces controls, collapses
+// interior whitespace, rejects invalid UTF-8, and never retains prompt text.
+std::string make_display_field(std::string_view raw, std::size_t max_bytes)
+{
+  std::string value;
+  value.reserve(std::min(raw.size(), max_bytes));
+  bool pending_space = false;
+  auto flush_space = [&] {
+    if (pending_space && !value.empty())
+      value.push_back(' ');
+    pending_space = false;
+  };
+  for (char const ch : raw)
+  {
+    auto const byte = static_cast<unsigned char>(ch);
+    if (byte < 0x20U || byte == 0x7FU || ch == ' ')
+    {
+      pending_space = !value.empty();
+      continue;
+    }
+    flush_space();
+    value.push_back(ch);
+    if (value.size() >= max_bytes + 4)
+      break;
+  }
+  if (!ava::core::json::is_valid_utf8(value))
+    return {};
+  truncate_utf8(value, max_bytes);
+  while (!value.empty() && value.back() == ' ') value.pop_back();
+  return value;
+}
+
 BackgroundJobCompletion exception_completion(std::string const& job_id, std::stop_token const& stop_token, std::string cause)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "background job worker threw an exception");
@@ -142,6 +180,37 @@ BackgroundJobCompletion exception_completion(std::string const& job_id, std::sto
           .final_text = {},
           .stop_reason = stop_token.stop_requested() ? "canceled" : "failed",
           .error = std::move(error)};
+}
+
+std::uint64_t advance_content_generation(std::uint64_t current) noexcept
+{
+  auto next = current + 1;
+  if (next == 0)
+    next = 1;
+  return next;
+}
+
+std::shared_ptr<SubagentInspectorFrame const> stamp_inspection_frame(std::uint64_t generation, bool terminal, bool freeze_pending, bool unavailable,
+                                                                     bool refresh_unavailable, std::vector<SubagentLiveMessage> messages)
+{
+  auto frame = std::make_shared<SubagentInspectorFrame>();
+  frame->generation = generation;
+  frame->terminal = terminal;
+  frame->freeze_pending = freeze_pending;
+  frame->unavailable = unavailable;
+  frame->refresh_unavailable = refresh_unavailable;
+  frame->messages = std::move(messages);
+  return std::shared_ptr<SubagentInspectorFrame const>(std::move(frame));
+}
+
+std::shared_ptr<SubagentInspectorFrame const> view_published_frame(std::shared_ptr<SubagentInspectorFrame const> const& published, bool terminal,
+                                                                   bool freeze_pending)
+{
+  if (!published)
+    return nullptr;
+  if (published->terminal == terminal && published->freeze_pending == freeze_pending && !published->not_modified)
+    return published;
+  return stamp_inspection_frame(published->generation, terminal, freeze_pending, published->unavailable, published->refresh_unavailable, published->messages);
 }
 
 BackgroundJobCompletion normalize_completion(std::string const& job_id, BackgroundJobCompletion completion)
@@ -314,6 +383,18 @@ struct SubagentCoordinator::JobState
   mutable std::mutex mutex;
   std::condition_variable changed;
   std::shared_ptr<SubagentInteractionGate> interaction_gate = nullptr;
+  std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr;
+  // Latest successfully published path-free frame + the fingerprint it was
+  // projected from. Survives freeze_pending so racing inspect never sees a gap.
+  std::shared_ptr<SubagentInspectorFrame const> published_inspection = nullptr;
+  std::optional<ava::session::SessionContentFingerprint> published_fingerprint = std::nullopt;
+  // Source/freeze identity. Bumped on complete/shutdown/eviction so late live
+  // projections cannot publish after a newer terminal handoff.
+  std::uint64_t source_epoch = 1;
+  // Published content generation. Distinct from source_epoch; never zero once
+  // any frame has been successfully published for this job.
+  std::uint64_t content_generation = 0;
+  bool freeze_pending = false;
   bool published = false;
   bool terminal_notification_pending = false;
   bool terminal_notification_emitted = false;
@@ -385,6 +466,16 @@ bool SubagentCoordinator::erase_oldest_eligible_locked()
   }
   if (oldest == jobs_.end())
     return false;
+  {
+    std::lock_guard state_lock(oldest->second->mutex);
+    // Eviction invalidates the source epoch so late live/freeze results cannot
+    // store. Published frames may remain only while JobState is still held.
+    ++oldest->second->source_epoch;
+    if (oldest->second->source_epoch == 0)
+      oldest->second->source_epoch = 1;
+    oldest->second->inspection_source = nullptr;
+    oldest->second->freeze_pending = false;
+  }
   jobs_.erase(oldest);
   return true;
 }
@@ -403,10 +494,14 @@ void SubagentCoordinator::prune_eligible_locked()
   while (eligible > options_.registry_options.max_retained_finished_jobs && erase_oldest_eligible_locked()) --eligible;
 }
 
-ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
-                                                                             BackgroundJobStartOptions options, BackgroundJobWorker worker,
-                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate)
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(SubagentCoordinatorStartRequest request, BackgroundJobWorker worker,
+                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate,
+                                                                             std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
+  auto parent_session_id = std::move(request.parent_session_id);
+  auto const mode = request.mode;
+  auto options = std::move(request.job);
+  auto launch_display = std::move(request.launch_display);
   if (!worker)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "background job worker is unavailable");
@@ -424,6 +519,21 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
     auto error = std::move(valid.error());
     mark_unpublished(error);
     return std::unexpected(std::move(error));
+  }
+  // Coordinated sources must be persistent and bound to the exact child session
+  // identity before any worker launch or process-local publication.
+  if (inspection_source)
+  {
+    if (inspection_source->is_ephemeral() || inspection_source->session_id() != options.child_session_id)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent inspection source does not match the child session");
+      error.with_context("child_session_id", options.child_session_id);
+      if (!inspection_source->session_id().empty())
+        error.with_context("source_session_id", inspection_source->session_id());
+      error.with_context("source_ephemeral", inspection_source->is_ephemeral() ? "true" : "false");
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
   }
 
   std::shared_ptr<JobState> state;
@@ -492,8 +602,14 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
                            .execution = SubagentExecutionState::Starting,
                            .delivery = SubagentDeliveryState::Direct,
                            .started_at = now,
-                           .updated_at = now};
+                           .updated_at = now,
+                           .display_title = make_display_field(options.title, kMaxDisplayTitleBytes),
+                           .display_subagent_type = make_display_field(options.subagent_type, kMaxDisplaySubagentTypeBytes),
+                           .launch_display = launch_display};
     candidate->interaction_gate = interaction_gate;
+    // Store the source before registry start/publication so inspect can observe
+    // the child as soon as the job becomes visible.
+    candidate->inspection_source = inspection_source;
 
     std::lock_guard lock(mutex_);
     if (auto capacity = require_capacity_locked(); !capacity)
@@ -583,10 +699,20 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std
   return result;
 }
 
-ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_background(std::string parent_session_id, BackgroundJobStartOptions options,
-                                                                                        BackgroundJobWorker worker)
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(std::string parent_session_id, SubagentJobMode mode,
+                                                                             BackgroundJobStartOptions options, BackgroundJobWorker worker,
+                                                                             std::shared_ptr<SubagentInteractionGate> interaction_gate,
+                                                                             std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
-  return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker));
+  return start(SubagentCoordinatorStartRequest{.parent_session_id = std::move(parent_session_id), .mode = mode, .job = std::move(options)}, std::move(worker),
+               std::move(interaction_gate), std::move(inspection_source));
+}
+
+ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_background(std::string parent_session_id, BackgroundJobStartOptions options,
+                                                                                        BackgroundJobWorker worker,
+                                                                                        std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
+{
+  return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker), nullptr, std::move(inspection_source));
 }
 
 BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> const& state, BackgroundJobCompletion completion)
@@ -598,6 +724,8 @@ BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> 
   }
   completion = normalize_completion(job_id, std::move(completion));
   auto const now = ava::session::now_timestamp();
+  std::shared_ptr<SubagentLiveInspectionSource> freeze_source;
+  std::uint64_t freeze_epoch = 0;
   {
     std::lock_guard state_lock(state->mutex);
     if (terminal(state->snapshot.execution))
@@ -634,9 +762,60 @@ BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> 
       state->snapshot.delivery_pending_at = now;
       state->terminal_notification_pending = true;
     }
+    // Terminal inspection handoff: move the source local, bump source epoch so
+    // late live publishes cannot store, preserve the latest successful live
+    // frame through freeze_pending, and never reacquire by path.
+    freeze_source = std::move(state->inspection_source);
+    state->inspection_source = nullptr;
+    ++state->source_epoch;
+    if (state->source_epoch == 0)
+      state->source_epoch = 1;
+    freeze_epoch = state->source_epoch;
+    state->freeze_pending = static_cast<bool>(freeze_source);
     state->changed.notify_all();
   }
+
+  if (freeze_source)
+  {
+    // Bounded final projection outside locks. No I/O or callbacks under locks.
+    auto projected = freeze_source->project_messages();
+    auto fingerprint = freeze_source->content_fingerprint();
+    freeze_source.reset();
+    {
+      std::lock_guard state_lock(state->mutex);
+      if (state->freeze_pending && state->source_epoch == freeze_epoch)
+      {
+        if (projected)
+        {
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection =
+              stamp_inspection_frame(state->content_generation, true, false, false, false, std::move(*projected));
+          if (fingerprint)
+            state->published_fingerprint = std::move(*fingerprint);
+        }
+        else if (state->published_inspection)
+        {
+          // Retain prior messages and mark a truthful path-free final-unavailable flag.
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection = stamp_inspection_frame(state->content_generation, true, false, false, true,
+                                                              state->published_inspection->messages);
+        }
+        else
+        {
+          state->content_generation = advance_content_generation(state->content_generation);
+          state->published_inspection = make_unavailable_inspection_frame(state->content_generation, true, false);
+          state->published_fingerprint = std::nullopt;
+        }
+        state->freeze_pending = false;
+        state->changed.notify_all();
+      }
+    }
+  }
+
+  // Delay terminal sink until the freeze attempt is stable so observers never
+  // race an empty gap between terminal job state and published inspection.
   publish_terminal_notification(state);
+
   {
     std::lock_guard lock(mutex_);
     prune_eligible_locked();
@@ -801,6 +980,177 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::cancel(st
   }
   std::lock_guard state_lock(state->mutex);
   return public_snapshot_locked(*state);
+}
+
+ava::core::Result<std::shared_ptr<SubagentInspectorFrame const>> SubagentCoordinator::inspect(std::string_view parent_session_id, std::string_view job_id,
+                                                                                              std::optional<std::uint64_t> known_generation)
+{
+  std::shared_ptr<JobState> state;
+  {
+    std::lock_guard lock(mutex_);
+    state = find_owned_locked(parent_session_id, job_id);
+  }
+  if (!state)
+    return std::unexpected(not_found(job_id));
+
+  std::shared_ptr<SubagentLiveInspectionSource> source;
+  std::shared_ptr<SubagentInspectorFrame const> published;
+  std::optional<ava::session::SessionContentFingerprint> published_fingerprint;
+  std::uint64_t source_epoch = 0;
+  std::uint64_t content_generation = 0;
+  bool freeze_pending = false;
+  bool is_terminal = false;
+  std::function<void()> after_capture_hook;
+  std::function<void()> before_publish_hook;
+  {
+    std::lock_guard state_lock(state->mutex);
+    source = state->inspection_source;
+    published = state->published_inspection;
+    published_fingerprint = state->published_fingerprint;
+    source_epoch = state->source_epoch;
+    content_generation = state->content_generation;
+    freeze_pending = state->freeze_pending;
+    is_terminal = terminal(state->snapshot.execution);
+    after_capture_hook = options_.inspect_after_source_capture_for_test;
+    before_publish_hook = options_.inspect_before_publish_for_test;
+  }
+  SubagentLiveInspectionSource* const captured_source = source.get();
+  // Captured after the post-seam recheck below; used at final publish to reject
+  // older projections when a concurrent inspector already advanced generation.
+  std::uint64_t captured_content_generation = content_generation;
+
+  auto current_frame_locked = [&]() -> std::shared_ptr<SubagentInspectorFrame const> {
+    auto const current_published = state->published_inspection;
+    auto const current_terminal = terminal(state->snapshot.execution);
+    auto const current_freeze_pending = state->freeze_pending;
+    auto const current_generation = state->content_generation;
+    if (current_published)
+      return view_published_frame(current_published, current_terminal, current_freeze_pending);
+    return make_unavailable_inspection_frame(current_generation, current_terminal, current_freeze_pending);
+  };
+
+  // Stable terminal publication: no live source and freeze is complete.
+  if (!source && is_terminal && !freeze_pending)
+  {
+    if (published)
+    {
+      if (known_generation && *known_generation == published->generation)
+        return make_not_modified_inspection_frame(published->generation, true, false);
+      return view_published_frame(published, true, false);
+    }
+    return make_unavailable_inspection_frame(content_generation, true, false);
+  }
+
+  // Freeze in progress: preserve latest successful live content + terminal metadata.
+  if (!source && freeze_pending)
+  {
+    if (published)
+      return view_published_frame(published, true, true);
+    return make_unavailable_inspection_frame(content_generation, true, true);
+  }
+
+  if (!source)
+  {
+    // Missing source without terminal freeze (legacy/test jobs or shutdown mid-run).
+    if (published)
+      return view_published_frame(published, is_terminal, freeze_pending);
+    return make_unavailable_inspection_frame(content_generation, is_terminal, freeze_pending);
+  }
+
+  // Deterministic race seam: pause after live source/epoch capture before project.
+  if (after_capture_hook)
+    after_capture_hook();
+
+  // Re-check after the test seam: complete/shutdown may have invalidated the source.
+  // Capture content_generation here (post-recheck, pre-fingerprint/project) so the
+  // final publish lock can detect concurrent generation advances and refuse to
+  // store an older projection under a newer generation number.
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    is_terminal = terminal(state->snapshot.execution);
+    freeze_pending = state->freeze_pending;
+    published = state->published_inspection;
+    published_fingerprint = state->published_fingerprint;
+    content_generation = state->content_generation;
+    captured_content_generation = content_generation;
+  }
+
+  auto fingerprint = source->content_fingerprint();
+  if (!fingerprint)
+  {
+    // Path-free: never surface raw fingerprint/session errors to inspect callers.
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection)
+      return make_refresh_unavailable_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution),
+                                                       state->freeze_pending, state->published_inspection->messages);
+    return make_refresh_unavailable_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending);
+  }
+
+  if (known_generation && published && *known_generation == published->generation && published_fingerprint && *published_fingerprint == *fingerprint)
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection && state->published_fingerprint && *state->published_fingerprint == *fingerprint &&
+        known_generation && *known_generation == state->published_inspection->generation)
+      return make_not_modified_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution), state->freeze_pending);
+    if (state->published_inspection)
+      return view_published_frame(state->published_inspection, terminal(state->snapshot.execution), state->freeze_pending);
+    return current_frame_locked();
+  }
+
+  auto projected = source->project_messages();
+  if (!projected)
+  {
+    // Corrupt/over-cap/load failures become path-free flags only.
+    std::lock_guard state_lock(state->mutex);
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+    if (state->published_inspection)
+      return make_refresh_unavailable_inspection_frame(state->published_inspection->generation, terminal(state->snapshot.execution),
+                                                       state->freeze_pending, state->published_inspection->messages);
+    return make_refresh_unavailable_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending);
+  }
+
+  // Deterministic race seam: pause after fingerprint+project, before publish.
+  // Outside locks; lets a concurrent inspector publish a newer generation first.
+  if (before_publish_hook)
+    before_publish_hook();
+
+  {
+    std::lock_guard state_lock(state->mutex);
+    // ARCH-INS-06: discard stale live results after complete/shutdown publication.
+    if (state->source_epoch != source_epoch || state->inspection_source.get() != captured_source)
+      return current_frame_locked();
+
+    // Another concurrent inspector may already have published this fingerprint.
+    // Return the cached current frame without advancing generation.
+    if (state->published_fingerprint && *state->published_fingerprint == *fingerprint && state->published_inspection)
+      return view_published_frame(state->published_inspection, terminal(state->snapshot.execution), state->freeze_pending);
+
+    // ARCH-INS-09: if content_generation moved since our post-recheck capture,
+    // a concurrent inspector already published a newer projection. Discard this
+    // older projection rather than advancing generation with stale content.
+    // No post-project fingerprint recheck: fingerprint I/O stays outside the
+    // lock once; same-fingerprint hits the cache path above, and a generation
+    // advance with a different fingerprint is exactly the concurrent-publish
+    // case this check covers. A fingerprint/content skew from an append between
+    // fingerprint and project cannot regress published content (projection reads
+    // at least as new as the fingerprint) and self-heals on the next inspect.
+    if (state->content_generation != captured_content_generation)
+      return current_frame_locked();
+
+    state->content_generation = advance_content_generation(state->content_generation);
+    auto frame = stamp_inspection_frame(state->content_generation, terminal(state->snapshot.execution), state->freeze_pending, false, false,
+                                        std::move(*projected));
+    state->published_inspection = frame;
+    state->published_fingerprint = std::move(*fingerprint);
+    return frame;
+  }
 }
 
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::promote(std::string_view parent_session_id, std::string_view job_id)
@@ -1020,6 +1370,13 @@ void SubagentCoordinator::shutdown()
     for (auto const& [job_id, state] : jobs_)
     {
       std::lock_guard state_lock(state->mutex);
+      // Invalidate source epoch so late live/freeze results cannot store after
+      // shutdown. Published frames remain only while JobState is still held.
+      ++state->source_epoch;
+      if (state->source_epoch == 0)
+        state->source_epoch = 1;
+      state->inspection_source = nullptr;
+      state->freeze_pending = false;
       if (!terminal(state->snapshot.execution))
       {
         state->snapshot.cancel_requested = true;
@@ -1028,6 +1385,7 @@ void SubagentCoordinator::shutdown()
         state->snapshot.updated_at = *state->snapshot.cancel_requested_at;
         jobs.push_back(job_id);
       }
+      state->changed.notify_all();
     }
   }
   for (auto const& job_id : jobs) static_cast<void>(registry_.cancel(job_id));
@@ -1036,6 +1394,15 @@ void SubagentCoordinator::shutdown()
   {
     std::lock_guard lock(mutex_);
     shutdown_complete_ = true;
+    for (auto const& [_, state] : jobs_)
+    {
+      std::lock_guard state_lock(state->mutex);
+      ++state->source_epoch;
+      if (state->source_epoch == 0)
+        state->source_epoch = 1;
+      state->inspection_source = nullptr;
+      state->freeze_pending = false;
+    }
     released.swap(jobs_);
   }
 }

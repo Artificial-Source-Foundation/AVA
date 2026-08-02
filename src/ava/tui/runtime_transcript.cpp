@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tui/composer_editor.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/text.h"
 #include "ava/tui/tool_cards.h"
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -144,19 +146,27 @@ void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::str
     final_visible_assistant->meta = meta;
 }
 
-void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta)
+std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta)
 {
   std::vector<TranscriptItem> items;
   items.reserve(outputs.size());
   for (auto const& output : outputs) items.push_back(TranscriptItem{.label = "ava", .text = output});
   apply_assistant_turn_meta(items, meta, snapshot.thinking_visible);
-  for (auto& item : items) push_transcript(snapshot, std::move(item));
+  std::ptrdiff_t item_index_shift = 0;
+  for (auto& item : items) item_index_shift += push_transcript(snapshot, std::move(item));
+  return item_index_shift;
 }
 
 std::string base64_encode(std::string_view text)
 {
   std::string output;
-  output.reserve(((text.size() + 2) / 3) * 4);
+  // encoded_size = ceil(n / 3) * 4 = ((n + 2) / 3) * 4 — guard both steps.
+  if (text.size() <= std::numeric_limits<std::size_t>::max() - 2)
+  {
+    auto const groups = (text.size() + 2) / 3;
+    if (groups <= std::numeric_limits<std::size_t>::max() / 4)
+      output.reserve(groups * 4);
+  }
   for (std::size_t index = 0; index < text.size(); index += 3)
   {
     auto const first = static_cast<unsigned char>(text[index]);
@@ -171,12 +181,31 @@ std::string base64_encode(std::string_view text)
   return output;
 }
 
+std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view text)
+{
+  if (text.empty() || text.size() > kMaxTerminalClipboardTextBytes)
+    return std::nullopt;
+
+  constexpr std::string_view kPrefix = "\x1b]52;c;";
+  constexpr std::string_view kSuffix = "\x1b\\";
+  auto const encoded = base64_encode(text);
+
+  // Bound above keeps prefix + encoded + suffix well inside size_t.
+  auto const total_size = kPrefix.size() + encoded.size() + kSuffix.size();
+  std::string sequence;
+  sequence.reserve(total_size);
+  sequence.append(kPrefix);
+  sequence.append(encoded);
+  sequence.append(kSuffix);
+  return sequence;
+}
+
 bool copy_text_to_terminal_clipboard(std::string_view text)
 {
-  if (text.empty())
+  auto sequence = try_build_osc52_clipboard_sequence(text);
+  if (!sequence.has_value())
     return false;
-  auto sequence = std::string("\x1b]52;c;") + base64_encode(text) + "\x1b\\";
-  return write_all_to_stdout(sequence);
+  return write_all_to_stdout(*sequence);
 }
 
 std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer)
@@ -249,6 +278,58 @@ void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> cons
   }
 }
 
+namespace {
+
+bool item_hosts_thinking_content(TranscriptItem const& item)
+{
+  if (item.tool)
+    return false;
+  if (item.label == "thinking")
+    return !item.text.empty() || !text_empty(item.text_model);
+  if (item.label == "ava")
+    return !item.thinking.empty() || !text_empty(item.thinking_model);
+  return false;
+}
+
+}  // namespace
+
+std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript)
+{
+  std::vector<std::pair<std::size_t, bool>> overrides;
+  for (std::size_t index = 0; index < transcript.size(); ++index)
+  {
+    if (transcript[index].thinking_expanded && item_hosts_thinking_content(transcript[index]))
+      overrides.emplace_back(index, true);
+  }
+  return overrides;
+}
+
+void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
+                              std::ptrdiff_t item_index_shift)
+{
+  // Captured current-UI true flags are authoritative after apply_capped_transcript_snapshot.
+  // Apply copies submitted_transcript, which can restore stale true flags from a prior turn;
+  // clear destination expansion before remapping only the currently expanded indices.
+  for (auto& item : transcript) item.thinking_expanded = false;
+  for (auto const& [old_index, expanded] : overrides)
+  {
+    if (!expanded)
+      continue;
+    auto const shifted = static_cast<std::ptrdiff_t>(old_index) + item_index_shift;
+    if (shifted < 0)
+      continue;
+    auto const new_index = static_cast<std::size_t>(shifted);
+    if (new_index >= transcript.size())
+      continue;
+    auto& item = transcript[new_index];
+    // Refuse stale index ownership onto a replacement non-thinking slot (for example a
+    // newly projected tool/text tail that landed on a previously expanded index).
+    if (!item_hosts_thinking_content(item))
+      continue;
+    item.thinking_expanded = true;
+  }
+}
+
 std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
 {
   for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
@@ -301,11 +382,12 @@ std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answe
   return detail;
 }
 
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
+std::ptrdiff_t push_transcript(ComposerSnapshot& snapshot, TranscriptItem item)
 {
   snapshot.transcript.push_back(std::move(item));
-  truncate_transcript(snapshot.transcript);
+  auto const removed = truncate_transcript(snapshot.transcript);
   ++snapshot.transcript_generation;
+  return -static_cast<std::ptrdiff_t>(removed);
 }
 
 void push_history(std::vector<std::string>& history, std::string input)
@@ -338,6 +420,33 @@ std::optional<std::size_t> toggle_latest_matching_tool_details(std::vector<Trans
     if (!item.tool || !detail::tool_card_matches_copy_query(*item.tool, query))
       continue;
     item.tool->details_visible = detail::tool_card_presentation(*item.tool, inherited) != ToolPresentation::Expanded;
+    return index - 1;
+  }
+  return std::nullopt;
+}
+
+bool transcript_item_thinking_is_boundable(TranscriptItem const& item, std::size_t width, bool thinking_visible)
+{
+  return detail::transcript_item_has_boundable_thinking(item, width, thinking_visible);
+}
+
+bool toggle_thinking_expansion_at(std::vector<TranscriptItem>& transcript, std::size_t item_index, std::size_t width, bool thinking_visible)
+{
+  if (item_index >= transcript.size())
+    return false;
+  auto& item = transcript[item_index];
+  if (!detail::transcript_item_has_boundable_thinking(item, width, thinking_visible))
+    return false;
+  item.thinking_expanded = !item.thinking_expanded;
+  return true;
+}
+
+std::optional<std::size_t> toggle_latest_boundable_thinking(std::vector<TranscriptItem>& transcript, std::size_t width, bool thinking_visible)
+{
+  for (std::size_t index = transcript.size(); index > 0; --index)
+  {
+    if (!toggle_thinking_expansion_at(transcript, index - 1, width, thinking_visible))
+      continue;
     return index - 1;
   }
   return std::nullopt;

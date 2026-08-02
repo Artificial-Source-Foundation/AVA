@@ -3,6 +3,7 @@
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
 #include "ava/tui/theme.h"
+#include "ava/tui/tool_card_task_job.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -24,7 +25,7 @@ bool wide_blocks(std::size_t width)
   return width >= kBlockMinWidth;
 }
 
-std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width);
+std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width, bool expanded = false, bool live = false);
 
 std::string trim_left(std::string_view text)
 {
@@ -1880,7 +1881,7 @@ std::vector<std::string> render_assistant_text_block(std::vector<std::string> co
 }
 
 std::vector<std::string> render_assistant_block(std::string const& text, std::string const& meta, std::string const& thinking, std::size_t width,
-                                                bool separate_assistant_runs)
+                                                bool separate_assistant_runs, bool thinking_expanded = false, bool thinking_live = false)
 {
   auto const content_width = width > 4 ? width - 4 : std::size_t{1};
   auto const content = text.empty() ? std::vector<std::string>{} : assistant_content_lines(text, content_width);
@@ -1888,7 +1889,7 @@ std::vector<std::string> render_assistant_block(std::string const& text, std::st
 
   if (!thinking.empty())
   {
-    auto thinking_lines = render_thinking_block(thinking, width);
+    auto thinking_lines = render_thinking_block(thinking, width, thinking_expanded, thinking_live);
     lines.insert(lines.end(), thinking_lines.begin(), thinking_lines.end());
   }
 
@@ -1906,7 +1907,7 @@ std::vector<std::string> render_assistant_block(std::string const& text, std::st
   return lines;
 }
 
-std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width)
+std::vector<std::string> render_thinking_block(std::string const& text, std::size_t width, bool expanded, bool live)
 {
   auto const visible_text = trim_ascii(remove_redacted_markers(text));
   if (visible_text.empty())
@@ -1952,6 +1953,20 @@ std::vector<std::string> render_thinking_block(std::string const& text, std::siz
       first_wrapped_line = false;
     }
     first_content_line = false;
+  }
+
+  // Completed long thinking defaults to a bounded preview. Live pending reasoning stays full.
+  if (!live && !expanded && lines.size() > kThinkingBoundedMaxRows)
+  {
+    auto const hidden = lines.size() - kThinkingBoundedContentRows;
+    lines.resize(kThinkingBoundedContentRows);
+    auto footer = std::string("… ") + std::to_string(hidden) + " lines hidden";
+    if (!tui_plain_output())
+      footer = std::string(kSgrDim) + footer + std::string(kSgrReset);
+    if (wide_blocks(width))
+      lines.push_back(render_wide_content(kSgrDim, std::move(footer), width));
+    else
+      lines.push_back(fit_line_preserving_sgr(std::move(footer), width));
   }
   return lines;
 }
@@ -2059,7 +2074,9 @@ TranscriptGroup transcript_group(TranscriptItem const& item)
 
 bool transcript_item_is_visible(TranscriptItem const& item, bool thinking_visible)
 {
-  if (item.tool || item.label == "you" || item.label == "error" || item.label == "compaction")
+  if (item.tool)
+    return !task_job_card_is_quiet_poll(*item.tool);
+  if (item.label == "you" || item.label == "error" || item.label == "compaction")
     return true;
   if (item.label == "ava")
   {
@@ -2210,41 +2227,70 @@ std::string render_context_tool_group_heading(std::size_t count, std::size_t wid
   return fit_line_preserving_sgr("  " + std::move(label), width);
 }
 
-std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
-                                                      bool suppress_result_summary, bool compact_spacing)
+bool thinking_item_is_live(TranscriptItem const& item)
+{
+  if (!(item.append_only_stream && !item.stream_id.empty()))
+    return false;
+  if (item.label == "thinking")
+    return !trim_ascii(remove_redacted_markers(text_model_or(item.text_model, item.text))).empty();
+  if (item.label == "ava")
+    return !trim_ascii(remove_redacted_markers(text_model_or(item.thinking_model, item.thinking))).empty();
+  return false;
+}
+
+std::size_t full_thinking_rendered_line_count(TranscriptItem const& item, std::size_t width)
+{
+  if (item.label == "thinking")
+    return render_thinking_block(text_model_or(item.text_model, item.text), width, true, false).size();
+  if (item.label == "ava")
+    return render_thinking_block(text_model_or(item.thinking_model, item.thinking), width, true, false).size();
+  return 0;
+}
+
+TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                     bool suppress_result_summary, bool compact_spacing)
 {
   if (item.tool)
-    return render_tool_card(*item.tool, width, tool_presentation, suppress_result_summary);
+  {
+    auto rendered = render_tool_card_rows(*item.tool, width, tool_presentation, suppress_result_summary);
+    return TranscriptRenderedBlock{.lines = std::move(rendered.lines), .presentation_private_rows = std::move(rendered.presentation_private_rows)};
+  }
   if (item.label == "you")
-    return render_user_block(text_model_or(item.text_model, item.text), width);
+    return TranscriptRenderedBlock{.lines = render_user_block(text_model_or(item.text_model, item.text), width)};
   if (item.label == "ava")
   {
     auto assistant_text = item.text;
     if (assistant_text.empty() && !text_empty(item.text_model))
       assistant_text = to_plain_text(item.text_model);
     auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
-    return render_assistant_block(assistant_text, item.meta, thinking_text, width, roomy_transcript_spacing(width, compact_spacing));
+    auto const thinking_live = item.append_only_stream && !item.stream_id.empty() && !thinking_text.empty();
+    return TranscriptRenderedBlock{.lines = render_assistant_block(assistant_text, item.meta, thinking_text, width,
+                                                                   roomy_transcript_spacing(width, compact_spacing), item.thinking_expanded, thinking_live)};
   }
   if (item.label == "thinking")
   {
     if (thinking_visible)
-      return render_thinking_block(text_model_or(item.text_model, item.text), width);
+    {
+      auto const thinking_live = item.append_only_stream && !item.stream_id.empty();
+      return TranscriptRenderedBlock{.lines = render_thinking_block(text_model_or(item.text_model, item.text), width, item.thinking_expanded, thinking_live)};
+    }
     return {};
   }
   if (item.label == "compaction")
-    return render_compaction_block(text_model_or(item.text_model, item.text), width);
+    return TranscriptRenderedBlock{.lines = render_compaction_block(text_model_or(item.text_model, item.text), width)};
   if (item.label == "setup" && item.text.starts_with("! "))
   {
     auto const marker = tui_plain_output() ? std::string("!") : std::string(kSgrWarning) + "!" + std::string(kSgrReset);
     auto line = std::string("  ") + marker + " " + sanitize_terminal_text(item.text.substr(2));
-    return {fit_line_preserving_sgr(std::move(line), width)};
+    return TranscriptRenderedBlock{.lines = {fit_line_preserving_sgr(std::move(line), width)}};
   }
   if (item.label == "error")
   {
-    return render_error_block(text_model_or(item.text_model, item.text), item.meta, width, tool_presentation == ToolPresentation::Expanded);
+    return TranscriptRenderedBlock{
+        .lines = render_error_block(text_model_or(item.text_model, item.text), item.meta, width, tool_presentation == ToolPresentation::Expanded)};
   }
 
-  std::vector<std::string> lines;
+  TranscriptRenderedBlock block;
   auto text = text_model_or(item.text_model, item.text);
   if (text.empty())
   {
@@ -2257,13 +2303,32 @@ std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item
   {
     for (auto const& wrapped : wrap_transcript_text(part, width))
     {
-      lines.push_back(render_generic_line(wrapped, width));
+      block.lines.push_back(render_generic_line(wrapped, width));
     }
   }
-  return lines;
+  return block;
+}
+
+std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                      bool suppress_result_summary, bool compact_spacing)
+{
+  return render_transcript_item_block(item, width, tool_presentation, thinking_visible, suppress_result_summary, compact_spacing).lines;
 }
 
 }  // namespace
+
+bool transcript_item_has_boundable_thinking(TranscriptItem const& item, std::size_t width, bool thinking_visible)
+{
+  if (!thinking_visible || item.tool || thinking_item_is_live(item))
+    return false;
+  if (item.label != "ava" && item.label != "thinking")
+    return false;
+  if (item.label == "ava" && trim_ascii(remove_redacted_markers(text_model_or(item.thinking_model, item.thinking))).empty())
+    return false;
+  if (item.label == "thinking" && trim_ascii(remove_redacted_markers(text_model_or(item.text_model, item.text))).empty())
+    return false;
+  return full_thinking_rendered_line_count(item, width) > kThinkingBoundedMaxRows;
+}
 
 TranscriptViewportAnchor capture_transcript_viewport_anchor(TranscriptLayout const& layout, std::size_t max_scroll_offset, std::size_t scroll_offset)
 {
@@ -2310,29 +2375,55 @@ std::size_t restore_transcript_viewport_anchor(TranscriptViewportAnchor anchor, 
   return max_scroll_offset - std::min(desired_start, max_scroll_offset);
 }
 
+TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+{
+  if (item_index >= transcript.size() || suppress_adjacent_tool_result(transcript, item_index))
+    return {};
+  auto block = render_transcript_item_block(transcript[item_index], width, tool_presentation, thinking_visible, false, compact_spacing);
+  if (block.lines.empty())
+    return block;
+  block.presentation_private_rows.resize(block.lines.size(), false);
+
+  auto const context_run_size = context_tool_run_size(transcript, item_index);
+  if (context_run_size >= 2 && (item_index == 0 || !is_context_gathering_tool(transcript[item_index - 1])))
+  {
+    block.lines.insert(block.lines.begin(), render_context_tool_group_heading(context_run_size, width));
+    block.presentation_private_rows.insert(block.presentation_private_rows.begin(), false);
+  }
+  return block;
+}
+
+std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+{
+  return render_transcript_search_item(transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing).lines;
+}
+
 TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
                                           bool thinking_visible, bool compact_spacing)
 {
   TranscriptLayout layout;
   for (std::size_t index = 0; index < transcript.size(); ++index)
   {
-    if (suppress_adjacent_tool_result(transcript, index))
-      continue;
-    auto const& item = transcript[index];
-    auto block = render_transcript_item_lines(item, width, tool_presentation, thinking_visible, false, compact_spacing);
-    if (block.empty())
+    auto block = render_transcript_search_item(transcript, index, width, tool_presentation, thinking_visible, compact_spacing);
+    if (block.lines.empty())
       continue;
 
+    layout.block_boundaries.push_back(layout.lines.size());
     if (roomy_transcript_spacing(width, compact_spacing) && !layout.lines.empty() && starts_visual_group(transcript, index, thinking_visible))
+    {
       layout.lines.emplace_back();
+      layout.presentation_private_rows.push_back(false);
+    }
     layout.message_starts.push_back(layout.lines.size());
     layout.message_item_indices.push_back(index);
     auto const context_run_size = context_tool_run_size(transcript, index);
     auto const context_heading = context_run_size >= 2 && (index == 0 || !is_context_gathering_tool(transcript[index - 1]));
     layout.content_starts.push_back(layout.lines.size() + (context_heading ? 1 : 0));
-    if (context_heading)
-      block.insert(block.begin(), render_context_tool_group_heading(context_run_size, width));
-    layout.lines.insert(layout.lines.end(), block.begin(), block.end());
+    layout.lines.insert(layout.lines.end(), std::make_move_iterator(block.lines.begin()), std::make_move_iterator(block.lines.end()));
+    layout.presentation_private_rows.insert(layout.presentation_private_rows.end(), block.presentation_private_rows.begin(),
+                                            block.presentation_private_rows.end());
   }
   return layout;
 }
@@ -2630,6 +2721,10 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
   TranscriptItem fragment;
   fragment.label = "ava";
   fragment.meta = streaming_item->meta;
+  // Preserve live-stream identity so long thinking fragments never take the completed
+  // bounded-preview path during incremental tail updates.
+  fragment.stream_id = streaming_item->stream_id;
+  fragment.append_only_stream = streaming_item->append_only_stream;
   if (source_is_thinking)
     fragment.thinking = fragment_source;
   else

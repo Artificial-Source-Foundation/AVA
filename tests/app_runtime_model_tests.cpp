@@ -419,12 +419,16 @@ void test_app_runtime_model_switch_persists_and_reopens()
                                                                    .initial_reasoning_level = std::nullopt,
                                                                    .expected_original_cwd = std::nullopt});
   expect(unlocked_reopened_result.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
-  expect(unlocked_reopened_result.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   if (unlocked_reopened_result)
   {
     ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
     expect(reopened_r->model().provider_id == "anthropic" && reopened_r->model().model_id == "claude-test",
            "runtime reopen restores latest persisted model_change");
+    auto const resumed_unknown_launch_display =
+        ava::agent::SubagentLaunchDisplay::normalized(ava::config::proven_configured_model_display_name(reopened_r->model()));
+    expect(reopened_r->model().display_name == "Claude Test" && ava::config::proven_configured_model_display_name(reopened_r->model()).empty() &&
+               resumed_unknown_launch_display.model_display_name().empty(),
+           "resumed unknown model retains its public fallback label but is omitted from private launch display without process-local provenance");
     auto const emoji_quirk = std::string("\xF0\x9F\x98\x80");
     bool const restored_emoji_quirk = std::ranges::find(reopened_r->model().compatibility_quirks, emoji_quirk) !=
                                       reopened_r->model().compatibility_quirks.end();

@@ -10,7 +10,7 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ## Source Map
 
-- `src/main.cpp`: application entry point, CLI argument handling, OpenAI connect flow, TUI startup, and non-TTY line shell wiring.
+- `src/main.cpp`: thin process entry point that initializes the application and delegates to `ava::app::run`; CLI and frontend orchestration live under `src/ava/app/`.
 - `src/ava/core/`: shared primitives such as `Result<T>`, errors, JSON helpers, descriptor anchors, IDs, and shared Build/Plan mode.
 - `src/ava/config/`: XDG paths, auth storage, model configuration, prompt configuration, and OpenAI OAuth support.
 - `src/ava/http/`: neutral HTTP transport, curl, and retry contract.
@@ -19,9 +19,9 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/agent/`: agent loop, thin tool dispatch/registration/family adapters, user-question plumbing, configurable task subagents, and process-local background job registry.
 - `src/ava/command/`: canonical command planning, classification, policy, environment, and execution metadata.
 - `src/ava/containment/`: Linux Landlock/seccomp command-containment planning and enforcement helpers.
-- `src/ava/app/`: runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), command dispatch, project trust, headless policy, and event adapters.
+- `src/ava/app/`: application entry after `main`, runtime orchestration, CLI/TUI/print/RPC/ACP glue (including `app/acp/`), OpenAI connect flow, non-TTY line shell, command dispatch, project trust, headless policy, and event adapters.
 - `src/ava/permissions/`: backend permission policy, persistent rules, prompts, and decisions.
-- `src/ava/tools/`: built-in file, search, shell, web, LSP, and interaction tools. Keep filesystem and process safety checks here or in clearly permissioned call paths.
+- `src/ava/tools/`: built-in file, search, shell, web, and LSP tools. Keep filesystem and process safety checks here or in clearly permissioned call paths. User-interaction tools such as `question` are registered and dispatched under `src/ava/agent/`.
 - `src/ava/session/`: append-only JSONL session storage, leases/authority, compaction, validation, and session lifecycle helpers.
 - `src/ava/context/`: project/global instruction and skill loading for provider context.
 - `src/ava/mcp/`: stdio MCP config, protocol, client lifecycle, tool/resource/prompt broker, and containment helpers.
@@ -30,14 +30,14 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 - `src/ava/diagnostics/`: sanitized runtime diagnostics, records, and bounded diagnostic artifacts.
 - `src/ava/observability/`: run observers, trace accounting, and deterministic trace validation/scoring.
 - `src/ava/debug/`: optional libcwd-backed debug channels and generated print-member support.
-- `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction.
+- `src/ava/tui/`: custom terminal UI rendering, input handling, runtime glue, and terminal abstraction. Its live subagent workspace consumes only path-free coordinator snapshots and inspector frames; backend session/source authority remains outside TUI code.
 - `src/ava/desktop/`: optional Qt/QML desktop prototype.
 - `tests/`: focused `ava_tests` sources and support fakes, plus CMake/Python CLI, RPC, ACP, package/release, PTY, and TUI integration tests. The split tmux harness is `tests/tui_tmux_smoke.py` plus `tests/tui_tmux_scenarios/`.
 
 ## Internal Ownership Boundaries
 
 - `AgentLoopOptions` uses focused model-invocation, tool-resource, and tool-execution bundles; credentials stay separate, and `ToolContext` remains execution/safety authority.
-- `runtime_prompt` applies `RunOptions` isolation flags when projecting `ExtensionResourcePolicy`: ambient plugin/LSP/subagent resources, global/project MCP discovery, and global/plugin-declared skills stay disabled; explicit session MCP can remain unless `disable_session_mcp` is set.
+- `runtime_prompt` builds `ExtensionResourcePolicy` from the session, then applies `RunOptions` isolation flags while composing the run: ambient plugin/LSP/subagent resources, global/project MCP discovery, and global/plugin-declared skills stay disabled; explicit session MCP can remain unless `disable_session_mcp` is set.
 - Runtime prompt ownership splits across `runtime_prompt_state`, `runtime_prompt_file_references`, `runtime_run_outcomes`, and `runtime_prompt` orchestration.
 - `/trust` and `/reload` orchestration owners are `command_trust` and `command_reload`; persistence remains `project_trust`.
 - The module dependency guard has zero backend exceptions; do not introduce a new module cycle.
@@ -88,7 +88,7 @@ git --no-pager diff --check
 
 ## Engineering Rules
 
-- Follow `docs/engineering/cpp-safety-rules.md` for C++ work.
+- Follow `docs/development/cpp-safety-rules.md` for C++ work.
 - Use C++23 and CMake.
 - Prefer small modules, narrow interfaces, and explicit ownership.
 - No raw owning pointers, manual `new`, or manual `delete` in application code.
@@ -117,7 +117,7 @@ git --no-pager diff --check
 
 ## TUI And Terminal Testing
 
-- The opt-in tmux suite is 15 isolated `ava_tui.tmux_smoke_*` scenarios dispatched by `tests/tui_tmux_smoke.py` into `tests/tui_tmux_scenarios/`. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 15 -R '^ava_tui\.tmux_smoke_'`.
+- The opt-in tmux suite is 18 isolated `ava_tui.tmux_smoke_*` scenarios dispatched by `tests/tui_tmux_smoke.py` into `tests/tui_tmux_scenarios/`. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 18 -R '^ava_tui\.tmux_smoke_'`.
 - Start TUI verification at the smallest deterministic layer: text wrapping, width calculation, editor state, keybinding dispatch, palette/filter state, event reducers, permission/tool-card formatting, and transcript rendering should be covered by CTest unit tests where possible.
 - For full terminal behavior, use a pseudo-terminal harness rather than plain pipes. A PTY smoke can set `TERM`, rows, columns, and environment variables, start `ava`, send keystrokes or escape sequences, resize the terminal, and assert on captured screen state and process exit.
 - For ncurses-backed behavior, keep `newterm`/RAII lifecycle tests and add real terminal smokes only for behavior that requires a controlling terminal: alternate-screen cleanup, bracketed paste, resize redraw, mouse events, Escape latency, cursor visibility, Unicode cell placement, and terminal-state restoration after cancellation or crash.

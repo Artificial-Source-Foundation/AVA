@@ -3,6 +3,7 @@
 #include "runtime/Session.h"
 
 #include "ava/agent/job_control.h"
+#include "ava/app/command_format.h"
 
 #include <algorithm>
 #include <cctype>
@@ -64,6 +65,177 @@ void add_error(CommandResult& result, ava::core::Error const& error)
   result.output.push_back("jobs: " + error.message());
 }
 
+std::string_view human_execution_state(ava::agent::SubagentExecutionState state) noexcept
+{
+  switch (state)
+  {
+    case ava::agent::SubagentExecutionState::Starting:
+      return "Starting";
+    case ava::agent::SubagentExecutionState::Running:
+      return "Running";
+    case ava::agent::SubagentExecutionState::Completed:
+      return "Completed";
+    case ava::agent::SubagentExecutionState::Failed:
+      return "Failed";
+    case ava::agent::SubagentExecutionState::Canceled:
+      return "Canceled";
+    case ava::agent::SubagentExecutionState::Interrupted:
+      return "Interrupted";
+  }
+  return "Unknown";
+}
+
+std::string_view human_job_mode(ava::agent::SubagentJobMode mode) noexcept
+{
+  switch (mode)
+  {
+    case ava::agent::SubagentJobMode::Foreground:
+      return "Foreground";
+    case ava::agent::SubagentJobMode::Background:
+      return "Background";
+  }
+  return "Unknown";
+}
+
+std::string_view human_delivery_state(ava::agent::SubagentDeliveryState state) noexcept
+{
+  switch (state)
+  {
+    case ava::agent::SubagentDeliveryState::Direct:
+      return "direct delivery";
+    case ava::agent::SubagentDeliveryState::Pending:
+      return "delivery pending";
+    case ava::agent::SubagentDeliveryState::Attempting:
+      return "delivery attempting";
+    case ava::agent::SubagentDeliveryState::Acknowledged:
+      return "delivery acknowledged";
+  }
+  return "delivery unknown";
+}
+
+bool terminal_execution(ava::agent::SubagentExecutionState state) noexcept
+{
+  return state == ava::agent::SubagentExecutionState::Completed || state == ava::agent::SubagentExecutionState::Failed ||
+         state == ava::agent::SubagentExecutionState::Canceled || state == ava::agent::SubagentExecutionState::Interrupted;
+}
+
+std::string display_title_text(ava::agent::SubagentJobSnapshot const& job)
+{
+  if (!job.display_title.empty())
+    return sanitize_inline_text(job.display_title);
+  return {};
+}
+
+std::string primary_job_line(ava::agent::SubagentJobSnapshot const& job)
+{
+  std::string line;
+  line += human_execution_state(job.execution);
+  line += " · ";
+  line += human_job_mode(job.mode);
+  auto const title = display_title_text(job);
+  if (!title.empty())
+  {
+    line += " · ";
+    line += title;
+  }
+  return line;
+}
+
+void append_detail_fragment(std::string& details, std::string_view fragment)
+{
+  if (fragment.empty())
+    return;
+  if (!details.empty())
+    details += " · ";
+  details += fragment;
+}
+
+std::string secondary_job_details(ava::agent::SubagentCoordinatorJobSnapshot const& snapshot, bool include_job_id, bool include_result_content)
+{
+  auto const& job = snapshot.job;
+  std::string details;
+  if (include_job_id)
+    append_detail_fragment(details, "id " + sanitize_inline_text(job.identity.job_id));
+  if (!job.display_subagent_type.empty())
+    append_detail_fragment(details, "type " + sanitize_inline_text(job.display_subagent_type));
+  if (job.tool_calls > 0)
+    append_detail_fragment(details, "tools " + std::to_string(job.tool_calls));
+  if (!job.started_at.empty())
+    append_detail_fragment(details, "started " + sanitize_inline_text(job.started_at));
+  if (job.cancel_requested)
+    append_detail_fragment(details, "cancel requested");
+  if (job.was_promoted)
+    append_detail_fragment(details, "promoted");
+  if (snapshot.timed_out)
+    append_detail_fragment(details, "wait timed out");
+  if (job.delivery != ava::agent::SubagentDeliveryState::Direct)
+    append_detail_fragment(details, human_delivery_state(job.delivery));
+  if (include_result_content && terminal_execution(job.execution))
+  {
+    if (job.execution == ava::agent::SubagentExecutionState::Completed)
+    {
+      auto summary = sanitize_inline_text(job.summary.value_or(""));
+      if (summary.empty())
+        summary = "subagent job completed";
+      append_detail_fragment(details, "result " + summary);
+    }
+    else if (job.execution == ava::agent::SubagentExecutionState::Failed)
+    {
+      auto message = sanitize_inline_text(job.error.value_or("subagent job failed"));
+      if (message.empty())
+        message = "subagent job failed";
+      append_detail_fragment(details, "error " + message);
+    }
+    else if (job.execution == ava::agent::SubagentExecutionState::Canceled)
+      append_detail_fragment(details, "canceled");
+    else if (job.execution == ava::agent::SubagentExecutionState::Interrupted)
+      append_detail_fragment(details, "interrupted");
+  }
+  return details;
+}
+
+std::string format_human_job_list(std::vector<ava::agent::SubagentCoordinatorJobSnapshot> const& snapshots)
+{
+  if (snapshots.empty())
+    return "Jobs: none";
+
+  auto const first = snapshots.size() > ava::agent::kMaxPublicJobListEntries ? snapshots.size() - ava::agent::kMaxPublicJobListEntries : 0;
+  auto const shown = snapshots.size() - first;
+  std::string output = "Jobs (" + std::to_string(shown) + "):";
+  if (first != 0)
+    output += " showing latest " + std::to_string(shown) + " of " + std::to_string(snapshots.size());
+  for (std::size_t index = first; index < snapshots.size(); ++index)
+  {
+    auto const ordinal = index - first + 1;
+    auto const& snapshot = snapshots[index];
+    output += "\n";
+    output += std::to_string(ordinal);
+    output += ". ";
+    output += primary_job_line(snapshot.job);
+    // List rows keep the exact job id secondary so controls remain copyable;
+    // ordinals are display-only and never accepted as control authority.
+    auto const details = secondary_job_details(snapshot, true, false);
+    if (!details.empty())
+    {
+      output += "\n   ";
+      output += details;
+    }
+  }
+  return output;
+}
+
+std::string format_human_job_snapshot(ava::agent::SubagentCoordinatorJobSnapshot const& snapshot, ava::agent::PublicJobContent content)
+{
+  std::string output = primary_job_line(snapshot.job);
+  auto const details = secondary_job_details(snapshot, true, content == ava::agent::PublicJobContent::IncludeTerminalResult);
+  if (!details.empty())
+  {
+    output += "\n  ";
+    output += details;
+  }
+  return output;
+}
+
 }  // namespace
 
 std::optional<std::string_view> active_jobs_command_arguments(std::string_view submitted) noexcept
@@ -99,7 +271,7 @@ ava::core::Result<CommandResult> run_jobs_command(std::shared_ptr<ava::agent::Su
   auto const owner = std::string(parent_session_id);
   if (parts.empty())
   {
-    result.output.push_back(ava::agent::format_public_job_list(coordinator->list(owner)));
+    result.output.push_back(format_human_job_list(coordinator->list(owner)));
     return result;
   }
   auto const action = parts.front();
@@ -148,7 +320,7 @@ ava::core::Result<CommandResult> run_jobs_command(std::shared_ptr<ava::agent::Su
     add_error(result, snapshot.error());
     return result;
   }
-  result.output.push_back(ava::agent::format_public_job_snapshot(*snapshot, content));
+  result.output.push_back(format_human_job_snapshot(*snapshot, content));
   return result;
 }
 

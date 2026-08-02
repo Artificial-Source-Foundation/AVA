@@ -2,18 +2,24 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/event/events.h"
+#include "ava/app/acp/session_update.h"
 #include "ava/app/commands.h"
 #include "ava/app/headless_policy.h"
 #include "ava/app/print_mode.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime_event_adapters.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/agent_loop_session.h"
+#include "ava/agent/message_builder.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/tool_dispatch_services.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/agent/tool_result.h"
 #include "ava/agent/tool_summaries.h"
+#include "ava/agent/tool_timeline.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
@@ -57,6 +63,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1445,7 +1452,13 @@ void test_task_mode_and_job_tool_controls()
     }
   };
   auto state = std::make_shared<WorkerState>();
-  auto started = coordinator->start_background("owner", {.child_session_id = "child_job_tool"}, [state](auto const& context) { return state->run(context); });
+  auto started = coordinator->start(
+      ava::agent::SubagentCoordinatorStartRequest{.parent_session_id = "owner",
+                                                   .mode = ava::agent::SubagentJobMode::Background,
+                                                   .job = {.child_session_id = "child_job_tool"},
+                                                   .launch_display = ava::agent::SubagentLaunchDisplay::normalized(
+                                                       "MODEL_JOB_SENTINEL", std::string_view("REASONING_JOB_SENTINEL"))},
+      [state](auto const& context) { return state->run(context); });
   expect(started.has_value(), "job dispatcher fixture starts owned job");
   if (!started)
     return;
@@ -1468,7 +1481,9 @@ void test_task_mode_and_job_tool_controls()
   expect(list && list->success && list->result_text.find(job_id) != std::string::npos && list->result_text.find("safe terminal summary") == std::string::npos &&
              status && status->success && status->result_text.find("\"state\":\"running\"") != std::string::npos && timed && timed->success &&
              timed->result_text.find("\"timed_out\":true") != std::string::npos && not_ready && !not_ready->success &&
-             not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success,
+             not_ready->result_text.find("\"code\":\"job_not_ready\"") != std::string::npos && duplicate && !duplicate->success &&
+             list->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos && status->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos &&
+             timed->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos && not_ready->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos,
          "job tool shares bounded snapshots, strict parsing, timeout snapshots, and stable not-ready status");
 
   ava::agent::ToolDispatcher other_owner(ava::tools::ToolContext{.workspace_dir = workspace, .session_id = "other"},
@@ -1485,7 +1500,9 @@ void test_task_mode_and_job_tool_controls()
   auto completed = coordinator->wait("owner", job_id, std::chrono::seconds(1));
   auto terminal_result = job_dispatcher.dispatch(
       ava::agent::ProviderToolCall{.id = "job_terminal", .name = "job", .arguments_json = "{\"action\":\"result\",\"job_id\":\"" + job_id + "\"}"});
-  expect(completed && terminal_result && terminal_result->success && terminal_result->result_text.find("safe terminal summary") != std::string::npos,
+  expect(completed && terminal_result && terminal_result->success && terminal_result->result_text.find("safe terminal summary") != std::string::npos &&
+             terminal_result->result_text.find("MODEL_JOB_SENTINEL") == std::string::npos &&
+             terminal_result->result_text.find("REASONING_JOB_SENTINEL") == std::string::npos,
          "job result includes a completed bounded summary only after terminal completion");
 
   auto promoted_state = std::make_shared<WorkerState>();
@@ -1603,6 +1620,258 @@ void test_tool_dispatcher_plan_mode_denies_mutation()
   expect(!std::filesystem::exists(workspace / "main.cpp"), "denied plan mode write does not create source file");
 }
 
+void test_subagent_launch_display_normalization_and_validated_task_callback()
+{
+  auto const normalized = ava::agent::SubagentLaunchDisplay::normalized("  Configured\tModel  ", std::string_view("  high\n"));
+  auto const idempotent =
+      ava::agent::SubagentLaunchDisplay::normalized(normalized.model_display_name(), std::string_view(normalized.reasoning_label()));
+  auto const defaulted = ava::agent::SubagentLaunchDisplay::normalized("");
+  auto const controlled = ava::agent::SubagentLaunchDisplay::normalized("unsafe\x1b[31m", std::string_view("low\x7f"));
+  auto const malformed = ava::agent::SubagentLaunchDisplay::normalized(std::string("\xC3\x28", 2), std::string_view(std::string("\xC2\x9B", 2)));
+  auto const bounded = ava::agent::SubagentLaunchDisplay::normalized(std::string(200, 'm'), std::string_view(std::string(80, 'r')));
+  auto const utf8_bounded = ava::agent::SubagentLaunchDisplay::normalized(std::string(127, 'u') + "\xF0\x9F\x98\x80");
+  expect(normalized.model_display_name() == "Configured Model" && normalized.reasoning_label() == "high" && idempotent == normalized &&
+             defaulted.model_display_name().empty() && defaulted.reasoning_label() == "default" && controlled.model_display_name().empty() &&
+             controlled.reasoning_label() == "default" && malformed.model_display_name().empty() && malformed.reasoning_label() == "default" &&
+             bounded.model_display_name().size() == ava::agent::kMaxSubagentLaunchModelDisplayNameBytes &&
+             bounded.reasoning_label().size() == ava::agent::kMaxSubagentLaunchReasoningLabelBytes && utf8_bounded.model_display_name().size() == 127 &&
+             ava::core::json::is_valid_utf8(utf8_bounded.model_display_name()),
+         "subagent launch display normalization is idempotent, bounded, UTF-8/control-safe, defaulted, and never falls back to ids");
+
+  auto const root = create_empty_root("dispatcher-private-task-launch");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::tools::ToolContext allow_context{
+      .workspace_dir = workspace,
+      .permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  std::vector<ava::agent::SubagentLaunchNotification> notifications;
+  std::size_t runs = 0;
+  ava::agent::ToolDispatchServices services{
+      .task_subagent_runner = [&runs](ava::agent::TaskSubagentRequest const& request) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+        ++runs;
+        return ava::agent::TaskSubagentResult{.task_id = "child",
+                                              .job_id = {},
+                                              .session_path = {},
+                                              .subagent_type = request.subagent_type,
+                                              .state = "completed",
+                                              .final_text = "done",
+                                              .stop_reason = "completed"};
+      },
+      .subagent_launch = {.display = normalized,
+                          .request_id = "request-exact",
+                          .correlation_id = "correlation-exact",
+                          .sink = [&notifications](ava::agent::SubagentLaunchNotification const& notification) { notifications.push_back(notification); }}};
+  ava::agent::ToolDispatcher dispatcher(allow_context, services);
+  auto valid = dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "backend-call-exact", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(valid && valid->success && runs == 1 && notifications.size() == 1 && notifications.front().tool_call_id == "backend-call-exact" &&
+             notifications.front().request_id == "request-exact" && notifications.front().correlation_id == "correlation-exact" &&
+             notifications.front().display == normalized,
+         "validated built-in task callback carries exact backend/request/correlation identity and immutable display");
+
+  auto malformed_task = dispatcher.dispatch(
+      ava::agent::ProviderToolCall{.id = "malformed", .name = "task", .arguments_json = R"({"description":"missing fields"})"});
+  auto similar = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "similar", .name = "task_similar", .arguments_json = "{}"});
+  auto job = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "job", .name = "job", .arguments_json = R"({"action":"list"})"});
+  ava::agent::ToolDispatcher excluded(allow_context, services, ava::agent::ToolVisibilityOptions{.excluded_tools = {"task"}});
+  auto excluded_task = excluded.dispatch(ava::agent::ProviderToolCall{
+      .id = "excluded", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(malformed_task && !malformed_task->success && similar && !similar->success && job && !job->success && excluded_task && !excluded_task->success &&
+             notifications.size() == 1 && runs == 1,
+         "malformed, unknown, similarly named, job, and excluded calls never emit private task launch metadata");
+
+  std::size_t denied_notifications = 0;
+  ava::tools::ToolContext deny_context{
+      .workspace_dir = workspace,
+      .auto_allow_deny_preflight = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Deny;
+      }};
+  auto denied_services = services;
+  denied_services.subagent_launch.sink = [&](auto const&) { ++denied_notifications; };
+  ava::agent::ToolDispatcher denied_dispatcher(deny_context, denied_services);
+  auto denied = denied_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "denied", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+
+  std::size_t failed_notifications = 0;
+  auto failed_services = services;
+  failed_services.task_subagent_runner = [](auto const&) -> ava::core::Result<ava::agent::TaskSubagentResult> {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "start failed"));
+  };
+  failed_services.subagent_launch.sink = [&](auto const&) {
+    ++failed_notifications;
+    throw std::runtime_error("private sink failure");
+  };
+  ava::agent::ToolDispatcher failed_dispatcher(allow_context, failed_services);
+  auto failed = failed_dispatcher.dispatch(ava::agent::ProviderToolCall{
+      .id = "failed", .name = "task", .arguments_json = R"({"description":"work","prompt":"do it","subagent_type":"general"})"});
+  expect(denied && !denied->success && denied_notifications == 1 && failed && !failed->success && failed_notifications == 1 && runs == 1,
+         "valid task permission denial and start failure retain launch metadata while a throwing private sink cannot affect execution");
+}
+
+void test_permission_denial_guidance_provider_only_channel()
+{
+  auto const root = create_empty_root("dispatcher-guidance-channel");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const outside = root / "outside-note.txt";
+  {
+    std::ofstream out(outside, std::ios::binary | std::ios::trunc);
+    out << "outside";
+  }
+
+  constexpr char const* kGuidance = "stay on the sealed workspace path";
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::agent::ToolDispatcher const dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+        denied.user_guidance = kGuidance;
+        return denied;
+      },
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      }});
+
+  auto const path_args = std::string("{\"path\":\"") + ava::core::json::escape(outside.string()) + "\"}";
+  auto denied = dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_guided_read", .name = "read_file", .arguments_json = path_args});
+  expect(denied && !denied->success, "guided provider-tool denial returns a failed ToolDispatchResult");
+
+  expect(denied->provider_user_guidance == kGuidance, "ToolDispatchResult dedicated provider field carries validated guidance");
+  expect(denied->result_text.find(kGuidance) == std::string::npos && denied->result_text.find("user_guidance") == std::string::npos &&
+             denied->result_text.find("provider_user_guidance") == std::string::npos && denied->payload.error_details.find(kGuidance) == std::string::npos &&
+             denied->payload.error_message.find(kGuidance) == std::string::npos && denied->payload.summary.find(kGuidance) == std::string::npos,
+         "guided denial keeps ordinary result_text and ToolResultPayload guidance-free");
+  auto const structured = ava::agent::serialize_tool_result_payload_json(*denied);
+  expect(structured.find(kGuidance) == std::string::npos && structured.find("provider_user_guidance") == std::string::npos,
+         "structured_result serialization never includes provider_user_guidance");
+
+  bool audits_clean = !audits.empty();
+  for (auto const& event : audits)
+  {
+    auto const json = ava::tools::permission_audit_data_json(event);
+    audits_clean = audits_clean && json.find(kGuidance) == std::string::npos && json.find("user_guidance") == std::string::npos &&
+                   json.find("provider_user_guidance") == std::string::npos;
+  }
+  expect(audits_clean, "permission audits remain free of one-shot denial guidance");
+
+  std::optional<ava::session::SessionEntry> persisted;
+  auto append_sink = [&](ava::session::SessionEntry entry) -> ava::core::VoidResult {
+    persisted = std::move(entry);
+    return {};
+  };
+  expect(static_cast<bool>(ava::agent::append_tool_result(append_sink, *denied)), "guided denial persists as a session tool_result");
+  expect(persisted && ava::core::json::string_field(persisted->data_json, "provider_user_guidance") == std::string(kGuidance),
+         "session ToolResult dedicated provider_user_guidance field contains validated guidance");
+  auto const stored_result = ava::core::json::string_field(persisted->data_json, "result").value_or("");
+  auto const stored_structured = ava::core::json::object_field(persisted->data_json, "structured_result").value_or("");
+  expect(stored_result.find(kGuidance) == std::string::npos && stored_structured.find(kGuidance) == std::string::npos,
+         "session ordinary result and structured_result stay guidance-free");
+
+  auto const session_guidance = ava::core::json::string_field(persisted->data_json, "provider_user_guidance").value_or("");
+  auto const reconstructed = ava::permissions::with_provider_user_guidance(stored_result, session_guidance);
+  expect(reconstructed.find(kGuidance) != std::string::npos && reconstructed != stored_result,
+         "reconstructed provider-facing tool-result content includes validated guidance");
+  expect(ava::permissions::with_provider_user_guidance(stored_result, "") == stored_result, "empty guidance leaves unguided provider content bytes unchanged");
+
+  // Minimal valid paired ToolCall/ToolResult sequence exercises the real provider
+  // message builder path (not only the with_provider_user_guidance helper).
+  auto messages = ava::agent::build_provider_messages_from_entries(
+      {ava::session::SessionEntry{.id = "call_entry",
+                                  .parent_id = "",
+                                  .type = ava::session::EntryType::ToolCall,
+                                  .timestamp = "2026-07-29T00:00:02Z",
+                                  .data_json = R"({"call_id":"call_guided_read","name":"read_file","arguments":"{}"})"},
+       *persisted},
+      ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                .model_id = "gpt-test",
+                                                                                .api_family = "openai_responses",
+                                                                                .reasoning_format = "openai_responses",
+                                                                                .supports_tools = true,
+                                                                                .supports_images = false}});
+  expect(static_cast<bool>(messages),
+         messages ? "provider message reconstruction succeeds for paired guided tool result"
+                  : "provider message reconstruction succeeds for paired guided tool result: " + messages.error().format());
+  bool provider_message_content_has_guidance = false;
+  bool provider_content_part_has_guidance = false;
+  if (messages)
+  {
+    for (auto const& message : *messages)
+    {
+      if (message.content.find(kGuidance) != std::string::npos)
+        provider_message_content_has_guidance = true;
+      for (auto const& part : message.content_parts)
+      {
+        if (part.type == ava::provider::ContentPartType::ToolResult && part.text.find(kGuidance) != std::string::npos)
+          provider_content_part_has_guidance = true;
+      }
+    }
+  }
+  expect(provider_message_content_has_guidance && provider_content_part_has_guidance,
+         "rebuilt provider messages and ToolResult content parts contain validated guidance");
+
+  ava::agent::ToolTimelineEntry timeline{.status = ava::agent::ToolTimelineStatus::Error,
+                                         .call_id = denied->call_id,
+                                         .name = denied->name,
+                                         .argument_summary = "read",
+                                         .result_summary = denied->payload.summary,
+                                         .arguments_json = "{}"};
+  ava::agent::populate_tool_timeline_metadata(timeline, *denied);
+  expect(timeline.result_json.find(kGuidance) == std::string::npos && timeline.structured_result_json.find(kGuidance) == std::string::npos &&
+             timeline.error_details.find(kGuidance) == std::string::npos,
+         "tool timeline metadata built from dispatch result stays guidance-free");
+
+  auto const runtime_event = ava::app::runtime_event_from_tool_timeline_entry({}, timeline);
+  auto const envelope = ava::event::to_event_envelope(runtime_event);
+  expect(envelope.payload_json.find(kGuidance) == std::string::npos && envelope.payload_json.find("provider_user_guidance") == std::string::npos,
+         "typed RuntimeEvent / RPC-equivalent envelope JSON stays guidance-free");
+
+  ava::app::acp::RuntimeSessionUpdateMapper mapper(ava::app::acp::RuntimeSessionUpdateMapperOptions{.workspace_root = workspace, .message_id = "msg"});
+  auto encoded = mapper.map_and_encode(runtime_event);
+  expect(encoded.has_value(), "ACP mapper encodes tool result events");
+  if (encoded && *encoded)
+  {
+    expect((*encoded)->find(kGuidance) == std::string::npos && (*encoded)->find("provider_user_guidance") == std::string::npos,
+           "ACP session update content built from the timeline stays guidance-free");
+  }
+
+  ava::agent::ToolDispatcher const forged_dispatcher(ava::tools::ToolContext{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied_decision{ava::permissions::PermissionResolution::Deny};
+        denied_decision.user_guidance = "evil\nforged\x01";
+        return denied_decision;
+      }});
+  auto forged = forged_dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_forged", .name = "read_file", .arguments_json = path_args});
+  expect(forged && !forged->success && forged->provider_user_guidance.empty() && forged->result_text.find("evil") == std::string::npos,
+         "invalid forged capture guidance is omitted fail-closed");
+
+  ava::agent::ToolDispatchResult forged_session_result = *denied;
+  forged_session_result.provider_user_guidance = "session\nforged\x7f";
+  std::optional<ava::session::SessionEntry> forged_persisted;
+  auto forged_sink = [&](ava::session::SessionEntry entry) -> ava::core::VoidResult {
+    forged_persisted = std::move(entry);
+    return {};
+  };
+  expect(static_cast<bool>(ava::agent::append_tool_result(forged_sink, forged_session_result)), "forged session guidance still appends the tool_result");
+  expect(forged_persisted && !ava::core::json::string_field(forged_persisted->data_json, "provider_user_guidance"),
+         "invalid forged session guidance is omitted fail-closed on append");
+
+  expect(ava::permissions::with_provider_user_guidance(stored_result, "evil\nforged") == stored_result,
+         "invalid forged session-file guidance is omitted fail-closed on replay");
+
+  auto const injected = ava::permissions::with_provider_user_guidance(R"({"tool":"read_file","ok":false})", kGuidance);
+  expect(injected.find("\"provider_user_guidance\":\"stay on the sealed workspace path\"") != std::string::npos,
+         "controlled JSON field injection places validated guidance for provider replay");
+  auto const unguided_bytes = std::string(R"({"tool":"read_file","ok":false})");
+  expect(ava::permissions::with_provider_user_guidance(unguided_bytes, "bad\nguidance") == unguided_bytes,
+         "invalid guidance leaves unguided provider content bytes unchanged");
+}
+
 }  // namespace
 
 void run_agent_tool_dispatcher_tests()
@@ -1610,7 +1879,9 @@ void run_agent_tool_dispatcher_tests()
   test_tool_dispatcher_plugin_tool_inclusion_control();
   test_tool_dispatcher();
   test_task_persistent_deny_preflight_blocks_runner();
+  test_subagent_launch_display_normalization_and_validated_task_callback();
   test_task_mode_and_job_tool_controls();
   test_empty_worker_services_disable_interactive_tools();
   test_tool_dispatcher_plan_mode_denies_mutation();
+  test_permission_denial_guidance_provider_only_channel();
 }

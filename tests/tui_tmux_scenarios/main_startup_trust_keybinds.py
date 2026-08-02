@@ -17,7 +17,6 @@ from tui_smoke_helpers import (
     tmux,
     wait_for,
     wait_for_absent,
-    wait_for_count,
     wait_for_screen_change,
 )
 from .common import _finish_main, _main_session
@@ -343,14 +342,20 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     keybindings_column = max(1, len(keybindings_row_text) - len(keybindings_row_text.lstrip()) + 4)
     send_literal(tmux_exe, session, f"\x1b[<0;{keybindings_column};{keybindings_row_number}M")
     settings_opened_hotkeys = wait_for(
-        tmux_exe, session, r"Search keybindings|mode_toggle", "settings mouse click opens keybindings view"
+        tmux_exe, session, r"Search keybindings|Toggle build/plan mode|mode_toggle", "settings mouse click opens keybindings view"
     )
     if "Search keybindings" not in settings_opened_hotkeys:
         raise RuntimeError(
             f"settings keybindings row mouse click did not open the active keybindings view\nscreen:\n{settings_opened_hotkeys}"
         )
     send_literal(tmux_exe, session, "cursor_left")
-    wait_for(tmux_exe, session, r"cursor_left", "settings-opened keybindings filtered action")
+    filtered_cursor_left = wait_for(
+        tmux_exe, session, r"Move cursor left|cursor_left", "settings-opened keybindings filtered action"
+    )
+    if "Move cursor left" not in filtered_cursor_left or "cursor_left" not in filtered_cursor_left:
+        raise RuntimeError(
+            f"settings-opened keybindings view did not show human label with machine id for cursor_left\nscreen:\n{filtered_cursor_left}"
+        )
     send_keys(tmux_exe, session, "Enter")
     hotkeys_edit_draft = wait_for(
         tmux_exe, session, r"/keybindings set cursor_left", "settings-opened keybindings drafts selected action"
@@ -654,33 +659,20 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     if "reasoning set to low" not in shift_tab_reasoning and "reasoning low" not in shift_tab_reasoning:
         raise RuntimeError(f"Shift+Tab did not cycle the visible reasoning state\nscreen:\n{shift_tab_reasoning}")
     send_keys(tmux_exe, session, "C-t")
-    send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/thinking")
-    wait_for(tmux_exe, session, r"/thinking", "ctrl-t thinking hide oracle draft")
-    send_keys(tmux_exe, session, "Enter")
-    thinking_hidden_key = wait_for(
-        tmux_exe, session, r"thinking blocks are now visible", "ctrl-t thinking hide oracle"
-    )
-    if "thinking blocks are now visible" not in thinking_hidden_key:
-        raise RuntimeError(f"Ctrl+T did not hide thinking blocks before /thinking restored them\nscreen:\n{thinking_hidden_key}")
-    send_keys(tmux_exe, session, "C-u")
+    thinking_selector = wait_for(tmux_exe, session, r"Select thinking mode", "ctrl-t thinking-mode selector")
+    if "Low" not in thinking_selector or "Esc cancel" not in thinking_selector:
+        raise RuntimeError(f"Ctrl+T did not open the direct thinking-mode selector\nscreen:\n{thinking_selector}")
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"Select thinking mode", "ctrl-t thinking-mode selector canceled")
     send_literal(tmux_exe, session, "/thinking")
     wait_for(tmux_exe, session, r"/thinking", "thinking command hide draft")
     send_keys(tmux_exe, session, "Enter")
-    thinking_hidden_command = wait_for(
-        tmux_exe, session, r"thinking blocks are now hidden", "thinking command hides blocks"
-    )
+    thinking_hidden_command = wait_for(tmux_exe, session, r"thinking blocks are now hidden", "thinking command hides blocks")
     if "thinking blocks are now hidden" not in thinking_hidden_command:
-        raise RuntimeError(f"/thinking did not hide thinking blocks before Ctrl+T show check\nscreen:\n{thinking_hidden_command}")
-    send_keys(tmux_exe, session, "C-t")
+        raise RuntimeError(f"/thinking no longer controls thinking-block visibility\nscreen:\n{thinking_hidden_command}")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/thinking")
-    wait_for(tmux_exe, session, r"/thinking", "ctrl-t thinking show oracle draft")
     send_keys(tmux_exe, session, "Enter")
-    thinking_visible_key = wait_for_count(
-        tmux_exe, session, r"thinking blocks are now hidden", 2, "ctrl-t thinking show oracle"
-    )
-    if len(re.findall(r"thinking blocks are now hidden", thinking_visible_key)) < 2:
-        raise RuntimeError(f"Ctrl+T did not show thinking blocks before /thinking hid them again\nscreen:\n{thinking_visible_key}")
+    wait_for(tmux_exe, session, r"thinking blocks are now visible", "thinking command restores visible blocks")
 
     _finish_main(tmux_exe, session)

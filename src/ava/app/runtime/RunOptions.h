@@ -26,7 +26,7 @@ namespace ava::app::runtime {
 // All callback members default to null; run_prompt treats a null permission or question resolver as an error and a null event sink as a no-op.
 struct RunOptions
 {
-  // Caller-supplied correlation ID. run_prompt generates one when absent.
+  // Caller-supplied request identity. run_prompt generates one when absent.
   std::optional<std::string> request_id = std::nullopt;
   std::string access_token;
   std::string credential_type = "bearer";
@@ -48,6 +48,8 @@ struct RunOptions
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   ava::event::RuntimeEventSink event_sink = nullptr;
+  // Private process-local task launch metadata; never enters RuntimeEvent/RPC.
+  ava::agent::SubagentLaunchSink on_subagent_launch = nullptr;
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::agent::QuestionResolver question_resolver = nullptr;
   std::function<bool()> cancel_requested = nullptr;

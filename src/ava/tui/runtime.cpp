@@ -13,10 +13,15 @@
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_submit_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
+#include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
+#include "ava/tui/theme.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -24,6 +29,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -37,6 +44,7 @@ using runtime_input::printable_jump_target;
 using runtime_input::read_curses_input_with_timeout;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_from_answer;
+using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
@@ -49,8 +57,9 @@ using runtime_views::kSettingsReloadKeybindings;
 namespace {
 
 constexpr std::size_t kKeyboardScrollRows = 3;
-constexpr std::size_t kMouseWheelScrollRows = 1;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
+constexpr auto kTerminalBackgroundProbeDeadline = std::chrono::milliseconds(50);
+
 class ComposerTerminalGraphicsGuard
 {
  public:
@@ -61,6 +70,56 @@ class ComposerTerminalGraphicsGuard
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+// Session-scoped OSC 11 detection and startup-input FIFO ownership. Reset before
+// each interactive TUI session and again on every exit so sequential sessions and
+// tests never inherit a prior probe result or queued startup events.
+class TerminalBackgroundDetectionGuard
+{
+ public:
+  TerminalBackgroundDetectionGuard()
+  {
+    disarm_terminal_background_response_handler();
+    reset_detected_terminal_background_appearance();
+    runtime_input::clear_startup_input_queue();
+  }
+
+  TerminalBackgroundDetectionGuard(TerminalBackgroundDetectionGuard const&) = delete;
+  TerminalBackgroundDetectionGuard& operator=(TerminalBackgroundDetectionGuard const&) = delete;
+
+  ~TerminalBackgroundDetectionGuard()
+  {
+    disarm_terminal_background_response_handler();
+    reset_detected_terminal_background_appearance();
+    runtime_input::clear_startup_input_queue();
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+std::optional<std::string_view> optional_environment_view(char const* name)
+{
+  auto const* value = std::getenv(name);
+  if (value == nullptr)
+    return std::nullopt;
+  return std::string_view(value);
+}
+
+void maybe_probe_terminal_background_appearance()
+{
+  if (!tui_theme_needs_terminal_background_probe())
+    return;
+
+  auto const tmux = optional_environment_view("TMUX");
+  auto const term = optional_environment_view("TERM");
+  if (!terminal_background_probe_environment_allows_query(tmux, term))
+    return;
+
+  arm_terminal_background_response_handler();
+  if (write_terminal_background_query(stdout))
+    runtime_input::drain_startup_probe_input(kTerminalBackgroundProbeDeadline);
+  disarm_terminal_background_response_handler();
+}
 
 }  // namespace
 
@@ -91,6 +150,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     return 1;
   }
   ComposerTerminalGraphicsGuard graphics_cleanup;
+  // Probe the direct terminal background once after enter and before first paint.
+  // No re-probe on suspend/resume and no late theme flip after presentation starts.
+  TerminalBackgroundDetectionGuard terminal_background_detection;
+  maybe_probe_terminal_background_appearance();
 
   RuntimePresentationState presentation_state(options);
   auto& snapshot = presentation_state.snapshot;
@@ -124,6 +187,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& completion_cache = renderer.completion_cache;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
   [[maybe_unused]] auto permission_resolver = prompt_coordinator.permission_resolver();
@@ -131,7 +195,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto render = [&]() -> bool { return renderer.render(); };
 
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
-  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller);
+  RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
+  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
+                                                   transcript_search, subagent_workspace);
   auto maybe_reload_display_settings = [&]() -> bool { return action_controller.maybe_reload_display_settings(); };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
@@ -140,6 +206,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto cycle_reasoning = [&]() { action_controller.cycle_reasoning(); };
   auto toggle_thinking_visibility = [&]() { action_controller.toggle_thinking_visibility(); };
   auto open_model_selector = [&]() -> bool { return action_controller.open_model_selector(); };
+  auto open_reasoning_selector = [&](bool chained = false) -> bool { return action_controller.open_reasoning_selector(chained); };
   auto open_scoped_model_selector = [&]() -> bool { return action_controller.open_scoped_model_selector(); };
   auto open_session_selector = [&]() -> bool { return action_controller.open_session_selector(); };
   auto cycle_model = [&](bool forward) { action_controller.cycle_model(forward); };
@@ -157,6 +224,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_up = [&](std::size_t amount) { navigation.scroll_up(amount); };
   auto scroll_down = [&](std::size_t amount) { navigation.scroll_down(amount); };
   auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
+  auto toggle_thinking_at = [&](std::size_t item_index) { return navigation.toggle_thinking_at(item_index); };
 
   auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
@@ -164,7 +232,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
   RuntimeSubmitController submit_controller(options, presentation_state, draft_state, renderer, navigation, action_controller, active_run_controller,
-                                            active_select_list);
+                                            transcript_search, subagent_workspace, active_select_list);
   auto handle_submit = [&](std::optional<std::string> forced_submission = std::nullopt) {
     auto const outcome = submit_controller.submit(std::move(forced_submission));
     terminal_write_failed = outcome.terminal_write_failed;
@@ -183,7 +251,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       terminal_write_failed = true;
       break;
     }
+    auto const input_poll_started_at = std::chrono::steady_clock::now();
+    if (subagent_workspace.poll(input_poll_started_at) && !renderer.request_render())
+    {
+      terminal_write_failed = true;
+      break;
+    }
     auto input_poll_delay = kIdleInputPollDelay;
+    if (auto workspace_wait = subagent_workspace.time_until_poll(input_poll_started_at))
+      input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(*workspace_wait));
     if (renderer.has_pending_render())
     {
       input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(renderer.time_until_pending_render()));
@@ -191,6 +267,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const maybe_input = read_curses_input_with_timeout(input_poll_delay);
     if (!maybe_input)
     {
+      if (subagent_workspace.poll() && !renderer.request_render())
+      {
+        terminal_write_failed = true;
+        break;
+      }
       if (!renderer.flush_pending_render_if_due() || !maybe_reload_display_settings())
       {
         terminal_write_failed = true;
@@ -218,6 +299,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     if (input.resize)
     {
       renderer.wheel_governor.reset();
+      transcript_search.refresh_after_resize();
       if (!render())
       {
         terminal_write_failed = true;
@@ -227,11 +309,32 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (!runtime_wheel_input_accepted(renderer.wheel_governor, input.event.key))
       continue;
+    if (subagent_workspace.active())
+    {
+      auto const handled = subagent_workspace.handle_input(input.event);
+      if (handled.beep)
+        static_cast<void>(beep());
+      if (handled.changed && !renderer.request_render())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
     clear_reasoning_feedback_for_user_input(snapshot);
+    if (auto handled = transcript_search.handle_input(input.event))
+    {
+      if (!*handled)
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
     if (snapshot.select_list)
     {
       auto input_result = [&]() {
-        if (input.event.key == Key::MouseLeftClick)
+        if (input.event.key == Key::MouseLeftPress || input.event.key == Key::MouseLeftClick)
         {
           if (auto const clicked = select_list_selection_for_screen_position(snapshot, input.event.mouse_row, input.event.mouse_column))
           {
@@ -332,20 +435,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       };
       auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool announce) {
         auto status = state.status;
-        snapshot.transcript.clear();
-        ++snapshot.transcript_generation;
-        draft_state.clear_selection();
-        reset_composer_draft(draft);
-        jump_mode = ComposerJumpMode::None;
-        draft_input.clear();
-        history_index.reset();
-        apply_runtime_state_snapshot(std::move(state));
+        static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state, draft_state, renderer, transcript_search,
+                                                                                    subagent_workspace, std::move(state)));
         if (announce && !status.empty())
         {
           push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
         }
-        transcript_scroll_offset = 0;
-        draft_scroll_offset = 0;
       };
       if (input_result.action == SelectListInputAction::Redraw && snapshot.select_list)
       {
@@ -684,7 +779,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         session_archive_confirmation.reset();
         if (input_result.action == SelectListInputAction::Cancel)
         {
-          snapshot.status = "view canceled";
+          snapshot.status = resolved_list == ActiveSelectList::Reasoning ? "thinking mode unchanged" : "view canceled";
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsOpenModels)
         {
@@ -767,6 +862,26 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (selected)
           {
             apply_runtime_state_snapshot(std::move(*selected));
+            if (!open_reasoning_selector(true))
+            {
+              terminal_write_failed = true;
+              break;
+            }
+          }
+          else
+          {
+            snapshot.status = selected.error().format();
+            static_cast<void>(beep());
+          }
+        }
+        else if (resolved_list == ActiveSelectList::Reasoning && options.on_reasoning_selected)
+        {
+          auto level = selected_value == "default" ? std::optional<std::string>{} : std::optional<std::string>{selected_value};
+          auto selected =
+              dispatch_tui_selector_authority(snapshot, "setting thinking mode…", render, [&]() { return options.on_reasoning_selected(std::move(level)); });
+          if (selected)
+          {
+            apply_runtime_state_snapshot(std::move(*selected));
           }
           else
           {
@@ -786,6 +901,51 @@ int run_interactive_composer(TuiRuntimeOptions options)
             snapshot.status = selected.error().format();
             static_cast<void>(beep());
           }
+        }
+        else if (resolved_list == ActiveSelectList::ForkUserTurn && options.on_fork_user_turn_selected)
+        {
+          auto const presentation_session_id = snapshot.session_id;
+          auto const presentation_session_path = presentation_state.sidebar.session_path;
+          UserTurnForkSelectionDecision decision;
+          if (selected_value.empty())
+          {
+            decision =
+                evaluate_fork_user_turn_selection(selected_value, presentation_session_id, presentation_session_path, options.on_fork_user_turn_selected);
+          }
+          else
+          {
+            // Paint truthful pending authority status before the blocking fork
+            // callback, matching other session-open selectors.
+            snapshot.status = "forking session…";
+            if (!render())
+            {
+              terminal_write_failed = true;
+              break;
+            }
+            decision =
+                evaluate_fork_user_turn_selection(selected_value, presentation_session_id, presentation_session_path, options.on_fork_user_turn_selected);
+          }
+          if (decision.action == UserTurnForkSelectionAction::ApplyOpenedSession && decision.opened_snapshot)
+          {
+            // Same transition boundary as session open: clear the prior
+            // transcript only when session identity actually changed.
+            apply_opened_session_snapshot(std::move(*decision.opened_snapshot), true);
+          }
+          else
+          {
+            snapshot.status = std::move(decision.status);
+            if (decision.beep)
+              static_cast<void>(beep());
+          }
+        }
+        else if (resolved_list == ActiveSelectList::CopyUserTurn && options.on_read_user_turn_text)
+        {
+          auto decision = evaluate_copy_user_turn_selection(selected_value, options.on_read_user_turn_text, copy_text_to_terminal_clipboard);
+          snapshot.status = decision.status;
+          push_transcript(snapshot, TranscriptItem{.label = decision.transcript_label, .text = snapshot.status});
+          transcript_scroll_offset = 0;
+          if (decision.beep)
+            static_cast<void>(beep());
         }
         else if (resolved_list == ActiveSelectList::Settings && options.on_settings_selected)
         {
@@ -1104,6 +1264,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       path_completion_force_active = false;
       static_cast<void>(draft_state.copy_selection(snapshot));
     }
+    else if (is_action(TuiAction::CopySelection) && renderer.has_transcript_selection())
+    {
+      pending_escape_clear = false;
+      path_completion_force_active = false;
+      static_cast<void>(renderer.copy_transcript_selection());
+    }
     else if (is_action(TuiAction::ClearInput) && (!draft.text.empty() || !is_action(TuiAction::Interrupt)))
     {
       pending_escape_clear = false;
@@ -1178,6 +1344,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       cycle_reasoning();
     }
+    else if (is_action(TuiAction::ReasoningSelect))
+    {
+      pending_escape_clear = false;
+      if (!open_reasoning_selector())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+    }
     else if (is_action(TuiAction::ThinkingToggle))
     {
       pending_escape_clear = false;
@@ -1246,74 +1421,96 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (event.key == Key::MouseWheelUp)
     {
-      scroll_up(kMouseWheelScrollRows);
+      scroll_up(kTranscriptWheelScrollRows);
     }
     else if (event.key == Key::MouseWheelDown)
     {
-      scroll_down(kMouseWheelScrollRows);
+      scroll_down(kTranscriptWheelScrollRows);
     }
-    else if (event.key == Key::MouseLeftClick)
-    {
-      renderer.synchronize_detached_transcript_layout();
-      pending_escape_clear = false;
-      if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_slash_command();
-      }
-      else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
-                                                                                                        completion_cache, snapshot.file_references_generation))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_file_reference();
-      }
-      else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(snapshot, event.mouse_row, event.mouse_column,
-                                                                                                         completion_cache, snapshot.file_references_generation))
-      {
-        draft_state.clear_selection();
-        selected_slash_command_index = *clicked;
-        select_path_completion();
-      }
-      else if (auto const tool_index = detail::transcript_tool_card_header_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        static_cast<void>(toggle_tool_details_at(*tool_index));
-      }
-      else if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
-      {
-        draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
-        draft_selection_anchor = draft.cursor;
-        draft_selection_cursor = draft.cursor;
-        draft.vertical_column = std::string::npos;
-        draft.yank_start = std::string::npos;
-        draft.yank_end = std::string::npos;
-        history_index.reset();
-        draft_input.clear();
-        snapshot.status = "cursor moved";
-      }
-    }
-    else if (event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease)
+    else if (event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick || event.key == Key::MouseLeftDrag || event.key == Key::MouseLeftRelease ||
+             event.key == Key::MousePointerCancel)
     {
       pending_escape_clear = false;
-      if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+      auto const begins_click = event.key == Key::MouseLeftPress || event.key == Key::MouseLeftClick;
+      bool palette_claimed = false;
+      if (begins_click)
       {
-        auto const next_cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
-        if (draft_selection_anchor == std::string::npos)
-          draft_selection_anchor = clamp_composer_draft_cursor_to_atomic_boundary(draft, draft.cursor);
-        draft_selection_cursor = next_cursor;
-        draft.cursor = next_cursor;
-        draft.vertical_column = std::string::npos;
-        draft.yank_start = std::string::npos;
-        draft.yank_end = std::string::npos;
-        history_index.reset();
-        draft_input.clear();
-        snapshot.status = draft_state.selection_bounds() ? "selection active" : "cursor moved";
+        if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_slash_command();
+          palette_claimed = true;
+        }
+        else if (auto const clicked = detail::file_reference_palette_selection_for_screen_position_cached(
+                     snapshot, event.mouse_row, event.mouse_column, completion_cache, snapshot.file_references_generation))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_file_reference();
+          palette_claimed = true;
+        }
+        else if (auto const clicked = detail::path_completion_palette_selection_for_screen_position_cached(
+                     snapshot, event.mouse_row, event.mouse_column, completion_cache, snapshot.file_references_generation))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          selected_slash_command_index = *clicked;
+          select_path_completion();
+          palette_claimed = true;
+        }
+      }
+      if (!palette_claimed)
+      {
+        auto const transcript_mouse = renderer.handle_transcript_selection_mouse(event, toggle_tool_details_at, toggle_thinking_at);
+        if (transcript_mouse == TranscriptSelectionMouseResult::Ignored)
+        {
+          if (begins_click)
+          {
+            if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+            {
+              renderer.clear_transcript_selection();
+              draft.cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
+              draft_state.clear_selection();
+              if (event.key == Key::MouseLeftPress)
+              {
+                draft_selection_anchor = draft.cursor;
+                draft_selection_cursor = draft.cursor;
+                draft_state.mouse_selecting = true;
+              }
+              draft.vertical_column = std::string::npos;
+              draft.yank_start = std::string::npos;
+              draft.yank_end = std::string::npos;
+              history_index.reset();
+              draft_input.clear();
+              snapshot.status = "cursor moved";
+            }
+          }
+          else if (draft_state.mouse_selecting)
+          {
+            if (auto const cursor = composer_input_cursor_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+            {
+              auto const next_cursor = clamp_composer_draft_cursor_to_atomic_boundary(draft, *cursor);
+              draft_selection_cursor = next_cursor;
+              draft.cursor = next_cursor;
+              draft.vertical_column = std::string::npos;
+              draft.yank_start = std::string::npos;
+              draft.yank_end = std::string::npos;
+              history_index.reset();
+              draft_input.clear();
+              snapshot.status = draft_state.selection_bounds() ? "selection active" : "cursor moved";
+            }
+            if (event.key == Key::MouseLeftRelease)
+              draft_state.mouse_selecting = false;
+          }
+        }
       }
     }
     else if (draft_state.extend_selection_for_key(event.key, snapshot))
     {
-      // Selection state was updated by the helper.
+      renderer.clear_transcript_selection();
     }
     else if (event.key == Key::CtrlHome)
     {
@@ -1558,6 +1755,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (draft_state.selection_bounds())
       {
         draft_state.clear_selection();
+        pending_escape_clear = false;
+        snapshot.status.clear();
+      }
+      else if (renderer.has_transcript_selection())
+      {
+        renderer.clear_transcript_selection();
         pending_escape_clear = false;
         snapshot.status.clear();
       }

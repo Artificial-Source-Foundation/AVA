@@ -22,8 +22,10 @@ enum class PublicJobContent
 };
 
 // Public, protocol-neutral job DTO serialization. These functions are the only
-// model/slash/RPC serialization boundary for coordinator state. They never
-// expose paths, coordinator diagnostics, prompts, or provider/tool context.
+// model-tool/RPC serialization boundary for coordinator state. Interactive
+// /jobs human text is formatted separately in command_jobs and must not change
+// these schemas. They never expose paths, coordinator diagnostics, prompts,
+// provider/tool context, or process-local display_title/display_subagent_type.
 [[nodiscard]] std::string public_job_snapshot_json(SubagentCoordinatorJobSnapshot const& snapshot,
                                                    PublicJobContent content = PublicJobContent::OmitTerminalContent);
 [[nodiscard]] std::string public_job_list_json(std::vector<SubagentCoordinatorJobSnapshot> const& snapshots);

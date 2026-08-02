@@ -68,6 +68,17 @@ struct ToolProgressEvent
 
 using ToolProgressSink = std::function<ava::core::VoidResult(ToolProgressEvent const&)>;
 
+// Per-dispatch capture for validated one-shot denial guidance. Owned through
+// ToolContext so parallel dispatch_with_context calls remain independent and
+// race-free. Direct app command contexts leave this null and discard guidance.
+struct PermissionDenialGuidanceCapture
+{
+  std::string provider_user_guidance = {};
+
+  // Guidance text must never appear in debug/log representations.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct ToolContext
 {
   std::filesystem::path workspace_dir;
@@ -119,6 +130,9 @@ struct ToolContext
   // data and must not cross the trace boundary.
   std::string trace_call_id = {};
   std::shared_ptr<std::vector<std::string>> permission_request_ids = nullptr;
+  // Independent per-dispatch capture installed by ToolDispatcher. shared_ptr
+  // debug printing only emits the pointer identity, never the guidance text.
+  std::shared_ptr<PermissionDenialGuidanceCapture> permission_denial_guidance_capture = nullptr;
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::filesystem::path plugin_global_plugins_dir = {};

@@ -1012,6 +1012,80 @@ void test_session_read_authority_retains_runtime_policy()
          "exact policy");
 }
 
+void test_session_read_authority_identity_fingerprint_and_clamp()
+{
+  auto const root = create_empty_root("session-read-authority-fingerprint");
+  auto const workspace = root / "workspace";
+  auto const sessions = root / "sessions";
+  std::filesystem::create_directories(workspace);
+
+  auto entry = [](std::string id, std::string text) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::UserMessage,
+                                      .timestamp = ava::session::now_timestamp(),
+                                      .data_json = "{\"text\":\"" + text + "\"}"};
+  };
+
+  auto const policy = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 2};
+  ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "fp-persistent"});
+  auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
+  expect(lease.has_value(), "fingerprint fixture acquires lease");
+  if (!lease)
+    return;
+  expect(store.append(*lease, entry("one", "first")).has_value(), "fingerprint fixture seeds history");
+
+  auto authority = ava::session::SessionReadAuthority::create_persistent(store, *lease, policy);
+  expect(authority && authority->active() && !authority->is_ephemeral() && authority->session_id() == "fp-persistent",
+         "persistent authority exposes session identity and ephemeral=false");
+  if (!authority)
+    return;
+
+  auto first_fp = authority->content_fingerprint();
+  expect(first_fp && !first_fp->ephemeral && first_fp->size > 0, "persistent fingerprint is lease-bound and non-empty");
+  auto same_fp = authority->content_fingerprint();
+  expect(first_fp && same_fp && *first_fp == *same_fp, "unchanged persistent content keeps an equal fingerprint");
+
+  // Wider request limits must clamp to the embedded policy and never load a third entry.
+  auto wide = ava::session::SessionReadLimits{.max_file_bytes = 8U * 1024U * 1024U, .max_line_bytes = 1024U * 1024U, .max_entries = 1000};
+  expect(store.append(*lease, entry("two", "second")).has_value(), "fingerprint fixture appends second entry");
+  expect(store.append(*lease, entry("three", "third")).has_value(), "fingerprint fixture appends third entry");
+  auto clamped = authority->load_bounded(wide);
+  expect(!clamped, "load_bounded clamps max_entries to the authority policy and rejects growth beyond it");
+
+  auto tighter = ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1};
+  auto narrowed = authority->load_bounded(tighter);
+  // With max_entries=1 effective, visiting stops... actually visit loads all and fails if count exceeds.
+  // Session store rejects when entries.size() > max_entries for ephemeral; for persistent it fails during visit when count exceeds.
+  // With 3 entries and max_entries=1, load should fail.
+  expect(!narrowed, "load_bounded honors a tighter caller max_entries without widening");
+
+  auto after_append_fp = authority->content_fingerprint();
+  expect(first_fp && after_append_fp && *first_fp != *after_append_fp, "persistent fingerprint changes after durable appends");
+
+  auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace);
+  expect(ephemeral.has_value(), "ephemeral fingerprint fixture creates store");
+  if (!ephemeral)
+    return;
+  auto ephemeral_authority = ava::session::SessionReadAuthority::create_ephemeral(*ephemeral, policy);
+  expect(ephemeral_authority && ephemeral_authority->is_ephemeral() && !ephemeral_authority->session_id().empty(),
+         "ephemeral authority exposes identity and ephemeral=true");
+  if (!ephemeral_authority)
+    return;
+  auto empty_fp = ephemeral_authority->content_fingerprint();
+  expect(ephemeral->append_ephemeral(entry("e1", "ephemeral")).has_value(), "ephemeral fingerprint fixture appends");
+  auto filled_fp = ephemeral_authority->content_fingerprint();
+  expect(empty_fp && filled_fp && empty_fp->ephemeral && filled_fp->ephemeral && *empty_fp != *filled_fp && filled_fp->entry_count == 1,
+         "ephemeral fingerprint tracks shared in-memory tip changes");
+
+  auto eph_clamped = ephemeral_authority->load_bounded(wide);
+  expect(eph_clamped && eph_clamped->size() == 1, "ephemeral load_bounded serves content under clamped policy");
+  expect(ephemeral->append_ephemeral(entry("e2", "two")).has_value(), "ephemeral grows to policy edge");
+  expect(ephemeral->append_ephemeral(entry("e3", "three")).has_value(), "ephemeral exceeds policy edge");
+  auto eph_over = ephemeral_authority->load_bounded(wide);
+  expect(!eph_over, "ephemeral load_bounded never widens past the authority max_entries policy");
+}
+
 void test_session_append_authority_and_commit_state()
 {
   auto const root = create_empty_root("session-append-authority");

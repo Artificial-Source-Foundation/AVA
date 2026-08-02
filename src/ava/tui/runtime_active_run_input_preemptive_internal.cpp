@@ -18,6 +18,15 @@
 namespace ava::tui {
 using runtime_input::printable_jump_target;
 
+detail::ActiveRunCancelDisposition detail::active_run_cancel_disposition(bool has_draft_selection, bool has_transcript_selection) noexcept
+{
+  if (has_draft_selection)
+    return ActiveRunCancelDisposition::ClearDraftSelection;
+  if (has_transcript_selection)
+    return ActiveRunCancelDisposition::ClearTranscriptSelection;
+  return ActiveRunCancelDisposition::RequestStop;
+}
+
 // Sidebar drawer, jump mode, cancel/copy/interrupt/exit, character/selection
 // and CtrlHome/CtrlEnd. These preempt all draft, completion, and view input.
 RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_preemptive_input(RuntimeActiveRunState& state,
@@ -66,12 +75,30 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
   }
   if (active_event.key == Key::Escape || is_action(active_event, TuiAction::Cancel))
   {
-    return to_input_handling(request_stop(state));
+    switch (detail::active_run_cancel_disposition(draft_state.selection_bounds().has_value(), renderer_.has_transcript_selection()))
+    {
+      case detail::ActiveRunCancelDisposition::ClearDraftSelection:
+        draft_state.clear_selection();
+        snapshot.status.clear();
+        return to_input_handling(renderer_.request_render());
+      case detail::ActiveRunCancelDisposition::ClearTranscriptSelection:
+        renderer_.clear_transcript_selection();
+        snapshot.status.clear();
+        return to_input_handling(renderer_.request_render());
+      case detail::ActiveRunCancelDisposition::RequestStop:
+        return to_input_handling(request_stop(state));
+    }
   }
   if (is_action(active_event, TuiAction::CopySelection) && draft_state.selection_bounds())
   {
     pending_escape_clear = false;
     static_cast<void>(draft_state.copy_selection(snapshot));
+    return to_input_handling(renderer_.request_render());
+  }
+  if (is_action(active_event, TuiAction::CopySelection) && renderer_.has_transcript_selection())
+  {
+    pending_escape_clear = false;
+    static_cast<void>(renderer_.copy_transcript_selection());
     return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::Interrupt))
@@ -98,6 +125,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
   }
   if (draft_state.extend_selection_for_key(active_event.key, snapshot))
   {
+    renderer_.clear_transcript_selection();
     return to_input_handling(renderer_.request_render());
   }
   if (active_event.key == Key::CtrlHome || active_event.key == Key::CtrlEnd)
@@ -286,6 +314,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_act
   }
   if (is_action(active_event, TuiAction::MessageFollowUp))
   {
+    renderer_.clear_transcript_selection();
     return to_input_handling(queue_active_draft(state, true));
   }
   if (is_action(active_event, TuiAction::Submit))
@@ -294,6 +323,7 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_act
       return to_input_handling(*handled);
     if (active_event.key == Key::Enter && draft_state.convert_backslash_enter_to_newline(snapshot))
       return to_input_handling(renderer_.request_render());
+    renderer_.clear_transcript_selection();
     if (auto handled = run_active_command(state))
       return to_input_handling(*handled);
     return to_input_handling(queue_active_draft(state, false));

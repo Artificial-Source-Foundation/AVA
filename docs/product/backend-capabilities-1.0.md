@@ -1,6 +1,6 @@
 # Backend Capabilities At 1.0 Baseline
 
-This checklist tracks the backend capabilities AVA declares for the 1.0 baseline. `docs/roadmap/backend.md` owns sequencing; this file exists so product docs have one status view. In this file, MVP and 1.0 mean the same capability cut; post-MVP means 1.1 and later. The current backend-only 1.1 candidate list lives in `docs/product/capabilities-1.1.md`.
+This checklist tracks the backend capabilities AVA declares for the 1.0 baseline. `docs/roadmap/backend.md` owns sequencing; this file exists so product docs have one status view. In this file, MVP and 1.0 mean the same capability cut; post-MVP means 1.1 and later. The current backend-only 1.1 candidate list lives in `docs/plans/capabilities-1.1.md`.
 
 Status legend: `Done` means implemented with regression coverage, `Partial` means a foundation exists but 1.0 behavior is incomplete, `Planned` means required or desired work that is not implemented yet, and `Deferred` means outside the 1.0 cut but retained on the 1.1+ roadmap.
 

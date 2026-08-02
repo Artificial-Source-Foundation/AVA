@@ -174,9 +174,18 @@ void run_tui_modal_tests_part_2()
                                           visible.find("(2/2)") == std::string::npos;
                                  }) &&
              std::ranges::any_of(palette, [](std::string const& line) { return line.find("\x1b[1m/glob") != std::string::npos; }) &&
+             std::ranges::any_of(palette,
+                                 [](std::string const& line) {
+                                   return line.find("/glob") != std::string::npos && line.find("\x1b[48;2;26;31;46m") != std::string::npos;
+                                 }) &&
+             std::ranges::any_of(palette,
+                                 [](std::string const& line) {
+                                   return strip_sgr(line).starts_with("│  /g") && line.find("\x1b[49m") != std::string::npos &&
+                                          line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+                                 }) &&
              std::ranges::none_of(palette, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }) &&
              std::ranges::none_of(palette, [](std::string const& line) { return line.find("/help") != std::string::npos; }),
-         "tui renders filtered slash-command palette with composer-integrated selected item highlight");
+         "tui renders filtered slash-command palette with elevated composer surface while the draft dock stays on the screen background");
   auto const suppressed_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                        .provider = "openai",
                                                                                        .model = "gpt-5.5",

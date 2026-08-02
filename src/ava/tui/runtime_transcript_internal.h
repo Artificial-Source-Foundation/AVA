@@ -26,22 +26,38 @@ struct CappedTranscriptSnapshotUpdate
 
 namespace runtime_transcript {
 
+// Conservative raw clipboard text ceiling for OSC 52 copies. Empty or larger
+// inputs are rejected (no silent truncation) so terminals never receive an
+// unbounded paste payload through AVA's direct plain OSC 52 path.
+inline constexpr std::size_t kMaxTerminalClipboardTextBytes = 65'536;  // 64 KiB
+
 [[nodiscard]] std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot,
                                                       std::optional<std::chrono::steady_clock::duration> elapsed = std::nullopt);
 void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible = true);
-void push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
+std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
 [[nodiscard]] std::string base64_encode(std::string_view text);
+// Pure OSC 52 sequence builder: ESC ] 52 ; c ; <base64> ST (ESC \). Returns
+// nullopt for empty or oversized text and never truncates. No tmux DCS wrap.
+[[nodiscard]] std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view text);
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
 [[nodiscard]] std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript);
 [[nodiscard]] std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript);
 void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript);
+// Capture/carry completed thinking expansion by exact transcript index ownership.
+// capture records only currently-true flags; carry clears destination expansion then
+// writes only those true indices (after item_index_shift remap). Captured current-UI
+// expansion is authoritative after apply_capped_transcript_snapshot so submitted-prefix
+// stale true flags cannot resurrect a collapse. Never match on content heuristics.
+[[nodiscard]] std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript);
+void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
+                              std::ptrdiff_t item_index_shift);
 [[nodiscard]] std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string diff_transcript_text(std::string_view title, std::string_view diff);
 [[nodiscard]] std::optional<std::string> latest_permission_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answer);
-void push_transcript(ComposerSnapshot& snapshot, TranscriptItem item);
+std::ptrdiff_t push_transcript(ComposerSnapshot& snapshot, TranscriptItem item);
 void push_history(std::vector<std::string>& history, std::string input);
 
 }  // namespace runtime_transcript
@@ -59,5 +75,15 @@ inline std::optional<std::size_t> toggle_latest_matching_tool_details(std::vecto
 {
   return toggle_latest_matching_tool_details(transcript, query, expanded ? ToolPresentation::Expanded : ToolPresentation::Compact);
 }
+
+// Completed thinking that currently renders more than the bounded preview rows.
+// Live append-only pending reasoning is never boundable.
+[[nodiscard]] bool transcript_item_thinking_is_boundable(TranscriptItem const& item, std::size_t width, bool thinking_visible = true);
+// Toggles only the latest completed boundable thinking item. Returns its index.
+[[nodiscard]] std::optional<std::size_t> toggle_latest_boundable_thinking(std::vector<TranscriptItem>& transcript, std::size_t width,
+                                                                          bool thinking_visible = true);
+// Toggles one transcript item when it currently hosts boundable completed thinking.
+[[nodiscard]] bool toggle_thinking_expansion_at(std::vector<TranscriptItem>& transcript, std::size_t item_index, std::size_t width,
+                                                bool thinking_visible = true);
 
 }  // namespace ava::tui

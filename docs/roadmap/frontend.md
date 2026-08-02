@@ -65,12 +65,13 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 15 tmux scenarios:
+Current CTest inventory has 18 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`active_run`, `restore_followup`, `streaming_scroll`, `main_startup_trust_keybinds`,
-`main_models_selectors`, `main_editor_input`, `main_slash_completions`,
-`main_permission_flow`, `main_question_flow`, `main_session_mgmt`, and
-`main_paste_scrollback_attach`; plus four direct PTY CTests:
+`active_run`, `restore_followup`, `streaming_scroll`, `transcript_search`,
+`transcript_selection`, `subagent_workspace`, `main_startup_trust_keybinds`, `main_models_selectors`,
+`main_editor_input`, `main_slash_completions`, `main_permission_flow`,
+`main_question_flow`, `main_session_mgmt`, and `main_paste_scrollback_attach`;
+plus four direct PTY CTests:
 `ava_tui.kitty_image_smoke`, `ava_tui.iterm2_image_smoke`,
 `ava_tui.terminal_lifecycle_smoke`, and `ava_tui.osc8_smoke`.
 
@@ -110,7 +111,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 15 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 18 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -216,7 +217,7 @@ At idle, the composer has one quiet input surface and at most one visual
 boundary or gutter: no nested frame/card, duplicate composer title, persistent
 help row, empty attachment/queue/status row, or open menu. Only the
 draft/placeholder and settled one-line footer persist; that footer may show the
-active model, active conversation-context usage (`ctx N%`, or estimated `ctx ~N` when model-window metadata is unavailable), and the active spinner only. Contextual rows appear
+active model, active conversation-context usage (`ctx count (percent)`, or estimated `ctx ~count` when model-window metadata is unavailable), and a fixed four-cell signal meter while processing. Ordinary draft/status/footer rows inherit terminal-default/`screenBg`; elevated `composerBg` remains for palettes and selectors. Contextual rows appear
 only while populated or relevant and release their rows when empty. These are
 terminal-native layout rules, not a pixel-look requirement.
 
@@ -228,12 +229,12 @@ OpenCode-style convergence:
 1. Plain **Up/Down** scroll transcript history only. They never move or
    replace the composer draft. History and cursor-vertical actions remain
    configurable but are unbound by default.
-2. The composer footer remains minimal: active model, active conversation-context usage, and the
-   active spinner while processing. Do not reintroduce cwd, git, AVA branding,
-   mode, provider, session metadata, cumulative session token usage, instruction-source counts, or reasoning metadata there.
-3. The frontend consumes semantic backend events. It does not create
+2. The composer footer remains minimal: active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and a fixed four-cell signal meter while processing. Do not reintroduce cwd, git, AVA branding,
+   mode, provider, session metadata, cumulative session token usage, instruction-source counts, reasoning metadata, or a spinner glyph there.
+3. Transcript mouse-wheel steps are three rendered rows per accepted event with 40ms same-direction coalescing and immediate reverse; selectors, questions, the sidebar drawer, and selection-edge autoscroll stay one row.
+4. The frontend consumes semantic backend events. It does not create
    renderer-specific backend contracts or reconstruct path/session state.
-4. No broad reusable-component rewrite or heavy terminal dependency is in
+5. No broad reusable-component rewrite or heavy terminal dependency is in
    scope without approval.
 
 ## 5. Priority categories
@@ -481,7 +482,7 @@ green. `git diff --check` and explicit no-index whitespace checks for both new
 roadmap documents also passed.
 
 The F1 review found a task-caused packaged-documentation link mistake:
-`docs/TESTING.md` linked to the historical baseline roadmap document, but
+`docs/operations/testing.md` linked to the historical baseline roadmap document, but
 roadmap documents are not in the package payload. This was not an
 untracked/index condition, and committing would not correct it. The link is
 now an inline source reference to
@@ -778,7 +779,7 @@ Argument completions now carry an optional renderer-only display label. Configur
 
 Disabled command arguments, `@` references, and path candidates are browseable but cannot mutate a draft through Enter, Tab, or mouse. They beep and report a concise command/reference/path disabled status. Explicit forced Tab rejects a single disabled path rather than inserting it. Palette mouse mapping now obtains its first screen row from the composer-owned layout calculation shared with rendering, including alerts, queues, attachments, compositor height, palette viewport, automatic rail main width, and modal/drawer suppression.
 
-During an active run, explicit Tab has the same forced path fallback as idle (bare token, empty token after Space, and slash argument), and active mouse accepts slash/reference/path rows through the shared layout. A single muted contextual row appears only while processing and no palette/prompt/modal owns the dock: it shows `Esc stop` with an empty draft, or first configured queue/follow-up/dequeue key displays with a draft. Queued rows retain `/restore` and use the configured dequeue key when available. The contextual row is reserved by the shared layout and sits above any admitted error, which remains directly above the composer. The footer remains model, optional context count, and spinner only.
+During an active run, explicit Tab has the same forced path fallback as idle (bare token, empty token after Space, and slash argument), and active mouse accepts slash/reference/path rows through the shared layout. A single muted contextual row appears only while processing and no palette/prompt/modal owns the dock: it shows `Esc stop` with an empty draft, or first configured queue/follow-up/dequeue key displays with a draft. Queued rows retain `/restore` and use the configured dequeue key when available. The contextual row is reserved by the shared layout and sits above any admitted error, which remains directly above the composer. The footer remains model, optional active context usage (`ctx count (percent)` or `ctx ~count`), and spinner only.
 
 Test-first checkpoint: before production edits, the new deterministic `display_label` test was compiled with `scripts/build.sh --target ava_tests --jobs 2` and failed red because `SlashCommandArgumentCompletion` had no `display_label` member. After the narrow implementation, focused deterministic coverage passes for label matching/insertion, 80/40 palette priority/bounds, control sanitization, disabled reference/path queries, dock-aware row mapping, and active contextual keys/error placement. The existing trailing-Space, arrows, selector, footer, queue, attachment, and F1/F2 coverage remains in the same focused test. The session completion regression additionally proves a named title is primary while the raw session id is secondary.
 
@@ -1222,11 +1223,11 @@ No optional surface expands the footer or changes default Up/Down behavior.
 **Status: complete — 2026-07-23**
 
 F8 closes the frontend documentation audit. Updated: this roadmap,
-`docs/roadmap/dogfood.md`, `docs/TESTING.md`, `docs/product/mvp-baseline.md`,
-`docs/features.md`,
-`docs/providers.md`, `docs/product/backend-capabilities-1.0.md`,
-`docs/USAGE.md`, and `docs/CONFIG.md`. Verified current with no edit:
-`docs/terminal-setup.md`, `docs/README.md`, and the historical
+`docs/roadmap/dogfood.md`, `docs/operations/testing.md`, `docs/product/mvp-baseline.md`,
+`docs/product/features.md`,
+`docs/core/providers.md`, `docs/product/backend-capabilities-1.0.md`,
+`docs/core/usage.md`, and `docs/core/configuration.md`. Verified current with no edit:
+`docs/operations/terminal-setup.md`, `docs/README.md`, and the historical
 `docs/roadmap/frontend-evidence-baseline.md`.
 
 Present behavior is marked shipped; standalone/deeper diff navigation,
@@ -1237,7 +1238,7 @@ excluded. No live-provider calls were made for this documentation closure.
 
 | Evidence area | Closure record |
 | --- | --- |
-| Renderer/performance | Deterministic `ava_tests.tui_composer` budgets recorded in F6 and `docs/TESTING.md` |
+| Renderer/performance | Deterministic `ava_tests.tui_composer` budgets recorded in F6 and `docs/operations/testing.md` |
 | Real terminal | 14 isolated tmux scenarios with private roots, deadlines, and cleanup |
 | Direct PTY | Kitty transmit/delete, iTerm2 OSC 1337, lifecycle/termios, and OSC8/OSC52 CTests |
 | Manual limits | External pixel quality, fixed 9x18 fallback, and broad screen-reader certification remain explicitly unclaimed |
@@ -1261,7 +1262,7 @@ still below each scenario's 60-second CTest deadline; the final 14-way wave
 passed. Documentation review findings `F8-DOC-001` through `F8-DOC-003` are
 closed: current summaries now state the malformed-v4 and unresolved-tool-pair
 fail-closed boundary, the capability matrix records shipped RPC/TUI attachment
-input, and `docs/TESTING.md` labels the current closure rather than the old
+input, and `docs/operations/testing.md` labels the current closure rather than the old
 59-test checkpoint as latest evidence.
 
 A post-roadmap offline dogfood pass then closed `DGF-001` and `DGF-002`:
@@ -1425,11 +1426,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the fifteen isolated tmux scenarios only when the change touches their
+Run the eighteen isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 15 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 18 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1490,7 +1491,9 @@ The following are not implied by this roadmap:
 | OpenCode is a behavior/quality reference, not source or architecture | Preserved | Compare outcomes only; do not port implementation patterns wholesale |
 | Native C++23/ncursesw and narrow semantic seams | Preserved | Keep rendering out of backend contracts |
 | Plain Up/Down scroll transcript only | Preserved | Do not move or replace drafts; vertical/history actions stay configurable and unbound by default |
-| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx N%` or estimated `ctx ~N`), and active spinner only |
+| Minimal composer footer | Preserved | Show active model, active conversation-context usage (`ctx count (percent)` or estimated `ctx ~count`), and a fixed four-cell signal meter while active; ordinary draft/status/footer rows inherit `screenBg`, while palettes/selectors keep elevated `composerBg` |
+| Transcript wheel step | Preserved | Three rendered rows per accepted transcript wheel event; same-direction 40ms coalescing; immediate reverse; selectors/questions/drawer/selection-edge stay one row |
+| Human labels without authority swap | Preserved | Permission summaries, keybinding help labels, and completion display labels are human-primary; exact `permrule_…`/job/action ids remain hidden insertion/control authority and never yield to ordinals or labels |
 | Ordinary Space completion policy | Preserved | Ordinary Space never opens file/reference completion; explicit Tab may force empty-token path suggestions, while real `@` and path-like prefixes remain valid triggers |
 | Renderer tests plus PTY smokes as current evidence strategy | Preserved | Add a screen model only after demonstrated evidence failure or approval |
 | Responsive sidebar/shell policy | Refreshed by visual dogfood | Disclose actionable activity/modified files from `144x16`, idle metadata from `176x16`, suppress the rail for prompts/selectors, and keep complete `/sidebar` disclosure |
@@ -1528,21 +1531,23 @@ cards retain an actionable human reason, and explicit `/permissions` plus `/copy
 permission` remain the audit surfaces.
 
 Active questions use a distinct configurable background and wrap their full text.
-Routine idle and active-run key, wheel, provider, and spinner repaint requests are
+Routine idle and active-run key, wheel, provider, and signal-meter repaint requests are
 coalesced into 16 ms frames; input state still mutates immediately, full-frame
 requests supersede footer-only requests, draw failures latch, and immediate
-lifecycle/terminal barriers remain synchronous. Same-direction wheel runs mutate
-once per completed frame, reversals remain immediate, detached transcript layouts
-stay frozen during draft-only repaint, and pending assistant/reasoning Markdown is
-not cumulatively parsed before the incremental tail renderer. Nested permission
-and question prompts drain same-direction wheel bursts without swallowing the
-following confirmation input.
+lifecycle/terminal barriers remain synchronous. Transcript wheel accepts three
+rendered rows per event, same-direction bursts coalesce at 40 ms, reversals remain
+immediate, selectors/questions/drawer/selection-edge stay one row, detached
+transcript layouts stay frozen during draft-only repaint, and pending
+assistant/reasoning Markdown is not cumulatively parsed before the incremental tail
+renderer. Nested permission and question prompts drain same-direction wheel bursts
+without swallowing the following confirmation input.
 
 Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 15 isolated scenarios;
-`streaming_scroll` and `active_run` measure idle/streaming flood responsiveness,
-active presentation commands, draft preservation, detached stability, prompt
-wheel ordering, resize synchronization, terminal hygiene, and cleanup.
+The credential-free fake-provider tmux matrix now has 18 isolated scenarios,
+including `transcript_search`, `transcript_selection`, and `subagent_workspace`;
+`streaming_scroll` and `active_run` measure idle/streaming flood responsiveness, active presentation
+commands, draft preservation, detached stability, prompt wheel ordering, resize
+synchronization, terminal hygiene, and cleanup.

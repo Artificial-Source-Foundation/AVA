@@ -2,14 +2,19 @@
 #include "ava/tui/terminal.h"
 
 #include <curses.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 #if !defined(NCURSES_WIDECHAR) || NCURSES_WIDECHAR != 1
 #error "AVA requires ncursesw with wide-character support."
 #endif
 
+#include "ava/tui/theme.h"
 #include "ava/core/error.h"
 
+#include <cctype>
 #include <clocale>
 #include <csignal>
 #include <cstdio>
@@ -22,15 +27,27 @@ namespace ava::tui {
 namespace {
 
 constexpr int kTerminalEscapeDelayMs = 100;
+constexpr std::size_t kOsc11ResponseMaxBytes = 256;
 constexpr std::string_view kKittyKeyboardPushSequence = "\x1b[>5u";
 constexpr std::string_view kKittyKeyboardQuerySequence = "\x1b[>5u\x1b[?u\x1b[c";
 constexpr std::string_view kKittyKeyboardPopSequence = "\x1b[<u";
 constexpr std::string_view kModifyOtherKeysEnableSequence = "\x1b[>4;2m";
 constexpr std::string_view kModifyOtherKeysDisableSequence = "\x1b[>4;0m";
+constexpr std::string_view kTerminalBackgroundQuerySequence = "\x1b]11;?\x1b\\";
 
 sig_atomic_t volatile g_terminal_signal = 0;
 bool g_keyboard_protocol_kitty_response_seen = false;
+bool g_keyboard_protocol_kitty_supported = false;
+bool g_kitty_keyboard_pushed = false;
 bool g_modify_other_keys_enabled = false;
+bool g_modify_other_keys_desired = false;
+bool g_bracketed_paste_enabled = false;
+bool g_mouse_enabled = false;
+bool g_left_mouse_down = false;
+bool g_terminal_background_response_handler_armed = false;
+detail::TerminalSequenceWriter g_terminal_sequence_writer = nullptr;
+detail::TerminalFlushinpHook g_terminal_flushinp_hook = nullptr;
+detail::TerminalTcflushHook g_terminal_tcflush_hook = nullptr;
 struct sigaction g_curses_previous_sigint{};
 struct sigaction g_curses_previous_sigterm{};
 
@@ -70,42 +87,100 @@ void configure_curses_colors()
   static_cast<void>(use_default_colors());
 }
 
-void configure_curses_mouse()
-{
-#ifdef NCURSES_MOUSE_VERSION
-  if (!has_mouse())
-    return;
-  mmask_t previous_mask = 0;
-  mmask_t mask = BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED;
-  static_cast<void>(mousemask(mask, &previous_mask));
-#endif
-}
-
-void set_bracketed_paste(bool enabled)
-{
-  static_cast<void>(std::fputs(enabled ? "\x1b[?2004h" : "\x1b[?2004l", stdout));
-  static_cast<void>(std::fflush(stdout));
-}
+constexpr std::string_view kBracketedPasteEnableSequence = "\x1b[?2004h";
+constexpr std::string_view kBracketedPasteDisableSequence = "\x1b[?2004l";
+constexpr std::string_view kMouseEnableSequence = "\x1b[?1003l\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+constexpr std::string_view kMouseDisableSequence = "\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 void write_terminal_sequence(std::string_view sequence)
 {
+  if (sequence.empty())
+    return;
+  if (g_terminal_sequence_writer != nullptr)
+  {
+    g_terminal_sequence_writer(sequence);
+    return;
+  }
   static_cast<void>(std::fwrite(sequence.data(), 1, sequence.size(), stdout));
   static_cast<void>(std::fflush(stdout));
 }
 
-void push_kitty_keyboard_protocol()
+void reset_ncurses_left_mouse_button_state() noexcept
 {
-  write_terminal_sequence(kKittyKeyboardQuerySequence);
+#ifdef NCURSES_MOUSE_VERSION
+  // Only touch ncurses mouse state when a screen is active. Pure sequence tests
+  // still track ownership without requiring newterm.
+  //
+  // Do not gate on has_mouse(): ncurses reports has_mouse() only after a nonzero
+  // mousemask() initializes the mouse driver. AVA still emits portable
+  // 1000/1002/1006 enables. On direct xterm/Ghostty terminfo (kmous=ESC[<),
+  // ncurses consumes ESC[< as KEY_MOUSE; without mousemask, getmouse() fails and
+  // SGR payloads such as "65;68;12M" leak into the composer as ordinary text.
+  if (stdscr == nullptr)
+    return;
+  if (g_mouse_enabled)
+  {
+    mmask_t previous_mask = 0;
+    // Re-arm the owned mask so any incomplete button-down state is dropped at the
+    // protocol boundary (Shift cancel, disable/rearm, suspend/editor handoff).
+    mmask_t const mask = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED | REPORT_MOUSE_POSITION | BUTTON4_PRESSED | BUTTON5_PRESSED;
+    static_cast<void>(mousemask(0, &previous_mask));
+    static_cast<void>(mousemask(mask, &previous_mask));
+    static_cast<void>(mouseinterval(0));
+  }
+  else
+  {
+    static_cast<void>(mousemask(0, nullptr));
+  }
+#endif
+}
+
+void apply_mouse_enabled(bool enabled) noexcept
+{
+  if (g_mouse_enabled == enabled)
+    return;
+  // A protocol boundary invalidates any incomplete press/drag lifecycle. This
+  // also prevents a motion report after suspend/resume from becoming a drag.
+  g_left_mouse_down = false;
+  // Publish the target enablement before resetting ncurses so re-arm uses the new mask.
+  g_mouse_enabled = enabled;
+  reset_ncurses_left_mouse_button_state();
+  // Keep the portable xterm SGR enable/disable boundary even when ncurses owns
+  // KEY_MOUSE decoding. Multiplexers (tmux kmous=ESC[M) still deliver full SGR
+  // reports to AVA's raw escape parser; direct terminfo needs mousemask above.
+  write_terminal_sequence(enabled ? kMouseEnableSequence : kMouseDisableSequence);
+}
+
+void set_bracketed_paste(bool enabled)
+{
+  if (g_bracketed_paste_enabled == enabled)
+    return;
+  write_terminal_sequence(enabled ? kBracketedPasteEnableSequence : kBracketedPasteDisableSequence);
+  g_bracketed_paste_enabled = enabled;
+}
+
+void push_kitty_keyboard_protocol(bool include_query)
+{
+  // Never grow the Kitty keyboard stack: one AVA-owned push at a time.
+  if (g_kitty_keyboard_pushed)
+    return;
+  write_terminal_sequence(include_query ? kKittyKeyboardQuerySequence : kKittyKeyboardPushSequence);
+  g_kitty_keyboard_pushed = true;
 }
 
 void pop_kitty_keyboard_protocol()
 {
+  if (!g_kitty_keyboard_pushed)
+    return;
   write_terminal_sequence(kKittyKeyboardPopSequence);
+  g_kitty_keyboard_pushed = false;
 }
 
 void reset_keyboard_protocol_negotiation()
 {
   g_keyboard_protocol_kitty_response_seen = false;
+  g_keyboard_protocol_kitty_supported = false;
+  g_modify_other_keys_desired = false;
   g_modify_other_keys_enabled = false;
 }
 
@@ -115,6 +190,7 @@ void enable_modify_other_keys_fallback()
     return;
   write_terminal_sequence(kModifyOtherKeysEnableSequence);
   g_modify_other_keys_enabled = true;
+  g_modify_other_keys_desired = true;
 }
 
 void disable_modify_other_keys_fallback()
@@ -134,6 +210,8 @@ void apply_keyboard_protocol_response_action(KeyboardProtocolResponseAction acti
       break;
     case KeyboardProtocolResponseAction::DisableModifyOtherKeys:
       disable_modify_other_keys_fallback();
+      // Kitty won negotiation: do not re-enable modifyOtherKeys on handoff resume.
+      g_modify_other_keys_desired = false;
       break;
     case KeyboardProtocolResponseAction::None:
       break;
@@ -1067,6 +1145,53 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   return Key::Unknown;
 }
 
+InputEvent normalized_left_mouse_event(bool shift, bool wheel_up, bool wheel_down, bool press, bool release, bool motion, bool clicked, std::size_t column,
+                                       std::size_t row)
+{
+  auto event = key_event(Key::Unknown);
+  if (wheel_up || wheel_down)
+  {
+    // Preserve transcript scrolling even when a terminal reports Shift with a
+    // wheel gesture; Shift ownership only suppresses button selection.
+    event.key = wheel_up ? Key::MouseWheelUp : Key::MouseWheelDown;
+  }
+  else if (shift)
+  {
+    // Shift belongs to terminal-native selection. Cancel AVA pointer ownership so a
+    // later unmodified hover/release cannot extend or toggle an armed interaction.
+    g_left_mouse_down = false;
+    reset_ncurses_left_mouse_button_state();
+    event.key = Key::MousePointerCancel;
+  }
+  else if (clicked)
+  {
+    // ncurses CLICKED is a complete press/release fallback.
+    g_left_mouse_down = false;
+    event.key = Key::MouseLeftClick;
+  }
+  else if (release)
+  {
+    if (g_left_mouse_down)
+      event.key = Key::MouseLeftRelease;
+    g_left_mouse_down = false;
+  }
+  else if (motion && g_left_mouse_down)
+  {
+    event.key = Key::MouseLeftDrag;
+  }
+  else if (press)
+  {
+    g_left_mouse_down = true;
+    event.key = Key::MouseLeftPress;
+  }
+  if (event.key != Key::Unknown)
+  {
+    event.mouse_column = column;
+    event.mouse_row = row;
+  }
+  return event;
+}
+
 std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
 {
   if (!sequence.starts_with("[<") || sequence.size() < 7)
@@ -1081,33 +1206,16 @@ std::optional<InputEvent> sgr_mouse_event(std::string_view sequence)
   auto const row = parse_unsigned_int(sequence, index);
   if (!row || index + 1 != sequence.size() || (sequence[index] != 'M' && sequence[index] != 'm'))
     return std::nullopt;
-  auto key = Key::Unknown;
   auto const button_code = *button;
   auto const final = sequence[index];
   auto const is_motion = (button_code & 32) != 0;
   auto const is_wheel = (button_code & 64) != 0;
+  auto const has_shift = (button_code & 4) != 0;
   auto const base_button = button_code & 3;
-  if (is_wheel && final == 'M')
-  {
-    key = (button_code & 1) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  }
-  else if (final == 'm' && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftRelease;
-  }
-  else if (final == 'M' && is_motion && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftDrag;
-  }
-  else if (final == 'M' && !is_motion && base_button == 0 && !is_wheel)
-  {
-    key = Key::MouseLeftClick;
-  }
-  return InputEvent{.key = key,
-                    .character = '\0',
-                    .text = {},
-                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(*column),
-                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(*row)};
+  return normalized_left_mouse_event(has_shift, is_wheel && final == 'M' && (button_code & 1) == 0, is_wheel && final == 'M' && (button_code & 1) != 0,
+                                     final == 'M' && !is_motion && !is_wheel && base_button == 0, final == 'm' && !is_wheel && base_button == 0,
+                                     final == 'M' && is_motion && !is_wheel && base_button == 0, false, static_cast<std::size_t>(*column),
+                                     static_cast<std::size_t>(*row));
 }
 
 Key sgr_mouse_key(std::string_view sequence)
@@ -1132,31 +1240,13 @@ std::optional<InputEvent> legacy_mouse_event(std::string_view sequence)
   if (button_byte < 32 || column_byte < 32 || row_byte < 32)
     return key_event(Key::Unknown);
   auto const button = static_cast<unsigned int>(button_byte - 32U);
-  auto key = Key::Unknown;
   auto const is_motion = (button & 32U) != 0;
   auto const is_wheel = (button & 64U) != 0;
+  auto const has_shift = (button & 4U) != 0;
   auto const base_button = button & 3U;
-  if (is_wheel)
-  {
-    key = (button & 1U) == 0 ? Key::MouseWheelUp : Key::MouseWheelDown;
-  }
-  else if (base_button == 3U)
-  {
-    key = Key::MouseLeftRelease;
-  }
-  else if (is_motion && base_button == 0U)
-  {
-    key = Key::MouseLeftDrag;
-  }
-  else if (!is_motion && base_button == 0U)
-  {
-    key = Key::MouseLeftClick;
-  }
-  return InputEvent{.key = key,
-                    .character = '\0',
-                    .text = {},
-                    .mouse_column = key == Key::Unknown ? 0U : static_cast<std::size_t>(column_byte - 32U),
-                    .mouse_row = key == Key::Unknown ? 0U : static_cast<std::size_t>(row_byte - 32U)};
+  return normalized_left_mouse_event(has_shift, is_wheel && (button & 1U) == 0, is_wheel && (button & 1U) != 0, !is_motion && !is_wheel && base_button == 0U,
+                                     !is_wheel && base_button == 3U, is_motion && !is_wheel && base_button == 0U, false,
+                                     static_cast<std::size_t>(column_byte - 32U), static_cast<std::size_t>(row_byte - 32U));
 }
 
 Key legacy_mouse_key(std::string_view sequence)
@@ -1188,6 +1278,119 @@ bool is_control_string_complete(std::string_view sequence)
   if (ends_with_string_terminator(sequence))
     return true;
   return sequence.front() == ']' && sequence.find('\a') != std::string_view::npos;
+}
+
+std::optional<int> hex_digit_value(char ch)
+{
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  if (ch >= 'a' && ch <= 'f')
+    return 10 + (ch - 'a');
+  if (ch >= 'A' && ch <= 'F')
+    return 10 + (ch - 'A');
+  return std::nullopt;
+}
+
+std::optional<int> parse_hex_channel(std::string_view text)
+{
+  if (text.empty() || text.size() > 4)
+    return std::nullopt;
+
+  unsigned value = 0;
+  for (char const ch : text)
+  {
+    auto const digit = hex_digit_value(ch);
+    if (!digit)
+      return std::nullopt;
+    value = (value << 4U) | static_cast<unsigned>(*digit);
+  }
+
+  auto const max_value = (1U << (static_cast<unsigned>(text.size()) * 4U)) - 1U;
+  if (max_value == 0)
+    return std::nullopt;
+  return static_cast<int>((value * 255U) / max_value);
+}
+
+std::optional<TerminalBackgroundColor> parse_rgb_slash_color(std::string_view payload, bool allow_alpha)
+{
+  auto const prefix = allow_alpha ? std::string_view("rgba:") : std::string_view("rgb:");
+  if (!payload.starts_with(prefix))
+    return std::nullopt;
+  payload.remove_prefix(prefix.size());
+
+  auto next_component = [&](bool last) -> std::optional<std::string_view> {
+    if (payload.empty())
+      return std::nullopt;
+    if (last)
+    {
+      auto const component = payload;
+      payload = {};
+      return component;
+    }
+    auto const separator = payload.find('/');
+    if (separator == std::string_view::npos)
+      return std::nullopt;
+    auto const component = payload.substr(0, separator);
+    payload.remove_prefix(separator + 1);
+    return component;
+  };
+
+  auto const red_text = next_component(false);
+  auto const green_text = next_component(false);
+  auto const blue_text = next_component(!allow_alpha);
+  if (!red_text || !green_text || !blue_text)
+    return std::nullopt;
+  if (red_text->size() != green_text->size() || green_text->size() != blue_text->size())
+    return std::nullopt;
+
+  auto const red = parse_hex_channel(*red_text);
+  auto const green = parse_hex_channel(*green_text);
+  auto const blue = parse_hex_channel(*blue_text);
+  if (!red || !green || !blue)
+    return std::nullopt;
+
+  if (allow_alpha)
+  {
+    auto const alpha_text = next_component(true);
+    if (!alpha_text || alpha_text->size() != red_text->size() || !parse_hex_channel(*alpha_text))
+      return std::nullopt;
+  }
+
+  if (!payload.empty())
+    return std::nullopt;
+
+  return TerminalBackgroundColor{.red = *red, .green = *green, .blue = *blue};
+}
+
+std::optional<TerminalBackgroundColor> parse_hash_color(std::string_view payload)
+{
+  if (!payload.starts_with('#') || (payload.size() != 7 && payload.size() != 13))
+    return std::nullopt;
+
+  auto const width = payload.size() == 7 ? std::size_t{2} : std::size_t{4};
+  auto const red = parse_hex_channel(payload.substr(1, width));
+  auto const green = parse_hex_channel(payload.substr(1 + width, width));
+  auto const blue = parse_hex_channel(payload.substr(1 + (2 * width), width));
+  if (!red || !green || !blue)
+    return std::nullopt;
+  return TerminalBackgroundColor{.red = *red, .green = *green, .blue = *blue};
+}
+
+std::optional<std::string_view> osc11_payload(std::string_view sequence)
+{
+  if (sequence.size() > kOsc11ResponseMaxBytes || !sequence.starts_with("]11;"))
+    return std::nullopt;
+
+  if (sequence.back() == '\a')
+    return sequence.substr(4, sequence.size() - 5);
+  if (ends_with_string_terminator(sequence))
+    return sequence.substr(4, sequence.size() - 6);
+  return std::nullopt;
+}
+
+int rgb_luminance(TerminalBackgroundColor const& color)
+{
+  return ((color.red * 299) + (color.green * 587) + (color.blue * 114)) / 1000;
 }
 
 }  // namespace
@@ -1280,10 +1483,7 @@ ava::core::Result<CursesSession> CursesSession::enter()
   static_cast<void>(set_escdelay(terminal_escape_delay_ms()));
 #endif
   configure_curses_colors();
-  configure_curses_mouse();
-  set_bracketed_paste(true);
-  reset_keyboard_protocol_negotiation();
-  push_kitty_keyboard_protocol();
+  arm_owned_terminal_protocols_on_enter();
   restore_signal_mask();
   return session;
 }
@@ -1294,14 +1494,50 @@ bool detail::force_terminal_cursor_visible() noexcept
   return curs_set(1) != ERR;
 }
 
+void detail::set_terminal_sequence_writer_for_test(TerminalSequenceWriter writer) noexcept
+{
+  g_terminal_sequence_writer = writer;
+}
+
+void detail::reset_terminal_sequence_writer_for_test() noexcept
+{
+  g_terminal_sequence_writer = nullptr;
+}
+
+void detail::set_terminal_input_flush_hooks_for_test(TerminalFlushinpHook flushinp_hook, TerminalTcflushHook tcflush_hook) noexcept
+{
+  g_terminal_flushinp_hook = flushinp_hook;
+  g_terminal_tcflush_hook = tcflush_hook;
+}
+
+void detail::reset_terminal_input_flush_hooks_for_test() noexcept
+{
+  g_terminal_flushinp_hook = nullptr;
+  g_terminal_tcflush_hook = nullptr;
+}
+
+void detail::reset_terminal_protocol_ownership_for_test() noexcept
+{
+  g_keyboard_protocol_kitty_response_seen = false;
+  g_keyboard_protocol_kitty_supported = false;
+  g_kitty_keyboard_pushed = false;
+  g_modify_other_keys_enabled = false;
+  g_modify_other_keys_desired = false;
+  g_bracketed_paste_enabled = false;
+  g_mouse_enabled = false;
+  g_left_mouse_down = false;
+}
+
 void CursesSession::restore() noexcept
 {
   if (!active_)
     return;
   static_cast<void>(set_term(static_cast<SCREEN*>(screen_.get())));
-  disable_modify_other_keys_fallback();
-  pop_kitty_keyboard_protocol();
-  set_bracketed_paste(false);
+  // Balance AVA-owned protocols before returning the terminal. Idempotent when
+  // enter failed before arming or when handoff already released them.
+  restore_owned_terminal_protocols();
+  // Discard pending curses then kernel input nonblockingly. No sleep/read loop.
+  discard_pending_terminal_input();
   if (restore_terminal_attrs_)
   {
     static_cast<void>(tcsetattr(STDIN_FILENO, TCSANOW, &previous_terminal_attrs_));
@@ -1386,6 +1622,102 @@ std::string_view terminal_modify_other_keys_disable_sequence()
   return kModifyOtherKeysDisableSequence;
 }
 
+std::string_view terminal_bracketed_paste_enable_sequence()
+{
+  return kBracketedPasteEnableSequence;
+}
+
+std::string_view terminal_bracketed_paste_disable_sequence()
+{
+  return kBracketedPasteDisableSequence;
+}
+
+std::string_view terminal_mouse_enable_sequence()
+{
+  return kMouseEnableSequence;
+}
+
+std::string_view terminal_mouse_disable_sequence()
+{
+  return kMouseDisableSequence;
+}
+
+TerminalProtocolOwnership terminal_protocol_ownership() noexcept
+{
+  return TerminalProtocolOwnership{
+      .kitty_keyboard_pushed = g_kitty_keyboard_pushed,
+      .kitty_keyboard_supported = g_keyboard_protocol_kitty_supported,
+      .keyboard_protocol_kitty_response_seen = g_keyboard_protocol_kitty_response_seen,
+      .modify_other_keys_enabled = g_modify_other_keys_enabled,
+      .modify_other_keys_desired = g_modify_other_keys_desired,
+      .bracketed_paste_enabled = g_bracketed_paste_enabled,
+      .mouse_enabled = g_mouse_enabled,
+  };
+}
+
+void arm_owned_terminal_protocols_on_enter() noexcept
+{
+  // Fresh session: clear prior negotiation memory, then enable paste/mouse and
+  // push Kitty with query/DA exactly once.
+  reset_keyboard_protocol_negotiation();
+  apply_mouse_enabled(true);
+  set_bracketed_paste(true);
+  push_kitty_keyboard_protocol(/*include_query=*/true);
+}
+
+void release_owned_terminal_protocols() noexcept
+{
+  // Handoff path: disable what AVA currently owns without forgetting negotiated
+  // keyboard preferences (modifyOtherKeys desired / kitty supported).
+  disable_modify_other_keys_fallback();
+  pop_kitty_keyboard_protocol();
+  set_bracketed_paste(false);
+  apply_mouse_enabled(false);
+}
+
+void rearm_owned_terminal_protocols() noexcept
+{
+  // Resume path after reset_prog_mode. Never re-probes OSC 11. Re-pushes Kitty
+  // without query/DA so the stack cannot grow and negotiation is not restarted.
+  apply_mouse_enabled(true);
+  set_bracketed_paste(true);
+  push_kitty_keyboard_protocol(/*include_query=*/false);
+  if (g_modify_other_keys_desired)
+    enable_modify_other_keys_fallback();
+}
+
+void restore_owned_terminal_protocols() noexcept
+{
+  release_owned_terminal_protocols();
+  reset_keyboard_protocol_negotiation();
+}
+
+void refresh_terminal_geometry_from_kernel() noexcept
+{
+  winsize size{};
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0)
+    return;
+  if (size.ws_row <= 0 || size.ws_col <= 0)
+    return;
+  static_cast<void>(resizeterm(size.ws_row, size.ws_col));
+}
+
+void discard_pending_terminal_input() noexcept
+{
+  // Ordering: drain the curses input queue first while the screen is still the
+  // active consumer, then discard any remaining kernel-side unread bytes. Both
+  // steps are nonblocking, fail-soft, and free of sleeps or read loops.
+  if (g_terminal_flushinp_hook != nullptr)
+    g_terminal_flushinp_hook();
+  else
+    flushinp();
+
+  if (g_terminal_tcflush_hook != nullptr)
+    static_cast<void>(g_terminal_tcflush_hook(STDIN_FILENO, TCIFLUSH));
+  else
+    static_cast<void>(tcflush(STDIN_FILENO, TCIFLUSH));
+}
+
 std::optional<int> terminal_kitty_keyboard_flags_response(std::string_view sequence)
 {
   if (!sequence.starts_with("[?") || sequence.size() < 4 || sequence.back() != 'u')
@@ -1436,10 +1768,11 @@ KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::s
 
 bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
 {
-  if (terminal_kitty_keyboard_flags_response(sequence))
+  if (auto const flags = terminal_kitty_keyboard_flags_response(sequence))
   {
     auto const action = terminal_keyboard_protocol_response_action(sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);
     g_keyboard_protocol_kitty_response_seen = true;
+    g_keyboard_protocol_kitty_supported = *flags > 0;
     apply_keyboard_protocol_response_action(action);
     return true;
   }
@@ -1452,6 +1785,110 @@ bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
   }
 
   return false;
+}
+
+std::string_view terminal_background_query_sequence()
+{
+  return kTerminalBackgroundQuerySequence;
+}
+
+bool terminal_background_probe_environment_allows_query(std::optional<std::string_view> tmux, std::optional<std::string_view> term)
+{
+  if (tmux && !tmux->empty())
+    return false;
+  if (term && term->starts_with("tmux"))
+    return false;
+  return true;
+}
+
+bool write_terminal_background_query(FILE* out)
+{
+  if (out == nullptr)
+    return false;
+
+  auto const query = terminal_background_query_sequence();
+  if (std::fwrite(query.data(), 1, query.size(), out) != query.size())
+    return false;
+  return std::fflush(out) == 0;
+}
+
+bool emit_terminal_background_query_if_environment_allows(std::optional<std::string_view> tmux, std::optional<std::string_view> term, FILE* out)
+{
+  if (!terminal_background_probe_environment_allows_query(tmux, term))
+    return false;
+  return write_terminal_background_query(out);
+}
+
+std::optional<TerminalBackgroundColor> terminal_osc11_background_response(std::string_view sequence)
+{
+  auto const payload = osc11_payload(sequence);
+  if (!payload)
+    return std::nullopt;
+
+  if (auto color = parse_rgb_slash_color(*payload, false))
+    return color;
+  if (auto color = parse_rgb_slash_color(*payload, true))
+    return color;
+  return parse_hash_color(*payload);
+}
+
+void arm_terminal_background_response_handler()
+{
+  g_terminal_background_response_handler_armed = true;
+}
+
+void disarm_terminal_background_response_handler()
+{
+  g_terminal_background_response_handler_armed = false;
+}
+
+bool terminal_background_response_handler_armed()
+{
+  return g_terminal_background_response_handler_armed;
+}
+
+bool terminal_background_response_handle(std::string_view sequence)
+{
+  if (!g_terminal_background_response_handler_armed)
+    return false;
+
+  auto const color = terminal_osc11_background_response(sequence);
+  if (!color)
+    return false;
+
+  auto const appearance = rgb_luminance(*color) >= 180 ? TerminalBackgroundAppearance::Light : TerminalBackgroundAppearance::Dark;
+  set_detected_terminal_background_appearance(appearance);
+  return true;
+}
+
+InputEvent terminal_ncurses_mouse_event(std::uint64_t button_state, std::size_t column, std::size_t row)
+{
+#ifdef NCURSES_MOUSE_VERSION
+  auto const matches = [button_state](mmask_t mask) { return (static_cast<mmask_t>(button_state) & mask) != 0; };
+#ifdef BUTTON_SHIFT
+  auto const shift = matches(BUTTON_SHIFT);
+#else
+  auto const shift = false;
+#endif
+#ifdef BUTTON5_PRESSED
+  auto const wheel_down = matches(BUTTON5_PRESSED);
+#else
+  auto const wheel_down = false;
+#endif
+  return normalized_left_mouse_event(shift, matches(BUTTON4_PRESSED), wheel_down, matches(BUTTON1_PRESSED), matches(BUTTON1_RELEASED),
+                                     matches(REPORT_MOUSE_POSITION), matches(BUTTON1_CLICKED), column, row);
+#else
+  static_cast<void>(button_state);
+  static_cast<void>(column);
+  static_cast<void>(row);
+  return key_event(Key::Unknown);
+#endif
+}
+
+void terminal_reset_mouse_tracking() noexcept
+{
+  g_left_mouse_down = false;
+  reset_ncurses_left_mouse_button_state();
 }
 
 InputEvent terminal_escape_sequence_event(std::string_view sequence)

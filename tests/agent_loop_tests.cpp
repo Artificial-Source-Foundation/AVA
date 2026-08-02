@@ -20,6 +20,7 @@ void run_agent_loop_tests()
   test_usage_accounting_saturates_without_signed_overflow();
   test_agent_loop_usage_and_cost_persistence();
   test_agent_loop_tool_turn_and_continuation();
+  test_agent_loop_private_task_launch_follows_public_running_and_stays_private();
   test_agent_loop_task_subagent_runs_child_session();
   test_agent_loop_foreground_task_child_uses_parent_permission_resolver();
   test_agent_loop_child_rejects_unadvertised_task_and_job_calls();
@@ -35,6 +36,7 @@ void run_agent_loop_tests()
   test_agent_loop_background_task_cancel_requests_child_cancellation();
   test_agent_loop_background_task_requires_coordinator();
   test_agent_loop_coordinator_start_failure_rolls_back_child();
+  test_agent_loop_background_task_publishes_inspection_source();
   test_background_job_registry_worker_exception_marks_failed();
   test_background_job_registry_enforces_running_limit();
   test_background_job_registry_coerces_non_terminal_completion_to_failed();

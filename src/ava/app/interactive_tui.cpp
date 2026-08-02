@@ -1,7 +1,9 @@
 #include "sys.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/command_sessions.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/interactive_run_queue.h"
@@ -11,6 +13,8 @@
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/runtime.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/app/session_user_turns.h"
+#include "ava/app/subagent_workspace.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/config/model_profiles.h"
@@ -18,9 +22,9 @@
 #include "ava/core/ids.h"
 #include "ava/core/version.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -130,7 +134,8 @@ int run_tui(ShellState real_state)
         .file_references = std::move(delivery.file_references),
         .workspace_catalog_generation = delivery.workspace_catalog_generation,
         .custom_themes = custom_theme_options(),
-        .project_trust = project_trust_snapshot(state.session.project_trust())};
+        .project_trust = project_trust_snapshot(state.session.project_trust()),
+        .todos = todos_for_session(state.session)};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
   bool session_selector_named_only = false;
@@ -214,6 +219,7 @@ int run_tui(ShellState real_state)
       .workspace_catalog_generation = initial_catalog_snapshot.workspace_catalog_generation,
       .custom_themes = custom_theme_options(),
       .project_trust = project_trust_snapshot(state.session.project_trust()),
+      .initial_todos = todos_for_session(state.session),
       .key_bindings = key_bindings,
       .token_status_provider = [&state]() { return token_status_for_session(state.session); },
       .active_context_status_provider = [&state]() { return active_context_status_for_session(state.session); },
@@ -267,8 +273,9 @@ int run_tui(ShellState real_state)
                 ava::permissions::build_persistent_permission_rule_resolver(state.session.permission_rule_store(), context.permission_resolver);
             auto const session_id_before = state.session.store.session_id();
             bool workspace_catalog_reload = workspace_catalog_reload_requested(submitted);
-            auto line_result = handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                           context.cancel_requested, context.take_steering_messages, std::move(context.image_attachments));
+            auto line_result =
+                handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
+                            context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch);
             if (is_display_settings_command(submitted))
             {
               if (auto watched = refresh_display_watch_state(); !watched)
@@ -276,41 +283,12 @@ int run_tui(ShellState real_state)
                 add_output(line_result, watched.error().format());
               }
             }
-            auto append_result = [](LineResult& target, LineResult next) {
-              target.quit = target.quit || next.quit;
-              target.session_tree_changed = target.session_tree_changed || next.session_tree_changed;
-              target.ordinary_turn_committed = target.ordinary_turn_committed || next.ordinary_turn_committed;
-              target.output.insert(target.output.end(), std::make_move_iterator(next.output.begin()), std::make_move_iterator(next.output.end()));
-              target.tool_timeline.insert(target.tool_timeline.end(), std::make_move_iterator(next.tool_timeline.begin()),
-                                          std::make_move_iterator(next.tool_timeline.end()));
-            };
-            while (!line_result.quit && (!context.cancel_requested || !context.cancel_requested()))
-            {
-              if (context.skip_active_steering)
-              {
-                if (auto skipped = context.skip_active_steering("run_completed_before_safe_point"); !skipped)
-                {
-                  add_output(line_result, skipped.error().format());
-                  break;
-                }
-              }
-              if (!context.take_next_follow_up)
-                break;
-              auto follow_up = context.take_next_follow_up();
-              if (!follow_up)
-                break;
-              if (context.mark_follow_up_started)
-              {
-                if (auto started = context.mark_follow_up_started(*follow_up); !started)
-                {
-                  add_output(line_result, started.error().format());
-                  break;
-                }
-              }
-              workspace_catalog_reload = workspace_catalog_reload || workspace_catalog_reload_requested(follow_up->message);
-              append_result(line_result, handle_line(state, follow_up->message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                                     context.cancel_requested, context.take_steering_messages));
-            }
+            auto const session_changed = run_queued_follow_ups_until_session_transition(
+                line_result, workspace_catalog_reload, session_id_before, context, [&state]() { return state.session.store.session_id(); },
+                [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
+                  return handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
+                                     context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch);
+                });
             bool const workspace_changed = workspace_catalog_reload || workspace_catalog_changed(line_result);
             if (workspace_changed)
               application_catalog.refresh_workspace(state.session, hotkeys);
@@ -319,7 +297,7 @@ int run_tui(ShellState real_state)
               if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
                 add_output(line_result, refreshed.error().format());
             }
-            else if (state.session.store.session_id() != session_id_before)
+            else if (session_changed)
             {
               application_catalog.retarget_session(state.session.store.session_id());
               application_catalog.refresh_values(state.session, hotkeys);
@@ -426,6 +404,11 @@ int run_tui(ShellState real_state)
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
       },
       .model_selector_view = [&state]() { return ava::app::model_selector_view_1(state.session, "Enter switch model · type to filter · Esc cancel"); },
+      .reasoning_selector_view =
+          [&state](bool chained) {
+            return ava::app::reasoning_selector_view(
+                state.session, chained ? "Enter select · type to filter · Esc keep default" : "Enter select · type to filter · Esc cancel");
+          },
       .scoped_model_selector_view = [&state]() { return ava::app::scoped_model_selector_view_1(state.session, scoped_model_selector_footer_hint()); },
       .session_selector_view =
           [&session_selector_sort, &session_selector_named_only, &session_selector_show_paths, &session_selector_show_archived,
@@ -437,6 +420,35 @@ int run_tui(ShellState real_state)
             session_selector_show_label_time = false;
             return session_selector_snapshot();
           },
+      .list_subagents = [&state]() { return ava::app::subagent_selector_view(state.session.subagent_coordinator(), state.session.store.session_id()); },
+      .inspect_subagent =
+          [&state](std::string_view job_id, std::optional<std::uint64_t> known_generation) {
+            auto const coordinator = state.session.subagent_coordinator();
+            if (!coordinator)
+            {
+              return ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>>(
+                  std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "subagent workspace is unavailable")));
+            }
+            return coordinator->inspect(state.session.store.session_id(), job_id, known_generation);
+          },
+      .cancel_subagent =
+          [&state](std::string_view job_id) {
+            return ava::app::cancel_subagent_for_workspace(state.session.subagent_coordinator(), state.session.store.session_id(), job_id);
+          },
+      .promote_subagent =
+          [&state](std::string_view job_id) {
+            return ava::app::promote_subagent_for_workspace(state.session.subagent_coordinator(), state.session.store.session_id(), job_id);
+          },
+      .on_open_fork_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
+        // F-001: refuse sessionless /fork-from before listing/selecting so a later
+        // handled no-op cannot open a picker that wipes the live transcript.
+        if (auto allowed = ava::app::require_persistent_session_for_fork_from(state.session); !allowed)
+          return std::unexpected(std::move(allowed.error()));
+        return ava::app::user_turn_selector_view(state.session, "Fork from user turn", "Enter fork · type to filter · Esc cancel", std::string(initial_query));
+      },
+      .on_open_copy_user_turn_selector = [&state](std::string_view initial_query) -> ava::core::Result<ava::tui::SelectListView> {
+        return ava::app::user_turn_selector_view(state.session, "Copy user turn", "Enter copy · type to filter · Esc cancel", std::string(initial_query));
+      },
       .on_session_selector_sort_cycle =
           [&session_selector_sort, &session_selector_snapshot]() {
             session_selector_sort = ava::app::next_session_selector_sort(session_selector_sort);
@@ -547,6 +559,84 @@ int run_tui(ShellState real_state)
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
+      },
+      .on_reasoning_selected = [&state, &state_snapshot](std::optional<std::string> level) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        if (!level)
+        {
+          auto changed = state.session.set_reasoning(std::nullopt);
+          if (!changed)
+            return std::unexpected(std::move(changed.error()));
+          return state_snapshot(*changed ? "thinking mode set to Default" : "thinking mode already Default");
+        }
+        auto selection = ava::app::reasoning_selection_for_level(state.session.model(), *level);
+        if (!selection)
+          return std::unexpected(std::move(selection.error()));
+        auto changed = state.session.set_reasoning(std::move(*selection));
+        if (!changed)
+          return std::unexpected(std::move(changed.error()));
+        auto const label = ava::app::reasoning_level_label(*level);
+        return state_snapshot(*changed ? "thinking mode set to " + label : "thinking mode already " + label);
+      },
+      .on_fork_user_turn_selected = [&state, &state_snapshot, &application_catalog, &hotkeys,
+                                     &refresh_session_tree_catalog](std::string_view entry_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        if (entry_id.empty())
+        {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "fork-from selection is missing entry id"));
+        }
+        if (auto allowed = ava::app::require_persistent_session_for_fork_from(state.session); !allowed)
+          return std::unexpected(std::move(allowed.error()));
+        auto const before_session_id = state.session.store.session_id();
+        auto const before_session_path = state.session.store.session_path().string();
+        auto forked = ava::app::run_fork_command(state.session, {}, entry_id);
+        if (!forked)
+          return std::unexpected(std::move(forked.error()));
+
+        auto const after_session_id = state.session.store.session_id();
+        auto const after_session_path = state.session.store.session_path().string();
+        // F-001 defense: never return an "opened" snapshot when authority did not
+        // switch (for example sessionless handled success with no branch).
+        if (after_session_id == before_session_id && after_session_path == before_session_path)
+        {
+          auto message = forked->output.empty() ? std::string("fork-from did not switch sessions") : forked->output.front();
+          if (auto const newline = message.find('\n'); newline != std::string::npos)
+            message.erase(newline);
+          auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message));
+          error.with_context("operation", "on_fork_user_turn_selected");
+          error.with_context("session_id", before_session_id);
+          return std::unexpected(std::move(error));
+        }
+
+        auto status = forked->output.empty() ? std::string("forked session") : forked->output.front();
+        if (auto const newline = status.find('\n'); newline != std::string::npos)
+          status.erase(newline);
+
+        // F-002: after a successful switch always return/apply the post-fork
+        // snapshot. Catalog refresh is soft and visible — never error after
+        // mutation and never keep old presentation over the new authority.
+        if (forked->session_tree_changed)
+        {
+          if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
+          {
+            application_catalog.retarget_session(after_session_id);
+            application_catalog.refresh_values(state.session, hotkeys);
+            auto warning = ava::app::sanitize_inline_text(refreshed.error().format());
+            if (auto const newline = warning.find('\n'); newline != std::string::npos)
+              warning.erase(newline);
+            if (!status.empty())
+              status += " · ";
+            status += "session tree refresh deferred: ";
+            status += warning;
+          }
+        }
+        else
+        {
+          application_catalog.retarget_session(after_session_id);
+          application_catalog.refresh_values(state.session, hotkeys);
+        }
+        return state_snapshot(std::move(status));
+      },
+      .on_read_user_turn_text = [&state](std::string_view entry_id) -> ava::core::Result<std::string> {
+        return ava::app::read_session_user_turn_text(state.session, entry_id);
       },
       .on_scoped_model_toggled = [&state](ava::tui::SelectListView const& previous, std::string_view value) -> ava::core::Result<ava::tui::SelectListView> {
         return toggle_scoped_model(state.session, previous, value);

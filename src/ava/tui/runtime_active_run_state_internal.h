@@ -22,6 +22,8 @@ struct RuntimeActiveRunState final
   RuntimeActiveRunState(RuntimeActiveRunState const&) = delete;
   RuntimeActiveRunState& operator=(RuntimeActiveRunState const&) = delete;
 
+  void discard_for_session_transition();
+
   std::string submitted;
   bool const is_command_submission;
   bool const supports_active_queue;

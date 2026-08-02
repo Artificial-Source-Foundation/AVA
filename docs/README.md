@@ -1,71 +1,69 @@
 # AVA Documentation
 
-This is the navigation spine for AVA's user, automation, engineering, and product docs. Prefer this index over the older release-ledger lists in the root README.
+This is the human documentation spine for AVA. Follow it in task order, or use the category indexes to browse a subject.
 
-## Start Here
+## How to read these docs
 
-- [`features.md`](features.md): user-facing AVA vs. Pi feature matrix and current limits.
-- [`USAGE.md`](USAGE.md): running AVA, TUI commands, headless modes, tool visibility, permissions, and current limits.
-- [`CONFIG.md`](CONFIG.md): XDG paths, credentials, models, prompts, subagents, project trust, LSP, compaction, and local resources.
-- [`TESTING.md`](TESTING.md): normal CTest workflow, headless/tool smokes, live-provider dogfood, sanitizer runs, and release evidence.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md): build prerequisites, development workflow, formatting, and review expectations.
-- [`thinking-modes.md`](thinking-modes.md): build/plan modes, provider reasoning levels, and Pi thinking-mode parity.
-- [`terminal-setup.md`](terminal-setup.md): terminal capability setup and troubleshooting for tmux, Kitty, OSC 8/52, paste, mouse, and themes.
-- [`themes-keybindings.md`](themes-keybindings.md): TUI themes, display settings, keybinding files, and Pi theme/keybinding differences.
-- [`security-sandboxing.md`](security-sandboxing.md): permission boundaries, trust, plugin/MCP process limits, and container/VM guidance.
-- [`diagnostics.md`](diagnostics.md): passive doctor, private traces, last-failure state, support exports, privacy exclusions, and libcwd's separate developer-debug role.
+- **Current** pages describe the implemented product or source tree and must change with the behavior they describe.
+- **Normative** contracts define compatibility or verified guarantees; their fixed paths and conformance coverage change together.
+- **Plans**, roadmaps, and goals describe intended work, not shipped behavior.
+- **History and evidence** preserve dated claims and observations; they are not proof of current behavior by themselves.
 
-## Automation And Extension Contracts
+## Start, configure, and use AVA
 
-- [`rpc-protocol.md`](rpc-protocol.md): normative proprietary AVA RPC v1 client-author contract, catalogs, correlation, compatibility ledger, and examples; it is distinct from JSON-RPC 2.0, ACP, and Pi RPC.
-- [`acp.md`](acp.md): stable ACP v1 JSON-RPC 2.0 editor endpoint, exact Zed/JetBrains/CodeCompanion setup, M6 interoperability evidence, model-truthful prompts, tools/permissions/client routing, limits, and maintenance rules.
-- [`acp-support.json`](acp-support.json): machine-checked ACP v1 support, exact test-only dependency pins, client evidence labels, confinement requirements, and deferred features.
-- [`interop/evidence/README.md`](interop/evidence/README.md): real-client evidence policy and incomplete report template; includes the confined, manually verified Zed 1.9.0 report for the captured flows.
-- [`headless-protocol.md`](headless-protocol.md): behavior shared by print/RPC headless modes, event envelopes, permission flags, credentials, and exits.
-- [`mcp.md`](mcp.md): local stdio MCP configuration and safety boundaries.
-- [`plugin-system.md`](plugin-system.md): local plugin authoring, manifest shape, runner protocol, permissions, diagnostics, and sample plugin.
-- [`plugin-compatibility-policy.md`](plugin-compatibility-policy.md): compatibility, deprecation, and golden-fixture policy for plugin/MCP contracts.
-- [`providers.md`](providers.md): runtime provider status, auth modes, reasoning support, live smoke variables, and deferred provider breadth.
-- [`session-format.md`](session-format.md): public AVA session JSONL envelope, entry types, validation, import/export caveats, and Pi incompatibility.
-- [`context-resources.md`](context-resources.md): context files, system prompts, prompt commands, skills, subagents, plugins, MCP, LSP, and trust.
-- [`docker/README.md`](docker/README.md): Docker build and container usage.
-- [`desktop-qml.md`](desktop-qml.md): optional Qt Quick desktop prototype.
+Start with [usage](core/usage.md), then [configuration](core/configuration.md), [providers](core/providers.md), and [environment variables](core/environment-variables.md). The [core index](core/README.md) also covers context resources, model-visible tools, subagents, and thinking modes.
 
-## Engineering References
+## Interfaces and contracts
 
-- [`engineering/session-architecture.md`](engineering/session-architecture.md): conceptual overview of the session subsystem — sessions, `SessionStore`, the lease, lease-bound reads and authorities, and sessionless/ephemeral mode. Read this before the format/versioning/controller docs.
-- [`engineering/cpp-safety-rules.md`](engineering/cpp-safety-rules.md): C++ ownership, error, concurrency, and RAII rules.
-- [`engineering/session-versioning.md`](engineering/session-versioning.md): session JSONL entry and payload versioning policy.
-- [`engineering/session-run-controller.md`](engineering/session-run-controller.md): M2 run controller and append-routing contract, including the runtime read-authority consumer inventory.
-- [`engineering/run-observer.md`](engineering/run-observer.md): run-observer trace event catalog and the non-authoritative observation attachment on `SessionStore`.
-- [`engineering/side-effect-safety-checklist.md`](engineering/side-effect-safety-checklist.md): required questions before adding new side-effect classes.
-- [`engineering/backend-implementation-ledger.md`](engineering/backend-implementation-ledger.md): historical backend milestone and implementation ledger.
-- [`AGENTS.md`](../AGENTS.md): repository source map and agent workflow rules.
+- [Interface index](interfaces/README.md): the terminal customization guide and experimental Qt/QML prototype.
+- [RPC protocol](rpc-protocol.md): normative proprietary AVA RPC v1 contract.
+- [ACP endpoint](acp.md) and [machine-readable support profile](acp-support.json): stable ACP integration contract and support declaration.
+- [Headless protocol](headless-protocol.md): normative behavior shared by print and RPC modes.
+- [Session format](session-format.md): normative append-only persisted-session contract.
+- [Plugin compatibility policy](plugin-compatibility-policy.md): normative plugin and MCP compatibility rules.
+- [Theme schema](schema/README.md): machine-readable theme contract.
+- [Session architecture](development/session-architecture.md): conceptual overview of sessions, `SessionStore`, leases, authorities, and sessionless mode.
+- [Session run controller](development/internals/session-run-controller.md): run-controller and append-routing contract.
+- [Run observer](development/internals/run-observer.md): trace events and the non-authoritative observation attachment on `SessionStore`.
+- [Backend implementation ledger](history/backend-implementation-ledger.md): historical backend milestone and implementation ledger.
 
-## Product, Parity, And Roadmap
+These fixed contract paths remain at the `docs/` root (or their established schema/security locations) so external consumers do not need to follow taxonomy changes.
 
-- [`product/mvp-baseline.md`](product/mvp-baseline.md): living Pi-first/OpenCode-second MVP baseline.
-- [`product/mvp-coverage-ledger.md`](product/mvp-coverage-ledger.md): evidence mapping for checked baseline rows.
-- [`product/backend-capabilities-1.0.md`](product/backend-capabilities-1.0.md): 1.0 backend baseline capability status view.
-- [`product/capabilities-1.1.md`](product/capabilities-1.1.md): backend candidate planning after 1.0.
-- [`product/tooling-plan.md`](product/tooling-plan.md): built-in tool contract and design notes.
-- [`product/package-manager-plan.md`](product/package-manager-plan.md): package/resource install, trust, provenance, rollback, and offline design plan.
-- [`product/parallel-tools-plan.md`](product/parallel-tools-plan.md): ordinary parallel tool execution design risks and rollout plan.
-- [`release-checklist.md`](release-checklist.md): local Linux host-artifact component/script contract, smokes, checksums, portability boundary, and explicitly deferred publish-pipeline work.
-- [`roadmap/backend.md`](roadmap/backend.md): backend roadmap and historical phase rationale.
-- [`roadmap/frontend.md`](roadmap/frontend.md): post-MVP terminal frontend maturity roadmap, using OpenCode as a behavior/quality reference without copying its architecture.
-- [`roadmap/frontend-evidence-baseline.md`](roadmap/frontend-evidence-baseline.md): completed F0 semantic-state inventory, current character-cell matrix, and reproducible terminal evidence catalog.
-- [`roadmap/backend-usability.md`](roadmap/backend-usability.md): approval ledger and implementation records for command permissions, background jobs, support diagnostics, compaction, and session titles.
-- [`roadmap/backend-maturity-baseline.md`](roadmap/backend-maturity-baseline.md): maturity gates and acceptance criteria.
-- [`goals/README.md`](goals/README.md): goal package index, including Pi MVP parity area files.
+## Extensions
 
-## Version Ledgers
+Use the [extensions index](extensions/README.md) for local plugins, MCP servers, and optional LSP integration. Extension guides are current descriptive or authoring references; the fixed compatibility and protocol documents above own normative promises.
 
-- [`versions/README.md`](versions/README.md): release-position ledger index.
-- [`versions/1.1.md`](versions/1.1.md): current backend planning and implementation journal.
-- [`versions/1.0.md`](versions/1.0.md): 1.0 backend baseline notes.
-- Older `versions/0.*.md` files are historical release-position evidence. They may mention features that were deferred at that time but have since landed.
+## Operations
 
-## Reference Code
+The [operations index](operations/README.md) covers builds, tests, Docker, terminals, diagnostics, troubleshooting, and release artifacts. Start with the symptom-first [troubleshooting guide](operations/troubleshooting.md) when AVA or its build fails.
 
-- `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` are local behavior references only. Do not copy source or architecture from them into AVA, and do not include them in builds, formatting, or broad source searches unless explicitly doing reference analysis.
+## Security
+
+Read the [security index](security/README.md). [Sandboxing and trust guidance](security/sandboxing.md) is practical current guidance; [containment](security/containment.md) is the fixed normative statement of verified command-containment scope and limitations.
+
+## Development
+
+The [development index](development/README.md) links contribution, architecture, codebase, C++ safety, side-effect, session-versioning, and internal runtime references. Documentation maintainers must also follow [`docs/AGENTS.md`](AGENTS.md) and the [documentation policy](development/documentation-policy.md).
+
+## Product and current status
+
+The [product index](product/README.md) contains the current feature overview, MVP baseline, backend baseline, and capability-to-evidence ledger. These pages describe current status; release readiness still requires the relevant tests and [release checklist](operations/release-checklist.md).
+
+## Plans
+
+The [plans index](plans/README.md) contains proposed or staged work for 1.1 capabilities, tooling, packages, and parallel tool execution. Plans do not establish current product behavior.
+
+## Roadmap and goals
+
+- [Roadmap index](roadmap/README.md): sequencing, approval ledgers, maturity targets, and dated frontend/backend qualification state.
+- [Goal packages](goals/README.md): bounded execution packages with acceptance criteria.
+
+Roadmaps and goals are planning surfaces even when they record completed slices; use current docs and tests to determine present behavior.
+
+## History and evidence
+
+- [History index](history/README.md): historical implementation ledgers.
+- [Version index](versions/README.md): release-position journals and historical capability claims.
+- [ACP evidence policy and reports](interop/evidence/README.md): dated, scoped interoperability observations.
+
+Local `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` trees are comparative behavior references only. They are not AVA architecture, implementation, documentation authority, build input, or part of documentation verification.

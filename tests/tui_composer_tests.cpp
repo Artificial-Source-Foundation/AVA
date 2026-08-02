@@ -25,15 +25,20 @@ void run_tui_composer_tests()
   run_tui_modal_tests_part_3();
   run_tui_selector_tests();
   run_tui_transcript_tests_part_1();
+  run_tui_transcript_selection_tests();
+  run_tui_transcript_search_tests();
   run_tui_tool_card_tests_part_1();
   run_tui_composer_rendering_tests_part_4();
   run_tui_session_grant_tests();
   run_tui_text_model_conversion_tests();
   run_tui_runtime_event_state_tests();
   run_tui_terminal_virtual_smoke_tests();
+  run_tui_terminal_osc11_theme_tests();
+  run_tui_terminal_lifecycle_protocol_tests();
   run_tui_large_render_performance_tests();
   run_tui_tool_card_detail_tests();
   run_tui_transcript_hierarchy_tests();
   run_tui_runtime_dispatch_tests();
   run_tui_transcript_cache_tests();
+  run_tui_prompt_search_race_tests();
 }

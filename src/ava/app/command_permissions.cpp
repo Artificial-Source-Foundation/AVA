@@ -63,8 +63,9 @@ std::string permissions_usage()
          "[scope=workspace|global] [mode=any|build|plan] [path=<path>] [command=\"<cmd>\"] [recipe_key=<key>] [tool=<tool>]\n"
          "    Advanced: exact Critical command Allows require critical_acknowledged=true and command=<exact command>; prompt UI never creates them.\n"
          "  /permissions remove <rule_id>\n"
+         "    Remove requires the full rule id from explain/completion; list ordinals are display-only.\n"
          "operations: read, search, edit, bash, network.fetch, network.search, lsp.server.launch, lsp.query, "
-         "skill, plugin.execute, plugin.tool.call, plugin.command.run, plugin.event.observe, mcp.server.launch, "
+         "skill, task, plugin.execute, plugin.tool.call, plugin.command.run, plugin.event.observe, mcp.server.launch, "
          "mcp.server.connect, mcp.tool.call, mcp.resource.read";
 }
 
@@ -104,45 +105,309 @@ std::string permission_rule_storage_path(ava::permissions::PermissionRuleStore c
   return ava::permissions::enforceable_permission_rules_file(store, rule.scope).generic_string();
 }
 
-std::string rule_target_text(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session)
+bool identity_equals_ascii_case_insensitive(std::string_view value, std::string_view expected)
 {
-  std::string text;
-  if (!rule.target_path.empty())
-    text += " path=" + sanitize_inline_text(display_permission_path(rule.target_path, session.workspace_dir()));
-  if (!rule.command.empty())
-    text += " command=\"" + sanitize_inline_text(rule.command) + "\"";
-  if (!rule.command_recipe_key.empty())
-    text += " recipe_key=" + sanitize_inline_text(rule.command_recipe_key);
-  if (!rule.recipe_display.empty())
-    text += " recipe=\"" + sanitize_inline_text(rule.recipe_display) + "\"";
-  if (rule.critical_acknowledged)
-    text += " critical_acknowledged=true";
-  if (!rule.tool_name.empty())
-    text += " tool=" + sanitize_inline_text(rule.tool_name);
-  return text;
+  return lower_ascii(value) == lower_ascii(expected);
 }
 
-std::string format_rule_line(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session)
+// Dense primary-line qualifier budget: UTF-8-safe byte cap keeps list/receipt
+// lines compact without depending on TUI cluster width helpers.
+constexpr std::size_t kPermissionSummaryQualifierMaxBytes = 120;
+constexpr std::size_t kPermissionSummaryToolQualifierMaxBytes = 48;
+constexpr std::size_t kPermissionSummaryTaskTypeMaxBytes = 32;
+
+std::size_t utf8_prefix_bytes(std::string_view text, std::size_t max_bytes)
 {
-  std::string line = "- " + sanitize_inline_text(rule.rule_id);
-  line += "  " + ava::permissions::to_string(rule.action);
-  line += " " + ava::permissions::to_string(rule.operation);
-  line += " scope=" + ava::permissions::to_string(rule.scope);
-  line += " mode=" + ava::permissions::to_string(rule.mode);
-  line += rule_target_text(rule, session);
-  line += " reason=\"" + sanitize_inline_text(rule.reason) + "\"";
-  return line;
+  if (text.size() <= max_bytes)
+    return text.size();
+  std::size_t index = 0;
+  std::size_t end = 0;
+  while (index < text.size())
+  {
+    auto const byte = static_cast<unsigned char>(text[index]);
+    std::size_t length = 0;
+    if (byte < 0x80U)
+      length = 1;
+    else if ((byte & 0xE0U) == 0xC0U)
+      length = 2;
+    else if ((byte & 0xF0U) == 0xE0U)
+      length = 3;
+    else if ((byte & 0xF8U) == 0xF0U)
+      length = 4;
+    else
+      length = 1;
+    if (index + length > text.size())
+      length = 1;
+    if (index + length > max_bytes)
+      break;
+    index += length;
+    end = index;
+  }
+  return end;
+}
+
+std::string bounded_safe_display_qualifier(std::string_view text, std::size_t max_bytes)
+{
+  auto cleaned = sanitize_inline_text(std::string(text));
+  cleaned.resize(utf8_prefix_bytes(cleaned, max_bytes));
+  return cleaned;
+}
+
+bool is_bounded_identifier_like_qualifier(std::string_view value, std::size_t max_bytes)
+{
+  if (value.empty() || value.size() > max_bytes)
+    return false;
+  for (char const ch : value)
+  {
+    auto const unsigned_ch = static_cast<unsigned char>(ch);
+    if (std::isalnum(unsigned_ch) == 0 && ch != '_' && ch != '-')
+      return false;
+  }
+  return true;
+}
+
+void append_summary_qualifier(std::string& summary, std::string_view qualifier)
+{
+  if (qualifier.empty())
+    return;
+  summary += " · ";
+  summary += qualifier;
+}
+
+std::string permission_rule_action_label(ava::permissions::PermissionAction action)
+{
+  switch (action)
+  {
+    case ava::permissions::PermissionAction::Allow:
+      return "Allow";
+    case ava::permissions::PermissionAction::Deny:
+      return "Block";
+    case ava::permissions::PermissionAction::Ask:
+      return "Ask";
+  }
+  return "Block";
+}
+
+std::string permission_rule_scope_label(ava::permissions::PermissionRuleScope scope)
+{
+  switch (scope)
+  {
+    case ava::permissions::PermissionRuleScope::Global:
+      return "Global";
+    case ava::permissions::PermissionRuleScope::Workspace:
+      return "Workspace";
+  }
+  return "Workspace";
+}
+
+std::string permission_rule_mode_label(ava::permissions::PermissionRuleMode mode)
+{
+  switch (mode)
+  {
+    case ava::permissions::PermissionRuleMode::Any:
+      return {};
+    case ava::permissions::PermissionRuleMode::Build:
+      return "Build";
+    case ava::permissions::PermissionRuleMode::Plan:
+      return "Plan";
+  }
+  return {};
+}
+
+std::string permission_rule_operation_subject(ava::permissions::Operation operation)
+{
+  switch (operation)
+  {
+    case ava::permissions::Operation::ReadFile:
+      return "file reads";
+    case ava::permissions::Operation::SearchFiles:
+      return "file searches";
+    case ava::permissions::Operation::EditFile:
+      return "file edits";
+    case ava::permissions::Operation::RunCommand:
+      return "shell commands";
+    case ava::permissions::Operation::NetworkFetch:
+      return "network fetches";
+    case ava::permissions::Operation::NetworkSearch:
+      return "network searches";
+    case ava::permissions::Operation::LspServerLaunch:
+      return "LSP server launches";
+    case ava::permissions::Operation::LspQuery:
+      return "LSP queries";
+    case ava::permissions::Operation::SkillLoad:
+      return "skills";
+    case ava::permissions::Operation::TaskRun:
+      return "subagents";
+    case ava::permissions::Operation::PluginExecute:
+      return "plugin execution";
+    case ava::permissions::Operation::PluginToolCall:
+      return "plugin tool calls";
+    case ava::permissions::Operation::PluginCommandRun:
+      return "plugin commands";
+    case ava::permissions::Operation::PluginEventObserve:
+      return "plugin event observation";
+    case ava::permissions::Operation::McpServerLaunch:
+      return "MCP server launches";
+    case ava::permissions::Operation::McpServerConnect:
+      return "MCP server connections";
+    case ava::permissions::Operation::McpToolCall:
+      return "MCP tool calls";
+    case ava::permissions::Operation::McpResourceRead:
+      return "MCP resource reads";
+  }
+  return "operations";
+}
+
+bool task_run_is_explore_identity(ava::permissions::PersistentPermissionRule const& rule)
+{
+  // Explore class requires exact command identity "explore" plus a non-conflicting
+  // tool slot (empty, default task, or also explore). tool_name=explore alone,
+  // free-form command + explore tool, or explore command + conflicting tool must
+  // not claim Explore; they keep fixed "subagents" framing instead.
+  if (!identity_equals_ascii_case_insensitive(rule.command, "explore"))
+    return false;
+  if (rule.tool_name.empty())
+    return true;
+  return identity_equals_ascii_case_insensitive(rule.tool_name, "task") || identity_equals_ascii_case_insensitive(rule.tool_name, "explore");
+}
+
+bool tool_name_is_operation_default(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.tool_name.empty())
+    return true;
+
+  auto const operation_token = ava::permissions::to_string(rule.operation);
+  if (identity_equals_ascii_case_insensitive(rule.tool_name, operation_token))
+    return true;
+
+  switch (rule.operation)
+  {
+    case ava::permissions::Operation::ReadFile:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "read");
+    case ava::permissions::Operation::EditFile:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "edit");
+    case ava::permissions::Operation::SearchFiles:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "search") || identity_equals_ascii_case_insensitive(rule.tool_name, "grep") ||
+             identity_equals_ascii_case_insensitive(rule.tool_name, "glob") || identity_equals_ascii_case_insensitive(rule.tool_name, "list");
+    case ava::permissions::Operation::RunCommand:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "bash") || identity_equals_ascii_case_insensitive(rule.tool_name, "shell");
+    case ava::permissions::Operation::TaskRun:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "task");
+    case ava::permissions::Operation::SkillLoad:
+      return identity_equals_ascii_case_insensitive(rule.tool_name, "skill");
+    default:
+      return false;
+  }
+}
+
+// Fixed human operation class only. Qualifiers (tool, recipe display, path, task
+// type) are appended separately so forged names cannot replace authority class.
+std::string permission_rule_subject(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.operation == ava::permissions::Operation::TaskRun)
+  {
+    if (task_run_is_explore_identity(rule))
+      return "Explore subagents";
+    return "subagents";
+  }
+
+  if (rule.operation == ava::permissions::Operation::RunCommand)
+  {
+    if (!rule.recipe_display.empty())
+      return "recipe";
+    if (!rule.command.empty() || !rule.command_recipe_key.empty())
+      return "Exact command";
+    return "shell commands";
+  }
+
+  return permission_rule_operation_subject(rule.operation);
+}
+
+std::string permission_rule_task_type_qualifier(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.operation != ava::permissions::Operation::TaskRun || task_run_is_explore_identity(rule))
+    return {};
+
+  // Task command/tool strings are forgeable. Keep only a short identifier-like
+  // type token; never print free-form task command bodies.
+  if (is_bounded_identifier_like_qualifier(rule.command, kPermissionSummaryTaskTypeMaxBytes))
+    return std::string(rule.command);
+  if (!tool_name_is_operation_default(rule) && is_bounded_identifier_like_qualifier(rule.tool_name, kPermissionSummaryTaskTypeMaxBytes))
+    return std::string(rule.tool_name);
+  return {};
+}
+
+std::string permission_rule_tool_qualifier(ava::permissions::PersistentPermissionRule const& rule)
+{
+  if (rule.operation == ava::permissions::Operation::TaskRun)
+    return {};
+  if (rule.operation == ava::permissions::Operation::RunCommand && !rule.recipe_display.empty())
+    return {};
+  if (tool_name_is_operation_default(rule))
+    return {};
+  return bounded_safe_display_qualifier(rule.tool_name, kPermissionSummaryToolQualifierMaxBytes);
+}
+
+std::string format_permission_rule_summary_impl(ava::permissions::PersistentPermissionRule const& rule, std::filesystem::path const& workspace_dir)
+{
+  std::string summary = permission_rule_action_label(rule.action);
+  summary += ' ';
+  summary += permission_rule_subject(rule);
+
+  if (rule.operation == ava::permissions::Operation::RunCommand && !rule.recipe_display.empty())
+    append_summary_qualifier(summary, bounded_safe_display_qualifier(rule.recipe_display, kPermissionSummaryQualifierMaxBytes));
+  else if (rule.operation == ava::permissions::Operation::TaskRun)
+    append_summary_qualifier(summary, permission_rule_task_type_qualifier(rule));
+  else
+    append_summary_qualifier(summary, permission_rule_tool_qualifier(rule));
+
+  // Any non-empty target_path is authority-critical, including RunCommand cwd and TaskRun paths.
+  if (!rule.target_path.empty())
+  {
+    auto const path_text = sanitize_inline_text(display_permission_path(rule.target_path, workspace_dir));
+    append_summary_qualifier(summary, path_text);
+  }
+
+  append_summary_qualifier(summary, permission_rule_scope_label(rule.scope));
+
+  if (auto const mode_label = permission_rule_mode_label(rule.mode); !mode_label.empty())
+    append_summary_qualifier(summary, mode_label);
+  return summary;
+}
+
+std::string format_permission_rule_receipt(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session, std::string_view verb)
+{
+  std::ostringstream output;
+  output << verb << " permission rule\n";
+  output << format_permission_rule_summary_impl(rule, session.workspace_dir()) << "\n";
+  output << "Rule ID: " << sanitize_inline_text(rule.rule_id);
+  return output.str();
+}
+
+bool looks_like_display_ordinal(std::string_view text)
+{
+  if (text.empty())
+    return false;
+  for (char const ch : text)
+  {
+    if (std::isdigit(static_cast<unsigned char>(ch)) == 0)
+      return false;
+  }
+  return true;
 }
 
 bool rule_matches_query(ava::permissions::PersistentPermissionRule const& rule, runtime::Session const& session, std::string_view query)
 {
   if (query.empty())
     return true;
-  return contains_ascii_case_insensitive(rule.rule_id, query) || contains_ascii_case_insensitive(ava::permissions::to_string(rule.scope), query) ||
+  auto const summary = format_permission_rule_summary_impl(rule, session.workspace_dir());
+  return contains_ascii_case_insensitive(summary, query) || contains_ascii_case_insensitive(rule.rule_id, query) ||
+         contains_ascii_case_insensitive(ava::permissions::to_string(rule.scope), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.action), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.operation), query) ||
          contains_ascii_case_insensitive(ava::permissions::to_string(rule.mode), query) || contains_ascii_case_insensitive(rule.tool_name, query) ||
          contains_ascii_case_insensitive(display_permission_path(rule.target_path, session.workspace_dir()), query) ||
+         // Command text may match filters privately; list/receipts never print the body.
          contains_ascii_case_insensitive(rule.command, query) || contains_ascii_case_insensitive(rule.command_recipe_key, query) ||
          contains_ascii_case_insensitive(rule.recipe_display, query) || contains_ascii_case_insensitive(rule.reason, query) ||
          contains_ascii_case_insensitive(rule.actor, query) || contains_ascii_case_insensitive(rule.created_at, query);
@@ -730,32 +995,36 @@ std::string format_permission_rules_list(ava::permissions::PermissionRuleStore c
          << sanitize_inline_text(ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace).generic_string())
          << "\n";
   output << "  behavior: built-in hard denies run first; matching deny rules override allow rules\n";
+  output << "  display: human summaries with 1-based ordinals; ordinals are not remove authority\n";
 
-  bool wrote_any = false;
+  std::vector<ava::permissions::PersistentPermissionRule const*> matched;
+  matched.reserve(rules.size());
   for (auto const& rule : rules)
   {
-    if (!rule_matches_query(rule, session, query))
-      continue;
-    if (!wrote_any)
-    {
-      if (!query.empty())
-        output << "  filter: " << sanitize_inline_text(std::string(query)) << "\n";
-      output << "\n";
-      wrote_any = true;
-    }
-    output << format_rule_line(rule, session) << "\n";
+    if (rule_matches_query(rule, session, query))
+      matched.push_back(&rule);
   }
 
-  if (!wrote_any)
+  if (!query.empty())
+    output << "  filter: " << sanitize_inline_text(std::string(query)) << "\n";
+  output << "\n";
+
+  if (matched.empty())
   {
-    output << "\n";
     if (query.empty())
       output << "No persistent permission rules.\n";
     else
       output << "No persistent permission rules match \"" << sanitize_inline_text(std::string(query)) << "\".\n";
   }
+  else
+  {
+    for (std::size_t index = 0; index < matched.size(); ++index)
+    {
+      output << "  " << (index + 1) << ". " << format_permission_rule_summary_impl(*matched[index], session.workspace_dir()) << "\n";
+    }
+  }
 
-  output << "\nUse /permissions add ... to add a rule and /permissions remove <rule_id> to remove one.";
+  output << "\nUse /permissions explain or /permissions remove, then choose or complete a rule.";
   return output.str();
 }
 
@@ -763,7 +1032,8 @@ std::string format_permission_rule_explain(ava::permissions::PermissionRuleStore
                                            runtime::Session const& session)
 {
   std::ostringstream output;
-  output << "Permission rule " << sanitize_inline_text(rule.rule_id) << "\n";
+  output << format_permission_rule_summary_impl(rule, session.workspace_dir()) << "\n";
+  output << "  rule id: " << sanitize_inline_text(rule.rule_id) << "\n";
   output << "  action: " << ava::permissions::to_string(rule.action) << "\n";
   output << "  operation: " << ava::permissions::to_string(rule.operation) << "\n";
   output << "  scope: " << ava::permissions::to_string(rule.scope) << "\n";
@@ -995,6 +1265,11 @@ ava::permissions::PersistentPermissionRule const* find_rule(std::vector<ava::per
 
 }  // namespace
 
+std::string format_permission_rule_summary(ava::permissions::PersistentPermissionRule const& rule, std::filesystem::path const& workspace_dir)
+{
+  return format_permission_rule_summary_impl(rule, workspace_dir);
+}
+
 ava::core::Result<CommandResult> run_permissions_command(runtime::Session& session, CommandRequest const& request)
 {
   CommandResult result;
@@ -1112,6 +1387,11 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
       add_output(result, missing_argument("/permissions explain <rule_id>"));
       return result;
     }
+    if (looks_like_display_ordinal((*tokens)[1]))
+    {
+      add_output(result, "permission rule explain requires the full rule id; list ordinals are display-only");
+      return result;
+    }
     auto rules = ava::permissions::load_persistent_permission_rules(store);
     if (!rules)
     {
@@ -1147,7 +1427,7 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
       add_output(result, added.error().format());
       return result;
     }
-    add_output(result, "added permission rule " + sanitize_inline_text(added->rule_id) + "\n" + format_rule_line(*added, session));
+    add_output(result, format_permission_rule_receipt(*added, session, "added"));
     return result;
   }
 
@@ -1158,13 +1438,18 @@ ava::core::Result<CommandResult> run_permissions_command(runtime::Session& sessi
       add_output(result, missing_argument("/permissions remove <rule_id>"));
       return result;
     }
+    if (looks_like_display_ordinal((*tokens)[1]))
+    {
+      add_output(result, "permission rule remove requires the full rule id; list ordinals are display-only");
+      return result;
+    }
     auto removed = ava::permissions::remove_persistent_permission_rule(store, (*tokens)[1]);
     if (!removed)
     {
       add_output(result, removed.error().format());
       return result;
     }
-    add_output(result, "removed permission rule " + sanitize_inline_text(removed->rule_id) + "\n" + format_rule_line(*removed, session));
+    add_output(result, format_permission_rule_receipt(*removed, session, "removed"));
     return result;
   }
 

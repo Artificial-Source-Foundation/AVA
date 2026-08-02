@@ -141,6 +141,7 @@ void test_classify_builtin_tools_for_scheduling()
   expect_builtin_classification("apply_patch", ToolScheduleEligibility::Barrier, "mutation");
   expect_builtin_classification("bash", ToolScheduleEligibility::Barrier, "shell");
   expect_builtin_classification("question", ToolScheduleEligibility::Barrier, "user_interaction");
+  expect_builtin_classification("todowrite", ToolScheduleEligibility::Barrier, "user_interaction");
   expect_builtin_classification("task", ToolScheduleEligibility::Barrier, "subagent");
   expect_builtin_classification("skill", ToolScheduleEligibility::Barrier, "skill");
 

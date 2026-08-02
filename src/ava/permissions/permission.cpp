@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/command/environment.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/json.h"
 #include "ava/core/mode.h"
 #include "ava/core/open_beneath.h"
 #include "ava/core/path.h"
@@ -24,6 +25,52 @@ PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution 
 PermissionResolutionDecision::PermissionResolutionDecision(PermissionResolution resolution_in, std::string reason_in)
     : resolution(resolution_in), reason(std::move(reason_in))
 {
+}
+
+namespace {
+
+bool guidance_has_forbidden_byte(std::string_view value) noexcept
+{
+  return std::ranges::any_of(value, [](unsigned char ch) { return ch < 0x20 || ch == 0x7F; });
+}
+
+}  // namespace
+
+std::optional<std::string> validated_permission_user_guidance(std::string_view value)
+{
+  if (value.empty() || value.size() > kMaxPermissionUserGuidanceBytes || guidance_has_forbidden_byte(value) || !ava::core::json::is_valid_utf8(value))
+  {
+    return std::nullopt;
+  }
+  return std::string(value);
+}
+
+std::string with_provider_user_guidance(std::string content, std::string_view guidance)
+{
+  auto validated = validated_permission_user_guidance(guidance);
+  if (!validated)
+    return content;
+
+  if (ava::core::json::is_valid_object(content))
+  {
+    while (!content.empty() && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r')) content.pop_back();
+    if (content.size() >= 2 && content.back() == '}')
+    {
+      content.pop_back();
+      while (content.size() > 1 && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r')) content.pop_back();
+      bool const empty_object = content.size() == 1;  // only remaining '{'
+      if (!empty_object)
+        content.push_back(',');
+      content += "\"provider_user_guidance\":\"" + ava::core::json::escape(*validated) + "\"}";
+      return content;
+    }
+  }
+
+  if (!content.empty() && content.back() != '\n')
+    content.push_back('\n');
+  content += "[ava:provider_user_guidance] ";
+  content += *validated;
+  return content;
 }
 
 bool operator==(PermissionResolutionDecision const& decision, PermissionResolution resolution)

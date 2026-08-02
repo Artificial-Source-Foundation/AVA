@@ -43,6 +43,8 @@ class RuntimeNavigationController final
   void scroll_down(std::size_t amount);
   [[nodiscard]] bool toggle_tool_details_at(std::size_t item_index);
   [[nodiscard]] std::optional<std::size_t> toggle_matching_tool_details(std::string_view query);
+  [[nodiscard]] bool toggle_thinking_at(std::size_t item_index);
+  [[nodiscard]] std::optional<std::size_t> toggle_latest_thinking_details();
 
   [[nodiscard]] bool sidebar_drawer_focused() const;
   void close_sidebar_drawer();
@@ -50,6 +52,7 @@ class RuntimeNavigationController final
   [[nodiscard]] std::optional<bool> handle_sidebar_drawer_input(InputEvent const& event);
 
   void jump_to_bottom(std::string status);
+  void jump_to_transcript_item(std::size_t item_index, std::string status);
   void scroll_to_message_boundary(bool previous);
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

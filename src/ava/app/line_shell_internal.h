@@ -1,8 +1,8 @@
 #pragma once
 
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/project_trust.h"
-#include "ava/event/RuntimeEvent.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime/session_ts.h"
 #include "ava/agent/agent_loop.h"
@@ -54,6 +54,9 @@ void append_status_line(std::string& target, std::string line);
 
 [[nodiscard]] std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries);
 [[nodiscard]] std::optional<std::string> token_status_for_session(runtime::Session const& session);
+// Fail-closed presentation hydration from the latest successful committed todowrite.
+[[nodiscard]] std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session);
+[[nodiscard]] std::string format_active_context_status_value(long long tokens, std::optional<long long> context_window_tokens);
 [[nodiscard]] std::optional<std::string> active_context_status_for_session(runtime::Session const& session);
 [[nodiscard]] std::string session_selector_footer_hint(SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time);
 [[nodiscard]] std::string scoped_model_selector_footer_hint();
@@ -76,11 +79,19 @@ void append_status_line(std::string& target, std::string line);
 [[nodiscard]] bool workspace_catalog_reload_requested(std::string_view submitted);
 [[nodiscard]] bool is_display_settings_command(std::string_view line) noexcept;
 void add_output(LineResult& result, std::string text);
+// Runs queued follow-ups only while the submit worker still owns the same
+// authoritative session. A transition keeps only that line's presentation
+// output/tool data while preserving aggregate control flags.
+[[nodiscard]] bool run_queued_follow_ups_until_session_transition(LineResult& result, bool& workspace_catalog_reload, std::string_view initial_session_id,
+                                                                  ava::tui::TuiSubmitContext const& context,
+                                                                  std::function<std::string()> const& current_session_id,
+                                                                  std::function<LineResult(ava::tui::TuiQueuedFollowUp const&)> const& run_follow_up);
 [[nodiscard]] LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver = nullptr,
                                      ava::agent::QuestionResolver question_resolver = nullptr, std::vector<CommandHotkey> const& hotkeys = {},
                                      ava::event::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                                      std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
-                                     std::vector<ava::session::ImageAttachmentRef> image_attachments = {});
+                                     std::vector<ava::session::ImageAttachmentRef> image_attachments = {}, std::string request_id = {},
+                                     ava::agent::SubagentLaunchSink on_subagent_launch = nullptr);
 
 [[nodiscard]] int run_tui(ShellState state);
 

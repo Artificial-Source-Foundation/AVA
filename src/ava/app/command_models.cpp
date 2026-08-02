@@ -158,7 +158,7 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   {
     if (model.reasoning_levels.empty())
     {
-      diagnostics.push_back("reasoning model has no reasoning_levels; Shift+Tab/Ctrl+T cannot cycle levels");
+      diagnostics.push_back("reasoning model has no reasoning_levels; Shift+Tab cannot cycle and Ctrl+T has no thinking modes to select");
     }
     if (!ava::config::reasoning_provider_profile_for_model(model))
     {
@@ -229,8 +229,8 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
     output += "  no configured models match the filter\n";
   }
   output +=
-      "\nModel switching is not enabled here. In the TUI, Shift+Tab or Ctrl+T cycles the current model's declared "
-      "reasoning levels using the provider/model-specific reasoning parameters above.";
+      "\nModel switching is not enabled here. In the TUI, Shift+Tab cycles the current model's declared reasoning levels; "
+      "Ctrl+T opens the policy-resolved thinking-mode selector between turns.";
   return output;
 }
 

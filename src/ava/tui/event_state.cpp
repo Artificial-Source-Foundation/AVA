@@ -588,6 +588,17 @@ void settle_responding_activity(TuiEventState& state, ToolTimelineStatus status,
   existing->detail = std::move(detail);
 }
 
+void settle_running_retry_activities(TuiEventState& state, ToolTimelineStatus status, std::string const& detail)
+{
+  for (auto& activity : state.activity)
+  {
+    if (activity.status != ToolTimelineStatus::Running || activity.label != "retry")
+      continue;
+    activity.status = status;
+    activity.detail = detail;
+  }
+}
+
 bool is_cancel_error(ava::event::ErrorPayload const& payload)
 {
   return payload.error_message == "agent loop canceled" || payload.text == "agent loop canceled" ||
@@ -689,6 +700,78 @@ void record_modified_file(TuiEventState& state, ToolTimelineItem const& item)
   if (state.modified_files.size() > kMaxModifiedFiles)
     state.modified_files.erase(state.modified_files.begin(),
                                state.modified_files.begin() + static_cast<std::ptrdiff_t>(state.modified_files.size() - kMaxModifiedFiles));
+}
+
+std::optional<TodoStatus> parse_todo_status_view(std::string_view value)
+{
+  if (value == "pending")
+    return TodoStatus::Pending;
+  if (value == "in_progress")
+    return TodoStatus::InProgress;
+  if (value == "completed")
+    return TodoStatus::Completed;
+  return std::nullopt;
+}
+
+// Fail-closed presentation parse of a normalized successful todowrite result.
+// Malformed historical/live payloads leave existing state unchanged.
+std::optional<std::vector<TodoItem>> parse_todowrite_result_todos(std::string_view result_json)
+{
+  if (!bool_field(result_json, "ok"))
+    return std::nullopt;
+  auto const tool = ava::core::json::string_field(result_json, "tool");
+  if (!tool || *tool != "todowrite")
+    return std::nullopt;
+  auto const schema = ava::core::json::integer_field(result_json, "schema_version");
+  if (!schema || *schema != 1)
+    return std::nullopt;
+  auto const objects = ava::core::json::strict_objects_in_array_field(result_json, "todos", 50);
+  if (!objects)
+    return std::nullopt;
+
+  std::vector<TodoItem> todos;
+  todos.reserve(objects->size());
+  std::size_t in_progress = 0;
+  for (auto const& object : *objects)
+  {
+    auto const id = ava::core::json::string_field(object, "id");
+    auto const content = ava::core::json::string_field(object, "content");
+    auto const status_text = ava::core::json::string_field(object, "status");
+    if (!id || id->empty() || id->size() > 32 || !content || content->empty() || content->size() > 512 || !status_text)
+      return std::nullopt;
+    auto const status = parse_todo_status_view(*status_text);
+    if (!status)
+      return std::nullopt;
+    if (*status == TodoStatus::InProgress)
+      ++in_progress;
+    if (in_progress > 1)
+      return std::nullopt;
+    for (unsigned char const ch : *id)
+    {
+      auto const is_alnum = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+      if (!(is_alnum || ch == '_' || ch == '-'))
+        return std::nullopt;
+    }
+    for (unsigned char const ch : *content)
+    {
+      if (ch < 0x20 || ch == 0x7F)
+        return std::nullopt;
+    }
+    if (std::ranges::any_of(todos, [&](TodoItem const& existing) { return existing.id == *id; }))
+      return std::nullopt;
+    todos.push_back(TodoItem{.id = *id, .content = *content, .status = *status});
+  }
+  return todos;
+}
+
+void apply_todowrite_result(TuiEventState& state, ToolTimelineItem const& item)
+{
+  if (item.status != ToolTimelineStatus::Success || item.name != "todowrite")
+    return;
+  auto parsed = parse_todowrite_result_todos(item.result_json);
+  if (!parsed)
+    return;
+  state.todos = std::move(*parsed);
 }
 
 std::string take_pending_reasoning_text(TuiEventState& state)
@@ -948,6 +1031,7 @@ void apply_tool_result(TuiEventState& state, ava::event::ToolPayload const& payl
       item.call_id = existing->call_id;
     item.request_id = existing->request_id;
     item.correlation_id = existing->correlation_id;
+    item.subagent_launch_display = existing->item.subagent_launch_display;
     for (auto const& permission_id : existing->item.permission_request_ids) add_permission_request_id(item, permission_id);
     for (auto const& audit : existing->item.permissions) add_permission_audit(item, audit);
     state.pending_tools.erase(existing);
@@ -959,6 +1043,7 @@ void apply_tool_result(TuiEventState& state, ava::event::ToolPayload const& payl
   attach_permission_audits(state, item);
   upsert_activity(state, item.call_id, item);
   record_modified_file(state, item);
+  apply_todowrite_result(state, item);
   state.transcript.push_back(TranscriptItem{.tool = std::move(item)});
 }
 
@@ -1135,6 +1220,24 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
   std::visit(
       [&]<typename Event>(Event const& typed_event) {
         auto const& payload = typed_event.payload;
+        if constexpr (!std::same_as<Event, ava::event::RetryEvent> && !std::same_as<Event, ava::event::RetryTickEvent>)
+        {
+          if constexpr (std::same_as<Event, ava::event::CancellationEvent>)
+          {
+            settle_running_retry_activities(state, ToolTimelineStatus::Canceled, "retry canceled");
+          }
+          else if constexpr (std::same_as<Event, ava::event::ErrorEvent>)
+          {
+            if (is_cancel_error(payload))
+              settle_running_retry_activities(state, ToolTimelineStatus::Canceled, "retry canceled");
+            else
+              settle_running_retry_activities(state, ToolTimelineStatus::Error, "retry failed");
+          }
+          else
+          {
+            settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry completed");
+          }
+        }
         if constexpr (std::same_as<Event, ava::event::SessionStartEvent>)
         {
           state.current_mode = payload.mode;
@@ -1259,6 +1362,10 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
         }
         else if constexpr (std::same_as<Event, ava::event::RetryEvent>)
         {
+          // A new retry owns the live chrome row. Prior Running retries (including
+          // different reason/trigger ids) are settled first so stale identities cannot
+          // resurface after the current attempt progresses or finishes.
+          settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry superseded");
           auto detail = std::string("retrying");
           if (!payload.reason.empty())
             detail += " after " + payload.reason;
@@ -1284,7 +1391,10 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
             detail += " summary=" + std::to_string(typed_event.diagnostics.summary_bytes) + " bytes";
           if (!payload.text.empty())
             detail += " - " + payload.text;
+          // Audit transcript keeps every RetryEvent; sidebar ownership is the live row only.
           state.transcript.push_back(transcript_text_item("audit", detail));
+          // Zero-delay RetryEvent announces an immediate attempt (transport emits no ticks).
+          // Keep the current row Running so chrome can show briefly until progress/cancel/error.
           upsert_sidebar_activity(
               state,
               SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
@@ -1309,9 +1419,20 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
           if (!payload.text.empty())
             detail += " - " + payload.text;
           upsert_retry_countdown_transcript(state, detail);
-          upsert_sidebar_activity(
-              state,
-              SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
+          if (payload.remaining_ms == 0)
+          {
+            // Countdown completion closes every Running retry identity, not only the tick's id.
+            settle_running_retry_activities(state, ToolTimelineStatus::Success, "retry completed");
+            upsert_sidebar_activity(
+                state,
+                SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = "retry completed", .status = ToolTimelineStatus::Success});
+          }
+          else
+          {
+            upsert_sidebar_activity(
+                state,
+                SidebarActivityItem{.id = retry_activity_id(payload), .label = "retry", .detail = std::move(detail), .status = ToolTimelineStatus::Running});
+          }
           state.run_status = TuiEventRunStatus::Running;
         }
         else if constexpr (std::same_as<Event, ava::event::CancellationEvent>)
@@ -1351,6 +1472,28 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
         }
       },
       event.payload());
+}
+
+void apply_subagent_launch_notification(TuiEventState& state, ava::agent::SubagentLaunchNotification const& notification)
+{
+  if (notification.tool_call_id.empty() || notification.request_id.empty() || notification.correlation_id.empty())
+    return;
+
+  auto match = state.pending_tools.end();
+  for (auto pending = state.pending_tools.begin(); pending != state.pending_tools.end(); ++pending)
+  {
+    if (pending->item.status != ToolTimelineStatus::Running || pending->item.name != "task" || pending->backend_call_id != notification.tool_call_id ||
+        pending->request_id.empty() || pending->request_id != notification.request_id || pending->correlation_id.empty() ||
+        pending->correlation_id != notification.correlation_id)
+    {
+      continue;
+    }
+    if (match != state.pending_tools.end())
+      return;
+    match = pending;
+  }
+  if (match != state.pending_tools.end())
+    match->item.subagent_launch_display = notification.display;
 }
 
 void apply_control_event_envelope(TuiEventState& state, ava::event::EventEnvelope const& envelope)

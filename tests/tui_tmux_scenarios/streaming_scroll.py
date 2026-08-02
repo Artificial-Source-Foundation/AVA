@@ -23,6 +23,10 @@ from .common import _wait_for_normal_turn_request_count
 
 _NUMBERED_LINE = re.compile(r"stream line (\d{3})")
 _DELETED_SCROLLBACK_TEXT = ("scrollback detached", "updates below", "jump_to_bottom")
+# Role-specific final chrome: footer uses the catalog display name; assistant turn meta may render
+# either the display name or the bare model id depending on the meta assembly path.
+_FOOTER_MODEL_LINE = re.compile(r"^│\s+AVA TUI Fake\b.*\bctx\b")
+_ASSISTANT_META_LINE = re.compile(r"\*\s+Build · (?:AVA TUI Fake|ava-tui-fake)\b")
 
 
 def _wait_for_path(path: pathlib.Path, label: str, timeout: float = 10.0) -> None:
@@ -116,6 +120,8 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
 
     wheel_up = "\x1b[<64;4;6M"
     wheel_down = "\x1b[<65;4;6M"
+    # One accepted transcript wheel event scrolls exactly three rendered rows.
+    wheel_scroll_rows = 3
     same_direction_started = time.monotonic()
     send_literal(tmux_exe, session, wheel_up * 12 + same_direction_suffix)
     same_direction_screen = wait_for(
@@ -123,11 +129,21 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     )
     same_direction_elapsed = time.monotonic() - same_direction_started
     same_direction_numbers = _numbered_window(same_direction_screen, "same-direction wheel-burst detached stream")
-    same_size_shift = [initial_numbers[0] - 1, *initial_numbers[:-1]]
-    one_extra_visible_row = [initial_numbers[0] - 1, *initial_numbers]
-    if same_direction_numbers not in (same_size_shift, one_extra_visible_row):
+
+    def _is_exact_wheel_up_step(before: list[int], after: list[int], step: int) -> bool:
+        if len(after) < 10 or after != list(range(after[0], after[-1] + 1)):
+            return False
+        if after[0] != before[0] - step:
+            return False
+        # Same-height window shifted by the wheel step.
+        if len(after) == len(before):
+            return after[-1] == before[-1] - step
+        # Detaching can free live-tail chrome rows; allow growth while keeping the step and bounds.
+        return len(after) > len(before) and after[-1] <= before[-1]
+
+    if not _is_exact_wheel_up_step(initial_numbers, same_direction_numbers, wheel_scroll_rows):
         raise RuntimeError(
-            "raw same-direction wheel burst did not produce exactly one upward transcript row\n"
+            "raw same-direction wheel burst did not produce exactly three upward transcript rows\n"
             f"active typing elapsed: {active_elapsed:.3f}s; wheel elapsed: {same_direction_elapsed:.3f}s\n"
             f"before: {initial_numbers}\nafter: {same_direction_numbers}\nscreen:\n{same_direction_screen}"
         )
@@ -196,6 +212,150 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
         raise RuntimeError(f"reverse-direction wheel events did not return to the completed live tail\nscreen:\n{live_stream_screen}")
     _assert_no_deleted_scrollback_text(live_stream_screen, "restored completed live tail")
 
+    def restored_live_tail(screen: str) -> bool:
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
+        return "STREAM COMPLETE" in screen and complete_draft in screen and bool(numbers) and numbers[-1] == 59
+
+    # Re-detach deterministically so Ctrl+End can prove live-tail restore independently of wheel.
+    send_literal(tmux_exe, session, wheel_up * 16)
+    ctrl_end_detached = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen
+        and "STREAM COMPLETE" not in screen
+        and bool([int(value) for value in _NUMBERED_LINE.findall(screen)]),
+        "streaming-scroll re-detached before Ctrl+End live-tail restore",
+    )
+    _assert_no_deleted_scrollback_text(ctrl_end_detached, "re-detached before Ctrl+End")
+
+    send_literal(tmux_exe, session, "\x1b[1;5F")
+    ctrl_end_live = wait_for_screen_state(
+        tmux_exe,
+        session,
+        restored_live_tail,
+        "streaming-scroll Ctrl+End returns detached stream to live tail without draft mutation",
+    )
+    ctrl_end_numbers = _numbered_window(ctrl_end_live, "Ctrl+End restored live tail")
+    if ctrl_end_numbers[-1] != 59 or complete_draft not in ctrl_end_live:
+        raise RuntimeError(
+            "Ctrl+End did not restore the completed live tail with the composer draft intact\n"
+            f"numbers: {ctrl_end_numbers}\nscreen:\n{ctrl_end_live}"
+        )
+    _assert_no_deleted_scrollback_text(ctrl_end_live, "Ctrl+End restored live tail")
+
+    # Leave live-tail chrome so ordinary Up/Down can be measured as the keyboard scroll step
+    # (3 transcript rows) without colliding with live-tail chrome or the oldest boundary.
+    keyboard_scroll_rows = 3
+    send_keys(tmux_exe, session, *(["Up"] * 4))
+    detached_numbered = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen
+        and "STREAM COMPLETE" not in screen
+        and (numbers := [int(value) for value in _NUMBERED_LINE.findall(screen)])
+        and len(numbers) >= 10
+        and numbers[0] >= keyboard_scroll_rows
+        and numbers[-1] <= 59 - keyboard_scroll_rows,
+        "streaming-scroll detached numbered region before plain arrow scroll checks",
+    )
+    before_up = _numbered_window(detached_numbered, "detached numbered region before plain Up")
+
+    def keyboard_step_up(screen: str) -> bool:
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
+        if len(numbers) < 10 or complete_draft not in screen:
+            return False
+        same_size_shift = list(range(before_up[0] - keyboard_scroll_rows, before_up[0] - keyboard_scroll_rows + len(before_up)))
+        return numbers == same_size_shift
+
+    send_keys(tmux_exe, session, "Up")
+    up_scrolled = wait_for_screen_state(
+        tmux_exe,
+        session,
+        keyboard_step_up,
+        "streaming-scroll plain Up scrolls transcript by the keyboard step without draft mutation",
+    )
+    up_numbers = _numbered_window(up_scrolled, "plain Up keyboard-step scroll")
+    if complete_draft not in up_scrolled:
+        raise RuntimeError(f"plain Up altered the composer draft\nscreen:\n{up_scrolled}")
+    _assert_no_deleted_scrollback_text(up_scrolled, "plain Up keyboard-step scroll")
+
+    before_down = up_numbers
+
+    def keyboard_step_down(screen: str) -> bool:
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
+        if complete_draft not in screen or len(numbers) < 10:
+            return False
+        same_size_shift = list(range(before_down[0] + keyboard_scroll_rows, before_down[0] + keyboard_scroll_rows + len(before_down)))
+        return numbers == same_size_shift
+
+    send_keys(tmux_exe, session, "Down")
+    down_scrolled = wait_for_screen_state(
+        tmux_exe,
+        session,
+        keyboard_step_down,
+        "streaming-scroll plain Down scrolls transcript by the keyboard step without draft mutation",
+    )
+    down_numbers = _numbered_window(down_scrolled, "plain Down keyboard-step scroll")
+    if complete_draft not in down_scrolled:
+        raise RuntimeError(f"plain Down altered the composer draft\nscreen:\n{down_scrolled}")
+    _assert_no_deleted_scrollback_text(down_scrolled, "plain Down keyboard-step scroll")
+
+    send_keys(tmux_exe, session, "M-k")
+    alt_k_screen = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen
+        and (
+            "previous message" in screen
+            or "oldest message visible" in screen
+            or [int(value) for value in _NUMBERED_LINE.findall(screen)] != down_numbers
+        ),
+        "streaming-scroll Alt+K moves to a prior message boundary",
+    )
+    alt_k_numbers = [int(value) for value in _NUMBERED_LINE.findall(alt_k_screen)]
+    if complete_draft not in alt_k_screen:
+        raise RuntimeError(f"Alt+K altered the composer draft\nscreen:\n{alt_k_screen}")
+    if (
+        not alt_k_numbers
+        and "oldest message visible" not in alt_k_screen
+        and "previous message" not in alt_k_screen
+    ):
+        raise RuntimeError(f"Alt+K did not move message boundaries or report a boundary status\nscreen:\n{alt_k_screen}")
+    _assert_no_deleted_scrollback_text(alt_k_screen, "Alt+K prior message boundary")
+
+    send_keys(tmux_exe, session, "M-j")
+    alt_j_screen = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen
+        and (
+            "next message" in screen
+            or "live tail" in screen
+            or "STREAM COMPLETE" in screen
+            or [int(value) for value in _NUMBERED_LINE.findall(screen)] != alt_k_numbers
+        ),
+        "streaming-scroll Alt+J moves to the next message boundary or live tail",
+    )
+    if complete_draft not in alt_j_screen:
+        raise RuntimeError(f"Alt+J altered the composer draft\nscreen:\n{alt_j_screen}")
+    _assert_no_deleted_scrollback_text(alt_j_screen, "Alt+J next message boundary")
+
+    send_literal(tmux_exe, session, "\x1b[1;5F")
+    live_after_nav = wait_for_screen_state(
+        tmux_exe,
+        session,
+        restored_live_tail,
+        "streaming-scroll Ctrl+End after message-boundary navigation restores live tail",
+    )
+    if complete_draft not in live_after_nav:
+        raise RuntimeError(f"Ctrl+End after message navigation altered the composer draft\nscreen:\n{live_after_nav}")
+    _assert_no_deleted_scrollback_text(live_after_nav, "Ctrl+End after message-boundary navigation")
+
+    live_stream_screen = live_after_nav
+    if complete_draft not in live_stream_screen or "STREAM COMPLETE" not in live_stream_screen:
+        raise RuntimeError(f"navigation path did not finish on the completed live tail\nscreen:\n{live_stream_screen}")
+    _assert_no_deleted_scrollback_text(live_stream_screen, "restored completed live tail after navigation defaults")
+
     send_keys(tmux_exe, session, "C-c")
     wait_for_absent(tmux_exe, session, re.escape(complete_draft), "streaming-scroll active draft clear")
 
@@ -203,12 +363,29 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     final_draft = idle_draft + "XFINAL"
     idle_started = time.monotonic()
     send_literal(tmux_exe, session, idle_draft + (wheel_up + wheel_down) * 40 + "XFINAL")
+
+    def _footer_model_lines(screen: str) -> list[str]:
+        return [line for line in screen.splitlines() if _FOOTER_MODEL_LINE.search(line)]
+
+    def _assistant_meta_lines(screen: str) -> list[str]:
+        return [line for line in screen.splitlines() if _ASSISTANT_META_LINE.search(line)]
+
+    def idle_burst_live_tail(screen: str) -> bool:
+        # Converge on true live tail with role-aware chrome before hard assertions fire.
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(screen)]
+        return (
+            bool(numbers)
+            and numbers[-1] == 59
+            and "STREAM COMPLETE" in screen
+            and final_draft in screen
+            and len(_footer_model_lines(screen)) == 1
+            and len(_assistant_meta_lines(screen)) == 1
+        )
+
     final_screen = wait_for_screen_state(
         tmux_exe,
         session,
-        lambda screen: "stream line 059" in screen
-        and final_draft in screen
-        and sum(1 for line in screen.splitlines() if "AVA TUI Fake" in line) == 1,
+        idle_burst_live_tail,
         "streaming-scroll completed live tail and retained idle burst draft",
         timeout=2.0,
     )
@@ -216,16 +393,20 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     final_numbers = _numbered_window(final_screen, "streaming-scroll final live tail")
     lines = final_screen.splitlines()
     dimensions = tmux(tmux_exe, "display-message", "-p", "-t", session, "#{pane_width},#{pane_height}").stdout.strip()
-    metadata_lines = [line for line in lines if "AVA TUI Fake" in line]
     input_rows = [index for index, line in enumerate(lines) if final_draft in line]
-    if final_numbers[-1] != 59 or final_draft not in final_screen:
+    footer_lines = _footer_model_lines(final_screen)
+    assistant_meta_lines = _assistant_meta_lines(final_screen)
+    if final_numbers[-1] != 59 or final_draft not in final_screen or "STREAM COMPLETE" not in final_screen:
         raise RuntimeError(
             "idle typed/wheel burst did not retain the completed live tail with the exact draft/cursor result\n"
             f"active typing elapsed: {active_elapsed:.3f}s; active wheel elapsed: {burst_elapsed:.3f}s; idle elapsed: {idle_elapsed:.3f}s\n"
             f"screen:\n{final_screen}"
         )
-    if len(metadata_lines) != 1:
-        raise RuntimeError(f"streaming turn metadata did not appear exactly once\nmetadata: {metadata_lines}\nscreen:\n{final_screen}")
+    if len(footer_lines) != 1 or len(assistant_meta_lines) != 1:
+        raise RuntimeError(
+            "streaming final frame did not keep exactly one footer model line and one assistant metadata line\n"
+            f"footer_model_lines={footer_lines!r}\nassistant_meta_lines={assistant_meta_lines!r}\nscreen:\n{final_screen}"
+        )
     if dimensions != "120,32" or len(lines) != 32 or any(len(line) > 120 for line in lines):
         raise RuntimeError(f"streaming final evidence did not retain exact bounded 120x32 dimensions\nscreen:\n{final_screen}")
     if (

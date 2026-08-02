@@ -9,7 +9,7 @@ presentation policy while preserving the semantic and interaction contracts
 recorded here.
 
 Current F1 runs generate the distinct `frontend-f1-*-idle-composer.txt`
-artifacts documented in `docs/TESTING.md`. The F0 source checkpoint is the
+artifacts documented in `docs/operations/testing.md`. The F0 source checkpoint is the
 reproduction authority for the old filenames and four-row observations below;
 running the same scenario on current F1 source intentionally does not recreate
 that historical presentation.

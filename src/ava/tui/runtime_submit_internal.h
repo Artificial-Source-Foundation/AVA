@@ -13,6 +13,8 @@ struct RuntimeDraftState;
 class RuntimeNavigationController;
 class RuntimePresentationState;
 class RuntimeRenderer;
+class RuntimeSubagentWorkspaceController;
+class TranscriptSearchController;
 struct TuiRuntimeOptions;
 
 enum class RuntimeSubmitDisposition
@@ -35,7 +37,8 @@ class RuntimeSubmitController final
  public:
   RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                           RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                          RuntimeActiveRunController& active_run_controller, ActiveSelectList& active_select_list);
+                          RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
+                          RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list);
   RuntimeSubmitController(RuntimeSubmitController const&) = delete;
   RuntimeSubmitController& operator=(RuntimeSubmitController const&) = delete;
 
@@ -49,6 +52,8 @@ class RuntimeSubmitController final
   RuntimeNavigationController& navigation_;
   RuntimeActionController& action_controller_;
   RuntimeActiveRunController& active_run_controller_;
+  TranscriptSearchController& transcript_search_;
+  RuntimeSubagentWorkspaceController& subagent_workspace_;
   ActiveSelectList& active_select_list_;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

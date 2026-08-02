@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -61,6 +62,11 @@ struct SubagentDeliveryAttemptSnapshot
 // This is the stable process-local backend DTO. Prompts, credentials, and
 // filesystem paths do not belong in the public contract; terminal delivery
 // text is explicitly bounded and control-safe.
+//
+// display_title / display_subagent_type / launch_display are process-local
+// interactive display only. They may carry the bounded start title / type and
+// configured launch presentation, never the full task prompt/description, and
+// must not appear in public JSON, RPC, model-tool, or persisted/wire schemas.
 struct SubagentJobSnapshot
 {
   long long schema_version = kSubagentJobContractVersion;
@@ -92,6 +98,10 @@ struct SubagentJobSnapshot
   std::size_t tool_iterations = 0;
   std::optional<std::string> acknowledged_attempt_id = std::nullopt;
   std::optional<std::string> committed_turn_id = std::nullopt;
+  // Interactive display only; omitted from every public serializer.
+  std::string display_title = {};
+  std::string display_subagent_type = {};
+  SubagentLaunchDisplay launch_display = {};
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

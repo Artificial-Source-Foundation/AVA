@@ -3,6 +3,7 @@
 #include "ava/agent/tool_result.h"
 #include "ava/agent/usage_accounting.h"
 #include "ava/session/assistant_output.h"
+#include "ava/permissions/permission.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 
@@ -215,6 +216,14 @@ std::string tool_result_data_json(ToolDispatchResult const& result, std::optiona
                      "\",\"success\":" + (materialized.success ? std::string("true") : std::string("false")) + ",\"status\":\"" +
                      ava::core::json::escape(to_string(materialized.payload.status)) + "\",\"result\":\"" + ava::core::json::escape(materialized.result_text) +
                      "\",\"structured_result\":" + serialize_tool_result_payload_json(materialized);
+  // Dedicated model/provider-only replay field. Revalidate fail-closed so forged,
+  // over-cap, or control-bearing session values never persist. Ordinary result and
+  // structured_result remain guidance-free for public timeline/event surfaces.
+  if (!materialized.success)
+  {
+    if (auto validated = ava::permissions::validated_permission_user_guidance(materialized.provider_user_guidance))
+      json += ",\"provider_user_guidance\":\"" + ava::core::json::escape(*validated) + "\"";
+  }
   if (assistant_output_entry_id)
     json += ",\"assistant_output_entry_id\":\"" + ava::core::json::escape(*assistant_output_entry_id) + "\"";
   json += '}';

@@ -1875,6 +1875,105 @@ void test_anchor_open()
          "open_readable rejects O_WRONLY and O_RDWR with InvalidArgument");
 }
 
+void test_permission_user_guidance_propagation()
+{
+  auto const root = create_empty_root("permission-user-guidance");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  auto const outside_path = root / "outside-guidance.txt";
+  {
+    std::ofstream outside_file(outside_path, std::ios::binary | std::ios::trunc);
+    outside_file << "outside content";
+  }
+
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+
+  auto guided_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
+  ava::tools::ToolContext guided_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "stay inside the workspace";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink,
+      .permission_denial_guidance_capture = guided_capture};
+  auto guided_denied = ava::tools::read_file(guided_context, outside_path);
+  expect(!guided_denied && guided_capture->provider_user_guidance == "stay inside the workspace" &&
+             guided_denied.error().format().find("user_guidance") == std::string::npos &&
+             guided_denied.error().format().find("stay inside the workspace") == std::string::npos &&
+             guided_denied.error().format().find("resolution: deny") != std::string::npos &&
+             !has_error_context(guided_denied.error(), "user_guidance", "stay inside the workspace"),
+         "non-command permission denial captures validated guidance without entering Error context/format");
+
+  bool audits_free_of_guidance = !audits.empty();
+  for (auto const& event : audits)
+  {
+    auto const json = ava::tools::permission_audit_data_json(event);
+    audits_free_of_guidance = audits_free_of_guidance && json.find("user_guidance") == std::string::npos &&
+                              json.find("provider_user_guidance") == std::string::npos && json.find("stay inside the workspace") == std::string::npos &&
+                              event.reason.find("stay inside") == std::string::npos && event.resolution_reason.find("stay inside") == std::string::npos;
+  }
+  expect(audits_free_of_guidance, "permission audits never serialize one-shot user_guidance");
+
+  // Direct app-command contexts without a capture discard guidance entirely.
+  ava::tools::ToolContext no_capture_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+            denied.user_guidance = "discard me";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink};
+  auto discarded = ava::tools::read_file(no_capture_context, outside_path);
+  expect(!discarded && discarded.error().format().find("discard me") == std::string::npos &&
+             discarded.error().format().find("user_guidance") == std::string::npos,
+         "direct command contexts without a capture discard denial guidance");
+
+  audits.clear();
+  auto forged_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
+  ava::tools::ToolContext forged_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "forged"};
+            denied.user_guidance = "evil\nguidance\x01";
+            return denied;
+          },
+      .permission_audit_sink = audit_sink,
+      .permission_denial_guidance_capture = forged_capture};
+  auto forged_denied = ava::tools::read_file(forged_context, outside_path);
+  expect(!forged_denied && forged_capture->provider_user_guidance.empty() && forged_denied.error().format().find("user_guidance") == std::string::npos &&
+             forged_denied.error().format().find("evil") == std::string::npos,
+         "malformed forged user_guidance is dropped at the backend trust boundary");
+
+  audits.clear();
+  auto overcap_capture = std::make_shared<ava::tools::PermissionDenialGuidanceCapture>();
+  ava::tools::ToolContext overcap_context{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver =
+          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+            denied.user_guidance = std::string(ava::permissions::kMaxPermissionUserGuidanceBytes + 8, 'z');
+            return denied;
+          },
+      .permission_audit_sink = audit_sink,
+      .permission_denial_guidance_capture = overcap_capture};
+  auto overcap_denied = ava::tools::read_file(overcap_context, outside_path);
+  expect(!overcap_denied && overcap_capture->provider_user_guidance.empty() && overcap_denied.error().format().find("user_guidance") == std::string::npos,
+         "over-cap forged user_guidance never enters the per-dispatch capture or Error format");
+}
+
 }  // namespace
 
 void run_tools_file_tests()
@@ -1890,4 +1989,5 @@ void run_tools_file_tests()
   test_anchor_set_multi_anchor();
   test_anchor_set_symlinked_root();
   test_anchor_open();
+  test_permission_user_guidance_propagation();
 }

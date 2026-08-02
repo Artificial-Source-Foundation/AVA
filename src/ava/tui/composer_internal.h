@@ -18,6 +18,7 @@ inline constexpr std::size_t kMinComposerBlockLines = 2;
 inline constexpr std::size_t kMaxComposerBlockLines = 8;
 inline constexpr std::size_t kMaxPaletteLines = 8;
 inline constexpr std::string_view kReverseVideo = "\x1b[7m";
+inline constexpr std::string_view kReverseVideoOff = "\x1b[27m";
 
 // The curses draw path currently maps these truecolor SGR forms directly.
 // Extend that parser before changing these to 256-color or basic ANSI codes.
@@ -35,17 +36,46 @@ inline constexpr std::string_view kSgrSuccess = "\x1b[38;2;52;211;153m";
 inline constexpr std::string_view kSgrWarning = "\x1b[38;2;251;191;36m";
 inline constexpr std::string_view kSgrError = "\x1b[38;2;248;113;113m";
 inline constexpr std::string_view kSgrAccent = "\x1b[38;2;77;158;246m";
-inline constexpr std::string_view kSgrScreenBg = "\x1b[48;2;11;14;20m";
+inline constexpr std::string_view kSgrScreenBg = "\x1b[49m";
 inline constexpr std::string_view kSgrComposerBg = "\x1b[48;2;26;31;46m";
 inline constexpr std::string_view kSgrToolBg = "\x1b[48;2;18;23;34m";
 inline constexpr std::string_view kSgrQuestionBg = "\x1b[48;2;32;38;56m";
 inline constexpr std::string_view kComposerBar = "│";
-inline constexpr std::array<std::string_view, 12> kProcessingIndicatorFrames = {"▁", "▂", "▃", "▄", "▅", "▆", "▇", "▆", "▅", "▄", "▃", "▂"};
+// Fixed-width four-cell signal meter. Outer bars use muted styling; the inner pair uses accent blue.
+inline constexpr std::array<std::string_view, 4> kProcessingIndicatorFrames = {"▂▄▇▃", "▃▆▄▂", "▅▃▇▄", "▄▇▅▂"};
 inline constexpr auto kProcessingIndicatorFrameDelay = std::chrono::milliseconds(120);
+inline constexpr std::size_t kProcessingIndicatorColumns = 4;
+// Lower-block meter glyphs are single-column and three UTF-8 bytes each.
+inline constexpr std::size_t kProcessingIndicatorBarBytes = 3;
 
 [[nodiscard]] inline std::string_view processing_indicator_frame(std::size_t frame)
 {
   return kProcessingIndicatorFrames[frame % kProcessingIndicatorFrames.size()];
+}
+
+// Styled meter for color terminals: muted | accent | accent | muted, then reset to screen bg.
+// NO_COLOR callers should use processing_indicator_frame() (or strip SGR from this result).
+[[nodiscard]] inline std::string processing_indicator_styled(std::size_t frame)
+{
+  auto const raw = processing_indicator_frame(frame);
+  if (raw.size() != kProcessingIndicatorBarBytes * kProcessingIndicatorColumns)
+    return std::string(raw);
+  auto const bar0 = raw.substr(0, kProcessingIndicatorBarBytes);
+  auto const bar1 = raw.substr(kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  auto const bar2 = raw.substr(2 * kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  auto const bar3 = raw.substr(3 * kProcessingIndicatorBarBytes, kProcessingIndicatorBarBytes);
+  std::string styled;
+  styled.reserve(raw.size() + kSgrMuted.size() * 2 + kSgrAccent.size() + kSgrReset.size() + kSgrScreenBg.size());
+  styled.append(kSgrMuted);
+  styled.append(bar0);
+  styled.append(kSgrAccent);
+  styled.append(bar1);
+  styled.append(bar2);
+  styled.append(kSgrMuted);
+  styled.append(bar3);
+  styled.append(kSgrReset);
+  styled.append(kSgrScreenBg);
+  return styled;
 }
 
 [[nodiscard]] inline std::size_t processing_indicator_elapsed_frames(std::chrono::steady_clock::duration elapsed)
@@ -67,9 +97,11 @@ enum class NcursesColorRole
 // Maps AVA's truecolor SGR values to the semantic ncurses palette roles.
 [[nodiscard]] NcursesColorRole ncurses_color_role_for_sgr(std::string_view sgr);
 
-[[nodiscard]] inline std::string composer_gutter()
+// Ordinary dock gutters inherit the screen/transcript background. Elevated palette
+// surfaces pass kSgrComposerBg so their left rail stays on the composer panel.
+[[nodiscard]] inline std::string composer_gutter(std::string_view background_sgr = kSgrScreenBg)
 {
-  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(kSgrComposerBg) + "  ";
+  return std::string(kSgrAccent) + std::string(kComposerBar) + std::string(kSgrReset) + std::string(background_sgr) + "  ";
 }
 
 struct ComposerLayoutPolicy
@@ -154,14 +186,26 @@ struct CompletionMatchCache
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TranscriptRenderedBlock
+{
+  std::vector<std::string> lines = {};
+  std::vector<bool> presentation_private_rows = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TranscriptLayout
 {
   std::vector<std::string> lines = {};
+  // Exact row-aligned presentation policy. Private rows remain in `lines` for
+  // screen geometry but are excluded from transcript search and extraction.
+  std::vector<bool> presentation_private_rows = {};
+  std::vector<std::size_t> block_boundaries = {};
   std::vector<std::size_t> message_starts = {};
   std::vector<std::size_t> content_starts = {};
   std::vector<std::size_t> message_item_indices = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptViewportAnchor
@@ -227,7 +271,7 @@ struct TranscriptTailRenderCache
   std::size_t max_carry_source_bytes = 0;
   std::size_t incremental_updates = 0;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TranscriptLayoutCache
@@ -243,7 +287,7 @@ struct TranscriptLayoutCache
   mutable std::size_t visible_slice_count = 0;
   TranscriptTailRenderCache tail = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ScreenRowCache
@@ -256,7 +300,7 @@ struct ScreenRowCache
   std::size_t height = 0;
   bool valid = false;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
@@ -267,6 +311,10 @@ void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
 [[nodiscard]] std::size_t utf8_sequence_length(unsigned char byte);
 [[nodiscard]] bool decode_utf8_codepoint(std::string_view text, std::size_t start, std::size_t length, char32_t& codepoint);
 [[nodiscard]] std::size_t codepoint_columns(char32_t codepoint);
+// Compact user-perceived cluster boundaries shared by rendering and the composer editor.
+// Covers base+combining/variation marks, regional-indicator pairs, emoji modifiers, and ZWJ
+// emoji sequences. Deliberately narrower than full Unicode UAX #29 grapheme segmentation.
+[[nodiscard]] std::size_t terminal_text_cluster_bytes(std::string_view text, std::size_t index);
 [[nodiscard]] TerminalTextCell terminal_text_cell(std::string_view text, std::size_t index);
 [[nodiscard]] bool skip_sgr_sequence(std::string_view text, std::size_t& index);
 [[nodiscard]] bool skip_osc_sequence(std::string_view text, std::size_t& index);
@@ -314,7 +362,31 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                         ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                         bool compact_spacing = false);
+[[nodiscard]] TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
+                                                                    ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing);
+[[nodiscard]] std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index,
+                                                                           std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
+                                                                           bool compact_spacing);
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+// Click target for the first rendered "Thinking:" header line of a boundable completed thinking item.
+[[nodiscard]] std::optional<std::size_t> transcript_thinking_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+
+// Shared transcript body geometry used by header hit-testing and rendered selection.
+struct TranscriptBodyScreenGeometry
+{
+  std::size_t transcript_height = 0;
+  std::size_t content_width = 0;
+  std::size_t canvas_left = 0;
+  bool valid = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+[[nodiscard]] TranscriptBodyScreenGeometry transcript_body_screen_geometry(ComposerSnapshot const& snapshot);
+// Bounded completed-thinking preview: first 11 rendered content rows + one footer row.
+inline constexpr std::size_t kThinkingBoundedMaxRows = 12;
+inline constexpr std::size_t kThinkingBoundedContentRows = 11;
+// True when completed (non-live) thinking currently renders more than the bounded preview at width.
+[[nodiscard]] bool transcript_item_has_boundable_thinking(TranscriptItem const& item, std::size_t width, bool thinking_visible);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
                                                                bool compact_spacing = false);
@@ -376,7 +448,8 @@ inline void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::v
 
 [[nodiscard]] ComposerFrame render_composer_frame_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                                          TranscriptLayoutCache* transcript_cache, std::size_t transcript_generation, bool center_canvas = true,
-                                                         bool allow_transcript_gap = true, bool freeze_transcript_layout = false);
+                                                         bool allow_transcript_gap = true, bool freeze_transcript_layout = false,
+                                                         bool allow_frozen_width_mismatch = false);
 [[nodiscard]] std::optional<ComposerPaletteScreenLayout> composer_palette_screen_layout_cached(ComposerSnapshot const& snapshot,
                                                                                                CompletionMatchCache& completion_cache,
                                                                                                std::size_t source_revision);
@@ -392,7 +465,7 @@ inline void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::v
                                                                                                       std::size_t source_revision);
 [[nodiscard]] bool draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                       TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache,
-                                      bool freeze_transcript_layout = false);
+                                      bool freeze_transcript_layout = false, bool allow_frozen_width_mismatch = false);
 [[nodiscard]] bool draw_processing_footer_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,
                                                  TranscriptLayoutCache& transcript_cache, std::size_t transcript_generation, ScreenRowCache& screen_cache);
 void clear_composer_terminal_graphics() noexcept;

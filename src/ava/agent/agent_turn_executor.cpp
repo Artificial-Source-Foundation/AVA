@@ -93,6 +93,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
       .task_subagent_runner = options_.trace_context.parent_session_id.empty()
                                   ? TaskSubagentRunner([this](TaskSubagentRequest const& request) { return run_task_subagent(request); })
                                   : TaskSubagentRunner{},
+      .subagent_launch = options_.subagent_launch,
       .subagent_coordinator = options_.subagent_coordinator,
       .subagents = subagents_,
   };

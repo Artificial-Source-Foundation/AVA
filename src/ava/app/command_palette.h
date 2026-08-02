@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ava/app/command_catalog.h"
+#include "ava/app/session_user_turns.h"
 #include "ava/tui/composer.h"
 #include "ava/config/model_config.h"
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
+#include "ava/core/result.h"
 
 #include <functional>
 #include <mutex>
@@ -157,6 +159,12 @@ void retarget_application_session(ApplicationCatalogCache& cache, std::string_vi
                                                         std::string footer_hint = {}, bool named_only = false, bool show_paths = false,
                                                         bool show_archived = false, bool show_label_time = false);
 #endif
+// Newest public user turns first. Item values are stable session entry ids;
+// rows keep only the backend-bounded preview/timestamp fields.
+[[nodiscard]] tui::SelectListView user_turn_selector_view(std::vector<SessionUserTurn> turns, std::string title, std::string footer_hint = {},
+                                                          std::string initial_query = {}, bool truncated_before = false);
+[[nodiscard]] ava::core::Result<tui::SelectListView> user_turn_selector_view(runtime::Session const& session, std::string title, std::string footer_hint = {},
+                                                                             std::string initial_query = {});
 [[nodiscard]] std::optional<std::string> session_selector_parent_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id);
 [[nodiscard]] std::optional<std::string> session_selector_child_target(ava::session::SessionTreeIndex const& tree, std::string_view session_id,
                                                                        SessionSelectorSort sort = SessionSelectorSort::Recent, bool include_archived = false);

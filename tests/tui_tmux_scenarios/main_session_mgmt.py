@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from tui_smoke_helpers import (
     SmokeContext,
     assert_screen_absent_for,
@@ -18,6 +20,7 @@ from tui_smoke_helpers import (
 from .common import (
     _finish_main,
     _main_session,
+    _wait_for_normal_turn_request_count,
     assert_title_first_new_receipt,
 )
 
@@ -47,7 +50,9 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
         lambda screen: tuple(screen.splitlines()[:-3]) != session_live_rows and "│  /name TUI smoke" not in screen,
         "idle Up arrow transcript movement without history recall",
     )
-    if any(text in arrow_scrollback for text in ("scrollback detached", "updates below", "jump_to_bottom")):
+    # /help scrollback intentionally lists the jump_to_bottom keybinding name; only
+    # treat the deleted detached-chrome phrases as failures here.
+    if any(text in arrow_scrollback for text in ("scrollback detached", "updates below")):
         raise RuntimeError(f"idle Up arrow surfaced deleted detached chrome\nscreen:\n{arrow_scrollback}")
     send_keys(tmux_exe, session, "Down")
     wait_for_screen_state(
@@ -282,6 +287,19 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "Enter")
     wait_for(tmux_exe, session, r"session name set: \"Branch parent\"", "branch parent session name")
     send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/fork-from")
+    send_keys(tmux_exe, session, "Enter")
+    # Command-only sessions have no public user turns; the picker fails closed with status.
+    empty_fork_from = wait_for(
+        tmux_exe,
+        session,
+        r"no public user turns available|Fork from user turn",
+        "fork-from empty-or-picker status on command-only session",
+    )
+    if "Fork from user turn" in empty_fork_from:
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Fork from user turn", "fork-from picker closed without mutation")
+    send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/fork Branch child")
     send_keys(tmux_exe, session, "Enter")
     wait_for(
@@ -341,4 +359,161 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     if "* Branch child" not in child_active:
         raise RuntimeError(f"selector Alt+Right did not make the child branch current\nscreen:\n{child_active}")
 
+    old_new_marker = "OLD-PRESENTATION-BEFORE-NEW-7E4C"
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, f"/clearance {old_new_marker}")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, old_new_marker, "old transcript marker before /new")
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/new Presentation reset new")
+    send_keys(tmux_exe, session, "Enter")
+    reset_by_new = wait_for(
+        tmux_exe,
+        session,
+        r'(?s)started session "Presentation reset new" · id.*?session_.*previous session "Branch child" · id.*?session_.*switched to "Presentation reset new"',
+        "fresh visible presentation after /new",
+    )
+    assert_title_first_new_receipt(reset_by_new, "Presentation reset new", "Branch child", "presentation reset /new")
+    if old_new_marker in reset_by_new:
+        raise RuntimeError(f"/new retained an old transcript marker\nscreen:\n{reset_by_new}")
+
+    old_clear_marker = "OLD-PRESENTATION-BEFORE-CLEAR-9A2D"
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, f"/clearance {old_clear_marker}")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, old_clear_marker, "old transcript marker before /clear")
+    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, "/clear Presentation reset clear")
+    send_keys(tmux_exe, session, "Enter")
+    reset_by_clear = wait_for(
+        tmux_exe,
+        session,
+        r'(?s)started session "Presentation reset clear" · id.*?session_.*previous session "Presentation reset new" · id.*?session_.*switched to "Presentation reset clear"',
+        "fresh visible presentation after /clear",
+    )
+    assert_title_first_new_receipt(reset_by_clear, "Presentation reset clear", "Presentation reset new", "presentation reset /clear")
+    if old_new_marker in reset_by_clear or old_clear_marker in reset_by_clear or 'started session "Presentation reset new"' in reset_by_clear:
+        raise RuntimeError(f"/clear retained old presentation rows\nscreen:\n{reset_by_clear}")
+    save_evidence(root, "session-new-clear-presentation-reset", reset_by_clear)
+
     _finish_main(tmux_exe, session)
+
+    # Production-path evidence for /fork-from and /copy user over real public turns
+    # using the fake provider (no paid live provider). Two distinct user turns are
+    # required so fork-from can cut before the later transcript.
+    fake_models = (
+        '{"default_provider":"moonshot","default_model":"ava-tui-fake",'
+        '"models":[{"provider":"moonshot","id":"ava-tui-fake","name":"AVA TUI Fake","family":"fake",'
+        '"context_window_tokens":8192,"max_output_tokens":1024,"supports_tools":false,'
+        '"supports_streaming":false,"supports_reasoning":false,"reports_usage":true}]}\n'
+    )
+    ctx.ava_config.joinpath("models.json").write_text(fake_models, encoding="utf-8")
+    # text-three admits multiple ordinary turns (default "text" stops after one).
+    provider = ctx.start_fake_provider("user-turn-pickers", delay_ms=0, scenario="text-three")
+    picker_command = ctx.fake_provider_command(
+        provider,
+        home=ctx.home,
+        config=ctx.config,
+        state=ctx.state,
+        data=ctx.data,
+    )
+    picker_session = ctx.session_name("user-turn-pickers")
+    ctx.launch_ava(picker_session, workspace=workspace, command=picker_command, width=120, height=32)
+    wait_for(tmux_exe, picker_session, r"Type a message|live session", "user-turn picker initial frame")
+
+    send_keys(tmux_exe, picker_session, "C-u")
+    send_literal(tmux_exe, picker_session, "alpha earlier unique user turn")
+    wait_for(tmux_exe, picker_session, r"alpha earlier unique user turn", "user-turn picker first draft")
+    send_keys(tmux_exe, picker_session, "Enter")
+    _wait_for_normal_turn_request_count(provider.request_log, 1, "user-turn picker first provider request")
+    wait_for(
+        tmux_exe,
+        picker_session,
+        r"(?s)alpha earlier unique user turn.*headless active prompt complete",
+        "user-turn picker first completed turn",
+    )
+    wait_for_absent(tmux_exe, picker_session, r"Esc stop|processing", "user-turn picker idle after first turn")
+
+    send_keys(tmux_exe, picker_session, "C-u")
+    send_literal(tmux_exe, picker_session, "beta later unique user turn")
+    wait_for(tmux_exe, picker_session, r"beta later unique user turn", "user-turn picker second draft")
+    send_keys(tmux_exe, picker_session, "Enter")
+    _wait_for_normal_turn_request_count(provider.request_log, 2, "user-turn picker second provider request")
+    both_turns = wait_for(
+        tmux_exe,
+        picker_session,
+        r"(?s)alpha earlier unique user turn.*beta later unique user turn.*headless active prompt complete",
+        "user-turn picker second completed turn",
+    )
+    if "beta later unique user turn" not in both_turns:
+        raise RuntimeError(f"expected both user turns before fork-from\nscreen:\n{both_turns}")
+    wait_for_absent(tmux_exe, picker_session, r"Esc stop|processing", "user-turn picker idle after second turn")
+
+    send_keys(tmux_exe, picker_session, "C-u")
+    send_literal(tmux_exe, picker_session, "/fork-from alpha earlier")
+    send_keys(tmux_exe, picker_session, "Enter")
+    fork_picker = wait_for(
+        tmux_exe,
+        picker_session,
+        r"Fork from user turn",
+        "fork-from filter opened picker on earlier turn",
+    )
+    if "alpha earlier unique user turn" not in fork_picker:
+        raise RuntimeError(f"fork-from filter did not retain the earlier turn\nscreen:\n{fork_picker}")
+    send_keys(tmux_exe, picker_session, "Enter")
+    forked = wait_for(
+        tmux_exe,
+        picker_session,
+        r"forked session session_\S+ from session_\S+",
+        "fork-from earlier turn switched sessions",
+    )
+    wait_for_absent(tmux_exe, picker_session, r"Fork from user turn", "fork-from selector cleared after resolve")
+    if "beta later unique user turn" in forked:
+        raise RuntimeError(f"fork-from earlier turn retained later transcript\nscreen:\n{forked}")
+    if "forked session" not in forked:
+        raise RuntimeError(f"fork-from did not expose the new fork status\nscreen:\n{forked}")
+    save_evidence(root, "user-turn-fork-from-earlier", forked)
+
+    fork_match = re.search(
+        r"forked session (session_\S+) from (session_\S+)",
+        forked,
+    )
+    if fork_match is None:
+        raise RuntimeError(f"fork-from status did not include source/new session ids\nscreen:\n{forked}")
+    parent_session_id = fork_match.group(2)
+
+    # Resume the parent so /copy user can target the later turn that the fork cut away.
+    send_keys(tmux_exe, picker_session, "C-u")
+    send_literal(tmux_exe, picker_session, f"/resume {parent_session_id}")
+    send_keys(tmux_exe, picker_session, "Enter")
+    wait_for(
+        tmux_exe,
+        picker_session,
+        rf"resumed session {re.escape(parent_session_id)}|session already open",
+        "resumed parent session before copy user",
+    )
+
+    send_keys(tmux_exe, picker_session, "C-u")
+    send_literal(tmux_exe, picker_session, "/copy user beta later")
+    send_keys(tmux_exe, picker_session, "Enter")
+    copy_picker = wait_for(
+        tmux_exe,
+        picker_session,
+        r"Copy user turn",
+        "copy user filter opened picker on later turn",
+    )
+    if "beta later unique user turn" not in copy_picker:
+        raise RuntimeError(f"copy user filter did not retain the later turn\nscreen:\n{copy_picker}")
+    send_keys(tmux_exe, picker_session, "Enter")
+    copy_status = wait_for(
+        tmux_exe,
+        picker_session,
+        r"copied user turn to clipboard|clipboard copy failed",
+        "copy user Enter status",
+    )
+    wait_for_absent(tmux_exe, picker_session, r"Copy user turn", "copy user selector cleared after resolve")
+    if "copied user turn to clipboard" not in copy_status and "clipboard copy failed" not in copy_status:
+        raise RuntimeError(f"copy user did not report a truthful status\nscreen:\n{copy_status}")
+    save_evidence(root, "user-turn-copy-user", copy_status)
+
+    _finish_main(tmux_exe, picker_session)

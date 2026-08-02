@@ -230,18 +230,18 @@ void run_tui_completion_tests()
              !ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 141),
          "F3 centered slash palette accepts both canvas edges and rejects the exact left and right gutters");
 
-  auto active_hint_snapshot =
-      ava::tui::ComposerSnapshot{.mode = "build",
-                                 .provider = "openai",
-                                 .model = "gpt-5.5",
-                                 .session_id = "session_test",
-                                 .input = "follow up",
-                                 .status = "invalid_argument: admitted",
-                                 .processing = true,
-                                 .active_run_hint = ava::tui::ActiveRunHint{.submit_or_queue = "Ctrl+Q", .follow_up = "Alt+F", .dequeue = "Alt+D"},
-                                 .transcript = {},
-                                 .width = 80,
-                                 .height = 12};
+  auto active_hint_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "follow up",
+      .status = "invalid_argument: admitted",
+      .processing = true,
+      .active_run_hint = ava::tui::ActiveRunHint{.submit_or_queue = "Ctrl+Q", .follow_up = "Alt+F", .dequeue = "Alt+D", .interrupt = "Esc"},
+      .transcript = {},
+      .width = 80,
+      .height = 12};
   auto const active_hint_lines = ava::tui::render_composer(active_hint_snapshot);
   active_hint_snapshot.processing = false;
   auto const idle_hint_lines = ava::tui::render_composer(active_hint_snapshot);
@@ -306,8 +306,21 @@ void run_tui_completion_tests()
                                auto const visible = strip_sgr(line);
                                return visible.find("openai/gpt-5.5") != std::string::npos && visible.find("GPT-5.5") != std::string::npos &&
                                       visible.find("Models") == std::string::npos;
-                             }),
-         "tui slash palette prioritizes argument value and description while suppressing the redundant category");
+                             }) &&
+             std::ranges::none_of(argument_palette, [](std::string const& line) { return strip_sgr(line).find("[complete]") != std::string::npos; }),
+         "tui slash palette prioritizes argument value and description while suppressing the redundant category and the old [complete] hint");
+  // append_space=false argument rows must not show a visual [complete] marker; bare /copy and /thinking exact-submit remain catalog-driven.
+  auto const terminal_argument_matches = ava::tui::filter_slash_commands("/models open", argument_slash_commands);
+  expect(!terminal_argument_matches.empty() && terminal_argument_matches.front().argument_completion && terminal_argument_matches.front().hint.empty() &&
+             ava::tui::slash_command_selection_text("/models open", argument_slash_commands, 0) == "/models openai/gpt-5.5",
+         "argument completion rows omit [complete] while still inserting exact values without a forced trailing space");
+  std::vector<ava::tui::SlashCommandItem> const bare_exact_commands = {
+      ava::tui::SlashCommandItem{
+          .command = "/copy", .description = "Copy the latest AVA message, user turn, tool, or permission details", .category = "Session"},
+      ava::tui::SlashCommandItem{
+          .command = "/thinking", .description = "Toggle thinking visibility; /thinking details inspects the latest block", .category = "Session"}};
+  expect(!ava::tui::slash_palette_visible("/copy", bare_exact_commands) && !ava::tui::slash_palette_visible("/thinking", bare_exact_commands),
+         "bare /copy and /thinking remain exact one-Enter submissions without a completion palette");
   auto const cursor_scoped_argument_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                    .provider = "openai",
                                                                                                    .model = "gpt-5.5",

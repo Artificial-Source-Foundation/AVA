@@ -1,6 +1,10 @@
 #include "sys.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_draft_internal.h"
+#include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 
 #include <utility>
@@ -43,6 +47,15 @@ ava::event::EventEnvelopeSink RuntimeEventQueue::envelope_sink()
   };
 }
 
+ava::agent::SubagentLaunchSink RuntimeEventQueue::subagent_launch_sink()
+{
+  return [this](ava::agent::SubagentLaunchNotification const& notification) {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.emplace_back(std::in_place_type<ava::agent::SubagentLaunchNotification>, notification);
+    received = true;
+  };
+}
+
 ava::core::VoidResult RuntimeEventQueue::enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context)
 {
   std::lock_guard<std::mutex> lock(mutex);
@@ -59,6 +72,13 @@ std::vector<QueuedTuiEvent> RuntimeEventQueue::drain()
   return drained;
 }
 
+void RuntimeEventQueue::discard()
+{
+  std::lock_guard<std::mutex> lock(mutex);
+  events.clear();
+  received = false;
+}
+
 bool RuntimeEventQueue::received_any()
 {
   std::lock_guard<std::mutex> lock(mutex);
@@ -69,7 +89,8 @@ RuntimePresentationState::RuntimePresentationState(TuiRuntimeOptions& options)
     : snapshot(initial_snapshot(options)),
       applied_slash_catalog_generation_(options.slash_catalog_generation),
       applied_workspace_catalog_generation_(options.workspace_catalog_generation),
-      sidebar{.session_id = options.session_id,
+      sidebar{.todos = std::move(options.initial_todos),
+              .session_id = options.session_id,
               .mode = options.mode,
               .provider = options.provider,
               .model = options.model,
@@ -139,9 +160,53 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   sidebar.workspace = std::move(state.workspace);
   sidebar.git_branch = std::move(state.git_branch);
   sidebar.context_source_count = state.context_source_count;
+  sidebar.todos = std::move(state.todos);
   refresh_token_status(options);
   refresh_active_context_status(options);
   refresh_reasoning_status(options);
+}
+
+bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
+                                                               RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
+                                                               TranscriptSearchController& transcript_search,
+                                                               RuntimeSubagentWorkspaceController& subagent_workspace, TuiRuntimeStateSnapshot state)
+{
+  auto& snapshot = presentation_state.snapshot;
+  auto& sidebar = presentation_state.sidebar;
+  auto const session_changed = snapshot.session_id != state.session_id;
+  if (session_changed)
+  {
+    transcript_search.reset_for_session_transition();
+    subagent_workspace.reset_for_session_transition();
+    draft_state.reset_for_session_transition();
+    renderer.reset_for_session_transition();
+
+    snapshot.transcript.clear();
+    ++snapshot.transcript_generation;
+    snapshot.queued_messages.clear();
+    snapshot.permission_prompt.reset();
+    snapshot.question_prompt.reset();
+    snapshot.sidebar.reset();
+    snapshot.sidebar_drawer_visible = false;
+    snapshot.sidebar_drawer_scroll_offset = 0;
+    snapshot.input.clear();
+    snapshot.input_cursor = 0;
+    snapshot.input_selection_start = std::string::npos;
+    snapshot.input_selection_end = std::string::npos;
+    snapshot.selected_slash_command_index = 0;
+    snapshot.slash_palette_suppressed = false;
+    snapshot.path_completion_force_active = false;
+    snapshot.draft_scroll_offset = 0;
+    snapshot.reasoning_feedback.reset();
+
+    sidebar.activity.clear();
+    sidebar.modified_files.clear();
+    sidebar.todos.clear();
+    sidebar.session_entry_count.reset();
+  }
+
+  presentation_state.apply_runtime_state_snapshot(options, std::move(state));
+  return session_changed;
 }
 
 }  // namespace ava::tui

@@ -23,6 +23,7 @@ ModelInfo text_model(std::string provider_id, std::string model_id, std::string 
   return ModelInfo{.provider_id = std::move(provider_id),
                    .model_id = std::move(model_id),
                    .display_name = std::move(display_name),
+                   .display_name_is_configured = true,
                    .family = std::move(family),
                    .context_window_tokens = context_window_tokens,
                    .max_output_tokens = max_output_tokens,

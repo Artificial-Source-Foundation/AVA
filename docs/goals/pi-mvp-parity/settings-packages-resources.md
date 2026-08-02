@@ -33,7 +33,7 @@ Suggested Codex command:
 | Project trust | `src/ava/app/project_trust.cpp`, command trust handlers |
 | Plugins/MCP/LSP config | `src/ava/plugin/discovery.cpp`, `src/ava/mcp/config.cpp`, `src/ava/lsp/configured_provider.cpp` |
 | Settings UI | `src/ava/tui/runtime.cpp`, `src/ava/app/command_palette.cpp`, `src/ava/app/commands.cpp` |
-| Docs | `docs/CONFIG.md`, `docs/USAGE.md`, `docs/plugin-system.md`, `docs/plugin-compatibility-policy.md` |
+| Docs | `docs/core/configuration.md`, `docs/core/usage.md`, `docs/extensions/plugin-system.md`, `docs/plugin-compatibility-policy.md` |
 | Tests | `tests/config_context_auth_oauth_tests.cpp`, `tests/app_runtime_tests.cpp`, `tests/plugin_tests.cpp`, `tests/mcp_tests.cpp`, `tests/tui_composer_tests.cpp` |
 
 ## Current Gap Summary
@@ -59,7 +59,7 @@ AVA has domain-specific XDG JSON configs, a TUI `/settings` select-list, theme/k
 
 | Slice | Work |
 | --- | --- |
-| S1. Settings architecture decision | Decide whether to introduce a unified `settings.json` facade over existing domain configs or keep domain configs with a settings index. Document in this file and `docs/CONFIG.md`. |
+| S1. Settings architecture decision | Decide whether to introduce a unified `settings.json` facade over existing domain configs or keep domain configs with a settings index. Document in this file and `docs/core/configuration.md`. |
 | S2. Safe config write utility | Reuse or create a narrow config write helper for owner-only, atomic writes, validation-before-commit, and external-edit preservation where needed. |
 | S3. Reload diagnostics | Add structured reload result objects and TUI/headless display for each reloadable domain. Keep last good config on failure. |
 | S4. Project settings trust | Define allowed project-local settings, deny model-writable policy escalation, and test trust decisions. |
@@ -110,18 +110,18 @@ git --no-pager diff --check
   - Changed `src/ava/app/app.cpp`: added top-level `ava packages ...` / `ava package ...` placeholder that exits successfully with the package deferral and manual resource-install guidance.
   - Added `tests/cli_package_manager_deferred.cmake` and registered `ava_cli.package_manager_deferred` in `tests/CMakeLists.txt`.
   - Changed `tests/app_runtime_tests.cpp`: covers `/packages` disabled handling, keybinding symlink-target rejection through atomic writes, and restoration of a normal keybinding config afterward.
-  - Changed docs: `docs/CONFIG.md`, `docs/USAGE.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` now record the domain-config decision, manual resource layout, package/offline/telemetry/self-update deferrals, and updated evidence.
+  - Changed docs: `docs/core/configuration.md`, `docs/core/usage.md`, `docs/product/mvp-baseline.md`, and `docs/product/mvp-coverage-ledger.md` now record the domain-config decision, manual resource layout, package/offline/telemetry/self-update deferrals, and updated evidence.
 
 ## Settings And Resource Disposition Matrix
 
 | Criterion | Disposition | Evidence / rationale |
 | --- | --- | --- |
-| Unified settings decision | Domain configs accepted for MVP; unified facade deferred | `docs/CONFIG.md` documents why AVA keeps separate auth/model/prompt/display/keybinding/plugin/MCP/LSP/trust/permission files to preserve safety boundaries and avoid model-writable authority. |
+| Unified settings decision | Domain configs accepted for MVP; unified facade deferred | `docs/core/configuration.md` documents why AVA keeps separate auth/model/prompt/display/keybinding/plugin/MCP/LSP/trust/permission files to preserve safety boundaries and avoid model-writable authority. |
 | Safe writes | Implemented for active user-mutated settings surfaces | Auth has owner-only locked atomic storage; model scoped-cycle and display theme writes already use atomic replacement; this area moved keybinding init/import/set/reset onto `write_text_file_atomic` and added symlink-target coverage. |
 | Project settings trust | Implemented | Trust decisions live in `$XDG_STATE_HOME/ava/project-trust.json`; project commands, skills, plugins, MCP/LSP config, and project system prompt resources are skipped until `/trust project`; context files remain visible. |
 | Reload diagnostics | Implemented for MVP | `/reload` reports display/models/trust/prompts/compaction/keybindings and restart-required auth/permissions/LSP/MCP/plugins, with targeted app-runtime coverage and opt-in TUI smoke coverage. |
 | Package/resource workflow | Local plugin directory install/remove implemented; broad package manager deferred | `/plugins install <path>` and `/plugins remove <id>` manage local global disabled plugin directories without entrypoint launch. `/packages` and `ava packages ...` return deferral text; no npm/git/marketplace/self-update side effects are added. |
-| Resource filters | Deferred with manual install docs | Because packages are deferred, package resource filters are also deferred. Manual global/project resource locations are documented in `docs/CONFIG.md`; plugin enable/disable remains available for local plugins. |
+| Resource filters | Deferred with manual install docs | Because packages are deferred, package resource filters are also deferred. Manual global/project resource locations are documented in `docs/core/configuration.md`; plugin enable/disable remains available for local plugins. |
 | Startup setup | AVA-native auth onboarding accepted; analytics/theme wizard deferred | First-run/pre-auth guidance remains focused on `/connect` and provider env/auth setup. Theme selection is available through `/settings` and `/theme`; analytics/telemetry remain excluded. |
 | Theme story | Implemented for MVP | Built-in/custom themes, display.json, auto reload, `NO_COLOR`, `AVA_TUI_THEME`, `COLORFGBG`, docs, unit tests, and opt-in TUI smoke coverage exist. Package-delivered themes are deferred. |
 | Offline mode | Implemented as a provider-call guard | `--offline` fails closed before provider prompt turns or provider-backed compaction resolve credentials or send requests. Local slash/RPC inspection commands and local plugin directory install/remove remain available; the flag is not an operating-system network sandbox for tools or future remote MCP/package surfaces. |
@@ -152,7 +152,7 @@ Manual/headless package placeholder smoke is covered by `ava_cli.package_manager
 - Deferral: Package resource filters for extensions/skills/prompts/themes are not implemented because package install is deferred. Manual resource installation remains the supported MVP path.
 - Deferral: Theme wizard/analytics first-run setup is not adopted. AVA keeps auth-first onboarding and local-first no-telemetry behavior.
 - Decision: `--offline` is implemented as a provider-call guard, not an OS network sandbox. Future remote package catalogs, remote MCP transports, version checks, and network sandboxing need separate policy before they can rely on it.
-- Residual risk: Domain-specific config means users do not have one Pi-style settings file to inspect; `docs/CONFIG.md`, `/settings`, `/reload`, and command-specific validation are the mitigation.
+- Residual risk: Domain-specific config means users do not have one Pi-style settings file to inspect; `docs/core/configuration.md`, `/settings`, `/reload`, and command-specific validation are the mitigation.
 - Pending questions: none blocking safe progress for this area.
 
 ## Review Findings

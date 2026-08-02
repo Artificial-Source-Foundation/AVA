@@ -75,6 +75,7 @@ set(AVA_TESTS_SOURCES
   "agent_loop_tests.cpp"
   "agent_loop_tool_execution_tests.cpp"
   "agent_tool_dispatcher_tests.cpp"
+  "agent_todo_tests.cpp"
   "app_compaction_tests.cpp"
   "app_command_registry_tests.cpp"
   "app_print_tests.cpp"
@@ -156,6 +157,8 @@ set(AVA_TESTS_SOURCES
   "tui_terminal_input_tests.cpp"
   "tui_tool_card_tests.cpp"
   "tui_transcript_tests.cpp"
+  "tui_transcript_selection_tests.cpp"
+  "tui_transcript_search_tests.cpp"
   "run_observer_tests.cpp"
   "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
@@ -213,6 +216,7 @@ set(AVA_TEST_SUITES
   agent_loop_resilience
   agent_loop
   agent_tool_dispatcher
+  agent_todo
   tool_scheduler
   lsp
   plugin
@@ -530,6 +534,35 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_tests.markdown_link_verifier
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/verify_markdown_links_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/verify-markdown-links.py)
+  set_tests_properties(ava_tests.markdown_link_verifier PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.markdown_links_source
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/verify-markdown-links.py
+            ${CMAKE_SOURCE_DIR}
+            --source-tree)
+  set_tests_properties(ava_tests.markdown_links_source PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.documentation_structure_checker
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/verify_documentation_structure_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/verify-documentation-structure.py)
+  set_tests_properties(ava_tests.documentation_structure_checker PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.documentation_structure_source
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/verify-documentation-structure.py
+            ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.documentation_structure_source PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.module_dependency_rules
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/module_dependency_rules_test.py
@@ -697,6 +730,9 @@ if(Python3_Interpreter_FOUND)
     active_run
     restore_followup
     streaming_scroll
+    transcript_search
+    transcript_selection
+    subagent_workspace
     main_startup_trust_keybinds
     main_models_selectors
     main_editor_input

@@ -35,17 +35,19 @@ std::pair<std::size_t, std::size_t> terminal_size()
   return {80, 24};
 }
 
-bool WheelBurstGovernor::accept(WheelDirection, Clock::time_point now)
+bool WheelBurstGovernor::accept(WheelDirection direction, Clock::time_point now)
 {
-  if (last_accepted_at_ && now < *last_accepted_at_ + kAcceptedEventInterval)
+  if (last_accepted_at_ && last_accepted_direction_ && *last_accepted_direction_ == direction && now < *last_accepted_at_ + kAcceptedEventInterval)
     return false;
   last_accepted_at_ = now;
+  last_accepted_direction_ = direction;
   return true;
 }
 
 void WheelBurstGovernor::reset()
 {
   last_accepted_at_.reset();
+  last_accepted_direction_.reset();
 }
 
 bool runtime_wheel_input_accepted(WheelBurstGovernor& governor, Key key, WheelBurstGovernor::Clock::time_point now)
@@ -141,11 +143,17 @@ void RuntimeRenderer::defer_detached_transcript_update(detail::TranscriptViewpor
 
 void RuntimeRenderer::synchronize_detached_transcript_layout()
 {
+  // Navigation max-scroll call sites invoke this before geometry math. Publish renderer
+  // chrome authority first so Wave A reserved-row height matches the eventual paint.
+  snapshot_.transcript_scroll_offset = transcript_scroll_offset;
+  snapshot_.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
   if (!deferred_detached_viewport_)
     return;
   if (transcript_scroll_offset == 0)
   {
     deferred_detached_viewport_.reset();
+    detached_new_output_count = 0;
+    snapshot_.transcript_new_output_count = 0;
     return;
   }
   auto deferred = *deferred_detached_viewport_;
@@ -153,7 +161,12 @@ void RuntimeRenderer::synchronize_detached_transcript_layout()
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, snapshot_.width, snapshot_.height, completion_cache, snapshot_.file_references_generation,
                                                            transcript_layout_cache, snapshot_.transcript_generation);
   transcript_scroll_offset = detail::restore_transcript_viewport_anchor(deferred.anchor, transcript_layout_cache.layout, max_scroll, deferred.item_index_shift);
+  if (transcript_scroll_offset == 0)
+    detached_new_output_count = 0;
   snapshot_.transcript_scroll_offset = transcript_scroll_offset;
+  snapshot_.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
+  transcript_selection_.apply_item_index_shift(deferred.item_index_shift, transcript_layout_cache.layout);
+  static_cast<void>(transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot_));
   deferred_detached_viewport_.reset();
 }
 
@@ -165,6 +178,110 @@ void RuntimeRenderer::discard_deferred_detached_transcript_update()
 bool RuntimeRenderer::has_deferred_detached_transcript_update() const
 {
   return deferred_detached_viewport_.has_value();
+}
+
+bool RuntimeRenderer::prepare_transcript_selection_authority()
+{
+  // A detached deferred viewport is deliberately frozen on the cache that was
+  // drawn. Never refresh it from the live transcript here.
+  if (!deferred_detached_viewport_)
+  {
+    auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot_.height);
+    auto const width = composer_canvas_layout(snapshot_).content_width;
+    auto const compact = detail::composer_layout_policy(snapshot_, height).compact_transcript_spacing;
+    detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot_.transcript, snapshot_.transcript_generation, width, snapshot_.tool_presentation,
+                                            snapshot_.thinking_visible, compact);
+    if (pending_live_selection_item_index_shift_ != 0)
+    {
+      transcript_selection_.apply_item_index_shift(pending_live_selection_item_index_shift_, transcript_layout_cache.layout);
+      pending_live_selection_item_index_shift_ = 0;
+    }
+  }
+  return transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot_);
+}
+
+TranscriptSelectionMouseResult RuntimeRenderer::handle_transcript_selection_mouse(InputEvent const& event, std::function<bool(std::size_t)> const& toggle_tool,
+                                                                                  std::function<bool(std::size_t)> const& toggle_thinking)
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  if (event.key == Key::MousePointerCancel)
+  {
+    auto const had_interaction = transcript_selection_.dragging() || draft_state_.mouse_selecting;
+    transcript_selection_.cancel_pointer_interaction();
+    draft_state_.mouse_selecting = false;
+    transcript_selection_.publish(snapshot_);
+    return had_interaction ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
+  }
+  // Frozen detached layouts keep geometry authority. Header toggles and live snapshot
+  // lookups map through the exact accumulated deferred item_index_shift; body drag does
+  // not force a live rebuild here.
+  auto const frozen_to_live_item_index_shift = deferred_detached_viewport_ ? deferred_detached_viewport_->item_index_shift : std::ptrdiff_t{0};
+  if (!prepare_transcript_selection_authority())
+    return TranscriptSelectionMouseResult::Ignored;
+  return transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset, frozen_to_live_item_index_shift,
+                                            toggle_tool, toggle_thinking);
+}
+
+bool RuntimeRenderer::copy_transcript_selection()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  return transcript_selection_.copy_selection(snapshot_, transcript_layout_cache);
+}
+
+void RuntimeRenderer::clear_transcript_selection()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.clear();
+  pending_live_selection_item_index_shift_ = 0;
+  transcript_selection_.publish(snapshot_);
+}
+
+void RuntimeRenderer::reset_for_session_transition()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.clear();
+  pending_live_selection_item_index_shift_ = 0;
+  transcript_selection_.publish(snapshot_);
+  transcript_scroll_offset = 0;
+  detached_new_output_count = 0;
+  detached_sidebar_snapshot.reset();
+  deferred_detached_viewport_.reset();
+  transcript_layout_cache = {};
+  screen_row_cache.valid = false;
+  wheel_governor.reset();
+  snapshot_.transcript_scroll_offset = 0;
+  snapshot_.transcript_new_output_count = 0;
+}
+
+void RuntimeRenderer::cancel_pointer_interaction()
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_selection_.cancel_pointer_interaction();
+  draft_state_.mouse_selecting = false;
+  transcript_selection_.publish(snapshot_);
+}
+
+void RuntimeRenderer::note_live_transcript_selection_item_shift(std::ptrdiff_t item_index_shift) noexcept
+{
+  // HeaderArmed has no committed range but still owns a live item index that must track
+  // leading eviction between press and release while the layout is not frozen.
+  if (!transcript_selection_.empty() || transcript_selection_.dragging())
+    pending_live_selection_item_index_shift_ += item_index_shift;
+}
+
+bool RuntimeRenderer::has_transcript_selection() const noexcept
+{
+  return !transcript_selection_.empty();
+}
+
+bool RuntimeRenderer::has_pointer_interaction() const noexcept
+{
+  return transcript_selection_.dragging() || draft_state_.mouse_selecting;
+}
+
+std::optional<TranscriptSelectionRange> RuntimeRenderer::transcript_selection_range() const noexcept
+{
+  return transcript_selection_.range();
 }
 
 bool RuntimeRenderer::render()
@@ -216,16 +333,29 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
       detached_new_output_count = 0;
       detached_sidebar_snapshot.reset();
     }
+    // Publish renderer geometry authority before freeze/sync/clamp so Wave A chrome height
+    // (N-new reserved row) participates in max-scroll math. Snapshot lag after detached stream
+    // updates otherwise suppresses the row during sync while paint reserves it, shifting the
+    // visible numbered window by one.
+    snapshot.transcript_scroll_offset = transcript_scroll_offset;
+    snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
     snapshot.sidebar = transcript_scroll_offset > 0 && detached_sidebar_snapshot ? *detached_sidebar_snapshot : sidebar;
     auto const [width, height] = terminal_size();
     snapshot.width = width;
     snapshot.height = height;
     auto const compact_spacing = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
-    auto const frozen_cache_compatible = transcript_layout_cache.valid && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width &&
-                                         transcript_layout_cache.tool_presentation == snapshot.tool_presentation &&
-                                         transcript_layout_cache.thinking_visible == snapshot.thinking_visible &&
-                                         transcript_layout_cache.compact_spacing == compact_spacing;
-    auto const freeze_detached_viewport = freeze_transcript_layout && deferred_detached_viewport_.has_value() && frozen_cache_compatible;
+    auto const presentation_settings_compatible = transcript_layout_cache.valid && transcript_layout_cache.tool_presentation == snapshot.tool_presentation &&
+                                                  transcript_layout_cache.thinking_visible == snapshot.thinking_visible &&
+                                                  transcript_layout_cache.compact_spacing == compact_spacing;
+    auto const frozen_cache_compatible = presentation_settings_compatible && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width;
+    auto const freeze_modal_transcript_layout =
+        ((snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout) || snapshot.subagent_workspace.has_value()) &&
+        presentation_settings_compatible;
+    // Detached freeze keeps a width-compatible cache across scheduled paints. Modal freeze keeps the
+    // pre-modal underlying layout even when the active selector canvas width differs, and freezes the
+    // draw itself whether or not a deferred detached viewport is pending.
+    auto const freeze_detached_viewport =
+        freeze_modal_transcript_layout || (freeze_transcript_layout && deferred_detached_viewport_.has_value() && frozen_cache_compatible);
     auto const synchronized_detached_viewport = deferred_detached_viewport_.has_value() && !freeze_detached_viewport;
     if (synchronized_detached_viewport)
       synchronize_detached_transcript_layout();
@@ -244,10 +374,38 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
       detached_sidebar_snapshot.reset();
       snapshot.sidebar = sidebar;
     }
+    // Re-publish final scroll/count after sync/clamp; live tail clears count truthfully.
     snapshot.transcript_scroll_offset = transcript_scroll_offset;
     snapshot.transcript_new_output_count = transcript_scroll_offset > 0 ? detached_new_output_count : 0;
+    detail::refresh_completion_match_cache(completion_cache, snapshot, snapshot.file_references_generation);
+    auto const completion_palette_visible = completion_cache.model && completion_cache.model->palette_visible;
+    auto const slash_palette_is_visible =
+        !snapshot.slash_palette_suppressed && slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+        slash_palette_is_visible || completion_palette_visible)
+    {
+      transcript_selection_.clear();
+      pending_live_selection_item_index_shift_ = 0;
+    }
+    if (!transcript_selection_.empty())
+    {
+      if (!freeze_detached_viewport)
+      {
+        auto const width = composer_canvas_layout(snapshot).content_width;
+        auto const compact = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
+        detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot.transcript, snapshot.transcript_generation, width, snapshot.tool_presentation,
+                                                snapshot.thinking_visible, compact);
+      }
+      if (!freeze_detached_viewport && pending_live_selection_item_index_shift_ != 0)
+      {
+        transcript_selection_.apply_item_index_shift(pending_live_selection_item_index_shift_, transcript_layout_cache.layout);
+        pending_live_selection_item_index_shift_ = 0;
+      }
+      static_cast<void>(transcript_selection_.ensure_authority(transcript_layout_cache, &snapshot));
+    }
+    transcript_selection_.publish(snapshot);
     wrote = detail::draw_screen_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache, snapshot.transcript_generation,
-                                       screen_row_cache, freeze_detached_viewport);
+                                       screen_row_cache, freeze_detached_viewport, freeze_modal_transcript_layout);
   }
   return wrote && !terminal_signal_received();
 }
@@ -315,7 +473,8 @@ bool RuntimeRenderer::paint(FrameRenderKind kind, bool freeze_transcript_layout)
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     SignalBlockGuard block_signals;
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible || !snapshot.processing)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+        !snapshot.processing)
       return true;
     wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
                                                   snapshot.transcript_generation, screen_row_cache);

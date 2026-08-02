@@ -17,6 +17,12 @@ enum class TuiThemeKind
   Custom,
 };
 
+enum class TerminalBackgroundAppearance
+{
+  Dark,
+  Light,
+};
+
 struct TuiThemePalette
 {
   int text = -1;
@@ -56,6 +62,10 @@ struct TuiThemeInfo
 };
 
 void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCustomTheme> custom_theme = std::nullopt);
+void set_detected_terminal_background_appearance(std::optional<TerminalBackgroundAppearance> appearance);
+void reset_detected_terminal_background_appearance();
+[[nodiscard]] std::optional<TerminalBackgroundAppearance> detected_terminal_background_appearance();
+[[nodiscard]] bool tui_theme_needs_terminal_background_probe();
 [[nodiscard]] TuiThemeInfo active_tui_theme();
 [[nodiscard]] bool tui_plain_output();
 

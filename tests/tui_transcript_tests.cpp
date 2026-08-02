@@ -4,6 +4,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/tool_cards.h"
 
 #include <algorithm>
@@ -54,13 +55,15 @@ void run_tui_transcript_tests_part_1()
                                                                                           .width = 50,
                                                                                           .height = 12,
                                                                                           .tool_presentation = ava::tui::ToolPresentation::Compact});
-  auto const composer_bg_rows = [](std::vector<std::string> const& rendered) {
-    return static_cast<std::size_t>(
-        std::ranges::count_if(rendered, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }));
+  auto const dock_gutter_rows = [](std::vector<std::string> const& rendered) {
+    return static_cast<std::size_t>(std::ranges::count_if(rendered, [](std::string const& line) {
+      return strip_sgr(line).starts_with("│  ") && line.find("\x1b[49m") != std::string::npos && line.find("\x1b[48;2;26;31;46m") == std::string::npos;
+    }));
   };
-  expect(composer_bg_rows(grown_composer_height) > composer_bg_rows(empty_composer_height) &&
-             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("│  five") != std::string::npos; }),
-         "tui composer grows with multiline input and keeps the latest line visible");
+  expect(dock_gutter_rows(grown_composer_height) > dock_gutter_rows(empty_composer_height) &&
+             std::ranges::any_of(grown_composer_height, [](std::string const& line) { return strip_sgr(line).find("│  five") != std::string::npos; }) &&
+             std::ranges::none_of(grown_composer_height, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }),
+         "tui composer grows with multiline input on the screen background and keeps the latest line visible");
   auto const tall_draft = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                .provider = "openai",
                                                                                .model = "gpt-5.5",
@@ -467,6 +470,25 @@ void test_tui_f2_transcript_hierarchy_and_tool_shell()
          "tui F2 transcript removes inter-group spacing below 44 columns");
   expect(std::ranges::none_of(compact_height, [](std::string const& line) { return line.empty(); }),
          "tui F2 explicit short-height spacing mode removes inter-group blanks at otherwise roomy widths");
+
+  auto const visible_assistant_flow = std::vector<ava::tui::TranscriptItem>{ava::tui::TranscriptItem{.label = "ava", .text = "before quiet poll"},
+                                                                            ava::tui::TranscriptItem{.label = "ava", .text = "after quiet poll"}};
+  auto quiet_poll_flow = visible_assistant_flow;
+  quiet_poll_flow.insert(
+      quiet_poll_flow.begin() + 1,
+      ava::tui::TranscriptItem{
+          .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                             .name = "job",
+                                             .arguments_json = R"({"action":"wait","job_id":"job_visible_spacing"})",
+                                             .result_json = R"({"schema_version":1,"job_id":"job_visible_spacing","state":"running","timed_out":true})",
+                                             .lifecycle = ava::tui::ToolLifecycleState::Complete}});
+  auto const visible_assistant_lines = ava::tui::detail::render_transcript_lines(visible_assistant_flow, 96, false, true);
+  auto const quiet_poll_lines = ava::tui::detail::render_transcript_lines(quiet_poll_flow, 96, false, true);
+  auto const visible_assistant_starts = ava::tui::detail::transcript_message_start_lines(visible_assistant_flow, 96, false, true);
+  auto const quiet_poll_starts = ava::tui::detail::transcript_message_start_lines(quiet_poll_flow, 96, false, true);
+  auto const quiet_poll_tail = ava::tui::detail::render_transcript_tail_lines(quiet_poll_flow, 96, quiet_poll_lines.size() + 3, false, true);
+  expect(quiet_poll_lines == visible_assistant_lines && quiet_poll_starts == visible_assistant_starts && quiet_poll_tail == visible_assistant_lines,
+         "tui quiet job polling items are invisible to roomy spacing, message starts, and bounded tail layout");
 
   auto const verify_hidden_thinking_spacing = [&](ava::tui::TranscriptItem first, std::string const& label) {
     auto const transcript = std::vector<ava::tui::TranscriptItem>{std::move(first), ava::tui::TranscriptItem{.label = "thinking", .text = "hidden reasoning"},
@@ -1178,6 +1200,425 @@ void test_tui_very_long_transcript_performance_budget()
          "tui very long transcript stress validates that scroll offsets change visible transcript content");
   expect(elapsed < std::chrono::seconds(20), "tui very long transcript performance budget keeps full redraw viable for real-world scrollback scale");
 }
+void test_tui_osc52_clipboard_sequence_bounds()
+{
+  using ava::tui::runtime_transcript::base64_encode;
+  using ava::tui::runtime_transcript::kMaxTerminalClipboardTextBytes;
+  using ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence;
+
+  constexpr std::string_view kPrefix = "\x1b]52;c;";
+  constexpr std::string_view kSuffix = "\x1b\\";
+
+  auto const assert_valid_sequence = [&](std::string_view raw, std::string const& sequence, std::string_view label) {
+    expect(sequence.starts_with(kPrefix) && sequence.ends_with(kSuffix),
+           std::string("OSC 52 sequence keeps exact plain prefix and ST terminator for ") + std::string(label));
+    auto const payload = sequence.substr(kPrefix.size(), sequence.size() - kPrefix.size() - kSuffix.size());
+    expect(payload == base64_encode(raw), std::string("OSC 52 payload is the base64 encoding of source for ") + std::string(label));
+    expect(payload.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") == std::string::npos,
+           std::string("OSC 52 payload stays within the base64 alphabet for ") + std::string(label));
+    // Source controls must not appear raw inside the base64 body (only in the fixed OSC framing).
+    expect(payload.find('\x1b') == std::string::npos && payload.find('\0') == std::string::npos && payload.find('\a') == std::string::npos,
+           std::string("OSC 52 payload contains no raw source control bytes for ") + std::string(label));
+  };
+
+  expect(kMaxTerminalClipboardTextBytes == 65'536, "terminal clipboard ceiling is the documented 64 KiB bound");
+  expect(!try_build_osc52_clipboard_sequence("").has_value(), "empty clipboard text builds no OSC 52 sequence");
+
+  auto const one_byte = try_build_osc52_clipboard_sequence("a");
+  expect(one_byte.has_value() && *one_byte == std::string(kPrefix) + "YQ==" + std::string(kSuffix),
+         "one-byte clipboard text builds the exact OSC 52 ST sequence");
+  assert_valid_sequence("a", *one_byte, "one-byte");
+
+  constexpr std::string_view kUnicode = "界π";
+  auto const unicode = try_build_osc52_clipboard_sequence(kUnicode);
+  expect(unicode.has_value(), "Unicode clipboard text builds an OSC 52 sequence");
+  assert_valid_sequence(kUnicode, *unicode, "unicode");
+
+  std::string const controls("pre\x1b\0\amid", 8);
+  auto const control_seq = try_build_osc52_clipboard_sequence(controls);
+  expect(control_seq.has_value(), "embedded ESC/NUL/BEL clipboard text builds an OSC 52 sequence");
+  assert_valid_sequence(controls, *control_seq, "embedded-controls");
+  // Full sequence framing uses ESC only at the known OSC/ST edges, never from the source body.
+  expect(control_seq->find('\0') == std::string::npos && control_seq->find('\a') == std::string::npos,
+         "accepted OSC 52 sequence never carries raw NUL or BEL from source text");
+
+  std::string const exact(kMaxTerminalClipboardTextBytes, 'x');
+  auto const exact_seq = try_build_osc52_clipboard_sequence(exact);
+  expect(exact_seq.has_value(), "exactly 64 KiB clipboard text is accepted");
+  assert_valid_sequence(exact, *exact_seq, "exact-64KiB");
+
+  std::string const oversized(kMaxTerminalClipboardTextBytes + 1, 'y');
+  expect(!try_build_osc52_clipboard_sequence(oversized).has_value(), "65,537-byte clipboard text is rejected without building a sequence");
+}
+
+std::string long_thinking_body(std::size_t lines)
+{
+  std::string body;
+  for (std::size_t index = 1; index <= lines; ++index)
+  {
+    body += "thinking-row-" + std::to_string(index);
+    if (index < lines)
+      body.push_back('\n');
+  }
+  return body;
+}
+
+void test_tui_bounded_thinking_disclosure_render_and_toggle()
+{
+  using tui_test_support::plain_lines;
+  auto const long_body = long_thinking_body(20);
+  auto const short_body = long_thinking_body(3);
+
+  auto long_item = ava::tui::TranscriptItem{.label = "ava", .text = "assistant answer", .meta = "Build · GPT-5.5", .thinking = long_body};
+  auto short_item = ava::tui::TranscriptItem{.label = "ava", .text = "short answer", .thinking = short_body};
+  auto legacy_item = ava::tui::TranscriptItem{.label = "thinking", .text = long_body};
+  auto live_item = ava::tui::TranscriptItem{.label = "ava", .thinking = long_body, .stream_id = "stream-1", .append_only_stream = true};
+
+  auto const width = std::size_t{80};
+  // The thinking block alone is capped at 12 rows; assistant text/meta follow.
+  auto thinking_only = ava::tui::TranscriptItem{.label = "thinking", .text = long_body};
+  auto const bounded = ava::tui::detail::render_transcript_layout({thinking_only}, width, ava::tui::ToolPresentation::Rich, true, false);
+  auto const bounded_plain = plain_lines(bounded.lines);
+  auto const hidden_footer = std::ranges::find_if(bounded_plain, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; });
+  expect(bounded.lines.size() == ava::tui::detail::kThinkingBoundedMaxRows && hidden_footer != bounded_plain.end(),
+         "completed long thinking defaults to exactly 12 rendered rows including the hidden-count footer");
+  auto const footer_plain = *hidden_footer;
+  auto const ellipsis = footer_plain.find("… ");
+  expect(ellipsis != std::string::npos, "bounded thinking footer uses the … N lines hidden marker");
+  auto const hidden_n = std::stoul(footer_plain.substr(ellipsis + 4));
+  // Full unexpanded count via expand.
+  thinking_only.thinking_expanded = true;
+  auto const expanded = ava::tui::detail::render_transcript_layout({thinking_only}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(expanded.lines.size() == hidden_n + ava::tui::detail::kThinkingBoundedContentRows &&
+             std::ranges::none_of(plain_lines(expanded.lines), [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }),
+         "explicit expand shows the full thinking line vector and restores no footer; N matches full-minus-11");
+
+  thinking_only.thinking_expanded = false;
+  auto const collapsed_again = ava::tui::detail::render_transcript_layout({thinking_only}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(collapsed_again.lines.size() == ava::tui::detail::kThinkingBoundedMaxRows, "collapse restores the bounded twelve-row preview");
+
+  auto const short_layout = ava::tui::detail::render_transcript_layout({short_item}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(std::ranges::none_of(plain_lines(short_layout.lines), [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }) &&
+             ava::tui::transcript_item_thinking_is_boundable(short_item, width, true) == false,
+         "short thinking renders fully with no chrome and is not boundable");
+
+  auto const live_layout = ava::tui::detail::render_transcript_layout({live_item}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(live_layout.lines.size() > ava::tui::detail::kThinkingBoundedMaxRows &&
+             std::ranges::none_of(plain_lines(live_layout.lines), [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }) &&
+             !ava::tui::transcript_item_thinking_is_boundable(live_item, width, true),
+         "live append-only pending reasoning stays fully expanded and is never auto-collapsed");
+
+  auto const legacy_layout = ava::tui::detail::render_transcript_layout({legacy_item}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(legacy_layout.lines.size() == ava::tui::detail::kThinkingBoundedMaxRows, "legacy label=thinking long blocks share the same bounded disclosure");
+
+  auto const ava_layout = ava::tui::detail::render_transcript_layout({long_item}, width, ava::tui::ToolPresentation::Rich, true, false);
+  auto const ava_plain = plain_lines(ava_layout.lines);
+  expect(std::ranges::any_of(ava_plain, [](std::string const& line) { return line.find("assistant answer") != std::string::npos; }) &&
+             std::ranges::any_of(ava_plain, [](std::string const& line) { return line.find("Build · GPT-5.5") != std::string::npos; }) &&
+             std::ranges::any_of(ava_plain, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; }),
+         "assistant text and final-only meta remain after bounded thinking");
+
+  long_item.thinking_expanded = false;
+  auto hidden_global = ava::tui::detail::render_transcript_layout({long_item}, width, ava::tui::ToolPresentation::Rich, false, false);
+  expect(hidden_global.lines.size() > 0 &&
+             std::ranges::none_of(plain_lines(hidden_global.lines), [](std::string const& line) { return line.find("Thinking:") != std::string::npos; }) &&
+             std::ranges::any_of(plain_lines(hidden_global.lines), [](std::string const& line) { return line.find("assistant answer") != std::string::npos; }),
+         "global thinking_visible=false hides thinking while assistant text remains");
+
+  // Width/resize recalculation: wider width may wrap less; N is always full-at-width minus 11.
+  auto narrow = ava::tui::TranscriptItem{.label = "thinking", .text = long_thinking_body(15)};
+  auto const narrow_layout = ava::tui::detail::render_transcript_layout({narrow}, 40, ava::tui::ToolPresentation::Rich, true, false);
+  narrow.thinking_expanded = true;
+  auto const narrow_full = ava::tui::detail::render_transcript_layout({narrow}, 40, ava::tui::ToolPresentation::Rich, true, false);
+  narrow.thinking_expanded = false;
+  auto const narrow_plain = plain_lines(narrow_layout.lines);
+  auto const narrow_footer = std::ranges::find_if(narrow_plain, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; });
+  expect(narrow_layout.lines.size() == ava::tui::detail::kThinkingBoundedMaxRows && narrow_footer != narrow_plain.end() &&
+             narrow_full.lines.size() > ava::tui::detail::kThinkingBoundedMaxRows,
+         "resize/width recalculates the bounded thinking footer from the current rendered line vector");
+
+  // NO_COLOR / plain: composer frame strips SGR while keeping the truthful footer text.
+  {
+    ScopedEnvVar no_color("NO_COLOR", "1");
+    auto plain_snapshot = ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_thinking_plain",
+        .input = "",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "thinking", .text = long_body}},
+        .width = 80,
+        .height = 24,
+        .thinking_visible = true,
+    };
+    auto const plain_frame = ava::tui::render_composer(plain_snapshot);
+    auto const has_footer = std::ranges::any_of(plain_frame, [](std::string const& line) { return line.find("lines hidden") != std::string::npos; });
+    auto const has_sgr = std::ranges::any_of(plain_frame, [](std::string const& line) { return line.find("\x1b[") != std::string::npos; });
+    expect(has_footer && !has_sgr, "NO_COLOR keeps a plain truthful thinking hidden footer without SGR styling");
+  }
+
+  // Tools remain unchanged by thinking disclosure.
+  auto tool_item = ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                               .name = "read_file",
+                                                                               .result_summary = "ok",
+                                                                               .call_id = "tool-1",
+                                                                               .lifecycle = ava::tui::ToolLifecycleState::Complete}};
+  auto const with_tool = ava::tui::detail::render_transcript_layout({thinking_only, tool_item}, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(std::ranges::any_of(plain_lines(with_tool.lines), [](std::string const& line) { return line.find("read_file") != std::string::npos; }),
+         "tool cards remain rendered unchanged alongside bounded thinking");
+
+  // Duplicate identical blocks expand independently.
+  auto first = ava::tui::TranscriptItem{.label = "thinking", .text = long_body};
+  auto second = ava::tui::TranscriptItem{.label = "thinking", .text = long_body};
+  first.thinking_expanded = true;
+  auto dup = std::vector<ava::tui::TranscriptItem>{first, second};
+  auto const dup_layout = ava::tui::detail::render_transcript_layout(dup, width, ava::tui::ToolPresentation::Rich, true, false);
+  expect(dup_layout.lines.size() == expanded.lines.size() + ava::tui::detail::kThinkingBoundedMaxRows,
+         "duplicate identical thinking blocks keep independent expansion state");
+  expect(ava::tui::toggle_thinking_expansion_at(dup, 1, width, true) && dup[1].thinking_expanded && dup[0].thinking_expanded,
+         "toggle on the second duplicate does not clear the first block's expansion");
+
+  // Carry across active-run rebuild with shift-zero and positive-cap eviction.
+  {
+    std::vector<ava::tui::TranscriptItem> submitted;
+    for (std::size_t index = 0; index < 5; ++index) submitted.push_back(ava::tui::TranscriptItem{.label = "you", .text = "seed " + std::to_string(index)});
+    std::vector<ava::tui::TranscriptItem> turn{
+        ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true},
+        ava::tui::TranscriptItem{.label = "ava", .text = "after reasoning"},
+        ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                    .name = "bash",
+                                                                    .result_summary = "done",
+                                                                    .call_id = "bash-1",
+                                                                    .lifecycle = ava::tui::ToolLifecycleState::Complete}},
+    };
+    // Simulate UI snapshot after user expanded the thinking item at index 5.
+    std::vector<ava::tui::TranscriptItem> ui = submitted;
+    ui.insert(ui.end(), turn.begin(), turn.end());
+    ui[5].thinking_expanded = true;
+    auto overrides = ava::tui::runtime_transcript::capture_thinking_expansion(ui);
+    std::vector<ava::tui::TranscriptItem> rebuilt;
+    // Fresh turn projection without expansion flags, then tools/text updates after completed reasoning.
+    std::vector<ava::tui::TranscriptItem> fresh_turn{
+        ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+        ava::tui::TranscriptItem{.label = "ava", .text = "after reasoning"},
+        ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                    .name = "bash",
+                                                                    .result_summary = "done",
+                                                                    .call_id = "bash-1",
+                                                                    .lifecycle = ava::tui::ToolLifecycleState::Complete}},
+        ava::tui::TranscriptItem{.label = "ava", .text = "final text"},
+    };
+    auto const zero_shift = ava::tui::apply_capped_transcript_snapshot(rebuilt, submitted, fresh_turn, 0);
+    ava::tui::runtime_transcript::carry_thinking_expansion(overrides, rebuilt, zero_shift.item_index_shift);
+    expect(zero_shift.item_index_shift == 0 && zero_shift.leading_evictions == 0 && rebuilt[5].thinking_expanded && !rebuilt[6].thinking_expanded &&
+               rebuilt[5].label == "thinking",
+           "shift-zero active-run rebuild carries expansion by exact source index through completed-reasoning + tool/text updates");
+
+    // Positive cap eviction: fill past kMaxTranscriptItems so leading rows drop.
+    submitted.clear();
+    submitted.reserve(ava::tui::kMaxTranscriptItems);
+    for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems - 2; ++index)
+      submitted.push_back(ava::tui::TranscriptItem{.label = "you", .text = "pad " + std::to_string(index)});
+    // UI currently shows submitted + one expanded thinking + one plain thinking (identical content).
+    ui = submitted;
+    ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+    ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body});
+    auto const expanded_index = ui.size() - 2;
+    overrides = ava::tui::runtime_transcript::capture_thinking_expansion(ui);
+    expect(overrides.size() == 1 && overrides.front().first == expanded_index, "capture records only expanded thinking indices");
+
+    // Rebuild with two extra leading pads in submitted so three leading items are evicted relative to a prior 0-eviction baseline?
+    // previous_leading_evictions=0, destination size = (kMax-2) + 3 turn items = kMax+1 => 1 eviction, shift=-1.
+    std::vector<ava::tui::TranscriptItem> turn_cap{
+        ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+        ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+        ava::tui::TranscriptItem{.label = "ava", .text = "tail"},
+    };
+    auto const cap_update = ava::tui::apply_capped_transcript_snapshot(rebuilt, submitted, turn_cap, 0);
+    ava::tui::runtime_transcript::carry_thinking_expansion(overrides, rebuilt, cap_update.item_index_shift);
+    auto const new_expanded = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(expanded_index) + cap_update.item_index_shift);
+    expect(cap_update.leading_evictions == 1 && cap_update.item_index_shift == -1 && new_expanded < rebuilt.size() && rebuilt[new_expanded].thinking_expanded &&
+               rebuilt[new_expanded].label == "thinking" && !rebuilt[new_expanded + 1].thinking_expanded,
+           "positive cap eviction remaps expansion by item_index_shift and keeps duplicate blocks independent");
+
+    // Stale override must not apply onto a replacement non-thinking tail slot.
+    overrides = {{rebuilt.size() - 1, true}};
+    auto before = rebuilt.back().label;
+    ava::tui::runtime_transcript::carry_thinking_expansion(overrides, rebuilt, 0);
+    expect(before == "ava" && !rebuilt.back().thinking_expanded, "stale expansion override does not attach onto a replacement non-thinking tail item");
+
+    // BT-001: submitted-prefix stale true flags must not resurrect a current-UI collapse.
+    // Start with a submitted thinking item expanded (as at run start), collapse it in the
+    // current UI, keep a different current expanded item, then production apply/capture/carry.
+    {
+      std::vector<ava::tui::TranscriptItem> submitted_prefix{
+          ava::tui::TranscriptItem{.label = "you", .text = "seed"},
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true},  // expanded at run start
+          ava::tui::TranscriptItem{.label = "ava", .text = "prior answer"},
+      };
+      // Current UI: user collapsed the submitted-prefix thinking and expanded a later turn item.
+      std::vector<ava::tui::TranscriptItem> current_ui = submitted_prefix;
+      current_ui[1].thinking_expanded = false;
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "live tail"});
+      auto const current_overrides = ava::tui::runtime_transcript::capture_thinking_expansion(current_ui);
+      expect(current_overrides.size() == 1 && current_overrides.front().first == 3 && current_overrides.front().second,
+             "capture records only the currently expanded thinking index, not the collapsed submitted-prefix item");
+
+      // Shift zero: apply restores submitted true flags; carry must clear them and reapply current set.
+      std::vector<ava::tui::TranscriptItem> fresh_turn{
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "ava", .text = "live tail"},
+      };
+      std::vector<ava::tui::TranscriptItem> destination;
+      auto const zero = ava::tui::apply_capped_transcript_snapshot(destination, submitted_prefix, fresh_turn, 0);
+      expect(zero.item_index_shift == 0 && destination[1].thinking_expanded,
+             "apply_capped_transcript_snapshot restores submitted-prefix thinking_expanded=true before carry");
+      ava::tui::runtime_transcript::carry_thinking_expansion(current_overrides, destination, zero.item_index_shift);
+      expect(zero.item_index_shift == 0 && !destination[1].thinking_expanded && destination[1].label == "thinking" && destination[3].thinking_expanded &&
+                 destination[3].label == "thinking",
+             "shift-zero carry keeps a current-UI collapse collapsed and a current expansion expanded");
+
+      // Positive cap eviction / nonzero shift: same collapse authority after index remap.
+      submitted_prefix.clear();
+      submitted_prefix.reserve(ava::tui::kMaxTranscriptItems);
+      for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems - 4; ++index)
+        submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "you", .text = "pad " + std::to_string(index)});
+      auto const collapsed_submitted_index = submitted_prefix.size();
+      submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      submitted_prefix.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "prior answer"});
+      current_ui = submitted_prefix;
+      current_ui[collapsed_submitted_index].thinking_expanded = false;
+      auto const current_expanded_index = current_ui.size();
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body, .thinking_expanded = true});
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body});  // duplicate stays collapsed
+      current_ui.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "tail"});
+      auto const cap_overrides = ava::tui::runtime_transcript::capture_thinking_expansion(current_ui);
+      expect(cap_overrides.size() == 1 && cap_overrides.front().first == current_expanded_index,
+             "cap-path capture still records only the current expanded index");
+      // destination size = (kMax-2 submitted) + 3 turn = kMax+1 => 1 leading eviction, shift=-1.
+      std::vector<ava::tui::TranscriptItem> turn_cap{
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+          ava::tui::TranscriptItem{.label = "ava", .text = "tail"},
+      };
+      auto const cap = ava::tui::apply_capped_transcript_snapshot(destination, submitted_prefix, turn_cap, 0);
+      ava::tui::runtime_transcript::carry_thinking_expansion(cap_overrides, destination, cap.item_index_shift);
+      auto const new_collapsed = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(collapsed_submitted_index) + cap.item_index_shift);
+      auto const new_expanded = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(current_expanded_index) + cap.item_index_shift);
+      expect(cap.leading_evictions == 1 && cap.item_index_shift == -1 && new_collapsed < destination.size() && new_expanded < destination.size() &&
+                 !destination[new_collapsed].thinking_expanded && destination[new_collapsed].label == "thinking" &&
+                 destination[new_expanded].thinking_expanded && destination[new_expanded].label == "thinking" &&
+                 !destination[new_expanded + 1].thinking_expanded,
+             "positive cap shift carry keeps submitted-prefix collapse collapsed, current expansion expanded, and duplicates independent");
+    }
+  }
+
+  // BT-002: idle /thinking details must snapshot expansion before cmd/status pushes that cap-truncate.
+  {
+    ava::tui::ComposerSnapshot idle_snapshot;
+    idle_snapshot.mode = "build";
+    idle_snapshot.provider = "openai";
+    idle_snapshot.model = "gpt-5.5";
+    idle_snapshot.session_id = "session_thinking_details_cap";
+    idle_snapshot.status = "ready";
+    idle_snapshot.width = 100;
+    idle_snapshot.height = 40;
+    idle_snapshot.thinking_visible = true;
+    idle_snapshot.transcript.reserve(ava::tui::kMaxTranscriptItems);
+    for (std::size_t index = 0; index < ava::tui::kMaxTranscriptItems - 1; ++index)
+      idle_snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "you", .text = "pad " + std::to_string(index)});
+    idle_snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "thinking", .text = long_body});
+    expect(idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && !idle_snapshot.transcript.back().thinking_expanded,
+           "idle /thinking details fixture starts at the transcript cap with collapsed latest thinking");
+
+    auto const width = ava::tui::composer_main_width(idle_snapshot);
+    auto const item_index = ava::tui::toggle_latest_boundable_thinking(idle_snapshot.transcript, width, idle_snapshot.thinking_visible);
+    expect(item_index && *item_index == ava::tui::kMaxTranscriptItems - 1 && idle_snapshot.transcript[*item_index].thinking_expanded,
+           "toggle expands the latest boundable thinking at the pre-push index");
+    // Production must snapshot before any push_transcript: head eviction shifts indices.
+    auto const expanded_after_toggle = idle_snapshot.transcript[*item_index].thinking_expanded;
+    auto const cmd_shift = ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "cmd", .text = "/thinking details"});
+    expect(cmd_shift == -1 && idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && idle_snapshot.transcript.back().label == "cmd",
+           "cmd push at the cap drops the first item and appends the command row");
+    // Post-push re-read at the old index is the BT-002 hazard: it now points at the cmd row.
+    expect(idle_snapshot.transcript[*item_index].label == "cmd" && !idle_snapshot.transcript[*item_index].thinking_expanded,
+           "cap truncation shifts the toggled thinking index onto the new cmd row");
+    auto const shifted_thinking = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*item_index) + cmd_shift);
+    expect(shifted_thinking < idle_snapshot.transcript.size() && idle_snapshot.transcript[shifted_thinking].label == "thinking" &&
+               idle_snapshot.transcript[shifted_thinking].thinking_expanded == expanded_after_toggle && expanded_after_toggle,
+           "actual toggled thinking remains expanded after the cap shift");
+    std::string const confirmation = expanded_after_toggle ? "latest thinking details are now expanded" : "latest thinking details are now collapsed";
+    ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "ava", .text = confirmation});
+    expect(confirmation == "latest thinking details are now expanded" && idle_snapshot.transcript.back().text == confirmation,
+           "visible idle /thinking details confirmation matches the actual toggled state after cap truncation");
+  }
+
+  // Hit-test: Thinking header toggles only boundable completed items; tools still win first.
+  {
+    auto hit_snapshot = ava::tui::ComposerSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_thinking_hit",
+        .input = "draft",
+        .status = "ready",
+        .transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "intro"}, ava::tui::TranscriptItem{.label = "thinking", .text = long_body},
+                       ava::tui::TranscriptItem{.tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success,
+                                                                                   .name = "glob",
+                                                                                   .result_summary = "1 file",
+                                                                                   .call_id = "glob_hit",
+                                                                                   .lifecycle = ava::tui::ToolLifecycleState::Complete}},
+                       ava::tui::TranscriptItem{.label = "ava", .text = "tail answer", .thinking = long_body}},
+        .width = 100,
+        .height = 40,
+    };
+    auto const frame = plain_lines(ava::tui::render_composer(hit_snapshot));
+    auto const thinking_line = std::ranges::find_if(frame, [](std::string const& line) { return line.find("Thinking:") != std::string::npos; });
+    auto const tool_line = std::ranges::find_if(frame, [](std::string const& line) { return line.find("+ glob") != std::string::npos; });
+    expect(thinking_line != frame.end() && tool_line != frame.end(), "thinking hit-test fixture renders Thinking header and tool card");
+    auto const thinking_row = static_cast<std::size_t>(thinking_line - frame.begin()) + 1;
+    auto const tool_row = static_cast<std::size_t>(tool_line - frame.begin()) + 1;
+    auto const canvas = ava::tui::composer_canvas_layout(hit_snapshot);
+    auto const col = canvas.left + 8;
+    expect(ava::tui::detail::transcript_thinking_header_for_screen_position(hit_snapshot, thinking_row, col) == 1,
+           "thinking header hit-test maps the boundable completed Thinking: row");
+    expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, tool_row, col) == 2, "tool header hit-test still wins on tool rows");
+    expect(!ava::tui::detail::transcript_thinking_header_for_screen_position(hit_snapshot, tool_row, col), "thinking hit-test ignores tool header rows");
+    // Live pending is not boundable.
+    hit_snapshot.transcript[1].stream_id = "live";
+    hit_snapshot.transcript[1].append_only_stream = true;
+    expect(!ava::tui::detail::transcript_thinking_header_for_screen_position(hit_snapshot, thinking_row, col),
+           "live pending thinking header is not a toggle target");
+    hit_snapshot.transcript[1].stream_id.clear();
+    hit_snapshot.transcript[1].append_only_stream = false;
+
+    // Detached viewport anchor: scroll so the thinking header is visible mid-history.
+    hit_snapshot.transcript.insert(hit_snapshot.transcript.begin(), 25, ava::tui::TranscriptItem{.label = "you", .text = "older line"});
+    hit_snapshot.transcript.insert(hit_snapshot.transcript.end(), 25, ava::tui::TranscriptItem{.label = "ava", .text = "newer line"});
+    auto const layout = ava::tui::detail::render_transcript_layout(hit_snapshot.transcript, ava::tui::composer_main_width(hit_snapshot), true, true, false);
+    auto const thinking_msg = std::ranges::find(layout.message_item_indices, std::size_t{26});
+    expect(thinking_msg != layout.message_item_indices.end(), "detached fixture retains the shifted thinking item index");
+    auto const position = static_cast<std::size_t>(thinking_msg - layout.message_item_indices.begin());
+    auto const max_scroll = ava::tui::composer_max_transcript_scroll_offset(hit_snapshot, hit_snapshot.width, hit_snapshot.height);
+    auto const desired_start = layout.content_starts[position];
+    hit_snapshot.transcript_scroll_offset = max_scroll - std::min(max_scroll, desired_start);
+    expect(ava::tui::detail::transcript_thinking_header_for_screen_position(hit_snapshot, 1, col) == 26,
+           "detached transcript thinking hit-test maps the anchored visible Thinking header");
+
+    // Generation: toggle bumps caller-owned generation; layout identity follows thinking_expanded.
+    auto generation = hit_snapshot.transcript_generation;
+    expect(ava::tui::toggle_thinking_expansion_at(hit_snapshot.transcript, 26, ava::tui::composer_main_width(hit_snapshot), true),
+           "toggle_thinking_expansion_at expands the detached boundable item");
+    ++generation;
+    hit_snapshot.transcript_generation = generation;
+    auto const expanded_detached =
+        ava::tui::detail::render_transcript_layout(hit_snapshot.transcript, ava::tui::composer_main_width(hit_snapshot), true, true, false);
+    expect(hit_snapshot.transcript[26].thinking_expanded && expanded_detached.lines.size() > layout.lines.size(),
+           "thinking expansion invalidates prior bounded layout geometry for the same generation bump");
+  }
+}
 }  // namespace
 
 void run_tui_large_render_performance_tests()
@@ -1187,7 +1628,9 @@ void run_tui_large_render_performance_tests()
 
 void run_tui_transcript_hierarchy_tests()
 {
+  test_tui_osc52_clipboard_sequence_bounds();
   test_tui_f2_transcript_hierarchy_and_tool_shell();
+  test_tui_bounded_thinking_disclosure_render_and_toggle();
   test_tui_detached_transcript_anchor_survives_capped_eviction();
   test_tui_detached_append_defers_layout_until_anchor_recovery();
   test_tui_streaming_tail_cache_is_bounded_and_matches_full_renderer();

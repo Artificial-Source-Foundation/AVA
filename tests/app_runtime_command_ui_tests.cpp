@@ -35,6 +35,17 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
              hotkeys->output[0].find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
              hotkeys->output[0].find("/reload keybindings") != std::string::npos,
          "command dispatcher /hotkeys reports effective keybind metadata");
+  auto const default_hotkeys_text = ava::app::command_hotkeys_text({});
+  auto const jump_line_pos = default_hotkeys_text.find("Jump to live tail");
+  auto const jump_id_pos = default_hotkeys_text.find("jump_to_bottom");
+  auto const mode_line_pos = default_hotkeys_text.find("Toggle build/plan mode");
+  auto const mode_id_pos = default_hotkeys_text.find("mode_toggle");
+  expect(jump_line_pos != std::string::npos && jump_id_pos != std::string::npos && jump_line_pos < jump_id_pos &&
+             default_hotkeys_text.find("Ctrl+End", jump_line_pos) != std::string::npos && mode_line_pos != std::string::npos &&
+             mode_id_pos != std::string::npos && mode_line_pos < mode_id_pos &&
+             default_hotkeys_text.find("Submit input or select the highlighted slash command") == std::string::npos &&
+             default_hotkeys_text.find("Return the transcript to the live tail") == std::string::npos,
+         "command help/hotkeys dense text leads with human labels, keeps machine ids secondary, and drops long action descriptions");
   auto packages_disabled = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/packages list"});
   expect(packages_disabled && packages_disabled->handled && !packages_disabled->output.empty() &&
              packages_disabled->output[0].find("/packages is disabled") != std::string::npos &&
@@ -321,6 +332,10 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
              sidebar->output[0].find("session overview") != std::string::npos && sidebar->output[0].find("session_id") == std::string::npos &&
              sidebar->output[0].find("workspace") == std::string::npos,
          "command dispatcher describes /sidebar as a TUI-only view without inventing sidebar data");
+  auto search = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/search Unicode literal"});
+  expect(search && search->handled && !search->output.empty() && search->output[0].find("only inside the interactive TUI") != std::string::npos &&
+             search->output[0].find("currently rendered transcript items") != std::string::npos,
+         "headless command dispatcher truthfully identifies transcript search as a TUI-only rendered view");
   auto tool = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/tools write"});
   expect(tool && tool->handled && !tool->output.empty() && tool->output[0].find("/tool [query] to toggle the latest or matching card") != std::string::npos &&
              tool->output[0].find("inherited non-expanded view and Expanded") != std::string::npos &&
@@ -333,10 +348,15 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
          "command dispatcher recognizes filtered /diff as a TUI transcript inspection command");
   auto copy = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy tool"});
   expect(copy && copy->handled && !copy->output.empty() && copy->output[0].find("/copy for the latest AVA message") != std::string::npos &&
+             copy->output[0].find("/copy user [query] to pick a public user turn") != std::string::npos &&
              copy->output[0].find("/copy tool [query] for tool details") != std::string::npos &&
              copy->output[0].find("/copy diff [query] for unified diffs") != std::string::npos &&
              copy->output[0].find("/copy permission [query] for permission audit details") != std::string::npos,
          "command dispatcher recognizes /copy as a TUI clipboard command");
+  auto copy_user = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy user"});
+  expect(copy_user && copy_user->handled && !copy_user->output.empty() &&
+             copy_user->output[0].find("/copy user [query] to pick a public user turn") != std::string::npos,
+         "command dispatcher recognizes exact /copy user as a TUI user-turn clipboard target");
   auto copy_diff = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy diff src/main.cpp"});
   expect(
       copy_diff && copy_diff->handled && !copy_diff->output.empty() && copy_diff->output[0].find("/copy diff [query] for unified diffs") != std::string::npos,
@@ -348,12 +368,21 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
   auto unsupported_copy = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/copy branch"});
   expect(unsupported_copy && unsupported_copy->handled && !unsupported_copy->output.empty() &&
              unsupported_copy->output[0].find("unsupported copy target: branch") != std::string::npos &&
-             unsupported_copy->output[0].find("supported: tool [query], diff [query], permission [query]") != std::string::npos,
+             unsupported_copy->output[0].find("supported: user [query], tool [query], diff [query], permission [query]") != std::string::npos,
          "command dispatcher reports unsupported copy targets");
+  auto fork_from = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/fork-from"});
+  expect(fork_from && fork_from->handled && !fork_from->output.empty() && fork_from->output[0].find("interactive TUI") != std::string::npos &&
+             fork_from->output[0].find("/fork-from") != std::string::npos && fork_from->output[0].find("/fork [name]") != std::string::npos,
+         "command dispatcher recognizes /fork-from as a TUI user-turn fork picker");
   auto thinking = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking"});
   expect(thinking && thinking->handled && !thinking->output.empty() && thinking->output[0].find("TUI display toggle") != std::string::npos &&
-             thinking->output[0].find("does not change provider reasoning mode") != std::string::npos,
+             thinking->output[0].find("does not change provider reasoning mode") != std::string::npos &&
+             thinking->output[0].find("/thinking details") != std::string::npos,
          "command dispatcher recognizes /thinking as display-only instead of changing backend reasoning mode");
+  auto thinking_details = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/thinking details"});
+  expect(
+      thinking_details && thinking_details->handled && !thinking_details->output.empty() && thinking_details->output[0].find("Thinking:") != std::string::npos,
+      "command dispatcher documents /thinking details as the per-item expand fallback");
   {
     ScopedEnvVar no_color_guard("NO_COLOR", "");
     ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
@@ -377,9 +406,10 @@ void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::co
   auto help = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
              help->output[0].find("/keybindings") != std::string::npos && help->output[0].find("/sidebar") != std::string::npos &&
-             help->output[0].find("/connect") != std::string::npos && help->output[0].find("/plugins") != std::string::npos &&
-             help->output[0].find("!<command>") != std::string::npos && help->output[0].find("!!<command>") != std::string::npos &&
-             help->output[0].find("Unavailable commands") != std::string::npos && help->output[0].find("Ctrl+M") != std::string::npos,
+             help->output[0].find("/search") != std::string::npos && help->output[0].find("/connect") != std::string::npos &&
+             help->output[0].find("/plugins") != std::string::npos && help->output[0].find("!<command>") != std::string::npos &&
+             help->output[0].find("!!<command>") != std::string::npos && help->output[0].find("Unavailable commands") != std::string::npos &&
+             help->output[0].find("Ctrl+M") != std::string::npos,
          "command dispatcher /help includes catalog commands and effective hotkeys");
 
   int shell_prompts = 0;

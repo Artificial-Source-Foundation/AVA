@@ -2,16 +2,26 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/app/command_palette.h"
+#include "ava/app/reasoning_controls.h"
+#include "ava/app/subagent_workspace.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/runtime_commands_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
+#include "ava/tui/runtime_user_turn_selection_internal.h"
 #include "ava/tui/theme.h"
 #include "ava/config/model_config.h"
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -19,6 +29,11 @@
 
 void run_tui_selector_tests()
 {
+  expect(ava::tui::runtime_commands::session_switching_command("/clear") && ava::tui::runtime_commands::session_switching_command("  /clear Fresh session  ") &&
+             !ava::tui::runtime_commands::session_switching_command("/clearance") &&
+             !ava::tui::runtime_commands::session_switching_command("/clearance Fresh session"),
+         "session-switch attachment safety recognizes exact /clear submissions and rejects ambiguous prefixes");
+
   auto make_model = [](std::string provider, std::string id, std::string name, std::string family, std::optional<bool> reasoning,
                        std::vector<std::string> levels = {}) {
     ava::config::ModelInfo model;
@@ -88,6 +103,139 @@ void run_tui_selector_tests()
       expect(hit && *hit == 2, "model selector mouse hit-testing shares the exact required-size rendered row window");
     }
   }
+  ava::tui::SelectListView grouped_model_view;
+  grouped_model_view.title = "Select model";
+  grouped_model_view.placeholder = "Search models";
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    ava::tui::SelectListItemView item;
+    item.value = "model-" + std::to_string(index);
+    item.label = "Grouped model " + std::to_string(index);
+    item.group = "OpenAI";
+    grouped_model_view.items.push_back(std::move(item));
+  }
+  grouped_model_view.selected_item_index = 6;
+  auto const grouped_rows = ava::tui::detail::render_select_list_modal(grouped_model_view, 88, 8);
+  auto const grouped_heading = std::ranges::find_if(grouped_rows, [](std::string const& line) { return strip_sgr(line).find("OpenAI") != std::string::npos; });
+  auto const grouped_selected = std::ranges::find_if(grouped_rows, [](std::string const& line) {
+    auto const plain = strip_sgr(line);
+    return plain.find("›") != std::string::npos && plain.find("Grouped model 6") != std::string::npos;
+  });
+  auto const grouped_selected_hit =
+      grouped_selected == grouped_rows.end()
+          ? std::optional<std::size_t>{}
+          : ava::tui::detail::select_list_item_for_modal_row(grouped_model_view, static_cast<std::size_t>(grouped_selected - grouped_rows.begin()), 88, 8);
+  auto const grouped_tiny_rows = ava::tui::detail::render_select_list_modal(grouped_model_view, 88, 4);
+  auto const grouped_tiny_screen = tui_test_support::join_visible_lines(grouped_tiny_rows);
+  auto const grouped_tiny_hit = ava::tui::detail::select_list_item_for_modal_row(grouped_model_view, 2, 88, 4);
+  expect(grouped_rows.size() == 8 && grouped_heading != grouped_rows.end() && grouped_selected != grouped_rows.end() && grouped_heading < grouped_selected &&
+             grouped_selected_hit == std::size_t{6} && grouped_tiny_rows.size() == 4 && grouped_tiny_screen.find("Grouped model 6") != std::string::npos &&
+             grouped_tiny_screen.find("OpenAI") == std::string::npos && grouped_tiny_hit == std::size_t{6},
+         "grouped selectors synthesize the first visible group heading for deep selections while one-content-row modals prioritize the selected item");
+
+  ava::tui::SelectListView generic_parity_view;
+  generic_parity_view.title = "Keybindings";
+  ava::tui::SelectListItemView generic_parity_item;
+  generic_parity_item.value = "cursor-up";
+  generic_parity_item.label = "Move up";
+  generic_parity_item.description = "Arrow Up";
+  generic_parity_item.detail = "configurable";
+  generic_parity_item.badge = "Default";
+  generic_parity_view.items.push_back(std::move(generic_parity_item));
+  auto const generic_parity_rows = ava::tui::detail::render_select_list_modal(generic_parity_view, 88, 6);
+  auto const generic_parity_screen = tui_test_support::join_visible_lines(generic_parity_rows);
+  expect(generic_parity_view.items.front().priority_suffix.empty() &&
+             generic_parity_screen.find("Move up  Default  Arrow Up  configurable") != std::string::npos &&
+             ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 2, 88, 6) == std::size_t{0},
+         "generic keybinding-style selectors preserve label/badge/description/detail order and mouse mapping when no priority suffix is requested");
+
+  auto reasoning_model = make_model("openai", "reasoning-policy", "Reasoning Policy", "gpt-5", true, {"off", "low", "medium", "high", "disabled", "blocked"});
+  reasoning_model.reasoning_level_mappings.push_back(
+      ava::config::ModelReasoningLevelMapping{.level = "blocked", .provider_level = std::nullopt, .supported = false});
+  auto const default_reasoning_picker = ava::app::reasoning_selector_view(reasoning_model, std::nullopt, "Enter select · type to filter · Esc keep default");
+  auto const explicit_reasoning_picker = ava::app::reasoning_selector_view(
+      reasoning_model,
+      ava::app::runtime::ReasoningSelection{.level = "high", .provider_level = std::string("provider-secret"), .budget_tokens = std::nullopt, .display = {}},
+      "Esc cancel");
+  auto non_reasoning_model = make_model("openai", "plain", "Plain", "plain", false, {"low", "disabled"});
+  auto const unavailable_reasoning_picker = ava::app::reasoning_selector_view(non_reasoning_model, std::nullopt);
+  expect(default_reasoning_picker && default_reasoning_picker->title == "Select thinking mode" && default_reasoning_picker->items.size() == 4 &&
+             default_reasoning_picker->items[0].value == "default" && default_reasoning_picker->items[0].label == "Default" &&
+             default_reasoning_picker->items[0].current && default_reasoning_picker->selected_item_index == 0 &&
+             default_reasoning_picker->footer_hint.find("Esc keep default") != std::string::npos && explicit_reasoning_picker &&
+             explicit_reasoning_picker->selected_item_index == 3 && explicit_reasoning_picker->items[3].value == "high" &&
+             explicit_reasoning_picker->items[3].label == "High" && explicit_reasoning_picker->items[3].current &&
+             std::ranges::none_of(explicit_reasoning_picker->items,
+                                  [](auto const& item) { return item.value == "off" || item.value == "disabled" || item.value == "blocked"; }) &&
+             !unavailable_reasoning_picker,
+         "thinking-mode selector uses policy-resolved configurable levels with Default and explicit current semantics");
+
+  auto const enabled_labels_are_unique = [](ava::tui::SelectListView const& view) {
+    for (std::size_t left = 0; left < view.items.size(); ++left)
+    {
+      if (!view.items[left].enabled)
+        continue;
+      for (std::size_t right = left + 1; right < view.items.size(); ++right)
+      {
+        if (view.items[right].enabled && view.items[left].label == view.items[right].label)
+          return false;
+      }
+    }
+    return true;
+  };
+  auto const builtin_models = ava::config::builtin_model_registry();
+  auto const gpt56_model = ava::config::find_model(builtin_models, "openai", "gpt-5.6-sol");
+  auto const gpt56_reasoning_picker = gpt56_model ? ava::app::reasoning_selector_view(*gpt56_model, std::nullopt) : std::nullopt;
+  std::vector<std::pair<std::string, std::string>> const expected_gpt56_rows = {
+      {"default", "Default"}, {"minimal", "Minimal"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}, {"xhigh", "Extra high"}, {"max", "Max"}};
+  auto gpt56_rows_match = gpt56_reasoning_picker && gpt56_reasoning_picker->items.size() == expected_gpt56_rows.size();
+  if (gpt56_rows_match)
+  {
+    for (std::size_t index = 0; index < expected_gpt56_rows.size(); ++index)
+    {
+      gpt56_rows_match = gpt56_reasoning_picker->items[index].value == expected_gpt56_rows[index].first &&
+                         gpt56_reasoning_picker->items[index].label == expected_gpt56_rows[index].second;
+      if (!gpt56_rows_match)
+        break;
+    }
+  }
+  expect(gpt56_model && gpt56_rows_match && enabled_labels_are_unique(*gpt56_reasoning_picker),
+         "GPT-5.6 thinking-mode selector keeps canonical authority and distinct Default through Max human labels");
+
+  auto collision_model = make_model("custom", "colliding-levels", "Colliding Levels", "custom", true, {"foo-bar", "foo_bar"});
+  auto const collision_picker = ava::app::reasoning_selector_view(collision_model, std::nullopt);
+  expect(collision_picker && collision_picker->items.size() == 3 && collision_picker->items[1].value == "foo-bar" &&
+             collision_picker->items[1].label == "Foo Bar (foo-bar)" && collision_picker->items[2].value == "foo_bar" &&
+             collision_picker->items[2].label == "Foo Bar (foo_bar)" && enabled_labels_are_unique(*collision_picker),
+         "thinking-mode selector deterministically disambiguates colliding custom human labels without changing canonical values");
+
+  if (explicit_reasoning_picker)
+  {
+    auto tiny_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                                    .provider = "openai",
+                                                    .model = "Reasoning Policy",
+                                                    .session_id = "session_reasoning_selector",
+                                                    .input = {},
+                                                    .status = "selecting thinking mode",
+                                                    .transcript = {},
+                                                    .select_list = *explicit_reasoning_picker,
+                                                    .width = 44,
+                                                    .height = 8};
+    auto const frame = ava::tui::render_composer(tiny_snapshot);
+    auto const selected_line = std::ranges::find_if(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("›") != std::string::npos && visible.find("High") != std::string::npos;
+    });
+    auto const visible = tui_test_support::join_visible_lines(frame);
+    expect(selected_line != frame.end() && visible.find("provider-secret") == std::string::npos && visible.find("blocked") == std::string::npos,
+           "thinking-mode selector stays human-readable and keeps the current row visible at tiny terminal size");
+    if (selected_line != frame.end())
+    {
+      auto const hit = ava::tui::select_list_selection_for_screen_position(tiny_snapshot, static_cast<std::size_t>(selected_line - frame.begin()) + 1, 22);
+      expect(hit && *hit == 3, "thinking-mode selector tiny-terminal mouse hit-testing shares generic rendered rows");
+    }
+  }
+
   auto const scoped_all_models =
       ava::app::scoped_model_selector_view(model_registry, model_registry.models.front(), std::nullopt, "Enter toggle · Ctrl+X clear");
   auto const scoped_ordered_models = ava::app::scoped_model_selector_view(
@@ -135,8 +283,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/parent.jsonl",
                                                                                                  .last_updated = "2026-05-06T08:00:00Z",
                                                                                                  .entry_count = 6},
-                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_parent",
-                                                                                                        .name = "Parent session",
+                                                         .metadata = ava::session::SessionMetadataView{.session_id = "session_parent",
+                                                                                                       .name = "Parent session",
                                                                                                        .labels = {"root"},
                                                                                                        .labels_updated = "2026-05-06T08:05:00Z",
                                                                                                        .parent_session_id = {},
@@ -150,8 +298,8 @@ void run_tui_selector_tests()
                                                                                                  .path = "/tmp/ava/sessions/child.jsonl",
                                                                                                  .last_updated = "2026-05-06T10:00:00Z",
                                                                                                  .entry_count = 11},
-                                                          .metadata = ava::session::SessionMetadataView{.session_id = "session_child",
-                                                                                                        .name = "Review branch",
+                                                         .metadata = ava::session::SessionMetadataView{.session_id = "session_child",
+                                                                                                       .name = "Review branch",
                                                                                                        .labels = {"review", "ui"},
                                                                                                        .labels_updated = "2026-05-06T10:05:00Z",
                                                                                                        .parent_session_id = "session_parent",
@@ -218,9 +366,14 @@ void run_tui_selector_tests()
       .summary =
           ava::session::SessionSummary{
               .session_id = "session_unnamed", .path = "/tmp/ava/sessions/unnamed.jsonl", .last_updated = "2026-05-06T11:00:00Z", .entry_count = 2},
-      .metadata =
-           ava::session::SessionMetadataView{
-               .session_id = "session_unnamed", .name = {}, .labels = {}, .parent_session_id = {}, .source_session_id = {}, .branch_from_entry_id = {}, .branch_origin = "root", .actor = "test"},
+      .metadata = ava::session::SessionMetadataView{.session_id = "session_unnamed",
+                                                    .name = {},
+                                                    .labels = {},
+                                                    .parent_session_id = {},
+                                                    .source_session_id = {},
+                                                    .branch_from_entry_id = {},
+                                                    .branch_origin = "root",
+                                                    .actor = "test"},
       .children = {},
       .current = false});
   auto named_only_sessions = ava::app::session_selector_view(tree_with_unnamed, ava::app::SessionSelectorSort::Name, "Ctrl+N show all", true);
@@ -300,17 +453,71 @@ void run_tui_selector_tests()
                                                                                   .select_list = hotkeys_view,
                                                                                   .width = 92,
                                                                                   .height = 18});
+  auto const mode_toggle_item = std::ranges::find_if(hotkeys_view.items, [](ava::tui::SelectListItemView const& item) { return item.value == "mode_toggle"; });
   expect(hotkeys_view.title == "Keybindings" && hotkeys_view.subtitle.find("$XDG_CONFIG_HOME/ava/keybinds.json") != std::string::npos &&
              hotkeys_view.subtitle.find("Enter drafts /keybindings set") != std::string::npos &&
              hotkeys_view.subtitle.find("/reload keybindings") != std::string::npos && hotkeys_view.footer_hint.find("Enter draft edit") != std::string::npos &&
-             std::ranges::any_of(hotkeys_view.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "mode_toggle" && item.detail.find("Tab") != std::string::npos && item.badge == "shared key";
-                                 }) &&
+             mode_toggle_item != hotkeys_view.items.end() && mode_toggle_item->label == "Toggle build/plan mode" && mode_toggle_item->value == "mode_toggle" &&
+             mode_toggle_item->description == "mode_toggle" && mode_toggle_item->detail.empty() && mode_toggle_item->badge.find("Tab") != std::string::npos &&
+             mode_toggle_item->badge.find("shared") != std::string::npos &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Keybindings") != std::string::npos; }) &&
+             std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("Toggle build/plan mode") != std::string::npos; }) &&
              std::ranges::any_of(hotkeys_frame, [](std::string const& line) { return strip_sgr(line).find("mode_toggle") != std::string::npos; }) &&
              std::ranges::none_of(hotkeys_frame, [](std::string const& line) { return line.find("\x1b[7m") != std::string::npos; }),
-         "keybindings view exposes active bindings, edit drafting, config/reload guidance, and context-shared keys");
+         "keybindings view exposes human labels, bound keys before machine ids, edit drafting, config/reload guidance, and context-shared keys");
+
+  auto mode_toggle_render_view = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  mode_toggle_render_view.query = "mode_toggle";
+  auto const mode_toggle_matches = ava::tui::filter_select_list_items(mode_toggle_render_view);
+  expect(!mode_toggle_matches.empty() && mode_toggle_render_view.items[mode_toggle_matches.front()].value == "mode_toggle",
+         "keybindings selector can focus mode_toggle by machine id for width-sensitive render checks");
+  if (!mode_toggle_matches.empty())
+    mode_toggle_render_view.selected_item_index = mode_toggle_matches.front();
+  auto const render_mode_toggle_width = [&](std::size_t width) {
+    return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                .provider = "openai",
+                                                                .model = "gpt-5.5",
+                                                                .session_id = "session_test",
+                                                                .input = "composer behind hotkeys",
+                                                                .status = "hotkeys opened",
+                                                                .transcript = {},
+                                                                .select_list = mode_toggle_render_view,
+                                                                .width = width,
+                                                                .height = 18});
+  };
+  auto const mode_toggle_frame_80 = render_mode_toggle_width(80);
+  auto const mode_toggle_frame_92 = render_mode_toggle_width(92);
+  auto const mode_toggle_row_visible = [](std::vector<std::string> const& frame) {
+    return std::ranges::any_of(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("Toggle build/plan mode") != std::string::npos && visible.find("Tab") != std::string::npos;
+    });
+  };
+  expect(mode_toggle_row_visible(mode_toggle_frame_80) && mode_toggle_row_visible(mode_toggle_frame_92),
+         "keybindings selector keeps mode-toggle human label and Tab keys visible at widths 80 and 92");
+
+  auto cursor_left_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  cursor_left_filter.query = "cursor_left";
+  auto const cursor_left_matches = ava::tui::filter_select_list_items(cursor_left_filter);
+  auto live_tail_filter = ava::tui::hotkeys_select_list_view(ava::tui::default_key_bindings());
+  live_tail_filter.query = "live tail";
+  auto const live_tail_matches = ava::tui::filter_select_list_items(live_tail_filter);
+  auto const cursor_left_item =
+      std::ranges::find_if(cursor_left_filter.items, [](ava::tui::SelectListItemView const& item) { return item.value == "cursor_left"; });
+  expect(!cursor_left_matches.empty() &&
+             std::ranges::any_of(cursor_left_matches,
+                                 [&](std::size_t index) {
+                                   return cursor_left_filter.items[index].value == "cursor_left" && cursor_left_filter.items[index].label == "Move cursor left";
+                                 }) &&
+             !live_tail_matches.empty() &&
+             std::ranges::any_of(live_tail_matches,
+                                 [&](std::size_t index) {
+                                   return live_tail_filter.items[index].value == "jump_to_bottom" && live_tail_filter.items[index].label == "Jump to live tail";
+                                 }) &&
+             mode_toggle_item != hotkeys_view.items.end() && mode_toggle_item->value == "mode_toggle" &&
+             ("/keybindings set " + mode_toggle_item->value + " ") == "/keybindings set mode_toggle " && cursor_left_item != cursor_left_filter.items.end() &&
+             ("/keybindings set " + cursor_left_item->value + " ") == "/keybindings set cursor_left ",
+         "keybindings selector filters on snake_case ids and human labels while Enter drafts canonical machine action ids");
 
   ava::tui::set_tui_config_theme(std::nullopt);
   auto settings_key_bindings = ava::tui::default_key_bindings();
@@ -738,4 +945,696 @@ void run_tui_selector_tests()
                std::ranges::all_of(plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
            "settings view reports active NO_COLOR plain display mode without ANSI styling");
   }
+
+  std::vector<ava::app::SessionUserTurn> user_turns{
+      ava::app::SessionUserTurn{.entry_id = "entry_user_a", .timestamp = "2026-05-08T00:00:01Z", .preview = "alpha first line"},
+      ava::app::SessionUserTurn{.entry_id = "entry_user_b", .timestamp = "2026-05-08T00:00:03Z", .preview = "beta second"},
+      ava::app::SessionUserTurn{.entry_id = "entry_user_c", .timestamp = "2026-05-08T00:00:06Z", .preview = "gamma third"},
+  };
+  auto fork_picker = ava::app::user_turn_selector_view(user_turns, "Fork from user turn", "Enter fork · Esc cancel");
+  expect(fork_picker.title == "Fork from user turn" && fork_picker.selected_item_index == 0 && fork_picker.items.size() == 3 &&
+             fork_picker.items[0].value == "entry_user_c" && fork_picker.items[0].label == "gamma third" &&
+             fork_picker.items[0].detail == "2026-05-08T00:00:06Z" && fork_picker.items[1].value == "entry_user_b" &&
+             fork_picker.items[2].value == "entry_user_a" && fork_picker.placeholder == "Search user turns",
+         "user-turn picker lists newest public turns first with stable entry ids and bounded previews");
+  fork_picker.query = "beta";
+  auto const beta_matches = ava::tui::filter_select_list_items(fork_picker);
+  expect(beta_matches.size() == 1 && fork_picker.items[beta_matches.front()].value == "entry_user_b", "user-turn picker filters by bounded preview text");
+  auto filtered_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Character, .character = 'x'});
+  expect(filtered_input.action == ava::tui::SelectListInputAction::Redraw && filtered_input.query == "betax",
+         "user-turn picker accepts incremental filter input without mutation");
+  fork_picker.query = "beta";
+  fork_picker.selected_item_index = ava::tui::clamp_select_list_selection(fork_picker, 0);
+  auto resolve_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(resolve_input.action == ava::tui::SelectListInputAction::Resolve && resolve_input.selected_item_index == 1 &&
+             fork_picker.items[resolve_input.selected_item_index].value == "entry_user_b",
+         "user-turn picker Enter resolves the filtered earlier entry id rather than the tip");
+  auto cancel_input = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Escape});
+  expect(cancel_input.action == ava::tui::SelectListInputAction::Cancel, "user-turn picker Escape cancels without mutation");
+
+  auto empty_result = ava::app::user_turn_selector_view(std::vector<ava::app::SessionUserTurn>{}, "Fork from user turn");
+  expect(empty_result.items.empty() && empty_result.empty_text == "No user turns match",
+         "user-turn picker builder retains empty-list semantics for callers that surface status without opening");
+
+  for (auto const height : {std::size_t{8}, std::size_t{10}, std::size_t{12}})
+  {
+    auto tall_picker = fork_picker;
+    tall_picker.query.clear();
+    tall_picker.selected_item_index = 2;
+    auto snapshot = ava::tui::ComposerSnapshot{.mode = "build",
+                                               .provider = "openai",
+                                               .model = "gpt-5.5",
+                                               .session_id = "session_test",
+                                               .input = "",
+                                               .status = "fork-from selector opened",
+                                               .transcript = {},
+                                               .select_list = tall_picker,
+                                               .width = 80,
+                                               .height = height};
+    auto const frame = ava::tui::render_composer(snapshot);
+    auto const selected_line = std::ranges::find_if(frame, [](std::string const& line) {
+      auto const visible = strip_sgr(line);
+      return visible.find("›") != std::string::npos && visible.find("alpha first line") != std::string::npos;
+    });
+    expect(selected_line != frame.end(), "user-turn picker keeps the selected older turn visible at tiny terminal heights");
+    if (selected_line != frame.end())
+    {
+      auto const hit = ava::tui::select_list_selection_for_screen_position(snapshot, static_cast<std::size_t>(selected_line - frame.begin()) + 1, 20);
+      expect(hit && *hit == 2, "user-turn picker mouse hit-testing shares the rendered selected row");
+    }
+  }
+
+  auto prompt_snapshot = ava::tui::ComposerSnapshot{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .session_id = "session_test",
+      .input = "",
+      .status = "permission required",
+      .transcript = {},
+      .permission_prompt = ava::tui::PermissionPromptView{.tool_name = "write_file", .operation = "write_file", .target = "src/main.cpp", .reason = "test"},
+      .select_list = fork_picker,
+      .width = 80,
+      .height = 24};
+  // Permission prompts outrank selectors for hit testing; the select-list path must not claim the click.
+  auto const blocked_hit = ava::tui::select_list_selection_for_screen_position(prompt_snapshot, 8, 10);
+  expect(!blocked_hit, "active permission prompts outrank user-turn selector hit testing");
+
+  // Production-path evidence for ForkUserTurn / CopyUserTurn Enter resolution (F-003).
+  fork_picker.query = "alpha";
+  fork_picker.selected_item_index = ava::tui::clamp_select_list_selection(fork_picker, 0);
+  auto const enter_resolve = ava::tui::handle_select_list_input(fork_picker, ava::tui::InputEvent{.key = ava::tui::Key::Enter});
+  expect(enter_resolve.action == ava::tui::SelectListInputAction::Resolve && enter_resolve.selected_item_index < fork_picker.items.size() &&
+             fork_picker.items[enter_resolve.selected_item_index].value == "entry_user_a",
+         "ForkUserTurn Enter resolves the filtered earlier stable entry id");
+  auto const selected_entry_id = fork_picker.items[enter_resolve.selected_item_index].value;
+
+  std::string forked_callback_id;
+  auto opened = ava::tui::evaluate_fork_user_turn_selection(selected_entry_id, "session_old", "/tmp/old.jsonl",
+                                                            [&](std::string_view entry_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+                                                              forked_callback_id = std::string(entry_id);
+                                                              ava::tui::TuiRuntimeStateSnapshot state;
+                                                              state.session_id = "session_forked";
+                                                              state.session_path = "/tmp/forked.jsonl";
+                                                              state.status = "forked session session_forked from session_old at entry_user_a";
+                                                              return state;
+                                                            });
+  expect(forked_callback_id == "entry_user_a" && opened.action == ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession && opened.clear_transcript &&
+             opened.opened_snapshot && opened.opened_snapshot->session_id == "session_forked",
+         "fork selection callback receives the stable entry id and apply-opened clears prior transcript");
+
+  auto prior_transcript = std::vector<ava::tui::TranscriptItem>{ava::tui::TranscriptItem{.label = "you", .text = "later turn must clear"},
+                                                                ava::tui::TranscriptItem{.label = "ava", .text = "assistant later"}};
+  auto presentation = ava::tui::ComposerSnapshot{.mode = "build",
+                                                 .provider = "openai",
+                                                 .model = "gpt-5.5",
+                                                 .session_id = "session_old",
+                                                 .input = "",
+                                                 .status = "forking session…",
+                                                 .transcript = prior_transcript,
+                                                 .width = 80,
+                                                 .height = 24};
+  expect(!presentation.transcript.empty(), "precondition: prior transcript is present before opened apply");
+  if (opened.action == ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession && opened.opened_snapshot && opened.clear_transcript)
+  {
+    // Mirror the production opened-session transition boundary used by runtime.cpp.
+    auto status = opened.opened_snapshot->status;
+    presentation.transcript.clear();
+    ++presentation.transcript_generation;
+    presentation.session_id = opened.opened_snapshot->session_id;
+    presentation.status = opened.opened_snapshot->status;
+    if (!status.empty())
+      presentation.transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = std::move(status)});
+  }
+  expect(presentation.session_id == "session_forked" && presentation.transcript.size() == 1 &&
+             presentation.transcript.front().text.find("forked session") != std::string::npos &&
+             presentation.transcript.front().text.find("later turn must clear") == std::string::npos,
+         "opened fork snapshot clears the old transcript and announces the new session");
+
+  std::size_t no_transition_calls = 0;
+  auto unchanged = ava::tui::evaluate_fork_user_turn_selection(selected_entry_id, "session_old", "/tmp/old.jsonl",
+                                                               [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+                                                                 ++no_transition_calls;
+                                                                 ava::tui::TuiRuntimeStateSnapshot state;
+                                                                 state.session_id = "session_old";
+                                                                 state.session_path = "/tmp/old.jsonl";
+                                                                 state.status = "Cannot branch a sessionless session.";
+                                                                 return state;
+                                                               });
+  expect(no_transition_calls == 1 && unchanged.action == ava::tui::UserTurnForkSelectionAction::NoSessionTransition && !unchanged.clear_transcript &&
+             unchanged.beep && unchanged.status.find("Cannot branch a sessionless session") != std::string::npos,
+         "unchanged session identity after fork callback does not clear transcript");
+
+  auto kept = presentation;
+  kept.transcript = prior_transcript;
+  kept.session_id = "session_old";
+  if (unchanged.action != ava::tui::UserTurnForkSelectionAction::ApplyOpenedSession)
+  {
+    kept.status = unchanged.status;
+  }
+  expect(kept.session_id == "session_old" && kept.transcript.size() == 2 && kept.transcript.front().text == "later turn must clear",
+         "no-transition fork decision retains prior transcript rows");
+
+  std::size_t failure_calls = 0;
+  auto failed = ava::tui::evaluate_fork_user_turn_selection(
+      selected_entry_id, "session_old", "/tmp/old.jsonl", [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        ++failure_calls;
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "branch source entry not found"));
+      });
+  expect(failure_calls == 1 && failed.action == ava::tui::UserTurnForkSelectionAction::AuthorityFailure && !failed.clear_transcript && failed.beep &&
+             failed.status.find("branch source entry not found") != std::string::npos,
+         "fork callback failure reports authority error without transcript mutation");
+
+  auto missing = ava::tui::evaluate_fork_user_turn_selection(
+      {}, "session_old", "/tmp/old.jsonl", [&](std::string_view) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+        expect(false, "empty fork selection must not invoke the authority callback");
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "unreachable"));
+      });
+  expect(missing.action == ava::tui::UserTurnForkSelectionAction::MissingSelection && !missing.clear_transcript,
+         "empty ForkUserTurn selection fails closed without authority work");
+
+  std::string copy_callback_id;
+  std::string copied_payload;
+  auto copy_ok = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id,
+      [&](std::string_view entry_id) -> ava::core::Result<std::string> {
+        copy_callback_id = std::string(entry_id);
+        return std::string("alpha first line body");
+      },
+      [&](std::string_view text) {
+        copied_payload = std::string(text);
+        return true;
+      });
+  expect(copy_callback_id == "entry_user_a" && copy_ok.action == ava::tui::UserTurnCopySelectionAction::Copied && copy_ok.transcript_label == "status" &&
+             copied_payload == "alpha first line body" && copy_ok.status.find("copied user turn") != std::string::npos,
+         "copy selection re-reads the selected stable id at action time and reports truthful success");
+
+  auto copy_read_fail = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id,
+      [&](std::string_view) -> ava::core::Result<std::string> {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "session user turn not found"));
+      },
+      [&](std::string_view) {
+        expect(false, "clipboard must not run after read failure");
+        return true;
+      });
+  expect(copy_read_fail.action == ava::tui::UserTurnCopySelectionAction::ReadFailure && copy_read_fail.transcript_label == "error" && copy_read_fail.beep,
+         "copy selection surfaces read failure without claiming clipboard success");
+
+  auto copy_osc_fail = ava::tui::evaluate_copy_user_turn_selection(
+      selected_entry_id, [&](std::string_view) -> ava::core::Result<std::string> { return std::string("payload"); }, [&](std::string_view) { return false; });
+  expect(copy_osc_fail.action == ava::tui::UserTurnCopySelectionAction::ClipboardFailure && copy_osc_fail.status == "clipboard copy failed" &&
+             copy_osc_fail.transcript_label == "error",
+         "copy selection reports truthful OSC/bound clipboard failure");
+
+  auto soft = ava::tui::attach_soft_status_warning("forked session session_x", "session tree refresh deferred: ", "tree locked\nextra");
+  expect(soft == "forked session session_x · session tree refresh deferred: tree locked",
+         "soft post-fork catalog warnings attach as single-line status without replacing the opened snapshot");
+
+  auto make_subagent_snapshot = [](std::string id, std::string owner, std::string title, std::string type, ava::agent::SubagentExecutionState execution,
+                                   std::size_t tools, ava::agent::SubagentJobMode mode = ava::agent::SubagentJobMode::Background, bool cancel_requested = false,
+                                   bool was_promoted = false) {
+    ava::agent::SubagentCoordinatorJobSnapshot snapshot;
+    snapshot.job.identity.job_id = std::move(id);
+    snapshot.job.identity.parent_session_id = std::move(owner);
+    snapshot.job.identity.child_session_id = "session_child_hidden";
+    snapshot.job.identity.task_id = "task_hidden";
+    snapshot.job.mode = mode;
+    snapshot.job.execution = execution;
+    snapshot.job.cancel_requested = cancel_requested;
+    snapshot.job.was_promoted = was_promoted;
+    snapshot.job.display_title = std::move(title);
+    snapshot.job.display_subagent_type = std::move(type);
+    snapshot.job.tool_calls = tools;
+    return snapshot;
+  };
+  auto running_cancel = make_subagent_snapshot("job_active", "owner-a", "Active", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                               ava::agent::SubagentJobMode::Foreground, true);
+  auto terminal_cancel = make_subagent_snapshot("job_done", "owner-a", "Done", "general", ava::agent::SubagentExecutionState::Completed, 0);
+  auto unexpected_cancel = make_subagent_snapshot("job_odd", "owner-a", "Odd", "general", ava::agent::SubagentExecutionState::Running, 0,
+                                                  ava::agent::SubagentJobMode::Foreground, false);
+  expect(ava::app::map_subagent_cancel_outcome(running_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested &&
+             ava::app::map_subagent_cancel_outcome(running_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested &&
+             ava::app::map_subagent_cancel_outcome(terminal_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::AlreadyFinished &&
+             ava::app::map_subagent_cancel_outcome(unexpected_cancel) == ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable &&
+             ava::app::map_subagent_cancel_outcome(std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "secret/job_path\\nleak"))) ==
+                 ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable,
+         "cancel mapper covers active/repeated, terminal, unexpected, and error states without backend text");
+  auto promoted_bg = make_subagent_snapshot("job_promoted", "owner-a", "Promoted", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                            ava::agent::SubagentJobMode::Background, false, true);
+  auto already_bg = make_subagent_snapshot("job_bg", "owner-a", "Background", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                           ava::agent::SubagentJobMode::Background);
+  auto terminal_promote =
+      make_subagent_snapshot("job_term", "owner-a", "Term", "general", ava::agent::SubagentExecutionState::Failed, 0, ava::agent::SubagentJobMode::Foreground);
+  auto foreground_running = make_subagent_snapshot("job_fg", "owner-a", "Foreground", "general", ava::agent::SubagentExecutionState::Running, 1,
+                                                   ava::agent::SubagentJobMode::Foreground);
+  auto promote_error = ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "secret/path/job-old\nunsafe")));
+  expect(ava::app::map_subagent_promote_outcome(promoted_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(already_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(terminal_promote) == ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished &&
+             ava::app::map_subagent_promote_outcome(promote_error, already_bg) == ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground &&
+             ava::app::map_subagent_promote_outcome(promote_error, terminal_promote) == ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished &&
+             ava::app::map_subagent_promote_outcome(promote_error, foreground_running) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable &&
+             ava::app::map_subagent_promote_outcome(promote_error) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable &&
+             ava::app::map_subagent_promote_outcome(foreground_running) == ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable,
+         "promote mapper covers success/already/background, terminal, race-checked background/terminal failures, and plain errors");
+  expect(ava::tui::runtime_commands::exact_command("/jobs", "/jobs") && ava::tui::runtime_commands::exact_command(" /jobs ", "/jobs") &&
+             ava::tui::runtime_commands::exact_command("\t/jobs\n", "/jobs") && !ava::tui::runtime_commands::exact_command("/jobs promote x", "/jobs") &&
+             !ava::tui::runtime_commands::exact_command("/jobs-extra", "/jobs") && !ava::tui::runtime_commands::exact_command("/jobsx", "/jobs"),
+         "exact /jobs classification trims ASCII surrounding whitespace and rejects args or prefixed lookalikes");
+  auto selector_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
+      make_subagent_snapshot("job_0123456789abcdef_old", "owner-a", {}, "explore", ava::agent::SubagentExecutionState::Completed, 0),
+      make_subagent_snapshot("job_0123456789abcdef_new", "owner-a", "Audit parser", "general", ava::agent::SubagentExecutionState::Running, 3)};
+  selector_snapshots[1].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  auto const jobs_selector = ava::app::subagent_selector_view(selector_snapshots);
+  expect(jobs_selector.title == "Subagents" && jobs_selector.freeze_underlying_transcript_layout && jobs_selector.items.size() == 2 &&
+             jobs_selector.items[0].label == "Audit parser" && jobs_selector.items[0].badge == "Running · Background" &&
+             jobs_selector.items[0].priority_suffix.find("Running · Background · ref @") == 0 &&
+             jobs_selector.items[0].description.find("type general") != std::string::npos &&
+             jobs_selector.items[0].description.find("tools 3") != std::string::npos &&
+             jobs_selector.items[0].non_searchable_suffix == "GPT-5.6 Terra · thinking high" && jobs_selector.items[1].label == "Explore subagent" &&
+             jobs_selector.items[0].priority_suffix != jobs_selector.items[1].priority_suffix,
+         "subagent selector is latest-first with human fallback labels, reserved status/refs, launch configuration, and optional details");
+  auto launch_filter = jobs_selector;
+  launch_filter.query = "GPT-5.6 Terra";
+  expect(ava::tui::filter_select_list_items(launch_filter).empty(), "subagent launch suffix is excluded from selector filter scoring");
+  auto selector_screen_snapshot = ava::tui::ComposerSnapshot{};
+  selector_screen_snapshot.select_list = jobs_selector;
+  selector_screen_snapshot.width = 88;
+  selector_screen_snapshot.height = 20;
+  auto const selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(selector_screen_snapshot));
+  auto const priority_ref = [](std::string const& suffix) {
+    auto const start = suffix.find("ref ");
+    auto const end = start == std::string::npos ? start : suffix.find(" · ", start);
+    return start == std::string::npos ? std::string{} : suffix.substr(start, end == std::string::npos ? end : end - start);
+  };
+  auto const primary_ref = priority_ref(jobs_selector.items[0].priority_suffix);
+  expect(selector_screen.find("Launch: GPT-5.6 Terra") != std::string::npos && !primary_ref.empty() && selector_screen.find(primary_ref) != std::string::npos &&
+             selector_screen.find("job_0123456789abcdef_new") == std::string::npos && selector_screen.find("session_child_hidden") == std::string::npos &&
+             selector_screen.find("task_hidden") == std::string::npos,
+         "88-column subagent selector keeps duplicate-safe ref authority on the primary row and launch configuration on its secondary row without full ids");
+
+  auto duplicate_snapshots = std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{
+      make_subagent_snapshot("job_duplicate_alpha_0123456789", "owner-a", "Duplicate audit", "general", ava::agent::SubagentExecutionState::Running, 0),
+      make_subagent_snapshot("job_duplicate_beta_9876543210", "owner-a", "Duplicate audit", "general", ava::agent::SubagentExecutionState::Running, 0)};
+  duplicate_snapshots[0].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  duplicate_snapshots[1].job.launch_display = duplicate_snapshots[0].job.launch_display;
+  auto duplicate_selector = ava::app::subagent_selector_view(duplicate_snapshots);
+  auto duplicate_snapshot = ava::tui::ComposerSnapshot{};
+  duplicate_snapshot.select_list = duplicate_selector;
+  duplicate_snapshot.width = 88;
+  duplicate_snapshot.height = 12;
+  auto const duplicate_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(duplicate_snapshot));
+  auto const duplicate_ref_0 = priority_ref(duplicate_selector.items[0].priority_suffix);
+  auto const duplicate_ref_1 = priority_ref(duplicate_selector.items[1].priority_suffix);
+  expect(duplicate_selector.items.size() == 2 && duplicate_selector.items[0].label == duplicate_selector.items[1].label &&
+             duplicate_selector.items[0].badge == duplicate_selector.items[1].badge &&
+             duplicate_selector.items[0].priority_suffix != duplicate_selector.items[1].priority_suffix && !duplicate_ref_0.empty() &&
+             !duplicate_ref_1.empty() && duplicate_ref_0 != duplicate_ref_1 && duplicate_screen.find(duplicate_ref_0) != std::string::npos &&
+             duplicate_screen.find(duplicate_ref_1) != std::string::npos && duplicate_screen.find("Launch: GPT-5.6 Terra") != std::string::npos,
+         "88-column duplicate title/status subagent rows remain visually distinct by short refs while each launch configuration remains visible");
+
+  std::string long_duplicate_title;
+  for (std::size_t index = 0; index < 30; ++index) long_duplicate_title += "界";
+  long_duplicate_title += " delegated duplicate audit";
+  auto long_duplicate_snapshots =
+      std::vector<ava::agent::SubagentCoordinatorJobSnapshot>{make_subagent_snapshot("job_long_duplicate_alpha_0123456789", "owner-a", long_duplicate_title,
+                                                                                     "general", ava::agent::SubagentExecutionState::Running, 999),
+                                                              make_subagent_snapshot("job_long_duplicate_beta_9876543210", "owner-a", long_duplicate_title,
+                                                                                     "general", ava::agent::SubagentExecutionState::Running, 999)};
+  long_duplicate_snapshots[0].job.launch_display = ava::agent::SubagentLaunchDisplay::normalized("GPT-5.6 Terra", std::string_view("high"));
+  long_duplicate_snapshots[1].job.launch_display = long_duplicate_snapshots[0].job.launch_display;
+  auto const long_duplicate_selector = ava::app::subagent_selector_view(long_duplicate_snapshots);
+  auto const long_ref_0 = priority_ref(long_duplicate_selector.items[0].priority_suffix);
+  auto const long_ref_1 = priority_ref(long_duplicate_selector.items[1].priority_suffix);
+  for (auto const width : {std::size_t{80}, std::size_t{88}, std::size_t{92}})
+  {
+    auto const rows = ava::tui::detail::render_select_list_modal(long_duplicate_selector, width, 12);
+    auto const first_ref_row = std::ranges::find_if(rows, [&](std::string const& line) { return strip_sgr(line).find(long_ref_0) != std::string::npos; });
+    auto const second_ref_row = std::ranges::find_if(rows, [&](std::string const& line) { return strip_sgr(line).find(long_ref_1) != std::string::npos; });
+    auto const visible = tui_test_support::join_visible_lines(rows);
+    expect(!long_ref_0.empty() && !long_ref_1.empty() && long_ref_0 != long_ref_1 && first_ref_row != rows.end() && second_ref_row != rows.end() &&
+               strip_sgr(*first_ref_row).find("Running · Background") != std::string::npos &&
+               strip_sgr(*second_ref_row).find("Running · Background") != std::string::npos && visible.find("Launch: GPT-5.6 Terra") != std::string::npos &&
+               visible.find("job_long_duplicate_alpha_0123456789") == std::string::npos &&
+               visible.find("job_long_duplicate_beta_9876543210") == std::string::npos,
+           "80/88/92-column long UTF-8 duplicate subagent rows reserve status and distinct short refs before truncating titles and optional details");
+  }
+
+  duplicate_selector.selected_item_index = 1;
+  auto const tiny_two_rows = ava::tui::detail::render_select_list_modal(duplicate_selector, 88, 5);
+  auto const tiny_one_row = ava::tui::detail::render_select_list_modal(duplicate_selector, 88, 4);
+  auto const tiny_primary_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 2, 88, 5);
+  auto const tiny_launch_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 3, 88, 5);
+  auto const one_row_hit = ava::tui::detail::select_list_item_for_modal_row(duplicate_selector, 2, 88, 4);
+  expect(tiny_two_rows.size() == 5 && tiny_one_row.size() == 4 && tiny_primary_hit == std::size_t{1} && tiny_launch_hit == std::size_t{1} &&
+             one_row_hit == std::size_t{1} && tui_test_support::join_visible_lines(tiny_one_row).find(duplicate_ref_1) != std::string::npos,
+         "secondary launch rows preserve one logical hit target and keep the selected primary row visible when the tiny viewport has only one content row");
+
+  auto mixed_suffix_selector = duplicate_selector;
+  mixed_suffix_selector.items[0].non_searchable_suffix.clear();
+  auto const mixed_suffix_rows = ava::tui::detail::render_select_list_modal(mixed_suffix_selector, 88, 5);
+  auto const mixed_suffix_screen = tui_test_support::join_visible_lines(mixed_suffix_rows);
+  auto const mixed_primary_hit = ava::tui::detail::select_list_item_for_modal_row(mixed_suffix_selector, 2, 88, 5);
+  auto const mixed_launch_hit = ava::tui::detail::select_list_item_for_modal_row(mixed_suffix_selector, 3, 88, 5);
+  expect(mixed_suffix_rows.size() == 5 && mixed_suffix_screen.find(duplicate_ref_0) == std::string::npos &&
+             mixed_suffix_screen.find(duplicate_ref_1) != std::string::npos && mixed_suffix_screen.find("Launch: GPT-5.6 Terra") != std::string::npos &&
+             mixed_primary_hit == std::size_t{1} && mixed_launch_hit == std::size_t{1},
+         "two-row backfill preserves the selected primary and launch span when a preceding logical item has no launch suffix");
+  auto unsafe_jobs_selector = ava::app::subagent_selector_view(
+      {make_subagent_snapshot("x", "owner-a", "<task> /tmp/session_secret job_secret", "/tmp/private-type", ava::agent::SubagentExecutionState::Running, 0)});
+  auto unsafe_selector_snapshot = ava::tui::ComposerSnapshot{};
+  unsafe_selector_snapshot.select_list = unsafe_jobs_selector;
+  unsafe_selector_snapshot.width = 80;
+  unsafe_selector_snapshot.height = 16;
+  auto const unsafe_selector_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(unsafe_selector_snapshot));
+  expect(unsafe_selector_screen.find("<task>") == std::string::npos && unsafe_selector_screen.find("/tmp/") == std::string::npos &&
+             unsafe_selector_screen.find("session_secret") == std::string::npos && unsafe_selector_screen.find("job_secret") == std::string::npos &&
+             unsafe_jobs_selector.items.front().label == "Subagent" && unsafe_jobs_selector.items.front().priority_suffix.find("ref @") != std::string::npos,
+         "unsafe title/type metadata falls back safely while even degenerate full ids remain hidden behind reserved short refs");
+  auto const empty_jobs_selector = ava::app::subagent_selector_view({});
+  expect(empty_jobs_selector.items.size() == 1 && !empty_jobs_selector.items.front().enabled && empty_jobs_selector.items.front().label == "No subagents yet",
+         "empty subagent selector stays open with a friendly disabled row");
+
+  ava::agent::SubagentCoordinatorOptions owner_options;
+  owner_options.registry_options.wait_for_terminal_before_start_returns = true;
+  owner_options.id_generator = [](std::string_view prefix) { return std::string(prefix) + "_owner_bound_0123456789abcdef"; };
+  auto owner_coordinator = ava::agent::SubagentCoordinator::create(std::move(owner_options));
+  expect(owner_coordinator.has_value(), "owner-bound selector coordinator fixture creates");
+  if (owner_coordinator)
+  {
+    ava::agent::BackgroundJobStartOptions start_options;
+    start_options.title = "Owner-visible title";
+    start_options.description = "RAW SECRET PROMPT <task>hidden</task>";
+    start_options.subagent_type = "general";
+    start_options.child_session_id = "session_owner_secret";
+    start_options.child_session_path = "/tmp/secret-child.jsonl";
+    auto started = (*owner_coordinator)->start_background("owner-a", std::move(start_options), [](ava::agent::BackgroundJobContext const&) {
+      ava::agent::BackgroundJobCompletion completion;
+      completion.state = ava::agent::BackgroundJobState::Completed;
+      completion.final_text = "finished";
+      return completion;
+    });
+    expect(started.has_value(), "owner-bound selector fixture publishes one job");
+    auto wrong_owner = ava::app::subagent_selector_view(*owner_coordinator, "owner-b");
+    auto right_owner = ava::app::subagent_selector_view(*owner_coordinator, "owner-a");
+    expect(wrong_owner && wrong_owner->items.size() == 1 && !wrong_owner->items.front().enabled && right_owner && right_owner->items.size() == 1 &&
+               right_owner->items.front().enabled,
+           "subagent selector callback is strictly owner-bound");
+    if (right_owner)
+    {
+      auto owner_snapshot = ava::tui::ComposerSnapshot{};
+      owner_snapshot.select_list = *right_owner;
+      owner_snapshot.width = 90;
+      owner_snapshot.height = 18;
+      auto const owner_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(owner_snapshot));
+      expect(owner_screen.find("RAW SECRET PROMPT") == std::string::npos && owner_screen.find("<task>") == std::string::npos &&
+                 owner_screen.find("/tmp/secret-child.jsonl") == std::string::npos && owner_screen.find("session_owner_secret") == std::string::npos &&
+                 owner_screen.find(started ? started->job.identity.job_id : std::string{}) == std::string::npos,
+             "owner-bound selector never renders raw prompts, XML, paths, session ids, or full job ids");
+    }
+  }
+
+  ava::tui::SubagentWorkspaceView live_view;
+  live_view.title = "Audit parser";
+  live_view.status = "Running · Background";
+  live_view.launch_detail = "GPT-5.6 Terra · thinking high";
+  live_view.messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Inspect the parser."},
+                        {.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = "Committed result line."}};
+  auto const live_lines = ava::tui::render_subagent_workspace(live_view, 64, 10);
+  auto const live_screen = tui_test_support::join_visible_lines(live_lines);
+  expect(live_lines.size() == 10 && live_screen.find("Audit parser") != std::string::npos &&
+             live_screen.find("Launch: GPT-5.6 Terra · thinking high") != std::string::npos && live_screen.find("User") != std::string::npos &&
+             live_screen.find("Assistant") != std::string::npos && live_screen.find("Committed result line.") != std::string::npos &&
+             live_screen.find("C cancel") != std::string::npos && live_screen.find("P promote") != std::string::npos &&
+             live_screen.find("Type a message") == std::string::npos,
+         "read-only subagent workspace renders only its header, committed child messages, status, and controls");
+  auto terminal_controls_view = live_view;
+  terminal_controls_view.terminal = true;
+  auto const terminal_controls_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(terminal_controls_view, 64, 10));
+  expect(terminal_controls_screen.find("C cancel") == std::string::npos && terminal_controls_screen.find("P promote") == std::string::npos &&
+             terminal_controls_screen.find("Esc jobs") != std::string::npos,
+         "terminal workspace frames omit C/P controls from the footer");
+  auto waiting_view = live_view;
+  waiting_view.launch_detail.clear();
+  waiting_view.messages.clear();
+  auto waiting_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(waiting_view, 20, 8));
+  auto refresh_view = live_view;
+  refresh_view.launch_detail.clear();
+  refresh_view.refresh_unavailable = true;
+  auto refresh_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(refresh_view, 38, 8));
+  auto unavailable_view = live_view;
+  unavailable_view.launch_detail.clear();
+  unavailable_view.unavailable = true;
+  auto unavailable_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(unavailable_view, 38, 8));
+  auto evicted_view = unavailable_view;
+  evicted_view.evicted = true;
+  auto evicted_screen = tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(evicted_view, 48, 8));
+  expect(waiting_screen.find("Waiting for comm") != std::string::npos && waiting_screen.find("itted messages") != std::string::npos,
+         "empty running subagent workspace truthfully renders a waiting state at tiny sizes");
+  expect(refresh_screen.find("Live refresh") != std::string::npos && refresh_screen.find("last committ") != std::string::npos,
+         "subagent workspace truthfully renders refresh-unavailable state at tiny sizes");
+  expect(unavailable_screen.find("Subagent unavail") != std::string::npos && unavailable_screen.find("last committed") != std::string::npos,
+         "subagent workspace truthfully renders unavailable state at tiny sizes");
+  expect(evicted_screen.find("no longer retained") != std::string::npos, "subagent retention eviction has a distinct truthful workspace state");
+
+  auto make_selector_item = [](std::string value, std::string label, std::string badge, std::string launch) {
+    ava::tui::SelectListItemView item;
+    item.value = std::move(value);
+    item.label = std::move(label);
+    item.badge = std::move(badge);
+    item.non_searchable_suffix = std::move(launch);
+    return item;
+  };
+  std::string current_new_launch = "GPT-5.6 Terra · thinking default";
+  auto controller_selector = [&]() {
+    ava::tui::SelectListView view;
+    view.title = "Subagents";
+    view.placeholder = "Search subagents";
+    view.empty_text = "No matching subagents";
+    view.footer_hint = "Enter open · Esc close";
+    view.freeze_underlying_transcript_layout = true;
+    view.items = {make_selector_item("job-new", "New job", "Running · Background", current_new_launch),
+                  make_selector_item("job-old", "Old job", "Completed · Background", "thinking high")};
+    return view;
+  };
+  std::size_t list_calls = 0;
+  std::size_t inspect_calls = 0;
+  bool list_refresh_failure = false;
+  std::vector<std::optional<std::uint64_t>> inspected_generations;
+  std::string canceled_id;
+  std::string promoted_id;
+  ava::tui::TuiRuntimeOptions controller_options;
+  controller_options.list_subagents = [&]() -> ava::core::Result<ava::tui::SelectListView> {
+    ++list_calls;
+    if (list_refresh_failure)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "private backend detail"));
+    return controller_selector();
+  };
+  controller_options.inspect_subagent =
+      [&](std::string_view id, std::optional<std::uint64_t> known) -> ava::core::Result<std::shared_ptr<ava::agent::SubagentInspectorFrame const>> {
+    ++inspect_calls;
+    inspected_generations.push_back(known);
+    auto frame = std::make_shared<ava::agent::SubagentInspectorFrame>();
+    if (id == "job-old")
+    {
+      frame->generation = 7;
+      frame->terminal = true;
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = "Old terminal result"}};
+    }
+    else if (!known)
+    {
+      frame->generation = 1;
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Committed first"}};
+    }
+    else if (*known == 1)
+    {
+      frame->generation = 2;
+      std::string long_result;
+      for (int line = 0; line < 30; ++line) long_result += "Committed live line " + std::to_string(line) + "\n";
+      frame->messages = {{.role = ava::agent::SubagentLiveMessageRole::User, .text = "Committed first"},
+                         {.role = ava::agent::SubagentLiveMessageRole::Assistant, .text = std::move(long_result)}};
+    }
+    else
+    {
+      frame->generation = *known;
+      frame->not_modified = true;
+    }
+    return std::shared_ptr<ava::agent::SubagentInspectorFrame const>(std::move(frame));
+  };
+  auto cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested;
+  auto promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+  controller_options.cancel_subagent = [&](std::string_view id) {
+    canceled_id = std::string(id);
+    return cancel_outcome;
+  };
+  controller_options.promote_subagent = [&](std::string_view id) {
+    promoted_id = std::string(id);
+    return promote_outcome;
+  };
+  ava::tui::ComposerSnapshot controller_snapshot;
+  controller_snapshot.input = "parent draft";
+  controller_snapshot.status = "parent status";
+  controller_snapshot.transcript = {{.label = "assistant", .text = "parent transcript"}};
+  controller_snapshot.transcript_generation = 42;
+  controller_snapshot.width = 40;
+  controller_snapshot.height = 8;
+  ava::tui::RuntimeSubagentWorkspaceController workspace_controller(controller_options, controller_snapshot);
+  using WorkspaceClock = ava::tui::RuntimeSubagentWorkspaceController::Clock;
+  auto const time_zero = WorkspaceClock::time_point{};
+  expect(workspace_controller.open_selector(time_zero) && workspace_controller.selector_active() && list_calls == 1,
+         "shared subagent controller opens the selector without changing the parent composer state");
+  ava::tui::InputEvent type_query;
+  type_query.key = ava::tui::Key::Character;
+  type_query.character = 'n';
+  type_query.text = "n";
+  auto query_result = workspace_controller.handle_input(type_query, time_zero);
+  expect(query_result.changed && controller_snapshot.select_list && controller_snapshot.select_list->query == "n",
+         "subagent controller owns selector filtering");
+  ava::tui::InputEvent enter_workspace;
+  enter_workspace.key = ava::tui::Key::Enter;
+  auto opened_workspace = workspace_controller.handle_input(enter_workspace, time_zero);
+  expect(opened_workspace.changed && workspace_controller.workspace_active() && workspace_controller.active_job_id() == "job-new" && inspect_calls == 1 &&
+             !inspected_generations.front() && controller_snapshot.subagent_workspace && controller_snapshot.subagent_workspace->messages.size() == 1 &&
+             controller_snapshot.subagent_workspace->launch_detail == "GPT-5.6 Terra · thinking default",
+         "selector Enter opens the owner-bound frozen frame with launch metadata using hidden job identity");
+  current_new_launch = "GPT-5.6 Luna · thinking default";
+  expect(!workspace_controller.poll(time_zero + std::chrono::milliseconds(149)) && inspect_calls == 1 && list_calls == 1,
+         "subagent workspace never polls faster than 150ms");
+  auto const live_changed = workspace_controller.poll(time_zero + std::chrono::milliseconds(150));
+  expect(live_changed && inspect_calls == 2 && list_calls == 2 && inspected_generations.back() == std::optional<std::uint64_t>{1} &&
+             workspace_controller.known_generation() == std::optional<std::uint64_t>{2} && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->messages.size() == 2 &&
+             controller_snapshot.subagent_workspace->launch_detail == "GPT-5.6 Luna · thinking default",
+         "subagent polling updates launch metadata while preserving hidden selection and publishes only newly committed messages");
+  auto const bottom_offset = controller_snapshot.subagent_workspace ? controller_snapshot.subagent_workspace->scroll_offset : 0;
+  ava::tui::InputEvent up_three;
+  up_three.key = ava::tui::Key::ArrowUp;
+  auto scrolled_up = workspace_controller.handle_input(up_three);
+  expect(scrolled_up.changed && controller_snapshot.subagent_workspace && bottom_offset >= controller_snapshot.subagent_workspace->scroll_offset + 3,
+         "workspace Up scrolls exactly three rendered rows within bounds");
+  ava::tui::InputEvent page_up;
+  page_up.key = ava::tui::Key::PageUp;
+  auto const before_page = controller_snapshot.subagent_workspace ? controller_snapshot.subagent_workspace->scroll_offset : 0;
+  auto paged_up = workspace_controller.handle_input(page_up);
+  expect(paged_up.changed && controller_snapshot.subagent_workspace && before_page >= controller_snapshot.subagent_workspace->scroll_offset + 5,
+         "workspace PageUp scrolls exactly five rendered rows within bounds");
+  auto const unchanged_poll = workspace_controller.poll(time_zero + std::chrono::milliseconds(300));
+  expect(!unchanged_poll && inspect_calls == 3 && inspected_generations.back() == std::optional<std::uint64_t>{2},
+         "not-modified inspector polls retain the frozen frame without requesting redraw");
+  list_refresh_failure = true;
+  expect(workspace_controller.poll(time_zero + std::chrono::milliseconds(450)) && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->refresh_unavailable && controller_snapshot.subagent_workspace->messages.size() == 2 && inspect_calls == 3,
+         "metadata refresh failures retain the frozen child frame and expose only a fixed unavailable state");
+  auto const refresh_failure_screen =
+      controller_snapshot.subagent_workspace
+          ? tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(*controller_snapshot.subagent_workspace, 40, 8))
+          : std::string{};
+  expect(refresh_failure_screen.find("Live refresh unavail") != std::string::npos && refresh_failure_screen.find("private backend detail") == std::string::npos,
+         "poll failure rendering is truthful and sanitized");
+  list_refresh_failure = false;
+  expect(workspace_controller.poll(time_zero + std::chrono::milliseconds(600)) && controller_snapshot.subagent_workspace &&
+             !controller_snapshot.subagent_workspace->refresh_unavailable && inspect_calls == 4,
+         "a successful metadata and known-generation refresh clears transient unavailable state");
+  ava::tui::InputEvent escape_workspace;
+  escape_workspace.key = ava::tui::Key::Escape;
+  auto escaped_to_selector = workspace_controller.handle_input(escape_workspace);
+  expect(escaped_to_selector.changed && workspace_controller.selector_active() && controller_snapshot.select_list &&
+             controller_snapshot.select_list->query == "n" &&
+             controller_snapshot.select_list->items[controller_snapshot.select_list->selected_item_index].value == "job-new",
+         "workspace Esc returns to the same selector query and hidden job selection after launch metadata refresh");
+  static_cast<void>(workspace_controller.handle_input(enter_workspace));
+  ava::tui::InputEvent next_job;
+  next_job.key = ava::tui::Key::Tab;
+  auto cycled = workspace_controller.handle_input(next_job);
+  expect(cycled.changed && workspace_controller.active_job_id() == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->terminal && controller_snapshot.subagent_workspace->launch_detail == "thinking high",
+         "workspace Tab cycles launch metadata by hidden job identity and opens the terminal frozen frame");
+  ava::tui::InputEvent cancel_job;
+  cancel_job.key = ava::tui::Key::Character;
+  cancel_job.character = 'C';
+  cancel_job.text = "C";
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancellationRequested;
+  auto canceled = workspace_controller.handle_input(cancel_job);
+  expect(canceled.changed && !canceled.beep && canceled_id == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancellation requested",
+         "active cancel publishes the fixed Cancellation requested notice without a beep");
+  auto canceled_again = workspace_controller.handle_input(cancel_job);
+  expect(canceled_again.changed && !canceled_again.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancellation requested",
+         "repeated cancel stays truthfully Cancellation requested");
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::AlreadyFinished;
+  auto canceled_terminal = workspace_controller.handle_input(cancel_job);
+  expect(canceled_terminal.changed && !canceled_terminal.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Already finished",
+         "terminal cancel publishes the fixed Already finished notice");
+  cancel_outcome = ava::tui::SubagentWorkspaceCancelOutcome::CancelUnavailable;
+  auto canceled_unavailable = workspace_controller.handle_input(cancel_job);
+  expect(canceled_unavailable.changed && canceled_unavailable.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Cancel unavailable",
+         "cancel errors map to Cancel unavailable with a beep");
+  ava::tui::InputEvent promote_job;
+  promote_job.key = ava::tui::Key::Character;
+  promote_job.character = 'P';
+  promote_job.text = "P";
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::CurrentlyBackground;
+  auto promoted = workspace_controller.handle_input(promote_job);
+  expect(promoted.changed && !promoted.beep && promoted_id == "job-old" && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Currently background",
+         "successful or already-background promote publishes Currently background without a beep");
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::AlreadyFinished;
+  auto promoted_terminal = workspace_controller.handle_input(promote_job);
+  expect(promoted_terminal.changed && !promoted_terminal.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Already finished",
+         "terminal promote publishes Already finished");
+  promote_outcome = ava::tui::SubagentWorkspacePromoteOutcome::PromotionUnavailable;
+  auto promoted_unavailable = workspace_controller.handle_input(promote_job);
+  auto const control_screen = controller_snapshot.subagent_workspace
+                                  ? tui_test_support::join_visible_lines(ava::tui::render_subagent_workspace(*controller_snapshot.subagent_workspace, 40, 8))
+                                  : std::string{};
+  expect(promoted_unavailable.changed && promoted_unavailable.beep && controller_snapshot.subagent_workspace &&
+             controller_snapshot.subagent_workspace->notice == "Promotion unavailable",
+         "promote errors map to Promotion unavailable with a beep");
+  expect(control_screen.find("Promotion") != std::string::npos && control_screen.find("unavaila") != std::string::npos &&
+             control_screen.find("secret/path") == std::string::npos && control_screen.find("job-old") == std::string::npos &&
+             control_screen.find("PermissionDenied") == std::string::npos && control_screen.find("Cancel requested") == std::string::npos,
+         "workspace control failures stay sanitized, use fixed notices, and never leak backend text or ids");
+  static_cast<void>(workspace_controller.handle_input(escape_workspace));
+  static_cast<void>(workspace_controller.handle_input(escape_workspace));
+  expect(!workspace_controller.active() && controller_snapshot.input == "parent draft" && controller_snapshot.status == "parent status" &&
+             controller_snapshot.transcript_generation == 42 && controller_snapshot.transcript.size() == 1,
+         "closing the shared workspace restores the exact parent draft, status, transcript, and generation");
+
+  auto prompt_precedence_snapshot = ava::tui::ComposerSnapshot{};
+  prompt_precedence_snapshot.subagent_workspace = live_view;
+  ava::tui::QuestionPromptView prompt_view;
+  prompt_view.header = "Permission first";
+  prompt_view.question = "Continue parent prompt?";
+  prompt_view.modal = true;
+  ava::tui::QuestionPromptOptionView prompt_option;
+  prompt_option.value = "yes";
+  prompt_option.label = "Yes";
+  prompt_view.options.push_back(std::move(prompt_option));
+  prompt_precedence_snapshot.question_prompt = std::move(prompt_view);
+  prompt_precedence_snapshot.width = 64;
+  prompt_precedence_snapshot.height = 16;
+  auto const prompt_precedence_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(prompt_precedence_snapshot));
+  expect(prompt_precedence_screen.find("Continue parent prompt?") != std::string::npos &&
+             prompt_precedence_screen.find("Committed result line.") == std::string::npos,
+         "question prompts render ahead of the jobs workspace");
+  auto permission_precedence_snapshot = ava::tui::ComposerSnapshot{};
+  permission_precedence_snapshot.subagent_workspace = live_view;
+  ava::tui::PermissionPromptView permission_view;
+  permission_view.tool_name = "write_file";
+  permission_view.operation = "write";
+  permission_view.target = "fixture.txt";
+  permission_view.reason = "test precedence";
+  permission_precedence_snapshot.permission_prompt = std::move(permission_view);
+  permission_precedence_snapshot.width = 64;
+  permission_precedence_snapshot.height = 16;
+  auto const permission_precedence_screen = tui_test_support::join_visible_lines(ava::tui::render_composer(permission_precedence_snapshot));
+  expect(permission_precedence_screen.find("Permission required") != std::string::npos &&
+             permission_precedence_screen.find("Committed result line.") == std::string::npos,
+         "permission prompts render ahead of the jobs workspace");
 }

@@ -175,14 +175,23 @@ bool RuntimeActionController::open_external_editor()
   draft_state_.path_completion_force_active = false;
   draft_state_.draft_scroll_offset = 0;
   draft_state_.clear_selection();
+  // Protocol handoff invalidates any incomplete press/drag/header arm while preserving
+  // a committed transcript range.
+  renderer_.cancel_pointer_interaction();
+  terminal_reset_mouse_tracking();
   snapshot.status = "opening external editor";
   if (!renderer_.render())
     return false;
 
   def_prog_mode();
   endwin();
+  // Balance AVA-owned protocols after leaving curses/alt-screen so the shell
+  // and $VISUAL/$EDITOR inherit a clean Kitty stack, paste, and mouse state.
+  release_owned_terminal_protocols();
   auto edited = options_.on_external_editor(draft_state_.draft.text);
   reset_prog_mode();
+  refresh_terminal_geometry_from_kernel();
+  rearm_owned_terminal_protocols();
   clearok(stdscr, TRUE);
   refresh();
 
@@ -214,22 +223,34 @@ bool RuntimeActionController::suspend_to_background()
   draft_state_.path_completion_force_active = false;
   draft_state_.draft_scroll_offset = 0;
   draft_state_.clear_selection();
+  // Suspend handoff cancels in-flight pointer interaction; committed ranges remain.
+  renderer_.cancel_pointer_interaction();
+  terminal_reset_mouse_tracking();
 
   {
     SignalBlockGuard block_signals;
     def_prog_mode();
     endwin();
+    // Disable AVA-owned protocols after leaving curses so the stopped process's
+    // shell inherits balanced keyboard/paste/mouse state. Negotiation preferences
+    // are retained so resume can re-arm without re-probing OSC 11.
+    release_owned_terminal_protocols();
     if (kill(0, SIGTSTP) != 0)
     {
       auto const saved_errno = errno;
       reset_prog_mode();
+      refresh_terminal_geometry_from_kernel();
+      rearm_owned_terminal_protocols();
       clearok(stdscr, TRUE);
       refresh();
       snapshot.status = std::string("failed to suspend: ") + std::strerror(saved_errno);
       static_cast<void>(beep());
       return renderer_.render();
     }
+    // Continues after fg/SIGCONT. Geometry may have changed while stopped.
     reset_prog_mode();
+    refresh_terminal_geometry_from_kernel();
+    rearm_owned_terminal_protocols();
     clearok(stdscr, TRUE);
     refresh();
   }
@@ -339,6 +360,29 @@ bool RuntimeActionController::open_model_selector()
   return renderer_.request_render();
 }
 
+bool RuntimeActionController::open_reasoning_selector(bool chained_from_model_selection)
+{
+  auto& snapshot = presentation_state_.snapshot;
+  auto view =
+      options_.reasoning_selector_view && options_.on_reasoning_selected ? options_.reasoning_selector_view(chained_from_model_selection) : std::nullopt;
+  if (!view)
+  {
+    if (!chained_from_model_selection)
+    {
+      snapshot.status = "thinking mode unavailable for current model";
+      static_cast<void>(beep());
+    }
+    return true;
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*view);
+  active_select_list_ = ActiveSelectList::Reasoning;
+  snapshot.status = "thinking mode selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
 bool RuntimeActionController::open_scoped_model_selector()
 {
   auto& snapshot = presentation_state_.snapshot;
@@ -371,6 +415,56 @@ bool RuntimeActionController::open_session_selector()
   snapshot.select_list = options_.session_selector_view();
   active_select_list_ = ActiveSelectList::Session;
   snapshot.status = "session selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
+bool RuntimeActionController::open_fork_user_turn_selector(std::string_view initial_query)
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!options_.on_open_fork_user_turn_selector)
+  {
+    snapshot.status = "fork-from selector unavailable";
+    static_cast<void>(beep());
+    return true;
+  }
+  auto opened = options_.on_open_fork_user_turn_selector(initial_query);
+  if (!opened)
+  {
+    snapshot.status = opened.error().format();
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*opened);
+  active_select_list_ = ActiveSelectList::ForkUserTurn;
+  snapshot.status = "fork-from selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
+bool RuntimeActionController::open_copy_user_turn_selector(std::string_view initial_query)
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!options_.on_open_copy_user_turn_selector)
+  {
+    snapshot.status = "copy user-turn selector unavailable";
+    static_cast<void>(beep());
+    return true;
+  }
+  auto opened = options_.on_open_copy_user_turn_selector(initial_query);
+  if (!opened)
+  {
+    snapshot.status = opened.error().format();
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  snapshot.select_list = std::move(*opened);
+  active_select_list_ = ActiveSelectList::CopyUserTurn;
+  snapshot.status = "copy user-turn selector opened";
   renderer_.transcript_scroll_offset = 0;
   return renderer_.request_render();
 }

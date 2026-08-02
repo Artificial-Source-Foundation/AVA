@@ -41,11 +41,11 @@ Explicitly post-MVP or current-develop follow-up work still on the product roadm
 - 1.2+ candidates: HTTP/server daemon mode, plugin marketplace/package manager/remote install, extension UI bridge, advanced MCP HTTP/OAuth/subscriptions/sampling/elicitation/pagination/resources, public/default parallel ordinary tool execution beyond the current internal read/search opt-in, OS-level plugin/shell sandboxing, dynamic custom-provider registration, and broader chained multi-agent orchestration beyond the native `task` slice.
 - Later research: in-process native plugin ABI only if AVA accepts the crash/memory/C++ ABI support burden.
 
-The current backend-only 1.1 candidate product list lives in `docs/product/capabilities-1.1.md`.
+The current backend-only 1.1 candidate product list lives in `docs/plans/capabilities-1.1.md`.
 
 Reference-code rule: material under `docs/reference-code/` is for behavior comparison only. Its source code and architecture must not be copied into AVA.
 
-Terminology note: this roadmap uses "1.0" and "backend MVP" for the same release cut. "Post-MVP" means 1.1 and later. Historical 1.0 evidence below is not an artifact-qualification claim: current Linux packaging qualifies only strict source-built x86_64/x64 artifacts with the provenance contract in [`../release-checklist.md`](../release-checklist.md); ARM/non-x86 remains unqualified.
+Terminology note: this roadmap uses "1.0" and "backend MVP" for the same release cut. "Post-MVP" means 1.1 and later. Historical 1.0 evidence below is not an artifact-qualification claim: current Linux packaging qualifies only strict source-built x86_64/x64 artifacts with the provenance contract in [`../release-checklist.md`](../operations/release-checklist.md); ARM/non-x86 remains unqualified.
 
 ## Reference: Backend Maturity Capabilities
 
@@ -218,7 +218,7 @@ Missing or incomplete:
 
 ### Extensibility And Plugin System
 
-AVA should not jump straight into a marketplace-scale platform, but a serious 1.0 backend should include a small, stable plugin foundation. Users should be able to create a plugin with docs, examples, or AI assistance without writing C++, and a bad plugin should fail as a contained plugin failure instead of crashing or corrupting AVA's core state. The plugin/MCP contract is expanded in `docs/plugin-system.md`.
+AVA should not jump straight into a marketplace-scale platform, but a serious 1.0 backend should include a small, stable plugin foundation. Users should be able to create a plugin with docs, examples, or AI assistance without writing C++, and a bad plugin should fail as a contained plugin failure instead of crashing or corrupting AVA's core state. The plugin/MCP contract is expanded in `docs/extensions/plugin-system.md`.
 
 The safest 1.0 shape is an out-of-process plugin protocol: AVA launches a plugin executable, performs a versioned handshake, exchanges bounded JSONL messages, and routes plugin contributions through the same validation, permission, event, audit, cancellation, and session paths used by built-in features. AVA should avoid in-process native shared-library plugins for 1.0 because they can crash the process, corrupt memory, and create a C++ ABI support burden.
 
@@ -245,7 +245,7 @@ Missing or incomplete:
 - Plugin-contributed operations cannot bypass AVA permissions when they request file, shell, network, external-directory, or session access through AVA.
 - MCP servers are launched or connected through explicit permissioned configuration; MCP tools, read-style resources, and prompts are exposed through bounded AVA registry paths; and advanced MCP resource behavior remains deferred unless it preserves explicit read-style permission boundaries.
 - The v1 plugin API has an explicit compatibility policy, deprecation path, and contract tests.
-- Native `task` subagents use child sessions, automatically allowed/audited launch, foreground nested Ask UI, fail-closed background nested Ask actions, and the background job registry; MCP stays bounded to the explicit 1.0 host scope in `docs/plugin-system.md`, and plugin-contributed subagent packages remain future work.
+- Native `task` subagents use child sessions, automatically allowed/audited launch, foreground nested Ask UI, fail-closed background nested Ask actions, and the background job registry; MCP stays bounded to the explicit 1.0 host scope in `docs/extensions/plugin-system.md`, and plugin-contributed subagent packages remain future work.
 - Full untrusted-code sandboxing remains a separate hardening layer; arbitrary plugin executables must be treated as local code the user chose to run unless AVA later adds OS-level sandboxing.
 
 ## Roadmap Phases
@@ -261,7 +261,7 @@ Scope:
 - Keep `docs/rpc-protocol.md` as the normative RPC v1 client contract and `docs/headless-protocol.md` for shared headless behavior.
 - Add an explicit 1.0 backend capability checklist to product planning.
 - Make version docs clearly historical when they describe old deferred status.
-- Cross-check `README.md`, `docs/CONFIG.md`, `docs/USAGE.md`, `docs/TESTING.md`, `docs/headless-protocol.md`, and `docs/product/*.md` against current code before starting Phase 2.
+- Cross-check `README.md`, `docs/core/configuration.md`, `docs/core/usage.md`, `docs/operations/testing.md`, `docs/headless-protocol.md`, and `docs/product/*.md` against current code before starting Phase 2.
 
 Acceptance criteria:
 

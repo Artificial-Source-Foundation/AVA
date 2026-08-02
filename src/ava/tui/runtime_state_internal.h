@@ -2,6 +2,7 @@
 
 #include "ava/event/EventEnvelope.h"
 #include "ava/event/events.h"
+#include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/session_grants.h"
 #include "ava/session/attachments.h"
@@ -16,8 +17,12 @@
 
 namespace ava::tui {
 
+struct RuntimeDraftState;
 struct TuiRuntimeOptions;
 struct TuiRuntimeStateSnapshot;
+class RuntimeRenderer;
+class RuntimeSubagentWorkspaceController;
+class TranscriptSearchController;
 
 struct QueuedRuntimeEvent
 {
@@ -29,13 +34,15 @@ struct QueuedRuntimeEvent
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-using QueuedTuiEvent = std::variant<QueuedRuntimeEvent, ava::event::EventEnvelope>;
+using QueuedTuiEvent = std::variant<QueuedRuntimeEvent, ava::event::EventEnvelope, ava::agent::SubagentLaunchNotification>;
 
 struct RuntimeEventQueue
 {
   [[nodiscard]] ava::event::EventEnvelopeSink envelope_sink();
+  [[nodiscard]] ava::agent::SubagentLaunchSink subagent_launch_sink();
   [[nodiscard]] ava::core::VoidResult enqueue(ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext context = {});
   [[nodiscard]] std::vector<QueuedTuiEvent> drain();
+  void discard();
   [[nodiscard]] bool received_any();
 
  private:
@@ -60,8 +67,12 @@ enum class ActiveSelectList
   Hotkeys,
   Settings,
   Model,
+  Reasoning,
   ScopedModels,
-  Session
+  Session,
+  TranscriptSearch,
+  ForkUserTurn,
+  CopyUserTurn
 };
 
 enum class ComposerJumpMode
@@ -103,5 +114,13 @@ class RuntimePresentationState final
  private:
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+// Applies every authoritative runtime snapshot, but clears session-scoped TUI
+// presentation first only when the authoritative session identity changed.
+[[nodiscard]] bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
+                                                                             RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
+                                                                             TranscriptSearchController& transcript_search,
+                                                                             RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                                             TuiRuntimeStateSnapshot state);
 
 }  // namespace ava::tui

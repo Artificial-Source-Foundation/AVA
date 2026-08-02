@@ -38,6 +38,7 @@ void run_session_tests()
   session_tests::test_lease_bound_session_reads_hold_exact_authority();
   session_tests::test_session_read_authority_binding_and_descriptor_lifetime();
   session_tests::test_session_read_authority_retains_runtime_policy();
+  session_tests::test_session_read_authority_identity_fingerprint_and_clamp();
   session_tests::test_assistant_output_append_target_state_and_batches();
   session_tests::test_incomplete_assistant_output_suffix_recovery();
   session_tests::test_session_append_authority_and_commit_state();

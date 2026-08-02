@@ -11,7 +11,9 @@
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
+#include "ava/tui/runtime_subagent_workspace_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
+#include "ava/tui/runtime_transcript_search_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/tool_cards.h"
 
@@ -22,6 +24,7 @@
 #include <curses.h>
 
 namespace ava::tui {
+using runtime_commands::search_command_argument;
 using runtime_commands::shell_helper_submission;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
@@ -141,6 +144,20 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (runtime_commands::exact_command(submitted_command, "/jobs"))
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    static_cast<void>(subagent_workspace_.open_selector());
+    return renderer_.request_render();
+  }
+  if (auto search_query = search_command_argument(submitted_command))
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    static_cast<void>(transcript_search_.open(std::move(*search_query)));
+    return renderer_.request_render();
+  }
   if (submitted_command == "/details" || submitted_command == "/details compact" || submitted_command == "/details rich" ||
       submitted_command == "/details expanded")
   {
@@ -159,6 +176,26 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     detached_new_output_count = 0;
     detached_sidebar_snapshot.reset();
     snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
+    return renderer_.request_render();
+  }
+  if (submitted_command == "/thinking" || submitted_command == "/thinking details")
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    if (submitted_command == "/thinking details")
+    {
+      if (!navigation_.toggle_latest_thinking_details())
+      {
+        snapshot.status = "no completed long thinking block to expand";
+        static_cast<void>(beep());
+      }
+    }
+    else
+    {
+      snapshot.thinking_visible = !snapshot.thinking_visible;
+      ++snapshot.transcript_generation;
+      snapshot.status = snapshot.thinking_visible ? "thinking visible" : "thinking hidden";
+    }
     return renderer_.request_render();
   }
   if (auto const tool_query = tool_command_argument(submitted_command))
@@ -326,8 +363,45 @@ void RuntimeActiveRunController::insert_active_text(runtime_input::RuntimeInput 
   }
 }
 
+std::optional<bool> RuntimeActiveRunController::handle_transcript_search_input(runtime_input::RuntimeInput const& active_input)
+{
+  if (!transcript_search_.is_open())
+    return std::nullopt;
+  if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+    renderer_.wheel_governor.reset();
+  if (active_input.resize)
+  {
+    transcript_search_.refresh_after_resize();
+    return renderer_.render();
+  }
+  if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+      !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+  {
+    return true;
+  }
+  return transcript_search_.handle_input(active_input.event).value_or(true);
+}
+
 bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
 {
+  if (subagent_workspace_.active())
+  {
+    if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+      renderer_.wheel_governor.reset();
+    if (active_input.resize)
+      return renderer_.render();
+    if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+        !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+    {
+      return true;
+    }
+    auto const handled = subagent_workspace_.handle_input(active_input.event);
+    if (handled.beep)
+      static_cast<void>(beep());
+    return !handled.changed || renderer_.request_render();
+  }
+  if (auto handled = handle_transcript_search_input(active_input))
+    return *handled;
   if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
     renderer_.wheel_governor.reset();
   if (active_input.resize)

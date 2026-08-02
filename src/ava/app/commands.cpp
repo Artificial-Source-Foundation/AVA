@@ -1093,6 +1093,11 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   {
     return handled_text("The current session overview is an interactive TUI view. Use /sidebar inside the TUI to open it.");
   }
+  if (starts_with_command(request.command, "/search"))
+  {
+    return handled_text(
+        "Transcript search is available only inside the interactive TUI. Use /search [query] there to find currently rendered transcript items.");
+  }
   if (starts_with_command(request.command, "/tool"))
   {
     return handled_text(
@@ -1110,17 +1115,26 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     auto const argument = command_argument(request.command, "/copy");
     auto const copy_args = split_command_arguments(argument);
     auto const target = copy_args.empty() ? std::string{} : copy_args.front();
-    if (!target.empty() && target != "tool" && target != "tools" && target != "diff" && target != "diffs" && target != "permission" && target != "permissions")
+    // Exact first token parsing: "user" opens the user-turn picker in the TUI.
+    // Aliases tools/diffs/permissions remain accepted for those targets only.
+    if (!target.empty() && target != "user" && target != "tool" && target != "tools" && target != "diff" && target != "diffs" && target != "permission" &&
+        target != "permissions")
     {
-      return handled_text("unsupported copy target: " + target + "\nsupported: tool [query], diff [query], permission [query]");
+      return handled_text("unsupported copy target: " + target + "\nsupported: user [query], tool [query], diff [query], permission [query]");
     }
     return handled_text(
-        "Clipboard copy is available inside the interactive TUI. Use /copy for the latest AVA message, /copy tool [query] for tool details, /copy diff [query] "
-        "for unified diffs, or /copy permission [query] for permission audit details.");
+        "Clipboard copy is available inside the interactive TUI. Use /copy for the latest AVA message, /copy user [query] to pick a public user turn, /copy "
+        "tool "
+        "[query] for tool details, /copy diff [query] for unified diffs, or /copy permission [query] for permission audit details.");
   }
-  if (request.command == "/thinking")
+  if (request.command == "/thinking" || request.command == "/thinking details")
   {
-    return handled_text("Thinking visibility is a TUI display toggle. It does not change provider reasoning mode.");
+    return handled_text(
+        "Thinking visibility is a TUI display toggle. It does not change provider reasoning mode. Bare /thinking shows or hides all inline thinking. In the "
+        "TUI, "
+        "/thinking details toggles the latest completed long thinking block between its bounded preview and full text; mouse-click the Thinking: header for "
+        "the "
+        "same per-item expand/collapse. Expansion is presentation-only and is not persisted across reload.");
   }
   if (starts_with_command(request.command, "/attach"))
   {
@@ -1179,6 +1193,11 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   if (request.command == "/recover-persistence")
   {
     return run_recover_persistence_command(session);
+  }
+  if (request.command == "/fork-from" || starts_with_command(request.command, "/fork-from"))
+  {
+    return handled_text(
+        "Fork-from is available inside the interactive TUI. Use /fork-from to open the public user-turn picker, or /fork [name] to fork at the latest entry.");
   }
   if (starts_with_command(request.command, "/fork"))
   {

@@ -63,7 +63,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   // MT: is this really single-threaded? `state_session.is_offline()` requires a lock,
   // but obiously could be offline immediately after returning from that accessor if this isn't single threaded.
   // For now just keep the lock for the whole duration of the function, but it smell badly.
-  runtime::Session const& state_session = *runtime::session_ts::rat(state.session);
+  runtime::Session const& state_session = *runtime::session_ts::rat(state.unlocked_session);
 
   LineResult line_result;
   if (state_session.is_offline())
@@ -115,7 +115,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                        std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {
   // MT: is this really single-threaded?
-  runtime::Session& state_session = *runtime::session_ts::wat(state.session);
+  runtime::Session& state_session = *runtime::session_ts::wat(state.unlocked_session);
 
   LineResult line_result;
   if (line.empty())
@@ -254,7 +254,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
 int run_line_shell(ShellState state)
 {
   // MT: is this really single-threaded?
-  runtime::Session const& state_session = *runtime::session_ts::rat(state.session);
+  runtime::Session const& state_session = *runtime::session_ts::rat(state.unlocked_session);
 
   std::cout << "AVA " << version::kDisplayVersion << " terminal shell\n";
   std::cout << "mode: " << ava::agent::to_string(state_session.mode()) << " | session: " << state_session.store.session_id() << "\n";
@@ -295,7 +295,7 @@ namespace ava::app {
 
 int run_interactive(runtime::session_ts& unlocked_session)
 {
-  line_shell_internal::ShellState state{.session = unlocked_session};
+  line_shell_internal::ShellState state{.unlocked_session = unlocked_session};
   if (ava::tui::terminal_is_tty())
     return line_shell_internal::run_tui(state);
   return line_shell_internal::run_line_shell(state);

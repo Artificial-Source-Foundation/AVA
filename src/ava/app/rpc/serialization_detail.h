@@ -28,6 +28,7 @@ class MessagesResultSerializer
 {
  public:
   // The session is retained by reference for the lifetime of the serializer.
+  // Called from Session::messages_result_json that passes *this: session is already locked.
   MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session);
 
   MessagesResultSerializer(MessagesResultSerializer const&) = delete;
@@ -94,6 +95,7 @@ class SessionResultSerializer
 {
  public:
   // The session is retained by reference for the lifetime of the serializer.
+  // Called from Session::*_json[_1] member functions that pass *this: session is already locked.
   SessionResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session);
 
   SessionResultSerializer(SessionResultSerializer const&) = delete;

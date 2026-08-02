@@ -42,7 +42,7 @@ struct FakeState
   ava::app::runtime::Session& session;
   operator ShellState&() { return real_state_; }
 
-  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.session), session(*session_w) { }
+  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.unlocked_session), session(*session_w) { }
 };
 
 namespace version = ava::core::version;

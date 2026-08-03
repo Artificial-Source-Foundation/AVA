@@ -251,6 +251,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
     ava::config::XdgPaths paths;
     std::string provider_id;
+    std::shared_ptr<ava::provider::ProviderCatalog const> prompt_catalog;
     bool session_offline = false;
     ava::core::Result<rpc::ProviderHandle> selected_provider = std::unexpected(rpc::invalid_rpc("compact provider was not selected"));
     ava::core::VoidResult config_valid = {};
@@ -258,6 +259,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
       std::lock_guard lock(options.session_mutex);
       paths = options.session.paths();
       session_offline = options.session.is_offline();
+      prompt_catalog = options.session.provider_catalog();
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
       {
@@ -279,7 +281,7 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
           }
           else
           {
-            auto catalog = options.session.provider_catalog() ? options.session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
+            auto catalog = prompt_catalog ? prompt_catalog : ava::provider::ProviderCatalog::build_builtins_only();
             auto provider = catalog->create(provider_id);
             if (!provider)
               selected_provider = std::unexpected(std::move(provider.error()));
@@ -305,8 +307,8 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
       return;
     }
 
-    auto compact_runtime_options =
-        rpc::ensure_prompt_runtime_options(paths, provider_id, std::move(options.runtime_options), options.auth_transport, "compact");
+    auto compact_runtime_options = rpc::ensure_prompt_runtime_options(paths, provider_id, std::move(options.runtime_options), options.auth_transport, "compact",
+                                                                      std::move(prompt_catalog));
     if (!compact_runtime_options)
     {
       finish(std::unexpected(std::move(compact_runtime_options.error())));

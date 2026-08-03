@@ -34,10 +34,13 @@ class ProviderCatalog
 
   // Compose built-in profiles/factories and load/validate providers.json.
   // Missing providers.json succeeds. Present unsafe/invalid file fails closed.
-  // Valid user definitions are retained for Phase C but do not receive factories yet.
+  // Resolves the six declarative generic built-in *_BASE_URL overrides once
+  // under the providers.json URL policy and pins them into factories/profiles.
   [[nodiscard]] static ava::core::Result<std::shared_ptr<ProviderCatalog const>> build(ava::config::XdgPaths const& paths);
 
-  // Built-ins only; no filesystem access. Intended for focused unit tests.
+  // Built-ins only; no filesystem access and no generic *_BASE_URL env reads.
+  // Pins compiled default endpoints. Intended for focused unit tests/fallbacks.
+  // Production startup must use build() so env overrides are applied once.
   [[nodiscard]] static std::shared_ptr<ProviderCatalog const> build_builtins_only();
 
   [[nodiscard]] bool contains(std::string_view provider_id) const noexcept;

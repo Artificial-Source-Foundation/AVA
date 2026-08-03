@@ -1,8 +1,10 @@
 #include "sys.h"
 #include "ava/config/builtin_generic_providers.h"
+#include "ava/config/provider_config_internal.h"
 #include "ava/config/reasoning_profiles.h"
 
 #include <array>
+#include <cstdlib>
 #include <utility>
 
 namespace ava::config {
@@ -398,6 +400,71 @@ std::string builtin_generic_canonical_endpoint(BuiltinGenericProviderSpec const&
   if (path.front() != '/')
     path.insert(path.begin(), '/');
   return base + path;
+}
+
+ava::core::Result<std::vector<ResolvedBuiltinGenericProvider>> resolve_builtin_generic_providers(bool read_base_url_env)
+{
+  using provider_config_detail::join_endpoint;
+  using provider_config_detail::parse_and_validate_base_url;
+  using provider_config_detail::validate_request_path;
+
+  std::vector<ResolvedBuiltinGenericProvider> resolved;
+  resolved.reserve(builtin_generic_provider_specs().size());
+
+  for (auto const& spec : builtin_generic_provider_specs())
+  {
+    std::string_view raw_base = spec.default_base_url;
+    if (read_base_url_env)
+    {
+      char const* env_value = std::getenv(std::string(spec.base_url_env).c_str());
+      if (env_value != nullptr && env_value[0] != '\0')
+        raw_base = env_value;
+    }
+
+    auto parsed_base = parse_and_validate_base_url(raw_base);
+    if (!parsed_base)
+    {
+      // Sanitized failure: provider + env name only. Never echo the override value.
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "built-in provider base URL override is invalid");
+      error.with_context("provider", std::string(spec.provider_id));
+      error.with_context("env", std::string(spec.base_url_env));
+      error.with_context("field", "base_url");
+      return std::unexpected(std::move(error));
+    }
+
+    std::string request_path(spec.request_path);
+    if (request_path.empty())
+      request_path = "/";
+    if (request_path.front() != '/')
+      request_path.insert(request_path.begin(), '/');
+    if (auto valid_path = validate_request_path(request_path, "request_path"); !valid_path)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "built-in provider request path is invalid");
+      error.with_context("provider", std::string(spec.provider_id));
+      return std::unexpected(std::move(error));
+    }
+
+    ResolvedBuiltinGenericProvider item;
+    item.provider_id = std::string(spec.provider_id);
+    item.display_name = std::string(spec.display_name);
+    item.base_url_env = std::string(spec.base_url_env);
+    item.base_url = std::move(parsed_base->canonical_base);
+    item.request_path = std::move(request_path);
+    item.endpoint = join_endpoint(item.base_url, item.request_path);
+    item.protocol = spec.protocol;
+    item.include_stream_usage = spec.include_stream_usage;
+    resolved.push_back(std::move(item));
+  }
+
+  return resolved;
+}
+
+void apply_resolved_builtin_generic_to_profile(ProviderProfile& profile, ResolvedBuiltinGenericProvider const& resolved) noexcept
+{
+  if (profile.provider_id != resolved.provider_id)
+    return;
+  profile.default_base_url = resolved.base_url;
+  profile.endpoint = resolved.endpoint;
 }
 
 }  // namespace ava::config

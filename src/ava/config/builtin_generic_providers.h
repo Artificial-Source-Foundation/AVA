@@ -3,6 +3,7 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/core/result.h"
 
 #include <cstddef>
 #include <optional>
@@ -71,6 +72,25 @@ struct BuiltinGenericModelSpec
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Catalog-time resolution of one generic built-in base URL + endpoint. Factories
+// capture these exact strings; they must never re-read process environment.
+struct ResolvedBuiltinGenericProvider
+{
+  std::string provider_id;
+  std::string display_name;
+  std::string base_url_env;
+  // Canonical base (scheme://host[:port][/path...], no trailing slash).
+  std::string base_url;
+  // Absolute request path from the declarative spec.
+  std::string request_path;
+  // Exact request URL: base_url + request_path.
+  std::string endpoint;
+  BuiltinGenericProtocol protocol = BuiltinGenericProtocol::OpenAIChatCompletions;
+  bool include_stream_usage = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 [[nodiscard]] std::span<BuiltinGenericProviderSpec const> builtin_generic_provider_specs() noexcept;
 [[nodiscard]] std::span<BuiltinGenericModelSpec const> builtin_generic_model_specs() noexcept;
 
@@ -80,5 +100,16 @@ struct BuiltinGenericModelSpec
 
 [[nodiscard]] std::optional<BuiltinGenericProviderSpec> find_builtin_generic_provider_spec(std::string_view provider_id) noexcept;
 [[nodiscard]] std::string builtin_generic_canonical_endpoint(BuiltinGenericProviderSpec const& spec);
+
+// Resolve all declarative generic built-ins once.
+// When read_base_url_env is true, nonempty <PROVIDER>_BASE_URL values are
+// validated with the same remote-HTTPS / loopback-HTTP policy as providers.json.
+// Invalid nonempty overrides fail closed with sanitized provider/env context
+// (raw override values are never echoed). Missing/empty env uses the compiled
+// default, which is also canonicalized.
+[[nodiscard]] ava::core::Result<std::vector<ResolvedBuiltinGenericProvider>> resolve_builtin_generic_providers(bool read_base_url_env);
+
+// Overlay catalog-time resolved base/endpoint onto a matching profile descriptor.
+void apply_resolved_builtin_generic_to_profile(ProviderProfile& profile, ResolvedBuiltinGenericProvider const& resolved) noexcept;
 
 }  // namespace ava::config

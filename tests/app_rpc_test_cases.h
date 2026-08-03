@@ -15,6 +15,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response();
 void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event();
 void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag();
 void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
+void test_app_rpc_prompt_uses_pinned_catalog_credential_policy();
 void test_app_rpc_malformed_line_recovery_and_unknown_command();
 void test_app_rpc_state_list_sessions_and_open_session();
 void test_app_rpc_job_controls_are_active_safe_and_redacted();

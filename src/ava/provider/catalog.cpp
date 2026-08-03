@@ -151,6 +151,20 @@ ProviderCatalog::ProviderCatalog(ProviderRegistry registry, std::vector<ava::con
 {
 }
 
+namespace {
+
+std::vector<ava::config::ProviderProfile> profiles_with_resolved_generics(std::vector<ava::config::ResolvedBuiltinGenericProvider> const& resolved_generics)
+{
+  auto profiles = ava::config::builtin_provider_profiles();
+  for (auto& profile : profiles)
+  {
+    for (auto const& resolved : resolved_generics) ava::config::apply_resolved_builtin_generic_to_profile(profile, resolved);
+  }
+  return profiles;
+}
+
+}  // namespace
+
 ava::core::Result<std::shared_ptr<ProviderCatalog const>> ProviderCatalog::build(ava::config::XdgPaths const& paths)
 {
   auto user_definitions = ava::config::load_user_provider_definitions(paths);
@@ -159,16 +173,29 @@ ava::core::Result<std::shared_ptr<ProviderCatalog const>> ProviderCatalog::build
   if (auto collision = ava::config::validate_user_provider_ids_against_builtins(*user_definitions); !collision)
     return std::unexpected(std::move(collision.error()));
 
-  auto registry = builtin_provider_registry();
-  auto profiles = ava::config::builtin_provider_profiles();
-  if (auto registered = register_user_definitions(registry, profiles, *user_definitions); !registered)
+  // Resolve generic built-in base URL overrides exactly once before any session
+  // mutation. Factories capture the canonical endpoint; catalog profiles match.
+  auto composed = compose_builtin_provider_registry(/*read_generic_base_url_env=*/true);
+  if (!composed)
+    return std::unexpected(std::move(composed.error()));
+
+  auto profiles = profiles_with_resolved_generics(composed->resolved_generics);
+  if (auto registered = register_user_definitions(composed->registry, profiles, *user_definitions); !registered)
     return std::unexpected(std::move(registered.error()));
-  return std::shared_ptr<ProviderCatalog const>(new ProviderCatalog(std::move(registry), std::move(profiles), std::move(*user_definitions)));
+  return std::shared_ptr<ProviderCatalog const>(new ProviderCatalog(std::move(composed->registry), std::move(profiles), std::move(*user_definitions)));
 }
 
 std::shared_ptr<ProviderCatalog const> ProviderCatalog::build_builtins_only()
 {
-  return std::shared_ptr<ProviderCatalog const>(new ProviderCatalog(builtin_provider_registry(), ava::config::builtin_provider_profiles(), {}));
+  // Unit-test / fallback composition: pin compiled defaults (no generic env
+  // override reads). Production startup uses build(), which resolves env once.
+  auto composed = compose_builtin_provider_registry(/*read_generic_base_url_env=*/false);
+  if (!composed)
+  {
+    return std::shared_ptr<ProviderCatalog const>(new ProviderCatalog(builtin_provider_registry(), ava::config::builtin_provider_profiles(), {}));
+  }
+  auto profiles = profiles_with_resolved_generics(composed->resolved_generics);
+  return std::shared_ptr<ProviderCatalog const>(new ProviderCatalog(std::move(composed->registry), std::move(profiles), {}));
 }
 
 bool ProviderCatalog::contains(std::string_view provider_id) const noexcept

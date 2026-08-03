@@ -1,15 +1,17 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "output.h"
 #include "prompt_worker.h"
 #include "resolvers.h"
 #include "run_state.h"
 #include "serialization.h"
 #include "session_operators.h"
-#include "ava/app/runtime.h"
 #include "ava/event/events.h"
+#include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/provider/catalog.h"
+#include "ava/core/thread.h"
 
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -74,12 +76,14 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
     };
 
     std::string prompt_provider_id;
+    std::shared_ptr<ava::provider::ProviderCatalog const> prompt_catalog;
     {
       std::lock_guard lock(options.session_mutex);
       prompt_provider_id = options.session.model().provider_id;
+      prompt_catalog = options.session.provider_catalog();
     }
-    auto prompt_options =
-        ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt");
+    auto prompt_options = ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt",
+                                                        std::move(prompt_catalog));
     if (!prompt_options)
     {
       auto published = publish_terminal(options.request_id, std::unexpected(std::move(prompt_options.error())), false, "prompt_start_failed");

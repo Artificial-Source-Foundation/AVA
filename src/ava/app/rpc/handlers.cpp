@@ -18,9 +18,9 @@ namespace ava::app::rpc {
 
 ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                      runtime::RunOptions options, ava::http::Transport& auth_transport,
-                                                                     std::string_view purpose)
+                                                                     std::string_view purpose, std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
-  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
+  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose), std::move(catalog));
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::session_ts::rat const& session_r, RpcCommand const& command)

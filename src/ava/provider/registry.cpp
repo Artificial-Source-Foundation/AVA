@@ -22,63 +22,11 @@ std::string env_or_default(char const* name, std::string fallback)
   return value;
 }
 
-}  // namespace
-
-ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_id, Factory factory)
+void register_legacy_builtin_providers(ProviderRegistry& registry)
 {
-  if (provider_id.empty())
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider id is required"));
-  }
-  if (!factory)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider factory is required");
-    error.with_context("provider", provider_id);
-    return std::unexpected(std::move(error));
-  }
-  if (contains(provider_id))
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider is already registered");
-    error.with_context("provider", provider_id);
-    return std::unexpected(std::move(error));
-  }
-  providers_.push_back(std::make_pair(std::move(provider_id), std::move(factory)));
-  return {};
-}
-
-bool ProviderRegistry::contains(std::string_view provider_id) const noexcept
-{
-  for (auto const& [id, _] : providers_)
-  {
-    if (id == provider_id)
-      return true;
-  }
-  return false;
-}
-
-ava::core::Result<std::unique_ptr<Provider>> ProviderRegistry::create(std::string_view provider_id) const
-{
-  for (auto const& [id, factory] : providers_)
-  {
-    if (id == provider_id)
-      return factory();
-  }
-  auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "provider is not registered");
-  error.with_context("provider", std::string(provider_id));
-  return std::unexpected(std::move(error));
-}
-
-std::vector<std::string> ProviderRegistry::provider_ids() const
-{
-  std::vector<std::string> ids;
-  ids.reserve(providers_.size());
-  for (auto const& [id, _] : providers_) ids.push_back(id);
-  return ids;
-}
-
-ProviderRegistry builtin_provider_registry()
-{
-  ProviderRegistry registry;
+  // Legacy built-ins retain historical create-time env base URL lookups. That
+  // path is outside AVA-PROV-001 (scoped to the six declarative generic
+  // factories) and is intentionally unchanged here.
   static_cast<void>(registry.register_provider(ava::config::anthropic_provider_profile().provider_id, [] { return std::make_unique<AnthropicProvider>(); }));
   static_cast<void>(registry.register_provider(ava::config::deepseek_provider_profile().provider_id, [] {
     auto const& profile = ava::config::deepseek_provider_profile();
@@ -148,16 +96,20 @@ ProviderRegistry builtin_provider_registry()
   };
   register_zai_compatible(ava::config::zai_provider_profile);
   register_zai_compatible(ava::config::zai_coding_cn_provider_profile);
+}
 
-  // One declarative registration path for first-class generic built-ins.
-  for (auto const& spec : ava::config::builtin_generic_provider_specs())
+ava::core::VoidResult register_resolved_builtin_generic_providers(ProviderRegistry& registry,
+                                                                  std::vector<ava::config::ResolvedBuiltinGenericProvider> const& resolved)
+{
+  for (auto const& item : resolved)
   {
-    static_cast<void>(registry.register_provider(std::string(spec.provider_id), [spec]() -> std::unique_ptr<Provider> {
-      auto const base_url = env_or_default(std::string(spec.base_url_env).c_str(), std::string(spec.default_base_url));
-      if (spec.protocol == ava::config::BuiltinGenericProtocol::OpenAIResponses)
+    auto registered = registry.register_provider(item.provider_id, [item]() -> std::unique_ptr<Provider> {
+      // Capture the catalog-time canonical base/endpoint. Never getenv here.
+      if (item.protocol == ava::config::BuiltinGenericProtocol::OpenAIResponses)
       {
         return std::make_unique<OpenAIProvider>(OpenAIProviderOptions{
-            .base_url = base_url,
+            .base_url = item.base_url,
+            .endpoint = item.endpoint,
             .follow_redirects = false,
             .require_credential = true,
             .send_authorization_bearer = true,
@@ -166,17 +118,104 @@ ProviderRegistry builtin_provider_registry()
         });
       }
       return std::make_unique<OpenAICompatibleProvider>(OpenAICompatibleProviderOptions{
-          .base_url = base_url,
-          .chat_completions_path = std::string(spec.request_path),
-          .provider_name = std::string(spec.display_name),
-          .include_stream_usage = spec.include_stream_usage,
+          .base_url = item.base_url,
+          .chat_completions_path = item.request_path,
+          .endpoint = item.endpoint,
+          .provider_name = item.display_name,
+          .include_stream_usage = item.include_stream_usage,
           .follow_redirects = false,
           .require_credential = true,
           .send_authorization_bearer = true,
       });
-    }));
+    });
+    if (!registered)
+      return std::unexpected(std::move(registered.error()));
   }
-  return registry;
+  return {};
+}
+
+}  // namespace
+
+ava::core::VoidResult ProviderRegistry::register_provider(std::string provider_id, Factory factory)
+{
+  if (provider_id.empty())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider id is required"));
+  }
+  if (!factory)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider factory is required");
+    error.with_context("provider", provider_id);
+    return std::unexpected(std::move(error));
+  }
+  if (contains(provider_id))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider is already registered");
+    error.with_context("provider", provider_id);
+    return std::unexpected(std::move(error));
+  }
+  providers_.push_back(std::make_pair(std::move(provider_id), std::move(factory)));
+  return {};
+}
+
+bool ProviderRegistry::contains(std::string_view provider_id) const noexcept
+{
+  for (auto const& [id, _] : providers_)
+  {
+    if (id == provider_id)
+      return true;
+  }
+  return false;
+}
+
+ava::core::Result<std::unique_ptr<Provider>> ProviderRegistry::create(std::string_view provider_id) const
+{
+  for (auto const& [id, factory] : providers_)
+  {
+    if (id == provider_id)
+      return factory();
+  }
+  auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "provider is not registered");
+  error.with_context("provider", std::string(provider_id));
+  return std::unexpected(std::move(error));
+}
+
+std::vector<std::string> ProviderRegistry::provider_ids() const
+{
+  std::vector<std::string> ids;
+  ids.reserve(providers_.size());
+  for (auto const& [id, _] : providers_) ids.push_back(id);
+  return ids;
+}
+
+ava::core::Result<BuiltinProviderRegistryComposition> compose_builtin_provider_registry(bool read_generic_base_url_env)
+{
+  auto resolved = ava::config::resolve_builtin_generic_providers(read_generic_base_url_env);
+  if (!resolved)
+    return std::unexpected(std::move(resolved.error()));
+
+  ProviderRegistry registry;
+  register_legacy_builtin_providers(registry);
+  if (auto registered = register_resolved_builtin_generic_providers(registry, *resolved); !registered)
+    return std::unexpected(std::move(registered.error()));
+
+  return BuiltinProviderRegistryComposition{.registry = std::move(registry), .resolved_generics = std::move(*resolved)};
+}
+
+ProviderRegistry builtin_provider_registry()
+{
+  // Defaults-only: no generic *_BASE_URL env reads. Compiled defaults are valid
+  // by construction, so composition cannot fail here.
+  auto composed = compose_builtin_provider_registry(false);
+  if (!composed)
+  {
+    // Defensive: surface a still-usable registry without the six generics rather
+    // than aborting process startup from a unit-test helper path.
+    ProviderRegistry registry;
+    register_legacy_builtin_providers(registry);
+    return registry;
+  }
+  return std::move(composed->registry);
 }
 
 }  // namespace ava::provider

@@ -10,10 +10,12 @@
 #include "ava/provider/registry.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <sys/stat.h>
 
 namespace {
 
@@ -264,6 +266,123 @@ void test_model_resolution_and_selector_visibility()
   }
 }
 
+ava::config::XdgPaths empty_catalog_paths(std::filesystem::path const& root)
+{
+  auto const config_home = root / "config";
+  auto const state_home = root / "state";
+  auto const data_home = root / "data";
+  auto const ava_config = config_home / "ava";
+  auto const ava_state = state_home / "ava";
+  for (auto const& directory : {config_home, state_home, data_home, ava_config, ava_state, ava_state / "sessions"})
+  {
+    std::filesystem::create_directories(directory);
+    ::chmod(directory.c_str(), 0700);
+  }
+  return ava::config::XdgPaths{.config_home = config_home,
+                               .state_home = state_home,
+                               .data_home = data_home,
+                               .ava_config_dir = ava_config,
+                               .ava_state_dir = ava_state,
+                               .auth_file = ava_config / "auth.json",
+                               .compaction_file = ava_config / "compaction.json",
+                               .global_agents_file = ava_config / "AGENTS.md",
+                               .models_file = ava_config / "models.json",
+                               .providers_file = ava_config / "providers.json",
+                               .prompts_dir = ava_config / "prompts",
+                               .sessions_dir = ava_state / "sessions"};
+}
+
+void test_generic_base_url_override_validation_and_pinning()
+{
+  auto const root = create_empty_root("builtin-generic-base-url");
+  auto paths = empty_catalog_paths(root);
+
+  struct AdversarialCase
+  {
+    char const* value;
+    char const* label;
+  };
+  AdversarialCase const adversarial[] = {
+      {"http://evil.example/v1", "remote http"}, {"https://user:pass@api.x.ai", "userinfo"}, {"https://api.x.ai?x=1", "query"},
+      {"https://api.x.ai#frag", "fragment"},     {"https://api.x.ai\\path", "backslash"},    {"https://api.x.ai/%2e%2e/v1", "encoded ambiguity"},
+  };
+
+  for (auto const& bad : adversarial)
+  {
+    ScopedEnvVar override("XAI_BASE_URL", bad.value);
+    auto built = ava::provider::ProviderCatalog::build(paths);
+    expect(!built, std::string("invalid XAI_BASE_URL rejected: ") + bad.label);
+    if (!built)
+    {
+      auto const formatted = built.error().format();
+      expect(formatted.find("xai") != std::string::npos && formatted.find("XAI_BASE_URL") != std::string::npos,
+             std::string("invalid override error names provider/env: ") + bad.label);
+      expect(formatted.find(bad.value) == std::string::npos, std::string("invalid override error omits raw value: ") + bad.label);
+    }
+  }
+
+  {
+    ScopedEnvVar https_override("GROQ_BASE_URL", "https://groq.override.test/openai/");
+    ScopedEnvVar loopback_override("MISTRAL_BASE_URL", "http://127.0.0.1:8080");
+    auto built = ava::provider::ProviderCatalog::build(paths);
+    expect(built.has_value(), built ? "valid https + loopback overrides build catalog" : built.error().format());
+    if (!built)
+      return;
+
+    auto groq_profile = (*built)->find_profile("groq");
+    expect(groq_profile && groq_profile->default_base_url == "https://groq.override.test/openai" &&
+               groq_profile->endpoint == "https://groq.override.test/openai/v1/chat/completions",
+           "groq profile reports resolved base/endpoint");
+    auto mistral_profile = (*built)->find_profile("mistral");
+    expect(mistral_profile && mistral_profile->default_base_url == "http://127.0.0.1:8080" &&
+               mistral_profile->endpoint == "http://127.0.0.1:8080/v1/chat/completions",
+           "mistral loopback profile reports resolved base/endpoint");
+
+    auto groq = (*built)->create("groq");
+    expect(groq.has_value(), "groq factory creates after override pin");
+    if (groq)
+    {
+      auto model = find_builtin_model("groq", "openai/gpt-oss-120b");
+      auto request = sample_request("groq", "openai/gpt-oss-120b");
+      if (model)
+        request.compatibility_quirks = model->compatibility_quirks;
+      auto req = (*groq)->build_request(request, "secret");
+      expect(req && req->url == "https://groq.override.test/openai/v1/chat/completions", "groq request uses pinned override endpoint");
+      expect(req && header_get(*req, "Authorization") == "Bearer secret", "groq Bearer still applied on override endpoint");
+    }
+
+    auto mistral = (*built)->create("mistral");
+    expect(mistral.has_value(), "mistral factory creates after loopback pin");
+    if (mistral)
+    {
+      auto model = find_builtin_model("mistral", "mistral-small-latest");
+      auto request = sample_request("mistral", "mistral-small-latest");
+      if (model)
+        request.compatibility_quirks = model->compatibility_quirks;
+      auto req = (*mistral)->build_request(request, "secret");
+      expect(req && req->url == "http://127.0.0.1:8080/v1/chat/completions", "mistral request uses pinned loopback endpoint");
+    }
+
+    // Post-build env mutation must not move the already-pinned catalog endpoint.
+    ScopedEnvVar mutated("GROQ_BASE_URL", "https://attacker.example/exfil");
+    auto groq_again = (*built)->create("groq");
+    expect(groq_again.has_value(), "groq factory still creates after env mutation");
+    if (groq_again)
+    {
+      auto model = find_builtin_model("groq", "openai/gpt-oss-120b");
+      auto request = sample_request("groq", "openai/gpt-oss-120b");
+      if (model)
+        request.compatibility_quirks = model->compatibility_quirks;
+      auto req = (*groq_again)->build_request(request, "pin-check");
+      expect(req && req->url == "https://groq.override.test/openai/v1/chat/completions", "post-build GROQ_BASE_URL mutation does not change pinned endpoint");
+      expect(req && header_get(*req, "Authorization") == "Bearer pin-check", "pinned endpoint still receives Bearer credential");
+      auto profile_again = (*built)->find_profile("groq");
+      expect(profile_again && profile_again->endpoint == "https://groq.override.test/openai/v1/chat/completions",
+             "catalog profile endpoint stays pinned after env mutation");
+    }
+  }
+}
+
 }  // namespace
 
 void run_provider_builtin_generic_tests()
@@ -273,4 +392,5 @@ void run_provider_builtin_generic_tests()
   test_model_metadata_contracts();
   test_request_body_and_auth_contracts();
   test_model_resolution_and_selector_visibility();
+  test_generic_base_url_override_validation_and_pinning();
 }

@@ -53,7 +53,7 @@ struct PrintModeOptions
 
 [[nodiscard]] ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& inputs);
 
-[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session& session, std::string const& prompt,
+[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session_ts& unlocked_session, std::string const& prompt,
                                                                               ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                               PrintModeRunOptions const& options, std::ostream& out, std::ostream& err);
 

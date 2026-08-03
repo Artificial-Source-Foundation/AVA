@@ -3,6 +3,7 @@
 #include "runtime/RunOptions.h"
 #include "runtime/OpenContext.h"
 #include "runtime/SessionLifecycleRequest.h"
+#include "runtime/session_ts.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"
 #include "ava/app/session_run_controller.h"
@@ -48,12 +49,12 @@ struct PreparedCompactionContext
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
 
-[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::Session& session, std::string const& user_message,
+[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::session_ts& unlocked_session, std::string const& user_message,
                                                                         ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                         runtime::RunOptions const& options);
 
 // Run a prompt using an admission guard already acquired from this session's controller.
-[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Session& session, std::string const& user_message,
+[[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::session_ts& unlocked_session, std::string const& user_message,
                                                                                  ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                                  runtime::RunOptions const& options, ActiveRunGuard guard);
 

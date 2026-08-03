@@ -150,14 +150,14 @@ ava::core::Result<std::string> merge_print_prompt(PrintPromptInputs const& input
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "print mode requires a prompt argument or stdin"));
 }
 
-ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session& session, std::string const& prompt, ava::provider::Provider const& provider,
+ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session_ts& unlocked_session, std::string const& prompt, ava::provider::Provider const& provider,
                                                                 ava::http::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err)
 {
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
-  runtime_options.permission_resolver =
-      ava::permissions::build_persistent_permission_rule_resolver(session.permission_rule_store(), std::move(runtime_options.permission_resolver));
+  runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(
+      runtime::session_ts::rat(unlocked_session)->permission_rule_store(), std::move(runtime_options.permission_resolver));
   ava::event::EventBus event_bus;
   if (options.output_format == PrintOutputFormat::Json)
   {
@@ -187,7 +187,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
     };
   }
 
-  auto result = run_prompt(session, prompt, provider, transport, runtime_options);
+  auto result = run_prompt(unlocked_session, prompt, provider, transport, runtime_options);
   if (!result)
   {
     if (!emitted_error)
@@ -195,7 +195,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::Session
       if (options.output_format == PrintOutputFormat::Json)
       {
         // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
-        static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(session, result.error()))));
+        runtime::session_ts::rat session_r(unlocked_session);
+        static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(*session_r, result.error()))));
       }
       else
       {
@@ -237,7 +238,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     err << terminal_output_text(unlocked_session_result.error().format(), sanitize_stderr) << '\n';
     return 1;
   }
-  runtime::session_ts::wat session_w(*unlocked_session_result);
+  runtime::session_ts& unlocked_session(*unlocked_session_result);
+
+  CRITICAL_AREA_BEGIN_W(session);
 
   ava::http::CurlCliTransport default_transport;
   ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
@@ -272,6 +275,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" && (*request_credential)->credential_type == "oauth";
     runtime_options.openai_account_id = (*request_credential)->account_id;
   }
+
+  CRITICAL_AREA_END_W(session);
+
   runtime_options.enable_transport_retries = !options.transport_override.has_value();
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
 
@@ -279,7 +285,7 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
                                         .runtime_options = std::move(runtime_options),
                                         .sanitize_terminal_output = sanitize_stdout,
                                         .sanitize_terminal_diagnostics = sanitize_stderr};
-  auto result = run_print_prompt(*session_w, *prompt, provider, transport, run_options, out, err);
+  auto result = run_print_prompt(unlocked_session, *prompt, provider, transport, run_options, out, err);
   return result ? 0 : 1;
 }
 

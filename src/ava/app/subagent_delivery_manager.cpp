@@ -204,13 +204,11 @@ std::optional<std::string> committed_delivery_turn(std::vector<ava::session::Ses
 struct SubagentDeliveryManager::ParentCapsule
 {
   ParentCapsule(runtime::Session session_in, runtime::RunOptions options_in, CapsuleGeneration generation_in)
-      : session(std::move(session_in)), run_options(std::move(options_in)), generation(generation_in)
+      : unlocked_session(std::move(session_in)), run_options(std::move(options_in)), generation(generation_in)
   {
   }
-  // Carlo's mutable runtime aggregate remains behind its established wrapper.
-  // Background delivery retains only this detached, independently leased copy;
-  // every access below is scoped through rat/wat guards.
-  runtime::session_ts session;
+  // Background delivery retains only this detached, independently leased copy; every access below is scoped through rat/wat guards.
+  runtime::session_ts unlocked_session;
   runtime::RunOptions run_options;
   CapsuleGeneration generation = 0;
 
@@ -257,31 +255,36 @@ std::shared_ptr<ava::agent::SubagentCoordinator> const& SubagentDeliveryManager:
   return coordinator_;
 }
 
-ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryManager::refresh_parent(runtime::Session const& session,
+ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryManager::refresh_parent(runtime::session_ts const& unlocked_session,
                                                                                                       runtime::RunOptions const& options)
 {
-  if (!session.run_controller())
+  CRITICAL_AREA_BEGIN_CR(session);
+
+  if (!session_r->run_controller())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot retain a parent without a run controller"));
-  auto authority = session.read_authority_1();
+  auto authority = session_r->read_authority_1();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
-  if (!session.sessionless())
+  if (!session_r->sessionless())
   {
-    auto duplicated = session.lease().duplicate();
+    auto duplicated = session_r->lease().duplicate();
     if (!duplicated)
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
+  auto snapshot = session_r->create_detached(std::move(lease), *authority, nullptr);
   auto safe_options = detached_run_options(options);
-  auto const id = session.store.session_id();
+  auto const session_id = session_r->store.session_id();
+
+  CRITICAL_AREA_END_R(session);
+
   CapsuleGeneration published_generation = 0;
   {
     std::lock_guard lock(mutex_);
     if (!accepting_)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent delivery manager is shutting down"));
-    auto found = parents_.find(id);
+    auto found = parents_.find(session_id);
     if (found == parents_.end() && parents_.size() >= options_.max_retained_parents)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "automatic subagent delivery parent retention limit reached"));
     published_generation = next_generation_++;
@@ -289,7 +292,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
       next_generation_ = 1;
     auto refreshed = std::make_shared<ParentCapsule>(std::move(snapshot), std::move(safe_options), published_generation);
     if (found == parents_.end())
-      parents_.emplace(id, std::move(refreshed));
+      parents_.emplace(session_id, std::move(refreshed));
     else
     {
       // Capsules are immutable after publication. A delivery already holding
@@ -298,7 +301,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
       found->second = std::move(refreshed);
     }
   }
-  auto pending = coordinator_->pending_deliveries(id);
+  auto pending = coordinator_->pending_deliveries(session_id);
   if (pending)
     for (auto const& delivery : *pending) enqueue(delivery);
   changed_.notify_all();
@@ -357,7 +360,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(ru
 void SubagentDeliveryManager::release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation)
 {
   auto capsule_active = [](std::shared_ptr<ParentCapsule> const& capsule) {
-    runtime::session_ts::rat session_r(capsule->session);
+    runtime::session_ts::rat session_r(capsule->unlocked_session);
     return session_r->run_controller() && session_r->run_controller()->snapshot().active;
   };
   std::shared_ptr<ParentCapsule> candidate;
@@ -415,7 +418,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     auto found = parents_.find(std::string(session_id));
     if (found != parents_.end())
     {
-      runtime::session_ts::rat session_r(found->second->session);
+      runtime::session_ts::rat session_r(found->second->unlocked_session);
       if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         return std::unexpected(retained_owner_not_found(session_id));
       capsule = found->second;
@@ -426,7 +429,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
       {
         if (!retained_id.starts_with(session_id))
           continue;
-        runtime::session_ts::rat session_r(retained->session);
+        runtime::session_ts::rat session_r(retained->unlocked_session);
         if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         {
           saw_foreign_owner = true;
@@ -449,7 +452,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     }
   }
   auto attached_result = [&]() -> ava::core::Result<runtime::Session> {
-    runtime::session_ts::rat session_r(capsule->session);
+    runtime::session_ts::rat session_r(capsule->unlocked_session);
     auto authority = session_r->read_authority_1();
     if (!authority)
       return std::unexpected(std::move(authority.error()));
@@ -541,7 +544,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
                                       std::stop_token stop_token)
 {
   auto capsule_controller = [](std::shared_ptr<ParentCapsule> const& retained) {
-    runtime::session_ts::rat session_r(retained->session);
+    runtime::session_ts::rat session_r(retained->unlocked_session);
     return session_r->run_controller();
   };
 
@@ -555,7 +558,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   auto const fingerprint = prompt_fingerprint(prompt);
 
   auto entries = [&]() -> ava::core::Result<ava::session::SessionReadAuthority> {
-    runtime::session_ts::rat session_r(selected_capsule->session);
+    runtime::session_ts::rat session_r(selected_capsule->unlocked_session);
     return session_r->read_authority_1();
   }();
   if (!entries)
@@ -691,7 +694,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   run_options.cancel_requested = [stop_token, deadline] { return stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline; };
 
   auto bundle = [&]() -> ava::core::Result<RuntimeProviderRunBundle> {
-    runtime::session_ts::wat session_w(selected_capsule->session);
+    runtime::session_ts::wat session_w(selected_capsule->unlocked_session);
     run_options.permission_resolver =
         ava::permissions::build_persistent_permission_rule_resolver(session_w->permission_rule_store(), build_headless_permission_resolver({}));
     return options_.provider_bundle_factory(*session_w, std::move(run_options), "automatic subagent delivery");
@@ -703,11 +706,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
     return;
   }
   BoundedDeliveryTransport bounded_transport(std::move(bundle->transport), stop_token, deadline);
-  ava::core::Result<ava::agent::AgentLoopResult> result;
-  {
-    runtime::session_ts::wat session_w(selected_capsule->session);
-    result = run_admitted_prompt(*session_w, prompt, *bundle->provider, bounded_transport, bundle->options, std::move(*guard));
-  }
+  auto result = run_admitted_prompt(selected_capsule->unlocked_session, prompt, *bundle->provider, bounded_transport, bundle->options, std::move(*guard));
   if (!result || !result->committed_turn_id)
   {
     if (!stop_token.stop_requested())
@@ -735,7 +734,7 @@ void SubagentDeliveryManager::shutdown() noexcept
       controllers.reserve(parents_.size());
       for (auto const& [_, capsule] : parents_)
       {
-        runtime::session_ts::rat session_r(capsule->session);
+        runtime::session_ts::rat session_r(capsule->unlocked_session);
         if (session_r->run_controller())
           controllers.push_back(session_r->run_controller());
       }

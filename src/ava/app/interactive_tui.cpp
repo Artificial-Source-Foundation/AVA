@@ -46,7 +46,11 @@ struct FakeState
   ava::app::runtime::Session& session;
   operator ShellState&() { return real_state_; }
 
-  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.unlocked_session), session(*session_w) { }
+  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.unlocked_session), session(*session_w)
+  {
+    // The hack just got worse... UNLOCK the mutex *cry*
+    session_w.unlock();
+  }
 };
 
 namespace version = ava::core::version;

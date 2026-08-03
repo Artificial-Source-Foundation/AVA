@@ -52,7 +52,7 @@ struct ParsedBaseUrl
 {
   std::string canonical_base;  // scheme://host[:port][/path...] without trailing slashes
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] ava::core::Result<ParsedBaseUrl> parse_and_validate_base_url(std::string_view raw);

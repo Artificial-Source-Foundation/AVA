@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/config/builtin_generic_providers.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/gemini_provider.h"
@@ -7,6 +8,7 @@
 #include "ava/provider/registry.h"
 
 #include <cstdlib>
+#include <string>
 #include <utility>
 
 namespace ava::provider {
@@ -146,6 +148,34 @@ ProviderRegistry builtin_provider_registry()
   };
   register_zai_compatible(ava::config::zai_provider_profile);
   register_zai_compatible(ava::config::zai_coding_cn_provider_profile);
+
+  // One declarative registration path for first-class generic built-ins.
+  for (auto const& spec : ava::config::builtin_generic_provider_specs())
+  {
+    static_cast<void>(registry.register_provider(std::string(spec.provider_id), [spec]() -> std::unique_ptr<Provider> {
+      auto const base_url = env_or_default(std::string(spec.base_url_env).c_str(), std::string(spec.default_base_url));
+      if (spec.protocol == ava::config::BuiltinGenericProtocol::OpenAIResponses)
+      {
+        return std::make_unique<OpenAIProvider>(OpenAIProviderOptions{
+            .base_url = base_url,
+            .follow_redirects = false,
+            .require_credential = true,
+            .send_authorization_bearer = true,
+            .enable_codex_oauth_mutations = false,
+            .force_include_max_output_tokens = true,
+        });
+      }
+      return std::make_unique<OpenAICompatibleProvider>(OpenAICompatibleProviderOptions{
+          .base_url = base_url,
+          .chat_completions_path = std::string(spec.request_path),
+          .provider_name = std::string(spec.display_name),
+          .include_stream_usage = spec.include_stream_usage,
+          .follow_redirects = false,
+          .require_credential = true,
+          .send_authorization_bearer = true,
+      });
+    }));
+  }
   return registry;
 }
 

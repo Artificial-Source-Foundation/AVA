@@ -2,6 +2,7 @@ add_library(ava_config
   "auth.cpp"
   "auth_file_store.cpp"
   "auth_record.cpp"
+  "builtin_generic_providers.cpp"
   "model_config.cpp"
   "model_profiles.cpp"
   "openai_oauth.cpp"

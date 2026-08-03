@@ -1316,8 +1316,19 @@ void test_builtin_provider_model_metadata_contracts()
            "builtin model display and family metadata is populated: " + model.provider_id + "/" + model.model_id);
     expect(model.display_name_is_configured && ava::config::proven_configured_model_display_name(model) == model.display_name,
            "builtin model display name retains explicit catalog provenance: " + model.provider_id + "/" + model.model_id);
-    expect(model.context_window_tokens && *model.context_window_tokens > 0,
-           "builtin model context window metadata is populated: " + model.provider_id + "/" + model.model_id);
+    // Cerebras/Fireworks context windows are account-tier dependent; the catalog
+    // intentionally omits them rather than claiming a single value (Phase D).
+    bool const context_may_be_unknown = model.provider_id == "cerebras" || model.provider_id == "fireworks";
+    if (context_may_be_unknown)
+    {
+      expect(!model.context_window_tokens.has_value(),
+             "tier-dependent builtin model omits context window rather than guessing: " + model.provider_id + "/" + model.model_id);
+    }
+    else
+    {
+      expect(model.context_window_tokens && *model.context_window_tokens > 0,
+             "builtin model context window metadata is populated: " + model.provider_id + "/" + model.model_id);
+    }
     expect(contains_string(model.input_modalities, "text") && contains_string(model.output_modalities, "text"),
            "builtin model modality metadata declares text input and output: " + model.provider_id + "/" + model.model_id);
     expect(model.supports_tools.has_value() && model.supports_streaming.has_value() && model.supports_reasoning.has_value() && model.reports_usage.has_value(),
@@ -1636,11 +1647,13 @@ void test_model_and_prompt_config()
   bool saw_openrouter_builtin_without_reasoning = false;
   bool saw_zai_builtin = false;
   bool saw_zai_cn_builtin = false;
-  bool all_builtins_have_context_windows = !builtin.models.empty();
+  bool all_builtins_have_known_or_explicitly_omitted_context = !builtin.models.empty();
   bool all_builtins_have_text_output = !builtin.models.empty();
   for (auto const& model : builtin.models)
   {
-    all_builtins_have_context_windows = all_builtins_have_context_windows && model.context_window_tokens.has_value();
+    bool const context_may_be_unknown = model.provider_id == "cerebras" || model.provider_id == "fireworks";
+    all_builtins_have_known_or_explicitly_omitted_context =
+        all_builtins_have_known_or_explicitly_omitted_context && (context_may_be_unknown || model.context_window_tokens.has_value());
     all_builtins_have_text_output =
         all_builtins_have_text_output && std::find(model.output_modalities.begin(), model.output_modalities.end(), "text") != model.output_modalities.end();
     saw_priced_builtin =
@@ -1690,7 +1703,8 @@ void test_model_and_prompt_config()
     saw_zai_cn_builtin = saw_zai_cn_builtin || (model.provider_id == "zai-coding-cn" && model.model_id == "glm-4.5-air" &&
                                                 model.api_family == "openai_chat_completions" && model.supports_reasoning.value_or(false));
   }
-  expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
+  expect(all_builtins_have_known_or_explicitly_omitted_context,
+         "builtin model registry provides context windows except documented tier-dependent omissions");
   expect(all_builtins_have_text_output, "builtin model registry always declares text output support");
   expect(saw_priced_builtin, "builtin model registry carries static pricing, context, and capability metadata");
   expect(saw_anthropic_builtin_reasoning_enabled, "Anthropic builtin exposes enabled-only native thinking reasoning metadata");

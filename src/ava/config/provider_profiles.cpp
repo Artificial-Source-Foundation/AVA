@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/config/builtin_generic_providers.h"
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/config/reasoning_profiles.h"
@@ -218,8 +219,12 @@ ProviderProfile const& zai_coding_cn_provider_profile()
 
 std::vector<ProviderProfile> builtin_provider_profiles()
 {
-  return {openai_provider_profile(), anthropic_provider_profile(),  deepseek_provider_profile(), gemini_provider_profile(),        moonshot_provider_profile(),
-          kimi_provider_profile(),   openrouter_provider_profile(), zai_provider_profile(),      zai_coding_cn_provider_profile(), vercel_provider_profile()};
+  std::vector<ProviderProfile> profiles = {
+      openai_provider_profile(), anthropic_provider_profile(),  deepseek_provider_profile(), gemini_provider_profile(),        moonshot_provider_profile(),
+      kimi_provider_profile(),   openrouter_provider_profile(), zai_provider_profile(),      zai_coding_cn_provider_profile(), vercel_provider_profile()};
+  // Declarative generic built-ins (xAI, Groq, Cerebras, Together, Fireworks, Mistral).
+  for (auto& profile : builtin_generic_provider_profiles()) profiles.push_back(std::move(profile));
+  return profiles;
 }
 
 std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id)

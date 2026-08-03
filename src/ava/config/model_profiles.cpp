@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/config/builtin_generic_providers.h"
 #include "ava/config/model_profiles.h"
 #include "ava/config/provider_profiles.h"
 
@@ -245,6 +246,8 @@ ModelRegistry builtin_model_profiles()
 
   for (auto& model : zai_coding_plan_models(zai)) models.push_back(std::move(model));
   for (auto& model : zai_coding_plan_models(zai_coding_cn)) models.push_back(std::move(model));
+  // Declarative generic built-ins (xAI, Groq, Cerebras, Together, Fireworks, Mistral).
+  for (auto& model : builtin_generic_model_infos()) models.push_back(std::move(model));
 
   return ModelRegistry{.default_provider_id = openai.provider_id, .default_model_id = "gpt-5.5", .models = std::move(models)};
 }

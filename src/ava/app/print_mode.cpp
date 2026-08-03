@@ -7,6 +7,7 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
 
@@ -242,8 +243,8 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::http::CurlCliTransport default_transport;
   ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
   ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
-  auto registry = ava::provider::builtin_provider_registry();
-  auto default_provider = registry.create(session_w->model().provider_id);
+  auto catalog = options.open_context.provider_catalog ? options.open_context.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+  auto default_provider = catalog->create(session_w->model().provider_id);
   if (!default_provider)
   {
     err << terminal_output_text(default_provider.error().format(), sanitize_stderr) << '\n';
@@ -263,8 +264,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
     }
     if (!*request_credential)
     {
-      err << "print mode requires auth for provider `" << terminal_output_text(session_w->model().provider_id, sanitize_stderr) << "`. Configure a credential in "
-          << terminal_output_text(session_w->paths().auth_file.string(), sanitize_stderr) << " or the provider API key environment variable\n";
+      err << "print mode requires auth for provider `" << terminal_output_text(session_w->model().provider_id, sanitize_stderr)
+          << "`. Configure a credential in " << terminal_output_text(session_w->paths().auth_file.string(), sanitize_stderr)
+          << " or the provider API key environment variable\n";
       return 1;
     }
     runtime_options.access_token = (*request_credential)->access_token;

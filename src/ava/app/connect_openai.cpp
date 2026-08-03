@@ -7,6 +7,7 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/result.h"
 
 #include <algorithm>
@@ -241,7 +242,8 @@ std::vector<ConnectProviderMenuItem> connect_provider_menu_items()
     groups.push_back(std::move(group));
     items.push_back(std::move(item));
   };
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  auto const builtin_catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  for (auto const& profile : builtin_catalog->profiles())
   {
     if (profile.provider_id == "kimi")
       continue;

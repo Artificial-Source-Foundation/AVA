@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/service.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -239,7 +240,8 @@ bool model_accepts_images(ava::config::ModelInfo const& model)
 
 ava::core::VoidResult validate_pinned_provider(AgentServiceOptions const& options, ava::config::ModelInfo const& model)
 {
-  if (options.provider_bundle_factory || ava::provider::builtin_provider_registry().contains(model.provider_id))
+  auto catalog = options.open_context.provider_catalog ? options.open_context.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+  if (options.provider_bundle_factory || catalog->contains(model.provider_id))
     return {};
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ACP startup provider is not registered");
   error.with_context("provider", model.provider_id);

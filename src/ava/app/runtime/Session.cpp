@@ -23,6 +23,7 @@
 #include "ava/config/session_title_config.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
+#include "ava/provider/catalog.h"
 #include "ava/context/markdown_resource.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/AnchorSet.h"
@@ -549,6 +550,12 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                                                  bool append_initial_session_name, std::shared_ptr<SubagentDeliveryManager> delivery_manager,
                                                  std::shared_ptr<SessionTitleCoordinator> title_coordinator)
 {
+  // Provider catalog is application-scoped authority. Resolve it before any
+  // session-file mutation so unsafe providers.json fails closed at startup.
+  auto provider_catalog = ava::provider::ensure_provider_catalog(context.provider_catalog, context.paths);
+  if (!provider_catalog)
+    return std::unexpected(std::move(provider_catalog.error()));
+
   auto directories = resolve_runtime_directories(context);
   if (!directories)
     return std::unexpected(std::move(directories.error()));
@@ -575,6 +582,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
     registry = std::move(*loaded_registry);
   }
   auto model = context.default_model_override.value_or(ava::config::select_default_model(registry));
+  if (auto valid = (*provider_catalog)->validate_active_model(model); !valid)
+    return std::unexpected(std::move(valid.error()));
 
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (load_existing_entries)
@@ -590,6 +599,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
       if (auto persisted_model = latest_persisted_model(registry, *entries))
         model = std::move(*persisted_model);
     }
+    if (auto valid = (*provider_catalog)->validate_active_model(model); !valid)
+      return std::unexpected(std::move(valid.error()));
     loaded_entries = std::move(*entries);
     if (request.expected_original_cwd)
     {
@@ -775,7 +786,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                              .subagent_coordinator = delivery_manager->coordinator(),
                              .subagent_delivery_manager = std::move(delivery_manager),
                              .session_title_coordinator = std::move(title_coordinator),
-                             .diagnostics = context.diagnostics};
+                             .diagnostics = context.diagnostics,
+                             .provider_catalog = std::move(*provider_catalog)};
   Session session({.invocation_inputs_ = std::move(invocation_inputs),
                    .resolved_prompt_state_ = std::move(resolved_prompt_state),
                    .model_selection_ = std::move(model_selection),
@@ -943,7 +955,8 @@ ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context,
 }
 
 // static
-ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
+ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease,
+                                                  bool created)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires a persistent session"));
@@ -972,7 +985,8 @@ Session Session::create_detached(ava::session::SessionLease lease, ava::session:
                                      .subagent_delivery_manager = std::move(manager),
                                      .session_title_coordinator = session_title_coordinator(),
                                      .diagnostics = diagnostics(),
-                                     .mcp_config = mcp_config()};
+                                     .mcp_config = mcp_config(),
+                                     .provider_catalog = provider_catalog()};
   return Session(Session_aggregate_base{.invocation_inputs_ = invocation_inputs(),
                                         .resolved_prompt_state_ = resolve_prompt_state(),
                                         .model_selection_ = model_selection(),
@@ -991,8 +1005,8 @@ ava::core::Result<session_ts> Session::create_at(OpenContext context, std::files
 }
 
 // static
-ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request)
+ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir,
+                                               SessionLifecycleRequest request)
 {
   context.workspace_dir = workspace_root;
   context.current_dir = current_dir;
@@ -1064,7 +1078,7 @@ ava::core::VoidResult Session::replace_with(Session&& replacement)
 }
 
 ava::core::VoidResult Session::recover_source_for_mutation(std::string const& source_session_id,
-                                                            std::optional<ava::session::SessionLease>& temporary_source_lease)
+                                                           std::optional<ava::session::SessionLease>& temporary_source_lease)
 {
   if (source_session_id == store.session_id())
   {
@@ -1110,6 +1124,7 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.subagent_delivery_manager = subagent_delivery_manager();
   context.session_title_coordinator = session_title_coordinator();
   context.diagnostics = diagnostics();
+  context.provider_catalog = provider_catalog();
   return context;
 }
 

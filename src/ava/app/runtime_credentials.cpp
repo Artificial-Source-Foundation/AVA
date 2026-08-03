@@ -4,6 +4,7 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 
 #include <memory>
@@ -50,7 +51,15 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
 
-  auto provider = ava::provider::builtin_provider_registry().create(session.model().provider_id);
+  auto catalog = session.provider_catalog();
+  if (!catalog)
+  {
+    auto built = ava::provider::ensure_provider_catalog(nullptr, session.paths());
+    if (!built)
+      return std::unexpected(std::move(built.error()));
+    catalog = std::move(*built);
+  }
+  auto provider = catalog->create(session.model().provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));
 

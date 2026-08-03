@@ -5,6 +5,7 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 #include "ava/core/thread.h"
@@ -290,7 +291,7 @@ ava::core::Result<ava::config::ModelInfo> title_model(SessionTitleGenerationRequ
   if (!request.config.model_id)
     return request.active_model;
   auto const provider = request.config.provider_id.value_or(request.active_model.provider_id);
-  auto model = resolve_runtime_model(request.paths, provider, *request.config.model_id);
+  auto model = resolve_runtime_model(request.paths, request.provider_catalog, provider, *request.config.model_id);
   if (!model)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "configured session title model is unavailable");
@@ -337,7 +338,10 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   if (!prepared)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title credentials are unavailable"));
 
-  auto provider = ava::provider::builtin_provider_registry().create(model->provider_id);
+  auto catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  if (generation.provider_catalog)
+    catalog = generation.provider_catalog;
+  auto provider = catalog->create(model->provider_id);
   if (!provider)
   {
     clear_secret(prepared->access_token);
@@ -667,6 +671,7 @@ void SessionTitleCoordinator::schedule(runtime::Session const& session, std::str
                                                        .active_model = session.model(),
                                                        .config = options_.config,
                                                        .anchor_set = session.anchor_set(),
+                                                       .provider_catalog = session.provider_catalog(),
                                                        .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,

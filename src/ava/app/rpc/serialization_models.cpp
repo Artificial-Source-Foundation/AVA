@@ -4,6 +4,7 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/config/model_config.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 
@@ -76,7 +77,7 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
 
 std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::Session const& session, bool configured)
 {
-  bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
+  bool const registered = ava::provider::ProviderCatalog::build_builtins_only()->contains(model.provider_id);
   std::string json = "{";
   json += string_field_json("provider", model.provider_id);
   json += ',';

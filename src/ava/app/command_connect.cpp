@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/command_connect.h"
@@ -9,6 +8,8 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/provider/catalog.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -156,8 +157,10 @@ std::string connect_provider_group_id(std::string_view provider_id)
   return std::string(provider_id);
 }
 
-std::string connect_provider_display_name(std::string_view provider_id)
+std::string connect_provider_display_name(runtime::Session const& session, std::string_view provider_id)
 {
+  if (session.provider_catalog())
+    return session.provider_catalog()->display_name(provider_id);
   if (connect_provider_group_id(provider_id) == "kimi-moonshot")
     return "Kimi / Moonshot";
   return ava::config::provider_display_name(provider_id);
@@ -175,9 +178,11 @@ std::vector<ava::agent::QuestionOption> provider_options(runtime::Session const&
   };
   if (!session.model().provider_id.empty())
   {
-    add(session.model().provider_id, connect_provider_display_name(session.model().provider_id) + " ✓", connect_provider_group_id(session.model().provider_id));
+    add(session.model().provider_id, connect_provider_display_name(session, session.model().provider_id) + " ✓",
+        connect_provider_group_id(session.model().provider_id));
   }
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  auto catalog = session.provider_catalog() ? session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
+  for (auto const& profile : catalog->profiles())
   {
     if (profile.provider_id == "kimi")
       continue;
@@ -315,10 +320,10 @@ ava::core::VoidResult store_connect_credential(runtime::Session const& session, 
   }
 
   return ava::config::store_provider_credential(session.paths(), ava::config::ProviderCredential{.provider_id = std::string(provider_id),
-                                                                                               .access_token = std::move(secret),
-                                                                                               .credential_type = credential_type_value(method),
-                                                                                               .account_id = "",
-                                                                                               .source = "connect"});
+                                                                                                 .access_token = std::move(secret),
+                                                                                                 .credential_type = credential_type_value(method),
+                                                                                                 .account_id = "",
+                                                                                                 .source = "connect"});
 }
 
 ava::core::Result<std::string> store_openai_oauth_result(runtime::Session const& session, ava::config::OpenAICredential const& credential)
@@ -338,8 +343,8 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::Session const& 
   ava::http::CurlCliTransport transport;
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
-  auto credential_future =
-      ava::core::make_async("openai_browser_oauth", [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
+  auto credential_future = ava::core::make_async(
+      "openai_browser_oauth", [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
 
   auto const browser_opened = open_url_in_browser(oauth_session->authorization_url);
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (browser)",
@@ -370,8 +375,8 @@ ava::core::Result<std::string> run_openai_headless_oauth(runtime::Session const&
 
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
-  auto credential_future =
-      ava::core::make_async("openai_device_oauth", [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
+  auto credential_future = ava::core::make_async(
+      "openai_device_oauth", [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
 
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (headless)",
                                   authorization->verification_url + "\n\nEnter code: " + authorization->user_code + "\n\nWaiting for authorization...",

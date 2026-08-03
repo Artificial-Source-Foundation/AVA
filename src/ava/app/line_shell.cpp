@@ -10,6 +10,7 @@
 #include "ava/config/auth.h"
 #include "ava/session/compaction.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/version.h"
 
@@ -92,8 +93,8 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     }
     return line_result;
   }
-  auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(provider_id);
+  auto catalog = state_session.provider_catalog() ? state_session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
+  auto provider = catalog->create(provider_id);
   if (!provider)
   {
     add_output(line_result, provider.error().format() + std::string(offline_suffix));

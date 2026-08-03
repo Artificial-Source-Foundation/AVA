@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/command_registry.h"
@@ -17,8 +16,10 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/attachments.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <cerrno>
@@ -278,7 +279,8 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
           }
           else
           {
-            auto provider = ava::provider::builtin_provider_registry().create(provider_id);
+            auto catalog = options.session.provider_catalog() ? options.session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
+            auto provider = catalog->create(provider_id);
             if (!provider)
               selected_provider = std::unexpected(std::move(provider.error()));
             else
@@ -349,9 +351,9 @@ std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 
 }  // namespace
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context,
-                                   ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
-                                   runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out)
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+                                   ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options,
+                                   rpc::RpcLineReader& input, std::ostream& out)
 {
 #ifdef CWDEBUG
   {
@@ -1144,8 +1146,8 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     runtime_options.enable_transport_retries = true;
     runtime_options.offline = session_r->is_offline() || options.open_context.offline;
 
-    auto registry = ava::provider::builtin_provider_registry();
-    auto provider_result = registry.create(session_r->model().provider_id);
+    auto catalog = options.open_context.provider_catalog ? options.open_context.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+    auto provider_result = catalog->create(session_r->model().provider_id);
     if (!provider_result)
     {
       err << provider_result.error().format() << '\n';

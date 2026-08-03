@@ -31,8 +31,11 @@ ava::config::XdgPaths app_test_paths(std::filesystem::path const& root)
   // Ordinary runtime tests must never make incidental provider calls. Focused
   // title tests inject their own bounded coordinator and fake generator.
   {
-    std::ofstream titles(ava_config / "session-titles.json", std::ios::binary | std::ios::trunc);
+    auto const titles_path = ava_config / "session-titles.json";
+    std::ofstream titles(titles_path, std::ios::binary | std::ios::trunc);
     titles << "{\"schema_version\":1,\"enabled\":false}\n";
+    titles.close();
+    ::chmod(titles_path.c_str(), S_IRUSR | S_IWUSR);
   }
   return ava::config::XdgPaths{.config_home = config_home,
                                .state_home = state_home,

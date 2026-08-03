@@ -18,6 +18,7 @@
 #include "ava/agent/subagent_config.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
@@ -415,8 +416,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
         return runtime::compact_runtime_context(session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
                                                 replayed_user_messages);
       },
-      .background_provider_factory = [provider_id = session.model().provider_id]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
-        return ava::provider::builtin_provider_registry().create(provider_id);
+      .background_provider_factory = [catalog = session.provider_catalog(), paths = session.paths(),
+                                      provider_id = session.model().provider_id]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+        auto ensured = ava::provider::ensure_provider_catalog(catalog, paths);
+        if (!ensured)
+          return std::unexpected(std::move(ensured.error()));
+        return (*ensured)->create(provider_id);
       },
       .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
         std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();

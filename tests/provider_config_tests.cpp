@@ -1,7 +1,10 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/runtime/OpenContext.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/config/provider_config.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/error.h"
 
 #include <chrono>
@@ -458,6 +461,92 @@ void test_default_env_helper()
 
 }  // namespace
 
+void test_provider_catalog_builtins_and_user_defs()
+{
+  auto catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  expect(catalog && catalog->contains("openai") && catalog->contains("anthropic"), "builtin catalog registers core factories");
+  expect(catalog->find_profile("vercel").has_value() && !catalog->contains("vercel"), "vercel remains metadata-only without a factory");
+  expect(catalog->user_definitions().empty(), "builtins-only catalog has no user definitions");
+
+  auto const root = create_empty_root("catalog-user-defs");
+  auto paths = providers_test_paths(root);
+  write_providers_file(paths.providers_file,
+                       wrap_providers(provider_json("local-openai", "Local OpenAI", "openai_chat_completions", "http://127.0.0.1:11434")));
+  auto built = ava::provider::ProviderCatalog::build(paths);
+  expect(built && (*built)->user_definitions().size() == 1 && (*built)->user_definitions().front().id == "local-openai",
+         "catalog stores validated user definitions without activating factories");
+  expect(!(*built)->contains("local-openai"), "Phase B does not register user-defined factories");
+  expect((*built)->contains("openai"), "built-in factories remain available alongside stored user defs");
+}
+
+void test_provider_catalog_collision_before_session()
+{
+  auto const root = create_empty_root("catalog-collision");
+  auto paths = providers_test_paths(root);
+  write_providers_file(paths.providers_file, wrap_providers(provider_json("openai", "Shadow", "openai_chat_completions", "https://example.com")));
+  auto built = ava::provider::ProviderCatalog::build(paths);
+  expect(!built && error_mentions(built.error(), "collides"), "builtin id collision fails catalog build");
+
+  // Unsafe present file also fails closed.
+  write_providers_file(paths.providers_file, "{not-json", 0600);
+  auto invalid = ava::provider::ProviderCatalog::build(paths);
+  expect(!invalid, "invalid present providers.json fails catalog build");
+}
+
+void test_provider_catalog_active_model_validation()
+{
+  auto catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  ava::config::ModelInfo ok;
+  ok.provider_id = "openai";
+  ok.model_id = "gpt-5.5";
+  ok.display_name = "GPT";
+  ok.api_family = "openai_responses";
+  expect(catalog->validate_active_model(ok).has_value(), "registered matching model validates");
+
+  ava::config::ModelInfo missing;
+  missing.provider_id = "nope";
+  missing.model_id = "m";
+  missing.display_name = "M";
+  expect(!catalog->validate_active_model(missing), "absent provider fails active model validation");
+
+  ava::config::ModelInfo mismatch;
+  mismatch.provider_id = "openai";
+  mismatch.model_id = "custom";
+  mismatch.display_name = "C";
+  mismatch.api_family = "anthropic_messages";
+  expect(!catalog->validate_active_model(mismatch), "api_family mismatch fails active model validation");
+}
+
+void test_session_pins_catalog_identity()
+{
+  auto const root = create_empty_root("catalog-session-pin");
+  auto paths = providers_test_paths(root);
+  auto catalog = ava::provider::ProviderCatalog::build(paths);
+  expect(catalog.has_value(), "catalog builds for session pin test");
+  if (!catalog)
+    return;
+
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = root / "workspace";
+  context.current_dir = context.workspace_dir;
+  context.paths = paths;
+  context.provider_catalog = *catalog;
+  std::filesystem::create_directories(context.workspace_dir);
+
+  ava::app::runtime::SessionLifecycleRequest lifecycle;
+  lifecycle.sessionless = true;
+  auto session = ava::app::runtime::Session::open(context, lifecycle);
+  expect(session.has_value(), session ? "session opens with injected catalog" : session.error().format());
+  if (!session)
+    return;
+  {
+    ava::app::runtime::session_ts::rat session_r(*session);
+    expect(session_r->provider_catalog().get() == catalog->get(), "session retains exact injected catalog identity");
+    auto replacement = session_r->replacement_open_context({});
+    expect(replacement.provider_catalog.get() == catalog->get(), "replacement open context preserves catalog identity");
+  }
+}
+
 void run_provider_config_tests()
 {
   test_parse_all_protocols_and_defaults();
@@ -469,4 +558,8 @@ void run_provider_config_tests()
   test_filesystem_authority();
   test_builtin_collision_helper();
   test_default_env_helper();
+  test_provider_catalog_builtins_and_user_defs();
+  test_provider_catalog_collision_before_session();
+  test_provider_catalog_active_model_validation();
+  test_session_pins_catalog_identity();
 }

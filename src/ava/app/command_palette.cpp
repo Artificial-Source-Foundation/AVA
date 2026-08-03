@@ -18,6 +18,7 @@
 #include "ava/session/session_store.h"
 #include "ava/session/session_tree.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
 
@@ -670,12 +671,12 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   if (auto index = find_item_index(items, "/models"))
   {
     auto& item = items[*index];
-    auto const providers = ava::provider::builtin_provider_registry();
+    auto catalog = session.provider_catalog() ? session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
     if (auto registry = ava::config::load_model_registry(session.paths()))
     {
       for (auto const& model : effective_models(*registry))
       {
-        auto const registered = providers.contains(model.provider_id);
+        auto const registered = catalog->contains(model.provider_id);
         add_completion(item, 0, model.provider_id + "/" + model.model_id, model_completion_description(model, registered), "Models", {}, false, registered,
                        registered ? "" : "provider is not registered", model.display_name.empty() ? model.model_id : model.display_name);
       }
@@ -794,8 +795,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
       auto const jobs = session.subagent_coordinator()->list(session.store.session_id());
       std::vector<std::string> job_ids;
       job_ids.reserve(jobs.size());
-      for (auto const& snapshot : jobs)
-        job_ids.push_back(snapshot.job.identity.job_id);
+      for (auto const& snapshot : jobs) job_ids.push_back(snapshot.job.identity.job_id);
       auto const job_refs = unique_short_id_refs(job_ids);
       for (std::size_t job_index = 0; job_index < jobs.size(); ++job_index)
       {
@@ -845,8 +845,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       std::vector<std::string> rule_ids;
       rule_ids.reserve(rules->size());
-      for (auto const& rule : *rules)
-        rule_ids.push_back(rule.rule_id);
+      for (auto const& rule : *rules) rule_ids.push_back(rule.rule_id);
       auto const rule_refs = unique_short_id_refs(rule_ids);
       for (std::size_t rule_index = 0; rule_index < rules->size(); ++rule_index)
       {
@@ -1165,12 +1164,13 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
   if (!metadata)
     return std::unexpected(std::move(metadata.error()));
 
-  ava::session::SessionSummary summary{.session_id = metadata->session_id,
-                                       .path = session.store.session_path(), // This is the store’s stable logical pathname; it does not change during the store’s lifetime.
-                                       .last_updated = entries->empty() ? std::string{} : entries->back().timestamp,
-                                       .entry_count = entries->size(),
-                                       .original_cwd = metadata->original_cwd,
-                                       .title = metadata->effective_title()};
+  ava::session::SessionSummary summary{
+      .session_id = metadata->session_id,
+      .path = session.store.session_path(), // This is the store’s stable logical pathname; it does not change during the store’s lifetime.
+      .last_updated = entries->empty() ? std::string{} : entries->back().timestamp,
+      .entry_count = entries->size(),
+      .original_cwd = metadata->original_cwd,
+      .title = metadata->effective_title()};
   bool refreshed = false;
   if (cache_.session_tree)
     refreshed = ava::session::refresh_session_tree_node(*cache_.session_tree, std::move(summary), std::move(*metadata));
@@ -1274,9 +1274,11 @@ std::vector<tui::FileReferenceItem> file_reference_items(runtime::Session const&
   return file_reference_items_from_candidates(walk_workspace_path_candidates(session));
 }
 
-tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model, std::string footer_hint)
+tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model, std::string footer_hint,
+                                        std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
-  auto const providers = ava::provider::builtin_provider_registry();
+  if (!catalog)
+    catalog = ava::provider::ProviderCatalog::build_builtins_only();
   auto models = effective_models(registry);
   auto const current_in_catalog = std::ranges::any_of(
       models, [&](auto const& model) { return model.provider_id == current_model.provider_id && model.model_id == current_model.model_id; });
@@ -1305,7 +1307,7 @@ tui::SelectListView model_selector_view(ava::config::ModelRegistry const& regist
     auto const current = model.provider_id == current_model.provider_id && model.model_id == current_model.model_id;
     if (current)
       view.selected_item_index = view.items.size();
-    view.items.push_back(model_selector_item(model, current_model, providers.contains(model.provider_id)));
+    view.items.push_back(model_selector_item(model, current_model, catalog->contains(model.provider_id)));
   }
 
   return view;
@@ -1315,7 +1317,7 @@ tui::SelectListView model_selector_view_1(runtime::Session const& session, std::
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
-    return model_selector_view(*registry, session.model(), std::move(footer_hint));
+    return model_selector_view(*registry, session.model(), std::move(footer_hint), session.provider_catalog());
 
   return tui::SelectListView{.title = "Select model",
                              .subtitle = {},
@@ -1336,9 +1338,11 @@ tui::SelectListView model_selector_view_1(runtime::Session const& session, std::
 }
 
 tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
-                                               std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint)
+                                               std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint,
+                                               std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
-  auto const providers = ava::provider::builtin_provider_registry();
+  if (!catalog)
+    catalog = ava::provider::ProviderCatalog::build_builtins_only();
   auto models = scoped_model_selector_models(effective_models(registry), scoped_model_cycle);
   auto const enabled_count = scoped_model_cycle ? scoped_model_cycle->size() : models.size();
 
@@ -1360,13 +1364,13 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
     current_in_catalog = current_in_catalog || current;
     if (current)
       view.selected_item_index = view.items.size();
-    view.items.push_back(scoped_model_selector_item(model, current_model, scoped_model_cycle, providers.contains(model.provider_id)));
+    view.items.push_back(scoped_model_selector_item(model, current_model, scoped_model_cycle, catalog->contains(model.provider_id)));
   }
 
   if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty())
   {
     view.selected_item_index = view.items.size();
-    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle, providers.contains(current_model.provider_id)));
+    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle, catalog->contains(current_model.provider_id)));
   }
 
   return view;
@@ -1376,7 +1380,7 @@ tui::SelectListView scoped_model_selector_view_1(runtime::Session const& session
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
-    return scoped_model_selector_view(*registry, session.model(), session.scoped_model_cycle(), std::move(footer_hint));
+    return scoped_model_selector_view(*registry, session.model(), session.scoped_model_cycle(), std::move(footer_hint), session.provider_catalog());
 
   return tui::SelectListView{.title = "Scoped model cycle",
                              .subtitle = {},

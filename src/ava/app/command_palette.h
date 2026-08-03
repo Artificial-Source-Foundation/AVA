@@ -1,3 +1,4 @@
+#include <memory>
 #pragma once
 
 #include "ava/app/command_catalog.h"
@@ -16,6 +17,9 @@
 #include <vector>
 #include "debug.h"
 
+namespace ava::provider {
+class ProviderCatalog;
+}
 namespace ava::app {
 
 struct SessionTitleCatalogChanges;
@@ -140,10 +144,11 @@ void retarget_application_session(ApplicationCatalogCache& cache, std::string_vi
 [[nodiscard]] std::vector<tui::SlashCommandItem> command_catalog_slash_items_1(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::vector<tui::FileReferenceItem> file_reference_items(runtime::Session const& session);
 [[nodiscard]] tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
-                                                      std::string footer_hint = {});
+                                                      std::string footer_hint = {}, std::shared_ptr<ava::provider::ProviderCatalog const> catalog = nullptr);
 [[nodiscard]] tui::SelectListView model_selector_view_1(runtime::Session const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
-                                                             std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint = {});
+                                                             std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint = {},
+                                                             std::shared_ptr<ava::provider::ProviderCatalog const> catalog = nullptr);
 [[nodiscard]] tui::SelectListView scoped_model_selector_view_1(runtime::Session const& session, std::string footer_hint = {});
 [[nodiscard]] tui::SelectListView session_selector_view(std::vector<ava::session::SessionSummary> summaries, std::string current_session_id = {},
                                                         SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {},

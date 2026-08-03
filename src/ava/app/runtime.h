@@ -1,7 +1,7 @@
 #pragma once
+#include "runtime/OpenContext.h"
 #include "runtime/PromptState.h"
 #include "runtime/RunOptions.h"
-#include "runtime/OpenContext.h"
 #include "runtime/SessionLifecycleRequest.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime/ReasoningSelection.h"
@@ -17,10 +17,15 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace ava::provider {
+class ProviderCatalog;
+} // namespace ava::provider
 
 namespace ava::app {
 
@@ -45,6 +50,9 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
 
+[[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths,
+                                                                              std::shared_ptr<ava::provider::ProviderCatalog const> catalog,
+                                                                              std::string_view provider_id, std::string_view model_id);
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
 

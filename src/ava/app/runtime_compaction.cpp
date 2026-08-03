@@ -9,6 +9,7 @@
 #include "ava/agent/message_builder.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/validation.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
@@ -384,7 +385,7 @@ ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runt
   }
   auto const provider_id = config.provider_explicit ? config.provider_id : session.model().provider_id;
   auto const model_id = config.model_id;
-  auto model = resolve_runtime_model(session.paths(), provider_id, model_id);
+  auto model = resolve_runtime_model(session.paths(), session.provider_catalog(), provider_id, model_id);
   if (!model)
   {
     model.error().with_context("compaction_provider", provider_id).with_context("compaction_model", model_id);
@@ -489,7 +490,9 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
   if (!effective_config)
     return std::unexpected(std::move(effective_config.error()));
   ava::core::Result<ava::config::ModelInfo> summary_model =
-      effective_config->model_explicit ? resolve_runtime_model(session.paths(), effective_config->provider_id, effective_config->model_id) : session.model();
+      effective_config->model_explicit
+          ? resolve_runtime_model(session.paths(), session.provider_catalog(), effective_config->provider_id, effective_config->model_id)
+          : session.model();
   if (!summary_model)
     return std::unexpected(std::move(summary_model.error()));
 
@@ -507,7 +510,15 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);
-    auto created = ava::provider::builtin_provider_registry().create(effective_config->provider_id);
+    auto catalog = session.provider_catalog();
+    if (!catalog)
+    {
+      auto built = ava::provider::ensure_provider_catalog(nullptr, session.paths());
+      if (!built)
+        return std::unexpected(std::move(built.error()));
+      catalog = std::move(*built);
+    }
+    auto created = catalog->create(effective_config->provider_id);
     if (!created)
       return std::unexpected(std::move(created.error()));
     owned_provider = std::move(*created);

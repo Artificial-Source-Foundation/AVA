@@ -10,8 +10,8 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/session_run_controller.h"
 #include "ava/app/runtime/session_ts.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -31,6 +31,10 @@
 namespace ava::diagnostics {
 class RuntimeDiagnostics;
 } // namespace ava::diagnostics
+
+namespace ava::provider {
+class ProviderCatalog;
+} // namespace ava::provider
 
 namespace ava::app {
 class SessionTitleCoordinator;
@@ -148,6 +152,8 @@ struct SessionResources
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
+  // Exact application-scoped provider catalog pinned for this session's lifetime.
+  std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -197,11 +203,10 @@ class Session : protected Session_aggregate_base
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
 
-  static ava::core::Result<session_ts> construct(
-      OpenContext const& context, SessionLifecycleRequest const& request,
-      ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
-      bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
-      std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
+  static ava::core::Result<session_ts> construct(OpenContext const& context, SessionLifecycleRequest const& request, ava::session::SessionStore& store,
+                                                 ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool append_session_start,
+                                                 bool append_initial_session_name, std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager,
+                                                 std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
 
  public:
   // Open a runtime session using stable `context` and the one-shot lifecycle
@@ -213,17 +218,16 @@ class Session : protected Session_aggregate_base
 
   // Consume an already-owned persistent store and its lease without reopening by path.
   // Inputs remain intact on failure so callers can roll back by stable identity.
-  static ava::core::Result<session_ts> open_owned(
-      OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
+  static ava::core::Result<session_ts> open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease,
+                                                  bool created);
 
   // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
-  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request);
+  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir,
+                                               SessionLifecycleRequest request);
 
   // Create a persistent session at `workspace_root` and `current_dir`, overriding
   // those locations in `context`.
-  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                              std::filesystem::path const& current_dir);
+  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir);
 
   // Create a persistent session inheriting active state from `current` and
   // frontend-only policy from `base_context`.
@@ -233,8 +237,8 @@ class Session : protected Session_aggregate_base
   // frontend-only policy from `base_context`.
   ava::core::Result<session_ts> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
 
-  Session create_detached(
-    ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
+  Session create_detached(ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
+                          std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
 
   ava::core::Result<session_ts> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
   {
@@ -314,6 +318,7 @@ class Session : protected Session_aggregate_base
   std::shared_ptr<ava::app::SessionTitleCoordinator> const& session_title_coordinator() const { return resources_.session_title_coordinator; }
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> const& diagnostics() const { return resources_.diagnostics; }
   std::shared_ptr<ava::mcp::McpConfig const> const& mcp_config() const { return resources_.mcp_config; }
+  std::shared_ptr<ava::provider::ProviderCatalog const> const& provider_catalog() const { return resources_.provider_catalog; }
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

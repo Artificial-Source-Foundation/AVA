@@ -7,11 +7,13 @@
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/config/reasoning_profiles.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -86,11 +88,11 @@ bool model_is_builtin(ava::config::ModelInfo const& model)
   return ava::config::find_model(builtin, model.provider_id, model.model_id).has_value();
 }
 
-bool api_family_is_known(std::string_view api_family)
+bool api_family_is_known(std::span<ava::config::ProviderProfile const> profiles, std::string_view api_family)
 {
   if (api_family.empty())
     return false;
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  for (auto const& profile : profiles)
   {
     if (profile.api_family == api_family)
       return true;
@@ -98,7 +100,14 @@ bool api_family_is_known(std::string_view api_family)
   return false;
 }
 
-std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, bool provider_registered)
+std::shared_ptr<ava::provider::ProviderCatalog const> catalog_for(runtime::Session const& session)
+{
+  if (session.provider_catalog())
+    return session.provider_catalog();
+  return ava::provider::ProviderCatalog::build_builtins_only();
+}
+
+std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, bool provider_registered, ava::provider::ProviderCatalog const& catalog)
 {
   std::vector<std::string> diagnostics;
   if (!ava::config::is_valid_provider_id(model.provider_id))
@@ -132,12 +141,12 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   }
   else
   {
-    auto const provider_profile = ava::config::find_provider_profile(model.provider_id);
+    auto const provider_profile = catalog.find_profile(model.provider_id);
     if (provider_profile && !provider_profile->api_family.empty() && provider_profile->api_family != model.api_family)
     {
       diagnostics.push_back("custom model api_family does not match provider profile; provider-specific request validation may fail");
     }
-    if (!api_family_is_known(model.api_family))
+    if (!api_family_is_known(catalog.profiles(), model.api_family))
     {
       diagnostics.push_back("custom model api_family is not recognized by built-in provider profiles; compatibility validation is limited");
     }
@@ -160,7 +169,7 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
     {
       diagnostics.push_back("reasoning model has no reasoning_levels; Shift+Tab cannot cycle and Ctrl+T has no thinking modes to select");
     }
-    if (!ava::config::reasoning_provider_profile_for_model(model))
+    if (!catalog.reasoning_profile_for_model(model))
     {
       diagnostics.push_back("reasoning api_family is not recognized; provider-specific reasoning validation is limited");
     }
@@ -170,7 +179,7 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
 
 std::string format_models_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
-  auto const providers = ava::provider::builtin_provider_registry();
+  auto const catalog = catalog_for(session);
   auto models = effective_models(registry);
   bool current_in_catalog = false;
 
@@ -187,7 +196,7 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
     if (!model_matches_query(model, query))
       continue;
     ++shown;
-    bool const registered = providers.contains(model.provider_id);
+    bool const registered = catalog->contains(model.provider_id);
     output += model.provider_id == session.model().provider_id && model.model_id == session.model().model_id ? "* " : "  ";
     output += model.provider_id + "/" + model.model_id;
     if (!model.display_name.empty())
@@ -200,7 +209,7 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
     if (model.max_output_tokens)
       output += " max_output=" + std::to_string(*model.max_output_tokens);
     output += '\n';
-    auto const diagnostics = model_diagnostics(model, registered);
+    auto const diagnostics = model_diagnostics(model, registered, *catalog);
     if (!diagnostics.empty())
     {
       output += "    diagnostics:\n";
@@ -281,18 +290,18 @@ std::string provider_credential_status(ava::config::XdgPaths const& paths, ava::
 
 std::string format_providers_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
-  auto const provider_registry = ava::provider::builtin_provider_registry();
+  auto const catalog = catalog_for(session);
   std::string output = "Providers:\n";
   if (!query.empty())
     output += "filter " + sanitize_inline_text(std::string(query)) + "\n";
 
   std::size_t shown = 0;
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  for (auto const& profile : catalog->profiles())
   {
     if (!provider_matches_query(profile, query))
       continue;
     ++shown;
-    bool const registered = provider_registry.contains(profile.provider_id);
+    bool const registered = catalog->contains(profile.provider_id);
     output += "  " + profile.provider_id;
     if (!profile.display_name.empty())
       output += "  " + profile.display_name;
@@ -328,7 +337,9 @@ std::string format_providers_text(runtime::Session const& session, ava::config::
 
 std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo const& model, bool provider_registered)
 {
-  return model_diagnostics(model, provider_registered);
+  // Compatibility surface for callers without a pinned catalog; uses the same
+  // built-in descriptor set the process catalog composes at startup.
+  return model_diagnostics(model, provider_registered, *ava::provider::ProviderCatalog::build_builtins_only());
 }
 
 ava::core::Result<CommandResult> run_models_command(runtime::Session& session, std::string_view query)

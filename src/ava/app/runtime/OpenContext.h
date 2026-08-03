@@ -22,6 +22,10 @@ namespace ava::diagnostics {
 class RuntimeDiagnostics;
 } // namespace ava::diagnostics
 
+namespace ava::provider {
+class ProviderCatalog;
+} // namespace ava::provider
+
 namespace ava::app {
 class SessionTitleCoordinator;
 class SubagentDeliveryManager;
@@ -69,6 +73,10 @@ struct OpenContext
   // Application-lifetime private diagnostics owner shared by visible,
   // retained, and protocol-managed runtime sessions.
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
+  // Immutable application-scoped provider composition. Built once before any
+  // session opens and pinned through replacement/background work. Null lets
+  // Session::open ensure a catalog from paths (tests/legacy adapters).
+  std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

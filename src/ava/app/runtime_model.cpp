@@ -4,7 +4,7 @@
 #include "ava/config/provider_profiles.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/validation.h"
-#include "ava/provider/registry.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/json.h"
 #include "ava/core/string_utils.h"
 
@@ -107,7 +107,9 @@ std::optional<ava::config::ModelInfo> latest_persisted_model(ava::config::ModelR
 
 namespace ava::app {
 
-ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id, std::string_view model_id)
+ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths,
+                                                                std::shared_ptr<ava::provider::ProviderCatalog const> catalog, std::string_view provider_id,
+                                                                std::string_view model_id)
 {
   auto const trimmed_provider_id = core::trim(provider_id);
   auto const trimmed_model_id = core::trim(model_id);
@@ -116,8 +118,10 @@ ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::Xdg
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "provider and model are required"));
   }
 
-  auto const providers = ava::provider::builtin_provider_registry();
-  if (!providers.contains(trimmed_provider_id))
+  auto ensured = ava::provider::ensure_provider_catalog(std::move(catalog), paths);
+  if (!ensured)
+    return std::unexpected(std::move(ensured.error()));
+  if (!(*ensured)->contains(trimmed_provider_id))
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::NotFound, "provider is not registered");
     error.with_context("provider", trimmed_provider_id);
@@ -135,7 +139,14 @@ ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::Xdg
     error.with_context("model", trimmed_model_id);
     return std::unexpected(std::move(error));
   }
+  if (auto valid = (*ensured)->validate_active_model(*model); !valid)
+    return std::unexpected(std::move(valid.error()));
   return *model;
+}
+
+ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id, std::string_view model_id)
+{
+  return resolve_runtime_model(paths, nullptr, provider_id, model_id);
 }
 
 }  // namespace ava::app

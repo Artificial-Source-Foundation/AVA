@@ -3,6 +3,7 @@
 // Private helpers shared by the provider_config translation units.
 // Not part of the public AVA config API.
 
+#include "ava/debug/print_members_on.h"
 #include "ava/config/provider_config.h"
 #include "ava/core/error.h"
 #include "ava/core/result.h"
@@ -50,6 +51,8 @@ constexpr std::size_t kMaxStrictJsonDepth = 8;
 struct ParsedBaseUrl
 {
   std::string canonical_base;  // scheme://host[:port][/path...] without trailing slashes
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 [[nodiscard]] ava::core::Result<ParsedBaseUrl> parse_and_validate_base_url(std::string_view raw);

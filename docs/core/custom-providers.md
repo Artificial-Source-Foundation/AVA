@@ -28,7 +28,7 @@ definition, model metadata, and secrets behind separate validators.
    lifetime. AVA does **not** re-read the file, hot-swap factories, or mutate the
    catalog in place.
 
-`/reload models` reloads `models.json` only.  
+`/reload models` reloads `models.json` only.
 `/reload providers` and `/reload all` report that **provider definitions require a
 process restart**. Edit `providers.json`, then restart AVA.
 

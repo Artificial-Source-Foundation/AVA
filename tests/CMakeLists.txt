@@ -105,6 +105,7 @@ set(AVA_TESTS_SOURCES
   "app_runtime_catalog_tests.cpp"
   "app_runtime_model_tests.cpp"
   "config_context_auth_oauth_tests.cpp"
+  "provider_config_tests.cpp"
   "command_tests.cpp"
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
@@ -200,6 +201,7 @@ set(AVA_TEST_SUITES
   app_command_registry
   tools
   config_context_auth_oauth
+  provider_config
   command
   app_compaction
   app_print

@@ -83,6 +83,8 @@ void test_xdg_paths()
   expect(fallback.auth_file == fallback.ava_config_dir / "auth.json", "auth file is in XDG config dir");
   expect(fallback.compaction_file == fallback.ava_config_dir / "compaction.json", "compaction file is in XDG config dir");
   expect(fallback.global_agents_file == fallback.ava_config_dir / "AGENTS.md", "global AGENTS.md file is in XDG config dir");
+  expect(fallback.models_file == fallback.ava_config_dir / "models.json", "models file is in XDG config dir");
+  expect(fallback.providers_file == fallback.ava_config_dir / "providers.json", "providers file is in XDG config dir");
   expect(fallback.sessions_dir == fallback.ava_state_dir / "sessions", "sessions are in XDG state dir");
 
   setenv("XDG_CONFIG_HOME", (root / "config").c_str(), 1);

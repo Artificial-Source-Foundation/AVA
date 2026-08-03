@@ -1050,7 +1050,6 @@ void test_anthropic_registry_and_env_auth()
 
   auto const root = create_empty_root("anthropic-auth");
 
-
   auto const config_home = root / "config";
   auto const state_home = root / "state";
   auto const data_home = root / "data";
@@ -1065,6 +1064,7 @@ void test_anthropic_registry_and_env_auth()
                                            .compaction_file = ava_config / "compaction.json",
                                            .global_agents_file = ava_config / "AGENTS.md",
                                            .models_file = ava_config / "models.json",
+                                           .providers_file = ava_config / "providers.json",
                                            .prompts_dir = ava_config / "prompts",
                                            .sessions_dir = ava_state / "sessions"};
   ava::tests::FakeTransport transport({});

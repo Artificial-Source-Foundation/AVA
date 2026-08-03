@@ -5,6 +5,7 @@ add_library(ava_config
   "model_config.cpp"
   "model_profiles.cpp"
   "openai_oauth.cpp"
+  "provider_config.cpp"
   "provider_profiles.cpp"
   "prompt_config.cpp"
   "reasoning_profiles.cpp"

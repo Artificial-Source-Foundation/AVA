@@ -186,7 +186,8 @@ void test_builtin_provider_registry()
 {
   auto registry = ava::provider::builtin_provider_registry();
   expect(registry.contains("openai"), "builtin provider registry contains OpenAI");
-  expect(registry.contains("deepseek") && registry.contains("kimi") && registry.contains("moonshot") && registry.contains("openrouter"),
+  expect(registry.contains("deepseek") && registry.contains("kimi") && registry.contains("moonshot") && registry.contains("openrouter") &&
+             registry.contains("zai") && registry.contains("zai-coding-cn"),
          "builtin provider registry contains OpenAI-compatible provider shims");
   auto provider = registry.create("openai");
   expect(provider.has_value() && *provider, "builtin provider registry creates OpenAI provider");
@@ -194,6 +195,10 @@ void test_builtin_provider_registry()
   expect(kimi.has_value() && *kimi, "builtin provider registry creates Kimi provider shim");
   auto deepseek = registry.create("deepseek");
   expect(deepseek.has_value() && *deepseek, "builtin provider registry creates DeepSeek provider shim");
+  auto zai = registry.create("zai");
+  expect(zai.has_value() && *zai, "builtin provider registry creates Z.AI provider shim");
+  auto zai_cn = registry.create("zai-coding-cn");
+  expect(zai_cn.has_value() && *zai_cn, "builtin provider registry creates Z.AI Coding CN provider shim");
 
   auto missing = registry.create("missing-provider");
   expect(!missing && missing.error().category() == ava::core::ErrorCategory::NotFound, "provider registry rejects unknown providers");

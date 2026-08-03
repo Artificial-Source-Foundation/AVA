@@ -436,6 +436,8 @@ void test_builtin_openai_compatible_provider_contracts()
   ScopedEnvVar kimi_base("KIMI_BASE_URL", "https://kimi.override.test/coding/");
   ScopedEnvVar moonshot_base("MOONSHOT_BASE_URL", "https://moonshot.override.test/api");
   ScopedEnvVar openrouter_base("OPENROUTER_BASE_URL", "https://openrouter.override.test/router/");
+  ScopedEnvVar zai_base("ZAI_BASE_URL", "https://zai.override.test/paas/v4/");
+  ScopedEnvVar zai_cn_base("ZAI_CODING_CN_BASE_URL", "https://zai-cn.override.test/paas/v4");
   auto registry = ava::provider::builtin_provider_registry();
 
   auto deepseek = registry.create("deepseek");
@@ -535,6 +537,154 @@ void test_builtin_openai_compatible_provider_contracts()
            "builtin Moonshot request does not replay private reasoning_content or request keep-all");
   }
 
+  auto zai = registry.create("zai");
+  expect(zai.has_value() && *zai, "builtin registry creates Z.AI compatible provider");
+  if (!zai || !*zai)
+    return;
+  auto const zai_enabled = (*zai)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "zai",
+          .model_id = "glm-4.7",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"},
+                       ava::provider::ChatMessage{
+                           .role = "assistant",
+                           .content = "fallback",
+                           .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Reasoning,
+                                                                        .text = "prior zai reasoning",
+                                                                        .reasoning_format = "reasoning_content"},
+                                             ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text, .text = "visible"}}}},
+          .tools_json = {"{\"name\":\"search\",\"description\":\"q\",\"parameters\":{\"type\":\"object\"}}"},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled"},
+          .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream"}},
+      "zai-token");
+  expect(zai_enabled.has_value(), "builtin Z.AI enabled-thinking request builds");
+  if (zai_enabled)
+  {
+    expect(zai_enabled->url == "https://zai.override.test/paas/v4/chat/completions", "builtin Z.AI request honors env base URL and chat-completions path");
+    expect(zai_enabled->headers.at("Authorization") == "Bearer zai-token", "builtin Z.AI request includes bearer auth");
+    expect(zai_enabled->body.find("\"model\":\"glm-4.7\"") != std::string::npos &&
+               zai_enabled->body.find("\"thinking\":{\"type\":\"enabled\",\"clear_thinking\":false}") != std::string::npos &&
+               zai_enabled->body.find("\"reasoning_content\":\"prior zai reasoning\"") != std::string::npos &&
+               zai_enabled->body.find("\"tool_stream\":true") != std::string::npos &&
+               zai_enabled->body.find("\"stream_options\":{\"include_usage\":true}") != std::string::npos &&
+               zai_enabled->body.find("\"reasoning_effort\"") == std::string::npos && zai_enabled->body.find("\"keep\":\"all\"") == std::string::npos,
+           "builtin Z.AI enabled request uses clear_thinking, replayed reasoning, tool_stream, and no keep-all/effort");
+  }
+
+  auto const zai_disabled = (*zai)->build_request(
+      ava::provider::ProviderRequest{.provider_id = "zai",
+                                     .model_id = "glm-4.7",
+                                     .system_prompt = "system",
+                                     .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+                                     .tools_json = {},
+                                     .stream = true,
+                                     .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream"}},
+      "zai-token");
+  expect(zai_disabled.has_value(), "builtin Z.AI disabled-thinking request builds");
+  if (zai_disabled)
+  {
+    expect(zai_disabled->body.find("\"thinking\":{\"type\":\"disabled\"}") != std::string::npos &&
+               zai_disabled->body.find("\"tool_stream\"") == std::string::npos && zai_disabled->body.find("\"reasoning_effort\"") == std::string::npos,
+           "builtin Z.AI disabled request omits tool_stream and effort while sending thinking disabled");
+  }
+
+  auto const zai_no_tool_stream = (*zai)->build_request(
+      ava::provider::ProviderRequest{.provider_id = "zai",
+                                     .model_id = "glm-4.5-air",
+                                     .system_prompt = "system",
+                                     .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+                                     .tools_json = {"{\"name\":\"search\",\"description\":\"q\",\"parameters\":{\"type\":\"object\"}}"},
+                                     .stream = true,
+                                     .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled"},
+                                     .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content"}},
+      "zai-token");
+  expect(zai_no_tool_stream.has_value(), "builtin Z.AI non-tool-stream model request builds");
+  if (zai_no_tool_stream)
+  {
+    expect(zai_no_tool_stream->body.find("\"tool_stream\"") == std::string::npos, "builtin Z.AI non-tool-stream model never sends tool_stream even with tools");
+  }
+
+  auto const zai_glm52_minimal = (*zai)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "zai",
+          .model_id = "glm-5.2",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+          .tools_json = {},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "minimal"},
+          .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream", "zai_reasoning_effort"}},
+      "zai-token");
+  expect(zai_glm52_minimal.has_value(), "builtin Z.AI glm-5.2 minimal request builds");
+  if (zai_glm52_minimal)
+  {
+    expect(zai_glm52_minimal->body.find("\"thinking\":{\"type\":\"enabled\",\"clear_thinking\":false}") != std::string::npos &&
+               zai_glm52_minimal->body.find("\"reasoning_effort\"") == std::string::npos,
+           "builtin Z.AI glm-5.2 minimal enables thinking without reasoning_effort");
+  }
+
+  auto const zai_glm52_high = (*zai)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "zai",
+          .model_id = "glm-5.2",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+          .tools_json = {},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "high"},
+          .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream", "zai_reasoning_effort"}},
+      "zai-token");
+  expect(zai_glm52_high.has_value(), "builtin Z.AI glm-5.2 high request builds");
+  if (zai_glm52_high)
+  {
+    expect(zai_glm52_high->body.find("\"thinking\":{\"type\":\"enabled\",\"clear_thinking\":false}") != std::string::npos &&
+               zai_glm52_high->body.find("\"reasoning_effort\":\"high\"") != std::string::npos,
+           "builtin Z.AI glm-5.2 high maps to reasoning_effort high");
+  }
+
+  auto const zai_glm52_max = (*zai)->build_request(
+      ava::provider::ProviderRequest{
+          .provider_id = "zai",
+          .model_id = "glm-5.2",
+          .system_prompt = "system",
+          .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+          .tools_json = {},
+          .stream = true,
+          .reasoning = ava::provider::ProviderReasoningOptions{.type = "max"},
+          .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream", "zai_reasoning_effort"}},
+      "zai-token");
+  expect(zai_glm52_max.has_value(), "builtin Z.AI glm-5.2 max request builds");
+  if (zai_glm52_max)
+  {
+    expect(zai_glm52_max->body.find("\"reasoning_effort\":\"max\"") != std::string::npos, "builtin Z.AI glm-5.2 xhigh mapping yields reasoning_effort max");
+  }
+
+  auto zai_cn = registry.create("zai-coding-cn");
+  expect(zai_cn.has_value() && *zai_cn, "builtin registry creates Z.AI Coding CN compatible provider");
+  if (!zai_cn || !*zai_cn)
+    return;
+  auto const zai_cn_request = (*zai_cn)->build_request(
+      ava::provider::ProviderRequest{.provider_id = "zai-coding-cn",
+                                     .model_id = "glm-5.1",
+                                     .system_prompt = "system",
+                                     .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}},
+                                     .tools_json = {},
+                                     .stream = true,
+                                     .reasoning = ava::provider::ProviderReasoningOptions{.type = "enabled"},
+                                     .compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "tool_stream"}},
+      "zai-cn-token");
+  expect(zai_cn_request.has_value(), "builtin Z.AI Coding CN request builds");
+  if (zai_cn_request)
+  {
+    expect(zai_cn_request->url == "https://zai-cn.override.test/paas/v4/chat/completions",
+           "builtin Z.AI Coding CN request honors env base URL and chat-completions path");
+    expect(zai_cn_request->headers.at("Authorization") == "Bearer zai-cn-token" &&
+               zai_cn_request->body.find("\"thinking\":{\"type\":\"enabled\",\"clear_thinking\":false}") != std::string::npos,
+           "builtin Z.AI Coding CN request includes bearer auth and Z.AI thinking controls");
+  }
+
   auto openrouter = registry.create("openrouter");
   expect(openrouter.has_value() && *openrouter, "builtin registry creates OpenRouter compatible provider");
   if (!openrouter || !*openrouter)
@@ -618,6 +768,15 @@ void test_builtin_openai_compatible_provider_contracts()
                           "{\"error\":{\"message\":\"insufficient credits\"}}",
                           ava::provider::ProviderErrorKind::Quota,
                           ""},
+      CompatibleErrorCase{
+          "zai", "Z.AI authentication error", 401, {}, "{\"error\":{\"message\":\"invalid api key\"}}", ava::provider::ProviderErrorKind::Authentication, ""},
+      CompatibleErrorCase{"zai-coding-cn",
+                          "Z.AI Coding CN rate-limit error",
+                          429,
+                          {{"Retry-After", "3"}},
+                          "{\"error\":{\"message\":\"rate limit\"}}",
+                          ava::provider::ProviderErrorKind::RateLimited,
+                          "retry_after: 3"},
       CompatibleErrorCase{"openrouter",
                           "OpenRouter context-overflow error",
                           400,

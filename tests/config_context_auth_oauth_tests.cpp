@@ -1502,6 +1502,47 @@ void test_builtin_provider_model_metadata_contracts()
   auto const deepseek_profile = ava::config::find_provider_profile("deepseek");
   auto const kimi_profile = ava::config::find_provider_profile("kimi");
   auto const moonshot_profile = ava::config::find_provider_profile("moonshot");
+  auto const zai = ava::config::find_model(builtin, "zai", "glm-5.2");
+  expect(zai.has_value(), "Z.AI glm-5.2 metadata fixture exists");
+  if (zai)
+  {
+    expect(zai->api_family == "openai_chat_completions" && zai->context_window_tokens && *zai->context_window_tokens == 1'000'000 &&
+               zai->supports_reasoning.value_or(false) && contains_string(zai->reasoning_levels, "minimal") &&
+               contains_string(zai->reasoning_levels, "xhigh") && zai->reasoning_format == "reasoning_content" &&
+               ava::config::provider_accepts_reasoning_format(*zai, "reasoning_content") && contains_string(zai->compatibility_quirks, "zai") &&
+               contains_string(zai->compatibility_quirks, "tool_stream") && contains_string(zai->compatibility_quirks, "zai_reasoning_effort"),
+           "Z.AI glm-5.2 metadata carries Coding Plan limits, preserved reasoning, and effort/tool-stream quirks");
+    auto const minimal = ava::config::resolve_reasoning_level(*zai, "minimal");
+    auto const low = ava::config::resolve_reasoning_level(*zai, "low");
+    auto const xhigh = ava::config::resolve_reasoning_level(*zai, "xhigh");
+    expect(minimal.supported && !minimal.provider_level && low.supported && low.provider_level && *low.provider_level == "high" && xhigh.supported &&
+               xhigh.provider_level && *xhigh.provider_level == "max",
+           "Z.AI glm-5.2 reasoning maps minimal without effort and low/xhigh to high/max");
+    expect(ava::config::validate_reasoning_request(*zai, "high", std::nullopt, "").has_value(), "Z.AI reasoning accepts level-only requests");
+    expect(!ava::config::validate_reasoning_request(*zai, "disabled", std::nullopt, ""), "Z.AI reasoning rejects disabled in favor of clear_reasoning");
+  }
+
+  auto const zai_air = ava::config::find_model(builtin, "zai", "glm-4.5-air");
+  expect(zai_air.has_value(), "Z.AI glm-4.5-air metadata fixture exists");
+  if (zai_air)
+  {
+    expect(zai_air->context_window_tokens && *zai_air->context_window_tokens == 131'072 && zai_air->max_output_tokens &&
+               *zai_air->max_output_tokens == 98'304 && !contains_string(zai_air->compatibility_quirks, "tool_stream") &&
+               !contains_string(zai_air->compatibility_quirks, "zai_reasoning_effort") && contains_string(zai_air->reasoning_levels, "enabled"),
+           "Z.AI glm-4.5-air remains enabled-only without tool_stream or effort");
+  }
+
+  auto const zai_vision = ava::config::find_model(builtin, "zai", "glm-5v-turbo");
+  expect(zai_vision.has_value() && contains_string(zai_vision->input_modalities, "image"), "Z.AI glm-5v-turbo declares image input");
+
+  auto const zai_cn = ava::config::find_model(builtin, "zai-coding-cn", "glm-4.7");
+  expect(zai_cn.has_value() && zai_cn->context_window_tokens && *zai_cn->context_window_tokens == 204'800 &&
+             contains_string(zai_cn->compatibility_quirks, "tool_stream"),
+         "Z.AI Coding CN glm-4.7 catalog entry mirrors Global Coding Plan metadata");
+  expect(std::ranges::count_if(builtin.models, [](auto const& model) { return model.provider_id == "zai"; }) == 6 &&
+             std::ranges::count_if(builtin.models, [](auto const& model) { return model.provider_id == "zai-coding-cn"; }) == 6,
+         "both Z.AI providers expose the six Coding Plan models");
+
   auto const openrouter_profile = ava::config::find_provider_profile("openrouter");
   expect(deepseek_profile && deepseek_profile->default_base_url_env == "DEEPSEEK_BASE_URL" && deepseek_profile->chat_completions_path == "/chat/completions" &&
              deepseek_profile->reasoning_request_field == "reasoning_effort" && deepseek_profile->reasoning_request_effort_string &&
@@ -1519,6 +1560,38 @@ void test_builtin_provider_model_metadata_contracts()
              contains_string(openrouter_profile->default_compatibility_quirks, "openai_compatible") &&
              contains_string(openrouter_profile->default_compatibility_quirks, "reasoning_content"),
          "OpenRouter profile records OpenAI-compatible stream-usage and reasoning-content quirks");
+
+  auto const zai_profile = ava::config::find_provider_profile("zai");
+  auto const zai_cn_profile = ava::config::find_provider_profile("zai-coding-cn");
+  expect(zai_profile && zai_profile->display_name == "Z.AI Coding Plan (Global)" && zai_profile->default_base_url_env == "ZAI_BASE_URL" &&
+             zai_profile->default_base_url == "https://api.z.ai/api/coding/paas/v4" && zai_profile->chat_completions_path == "/chat/completions" &&
+             zai_profile->include_stream_usage && zai_profile->preserve_reasoning_content && zai_profile->runtime_selectable &&
+             contains_string(zai_profile->default_compatibility_quirks, "zai") &&
+             contains_string(zai_profile->default_compatibility_quirks, "preserve_reasoning_content"),
+         "Z.AI Global profile records Coding Plan endpoint and preserved-reasoning quirks");
+  expect(zai_cn_profile && zai_cn_profile->display_name == "Z.AI Coding Plan (China)" && zai_cn_profile->default_base_url_env == "ZAI_CODING_CN_BASE_URL" &&
+             zai_cn_profile->default_base_url == "https://open.bigmodel.cn/api/coding/paas/v4" &&
+             zai_cn_profile->chat_completions_path == "/chat/completions" && zai_cn_profile->include_stream_usage &&
+             zai_cn_profile->preserve_reasoning_content && zai_cn_profile->runtime_selectable &&
+             contains_string(zai_cn_profile->default_compatibility_quirks, "zai"),
+         "Z.AI Coding CN profile records regional endpoint and preserved-reasoning quirks");
+  {
+    auto const root = create_empty_root("zai-auth-env");
+    ScopedEnvVar home("HOME", (root / "home").string());
+    ScopedEnvVar xdg_config("XDG_CONFIG_HOME", (root / "config").string());
+    ScopedEnvVar xdg_state("XDG_STATE_HOME", (root / "state").string());
+    ScopedEnvVar xdg_data("XDG_DATA_HOME", (root / "data").string());
+    ScopedEnvVar zai_key("ZAI_API_KEY", "env-zai-key");
+    ScopedEnvVar zai_cn_key("ZAI_CODING_CN_API_KEY", "env-zai-cn-key");
+    ava::tests::FakeTransport transport({});
+    auto const paths = ava::config::xdg_paths();
+    auto zai_cred = ava::config::provider_credential_for_request(paths, "zai", transport);
+    auto zai_cn_cred = ava::config::provider_credential_for_request(paths, "zai-coding-cn", transport);
+    expect(zai_cred && zai_cred->has_value() && (*zai_cred)->access_token == "env-zai-key" && (*zai_cred)->source == "env:ZAI_API_KEY",
+           "Z.AI auth env key derives as ZAI_API_KEY");
+    expect(zai_cn_cred && zai_cn_cred->has_value() && (*zai_cn_cred)->access_token == "env-zai-cn-key" && (*zai_cn_cred)->source == "env:ZAI_CODING_CN_API_KEY",
+           "Z.AI Coding CN auth env key derives as ZAI_CODING_CN_API_KEY");
+  }
 }
 
 void test_model_and_prompt_config()
@@ -1557,6 +1630,8 @@ void test_model_and_prompt_config()
   bool saw_kimi_builtin = false;
   bool saw_moonshot_builtin = false;
   bool saw_openrouter_builtin_without_reasoning = false;
+  bool saw_zai_builtin = false;
+  bool saw_zai_cn_builtin = false;
   bool all_builtins_have_context_windows = !builtin.models.empty();
   bool all_builtins_have_text_output = !builtin.models.empty();
   for (auto const& model : builtin.models)
@@ -1604,6 +1679,12 @@ void test_model_and_prompt_config()
         (model.provider_id == "openrouter" && model.model_id == "moonshotai/kimi-k2.6" && model.api_family == "openai_chat_completions" &&
          model.max_output_tokens && *model.max_output_tokens == 262'144 && !model.supports_reasoning.value_or(false) && model.reasoning_levels.empty() &&
          model.reasoning_format.empty());
+    saw_zai_builtin = saw_zai_builtin || (model.provider_id == "zai" && model.model_id == "glm-5.2" && model.api_family == "openai_chat_completions" &&
+                                          model.supports_reasoning.value_or(false) &&
+                                          std::find(model.compatibility_quirks.begin(), model.compatibility_quirks.end(), "zai_reasoning_effort") !=
+                                              model.compatibility_quirks.end());
+    saw_zai_cn_builtin = saw_zai_cn_builtin || (model.provider_id == "zai-coding-cn" && model.model_id == "glm-4.5-air" &&
+                                                model.api_family == "openai_chat_completions" && model.supports_reasoning.value_or(false));
   }
   expect(all_builtins_have_context_windows, "builtin model registry always provides context windows");
   expect(all_builtins_have_text_output, "builtin model registry always declares text output support");
@@ -1612,6 +1693,8 @@ void test_model_and_prompt_config()
   expect(saw_deepseek_builtin && saw_deepseek_pro_pricing && saw_kimi_builtin && saw_moonshot_builtin,
          "builtin model registry includes DeepSeek, Kimi, and Moonshot OpenAI-compatible coding profiles");
   expect(saw_openrouter_builtin_without_reasoning, "builtin OpenRouter profile does not advertise reasoning until OpenRouter-native reasoning is implemented");
+  expect(saw_zai_builtin, "builtin catalog includes Z.AI glm-5.2 with effort quirk");
+  expect(saw_zai_cn_builtin, "builtin catalog includes Z.AI Coding CN glm-4.5-air");
   expect(ava::config::reasoning_parameter_text(selected) == openai_profile->reasoning_request_parameters,
          "model reasoning parameter text comes from centralized provider/reasoning profiles");
 
@@ -1755,8 +1838,7 @@ void test_model_and_prompt_config()
   registry = ava::config::load_model_registry(paths);
   expect(registry && !registry->scoped_model_cycle, "model registry treats a missing scoped model cycle as all registered models enabled");
   std::ifstream persisted_model_config(paths.models_file, std::ios::binary);
-  auto const persisted_model_config_bytes =
-      std::string(std::istreambuf_iterator<char>(persisted_model_config), std::istreambuf_iterator<char>());
+  auto const persisted_model_config_bytes = std::string(std::istreambuf_iterator<char>(persisted_model_config), std::istreambuf_iterator<char>());
   expect(persisted_model_config_bytes.find("display_name_is_configured") == std::string::npos,
          "process-local display-name provenance never alters the public model config schema");
 

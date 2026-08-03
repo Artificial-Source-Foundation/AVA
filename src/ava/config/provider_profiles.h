@@ -53,6 +53,8 @@ struct ProviderProfile
 [[nodiscard]] ProviderProfile const& openai_provider_profile();
 [[nodiscard]] ProviderProfile const& openrouter_provider_profile();
 [[nodiscard]] ProviderProfile const& vercel_provider_profile();
+[[nodiscard]] ProviderProfile const& zai_provider_profile();
+[[nodiscard]] ProviderProfile const& zai_coding_cn_provider_profile();
 
 [[nodiscard]] std::vector<ProviderProfile> builtin_provider_profiles();
 [[nodiscard]] std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id);

@@ -24,6 +24,7 @@ struct ModelInvocationOptions
   std::optional<ava::config::ModelPricing> pricing = std::nullopt;
   std::string api_family = {};
   std::string reasoning_format = {};
+  std::vector<std::string> compatibility_quirks = {};
 
   // Prompt/context data is sensitive; never stream this aggregate through
   // generated debug output.

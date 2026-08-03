@@ -130,6 +130,22 @@ ProviderRegistry builtin_provider_registry()
                                         .reasoning_request_effort_string = profile.reasoning_request_effort_string,
                                         .include_stream_usage = profile.include_stream_usage});
   }));
+  auto register_zai_compatible = [&registry](ava::config::ProviderProfile const& (*profile_fn)()) {
+    static_cast<void>(registry.register_provider(profile_fn().provider_id, [profile_fn] {
+      auto const& profile = profile_fn();
+      return std::make_unique<OpenAICompatibleProvider>(
+          OpenAICompatibleProviderOptions{.base_url = env_or_default(profile.default_base_url_env.c_str(), profile.default_base_url),
+                                          .chat_completions_path = profile.chat_completions_path,
+                                          .provider_name = profile.display_name,
+                                          .reasoning_format = profile.default_reasoning_format,
+                                          .reasoning_request_field = profile.reasoning_request_field,
+                                          .reasoning_request_effort_string = profile.reasoning_request_effort_string,
+                                          .preserve_reasoning_content = profile.preserve_reasoning_content,
+                                          .include_stream_usage = profile.include_stream_usage});
+    }));
+  };
+  register_zai_compatible(ava::config::zai_provider_profile);
+  register_zai_compatible(ava::config::zai_coding_cn_provider_profile);
   return registry;
 }
 

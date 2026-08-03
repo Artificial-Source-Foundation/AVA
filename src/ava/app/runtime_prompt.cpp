@@ -331,6 +331,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
               .pricing = session.model().pricing,
               .api_family = session.model().api_family,
               .reasoning_format = session.model().reasoning_format,
+              .compatibility_quirks = session.model().compatibility_quirks,
           },
       .access_token = options.access_token,
       .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,

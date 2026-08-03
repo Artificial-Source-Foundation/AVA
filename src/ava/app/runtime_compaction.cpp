@@ -558,7 +558,8 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
                                                         .messages = {ava::provider::ChatMessage{.role = "user", .content = std::move(*prompt)}},
                                                         .tools_json = {},
                                                         .stream = summary_options.openai_oauth && summary_model->supports_streaming.value_or(true),
-                                                        .max_output_tokens = summary_model->max_output_tokens};
+                                                        .max_output_tokens = summary_model->max_output_tokens,
+                                                        .compatibility_quirks = summary_model->compatibility_quirks};
   ava::provider::ProviderAuthContext const auth_context{
       .access_token = summary_options.access_token,
       .credential_type = summary_options.openai_oauth && summary_options.credential_type == "bearer" ? "oauth" : summary_options.credential_type,

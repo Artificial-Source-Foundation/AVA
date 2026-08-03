@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
@@ -8,6 +7,7 @@
 #include "ava/app/session_title_coordinator.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <array>
@@ -353,7 +353,8 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
       .messages = {ava::provider::ChatMessage{.role = "user", .content = generation.source_text}},
       .tools_json = {},
       .stream = stream,
-      .max_output_tokens = max_tokens};
+      .max_output_tokens = max_tokens,
+      .compatibility_quirks = model->compatibility_quirks};
   ava::provider::ProviderAuthContext auth{
       .access_token = prepared->access_token,
       .credential_type = prepared->openai_oauth && prepared->credential_type == "bearer" ? "oauth" : prepared->credential_type,

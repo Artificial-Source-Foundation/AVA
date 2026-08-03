@@ -32,6 +32,8 @@ These values are credentials; export them only into the AVA process that needs t
 | Kimi | `KIMI_API_KEY` | `KIMI_BASE_URL` |
 | Moonshot | `MOONSHOT_API_KEY` | `MOONSHOT_BASE_URL` |
 | OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` |
+| Z.AI Coding Plan (Global) | `ZAI_API_KEY` | `ZAI_BASE_URL` |
+| Z.AI Coding Plan (China) | `ZAI_CODING_CN_API_KEY` | `ZAI_CODING_CN_BASE_URL` |
 
 Future provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` lookup only if a runtime provider is added. Do not infer support from that convention. Defaults, OAuth details, and implemented-provider boundaries are in [providers.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/core/providers.md).
 

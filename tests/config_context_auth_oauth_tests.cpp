@@ -1510,7 +1510,8 @@ void test_builtin_provider_model_metadata_contracts()
                zai->supports_reasoning.value_or(false) && contains_string(zai->reasoning_levels, "minimal") &&
                contains_string(zai->reasoning_levels, "xhigh") && zai->reasoning_format == "reasoning_content" &&
                ava::config::provider_accepts_reasoning_format(*zai, "reasoning_content") && contains_string(zai->compatibility_quirks, "zai") &&
-               contains_string(zai->compatibility_quirks, "tool_stream") && contains_string(zai->compatibility_quirks, "zai_reasoning_effort"),
+               contains_string(zai->compatibility_quirks, "max_completion_tokens") && contains_string(zai->compatibility_quirks, "tool_stream") &&
+               contains_string(zai->compatibility_quirks, "zai_reasoning_effort"),
            "Z.AI glm-5.2 metadata carries Coding Plan limits, preserved reasoning, and effort/tool-stream quirks");
     auto const minimal = ava::config::resolve_reasoning_level(*zai, "minimal");
     auto const low = ava::config::resolve_reasoning_level(*zai, "low");
@@ -1527,9 +1528,10 @@ void test_builtin_provider_model_metadata_contracts()
   if (zai_air)
   {
     expect(zai_air->context_window_tokens && *zai_air->context_window_tokens == 131'072 && zai_air->max_output_tokens &&
-               *zai_air->max_output_tokens == 98'304 && !contains_string(zai_air->compatibility_quirks, "tool_stream") &&
-               !contains_string(zai_air->compatibility_quirks, "zai_reasoning_effort") && contains_string(zai_air->reasoning_levels, "enabled"),
-           "Z.AI glm-4.5-air remains enabled-only without tool_stream or effort");
+               *zai_air->max_output_tokens == 98'304 && contains_string(zai_air->compatibility_quirks, "max_completion_tokens") &&
+               !contains_string(zai_air->compatibility_quirks, "tool_stream") && !contains_string(zai_air->compatibility_quirks, "zai_reasoning_effort") &&
+               contains_string(zai_air->reasoning_levels, "enabled"),
+           "Z.AI glm-4.5-air remains enabled-only without tool_stream or effort and still opts into max_completion_tokens");
   }
 
   auto const zai_vision = ava::config::find_model(builtin, "zai", "glm-5v-turbo");
@@ -1537,7 +1539,7 @@ void test_builtin_provider_model_metadata_contracts()
 
   auto const zai_cn = ava::config::find_model(builtin, "zai-coding-cn", "glm-4.7");
   expect(zai_cn.has_value() && zai_cn->context_window_tokens && *zai_cn->context_window_tokens == 204'800 &&
-             contains_string(zai_cn->compatibility_quirks, "tool_stream"),
+             contains_string(zai_cn->compatibility_quirks, "tool_stream") && contains_string(zai_cn->compatibility_quirks, "max_completion_tokens"),
          "Z.AI Coding CN glm-4.7 catalog entry mirrors Global Coding Plan metadata");
   expect(std::ranges::count_if(builtin.models, [](auto const& model) { return model.provider_id == "zai"; }) == 6 &&
              std::ranges::count_if(builtin.models, [](auto const& model) { return model.provider_id == "zai-coding-cn"; }) == 6,

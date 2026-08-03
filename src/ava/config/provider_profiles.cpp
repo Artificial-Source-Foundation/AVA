@@ -186,7 +186,7 @@ ProviderProfile const& zai_provider_profile()
       .default_base_url_env = "ZAI_BASE_URL",
       .default_base_url = "https://api.z.ai/api/coding/paas/v4",
       .chat_completions_path = "/chat/completions",
-      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content"},
+      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "max_completion_tokens"},
       .default_reasoning_levels = openai_compatible_reasoning_content_profile().levels,
       .default_reasoning_format = openai_compatible_reasoning_content_profile().format,
       .reasoning_request_parameters =
@@ -206,7 +206,7 @@ ProviderProfile const& zai_coding_cn_provider_profile()
       .default_base_url_env = "ZAI_CODING_CN_BASE_URL",
       .default_base_url = "https://open.bigmodel.cn/api/coding/paas/v4",
       .chat_completions_path = "/chat/completions",
-      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content"},
+      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "max_completion_tokens"},
       .default_reasoning_levels = openai_compatible_reasoning_content_profile().levels,
       .default_reasoning_format = openai_compatible_reasoning_content_profile().format,
       .reasoning_request_parameters =

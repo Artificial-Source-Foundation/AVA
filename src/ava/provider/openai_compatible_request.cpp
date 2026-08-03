@@ -416,7 +416,9 @@ std::string openai_compatible_request_body_json(ProviderRequest const& request, 
   body += ']';
   if (request.max_output_tokens && *request.max_output_tokens > 0)
   {
-    body += ",\"max_tokens\":";
+    // Z.AI Coding Plan (and any model that opts in) rejects chat-completions
+    // max_tokens and expects the OpenAI completions-compatible field name.
+    body += has_request_quirk(request, "max_completion_tokens") ? ",\"max_completion_tokens\":" : ",\"max_tokens\":";
     body += std::to_string(*request.max_output_tokens);
   }
   if (options.default_temperature)

@@ -129,12 +129,14 @@ function(ava_apply_warnings target)
       # and std::variant when Release optimization inlines those implementations.
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)
     endif()
-    # Limit number of errors to two.
-#    target_compile_options(${target} PRIVATE
-#      $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=2>
-#      $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=2>
-#      $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=2>
-#    )
+    if (NOT "${CMAKE_CXX_FLAGS}" MATCHES "-f(error-limit|max-errors)=")
+      # Limit number of errors to five (if this option isn't already set in CXXFLAGS).
+      target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=5>
+        $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=5>
+        $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=5>
+      )
+    endif()
   endif()
 endfunction()
 

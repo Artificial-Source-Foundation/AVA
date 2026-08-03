@@ -66,6 +66,10 @@ cw_option(EnableAvaSanitizers
 # directly, unlike the cw_option-based toggles above.
 option(AVA_BUILD_DESKTOP_QML "Build the experimental Qt Quick/QML desktop prototype" OFF)
 option(AVA_ENABLE_TSAN "Build AVA with ThreadSanitizer (focused coordinator tests only)" OFF)
+set(AVA_MAX_COMPILER_ERRORS 2 CACHE STRING "Maximum compiler errors reported per source file (0 = compiler default).")
+if(NOT AVA_MAX_COMPILER_ERRORS MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "AVA_MAX_COMPILER_ERRORS must be a non-negative integer")
+endif()
 if(OptionEnableAvaSanitizers AND AVA_ENABLE_TSAN)
   message(FATAL_ERROR "EnableAvaSanitizers/AVA_ENABLE_SANITIZERS and AVA_ENABLE_TSAN are mutually exclusive")
 endif()
@@ -129,12 +133,13 @@ function(ava_apply_warnings target)
       # and std::variant when Release optimization inlines those implementations.
       target_compile_options(${target} PRIVATE -Wno-error=maybe-uninitialized)
     endif()
-    # Limit number of errors to two.
-#    target_compile_options(${target} PRIVATE
-#      $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=2>
-#      $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=2>
-#      $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=2>
-#    )
+    if(NOT AVA_MAX_COMPILER_ERRORS STREQUAL "0")
+      target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU>:-fmax-errors=${AVA_MAX_COMPILER_ERRORS}>
+        $<$<CXX_COMPILER_ID:Clang>:-ferror-limit=${AVA_MAX_COMPILER_ERRORS}>
+        $<$<CXX_COMPILER_ID:AppleClang>:-ferror-limit=${AVA_MAX_COMPILER_ERRORS}>
+      )
+    endif()
   endif()
 endfunction()
 

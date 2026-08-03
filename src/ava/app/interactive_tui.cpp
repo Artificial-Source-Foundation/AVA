@@ -43,14 +43,14 @@ namespace ava::app::line_shell_internal {
 struct FakeState
 {
   ShellState& real_state_;
-  ava::app::runtime::session_ts::wat session_w;
+  ava::app::runtime::session_ts::wat session_w_;
   ava::app::runtime::Session& session;
   operator ShellState&() { return real_state_; }
 
-  FakeState(ShellState& real_state) : real_state_(real_state), session_w(real_state.unlocked_session), session(*session_w)
+  // Hack access to the base class of real_state.unlocked_session, without locking it.
+  FakeState(ShellState& real_state) : real_state_(real_state), session_w_(real_state.unlocked_session), session(*session_w_)
   {
-    // The hack just got worse... UNLOCK the mutex *cry*
-    session_w.unlock();
+    session_w_.unlock();
   }
 };
 
@@ -363,7 +363,8 @@ int run_tui(ShellState real_state)
       },
       .on_cycle_reasoning = [&state]() -> ava::core::Result<std::string> { return ava::app::cycle_runtime_reasoning(state.session); },
       .on_cycle_model = [&state, &state_snapshot](bool forward) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        auto model = forward ? ava::app::rpc::next_runtime_model(state.session_w) : ava::app::rpc::previous_runtime_model(state.session_w);
+        auto model = forward ? ava::app::rpc::next_runtime_model(ava::app::runtime::session_ts::wat(state.real_state_.unlocked_session))
+                             : ava::app::rpc::previous_runtime_model(ava::app::runtime::session_ts::wat(state.real_state_.unlocked_session));
         if (!model)
           return std::unexpected(std::move(model.error()));
         auto switched = state.session.switch_model(std::move(*model));

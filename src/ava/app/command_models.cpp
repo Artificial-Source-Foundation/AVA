@@ -275,15 +275,24 @@ std::string provider_oauth_status(ava::config::ProviderProfile const& profile)
 
 std::string provider_credential_status(ava::config::XdgPaths const& paths, ava::config::ProviderProfile const& profile)
 {
-  auto credential = ava::config::provider_credential_for_startup(paths, profile.provider_id);
+  ava::config::ProviderCredentialPolicy policy{.auth_none = profile.auth_none,
+                                               .user_defined = profile.user_defined,
+                                               .api_key_env = profile.api_key_env};
+  auto credential = ava::config::provider_credential_for_startup(paths, profile.provider_id, policy);
   if (!credential)
   {
     return "error: " + sanitize_inline_text(credential.error().format());
   }
   if (!*credential)
+  {
+    if (profile.user_defined && !profile.api_key_env.empty())
+      return "missing env=" + sanitize_inline_text(profile.api_key_env);
     return "missing";
+  }
 
   auto type = (*credential)->credential_type.empty() ? std::string("configured") : (*credential)->credential_type;
+  if (type == "none")
+    return "none (no credential required)";
   auto source = (*credential)->source.empty() ? std::string("configured") : (*credential)->source;
   return sanitize_inline_text(type) + " source=" + sanitize_inline_text(source);
 }
@@ -314,10 +323,13 @@ std::string format_providers_text(runtime::Session const& session, ava::config::
               " oauth=" + provider_oauth_status(profile) + "\n";
     if (!profile.api_family.empty())
       output += "    api_family=" + profile.api_family + "\n";
-    if (!profile.default_base_url.empty() || !profile.default_base_url_env.empty())
+    if (!profile.endpoint.empty() || !profile.default_base_url.empty() || !profile.default_base_url_env.empty())
     {
       output += "    endpoint=";
-      output += profile.default_base_url.empty() ? "provider default" : profile.default_base_url;
+      if (!profile.endpoint.empty())
+        output += profile.endpoint;
+      else
+        output += profile.default_base_url.empty() ? "provider default" : profile.default_base_url;
       if (!profile.default_base_url_env.empty())
         output += " env=" + profile.default_base_url_env;
       output += "\n";

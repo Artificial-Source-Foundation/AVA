@@ -474,8 +474,8 @@ void test_provider_catalog_builtins_and_user_defs()
                        wrap_providers(provider_json("local-openai", "Local OpenAI", "openai_chat_completions", "http://127.0.0.1:11434")));
   auto built = ava::provider::ProviderCatalog::build(paths);
   expect(built && (*built)->user_definitions().size() == 1 && (*built)->user_definitions().front().id == "local-openai",
-         "catalog stores validated user definitions without activating factories");
-  expect(!(*built)->contains("local-openai"), "Phase B does not register user-defined factories");
+         "catalog stores validated user definitions");
+  expect((*built)->contains("local-openai"), "Phase C registers user-defined factories");
   expect((*built)->contains("openai"), "built-in factories remain available alongside stored user defs");
 }
 

@@ -506,7 +506,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
     ava::http::CurlCliTransport auth_transport;
-    auto prepared = prepare_runtime_credentials(session.paths(), effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
+    auto prepared = prepare_runtime_credentials(session.paths(), effective_config->provider_id, std::move(summary_options), auth_transport, "compaction", session.provider_catalog());
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);
@@ -524,7 +524,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::Session cons
     owned_provider = std::move(*created);
     summary_provider = owned_provider.get();
   }
-  if (summary_options.access_token.empty())
+  if (summary_options.access_token.empty() && summary_options.credential_type != "none")
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token");
     error.with_context("provider", effective_config->provider_id);
@@ -618,7 +618,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
                                                 ava::provider::Provider const& provider, ava::http::Transport& transport, RunOptions const& options,
                                                 std::vector<std::string> const& replayed_user_messages)
 {
-  if (options.access_token.empty())
+  if (options.access_token.empty() && options.credential_type != "none")
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
   }

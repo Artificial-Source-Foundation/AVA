@@ -334,7 +334,7 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   if (!auth_inner)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
   DeadlineTransport auth_transport(std::move(auth_inner), stop_token, deadline);
-  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation");
+  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation", generation.provider_catalog);
   if (!prepared)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title credentials are unavailable"));
 

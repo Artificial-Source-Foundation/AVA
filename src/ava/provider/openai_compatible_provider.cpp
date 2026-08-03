@@ -433,7 +433,7 @@ ava::core::Result<ava::http::HttpRequest> OpenAICompatibleProvider::build_reques
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
-  if (access_token.empty())
+  if (options_.require_credential && access_token.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, options_.provider_name + " credential is required"));
   }
@@ -477,17 +477,19 @@ ava::core::Result<ava::http::HttpRequest> OpenAICompatibleProvider::build_reques
       return std::unexpected(std::move(converted.error()));
   }
 
-  std::map<std::string, std::string> headers{{"Authorization", "Bearer " + std::string(access_token)},
-                                             {"Content-Type", "application/json"},
+  std::map<std::string, std::string> headers{{"Content-Type", "application/json"},
                                              {"Accept", request.stream ? "text/event-stream" : "application/json"}};
+  if (options_.send_authorization_bearer && !access_token.empty())
+    headers["Authorization"] = "Bearer " + std::string(access_token);
   if (!options_.user_agent.empty())
     headers["User-Agent"] = options_.user_agent;
+  auto const url = !options_.endpoint.empty() ? options_.endpoint : join_openai_compatible_url(options_.base_url, options_.chat_completions_path);
   return ava::http::HttpRequest{.method = "POST",
-                                .url = join_openai_compatible_url(options_.base_url, options_.chat_completions_path),
+                                .url = url,
                                 .headers = std::move(headers),
                                 .body = openai_compatible_request_body_json(request, options_),
                                 .timeout_ms = 60000,
-                                .follow_redirects = true,
+                                .follow_redirects = options_.follow_redirects,
                                 .include_response_headers = false,
                                 .resolve_hosts = {}};
 }

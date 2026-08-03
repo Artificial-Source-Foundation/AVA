@@ -410,7 +410,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::Sess
       .cancel_requested = [&runtime_options,
                            &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
       .take_steering_messages = runtime_options.take_steering_messages,
-      .compact_context = runtime_options.access_token.empty() ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
+      .compact_context = (runtime_options.access_token.empty() && runtime_options.credential_type != "none") ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
                                                               : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
                                                                     std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
         return runtime::compact_runtime_context(session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,

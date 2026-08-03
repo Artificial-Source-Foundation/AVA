@@ -441,6 +441,18 @@ ava::core::Result<CommandResult> run_connect_command(runtime::Session& session, 
     break;
   }
 
+  auto catalog = session.provider_catalog() ? session.provider_catalog() : ava::provider::ProviderCatalog::build_builtins_only();
+  if (catalog->provider_auth_is_none(provider_id))
+  {
+    add_output(result, catalog->display_name(provider_id) + " requires no credential (auth:none). auth.json was not modified.");
+    return result;
+  }
+  if (catalog->provider_is_user_defined(provider_id) && method != ConnectMethod::ApiKey)
+  {
+    add_output(result, "user-defined providers only support API key credentials");
+    return result;
+  }
+
   if (method == ConnectMethod::OpenAIBrowserOAuth)
   {
     auto stored = run_openai_browser_oauth(session, request);

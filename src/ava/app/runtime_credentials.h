@@ -7,6 +7,11 @@
 #include <memory>
 #include <string_view>
 
+namespace ava::provider {
+class Provider;
+class ProviderCatalog;
+}  // namespace ava::provider
+
 namespace ava::app {
 
 struct RuntimeProviderRunBundle
@@ -25,6 +30,11 @@ using RuntimeProviderRunBundleFactory = std::function<ava::core::Result<RuntimeP
 [[nodiscard]] ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                                  runtime::RunOptions options, ava::http::Transport& auth_transport,
                                                                                  std::string_view purpose);
+// Catalog-bound overload: honors auth:none and user-defined api_key_env isolation.
+[[nodiscard]] ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
+                                                                                 runtime::RunOptions options, ava::http::Transport& auth_transport,
+                                                                                 std::string_view purpose,
+                                                                                 std::shared_ptr<ava::provider::ProviderCatalog const> catalog);
 
 // Creates an isolated provider/transport/auth bundle for one active run. The
 // returned transports are never shared with another session or run.

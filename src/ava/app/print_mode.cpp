@@ -8,6 +8,7 @@
 #include "ava/config/openai_oauth.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/catalog.h"
+#include "ava/app/runtime_credentials.h"
 #include "ava/provider/registry.h"
 #include "ava/core/error.h"
 
@@ -243,7 +244,9 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   ava::http::CurlCliTransport default_transport;
   ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
   ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
-  auto catalog = options.open_context.provider_catalog ? options.open_context.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+  auto catalog = session_w->provider_catalog() ? session_w->provider_catalog()
+                 : options.open_context.provider_catalog ? options.open_context.provider_catalog
+                                                        : ava::provider::ProviderCatalog::build_builtins_only();
   auto default_provider = catalog->create(session_w->model().provider_id);
   if (!default_provider)
   {
@@ -256,23 +259,22 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
   runtime_options.offline = session_w->is_offline() || options.open_context.offline;
   if (!runtime_options.offline)
   {
-    auto request_credential = ava::config::provider_credential_for_request(session_w->paths(), session_w->model().provider_id, auth_transport);
-    if (!request_credential)
+    auto prepared = prepare_runtime_credentials(session_w->paths(), session_w->model().provider_id, runtime_options, auth_transport, "print mode", catalog);
+    if (!prepared)
     {
-      err << terminal_output_text(request_credential.error().format(), sanitize_stderr) << '\n';
+      if (prepared.error().message().find("requires auth for provider") != std::string::npos)
+      {
+        err << "print mode requires auth for provider `" << terminal_output_text(session_w->model().provider_id, sanitize_stderr)
+            << "`. Configure a credential in " << terminal_output_text(session_w->paths().auth_file.string(), sanitize_stderr)
+            << " or the provider API key environment variable\n";
+      }
+      else
+      {
+        err << terminal_output_text(prepared.error().format(), sanitize_stderr) << '\n';
+      }
       return 1;
     }
-    if (!*request_credential)
-    {
-      err << "print mode requires auth for provider `" << terminal_output_text(session_w->model().provider_id, sanitize_stderr)
-          << "`. Configure a credential in " << terminal_output_text(session_w->paths().auth_file.string(), sanitize_stderr)
-          << " or the provider API key environment variable\n";
-      return 1;
-    }
-    runtime_options.access_token = (*request_credential)->access_token;
-    runtime_options.credential_type = (*request_credential)->credential_type;
-    runtime_options.openai_oauth = (*request_credential)->provider_id == "openai" && (*request_credential)->credential_type == "oauth";
-    runtime_options.openai_account_id = (*request_credential)->account_id;
+    runtime_options = std::move(*prepared);
   }
   runtime_options.enable_transport_retries = !options.transport_override.has_value();
   runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);

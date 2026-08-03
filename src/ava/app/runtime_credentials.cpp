@@ -5,23 +5,45 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/provider/catalog.h"
-#include "ava/provider/registry.h"
 
 #include <memory>
 #include <string>
 #include <utility>
 
 namespace ava::app {
+namespace {
+
+ava::config::ProviderCredentialPolicy credential_policy_for(std::shared_ptr<ava::provider::ProviderCatalog const> const& catalog, std::string_view provider_id)
+{
+  ava::config::ProviderCredentialPolicy policy;
+  if (!catalog)
+    return policy;
+  policy.auth_none = catalog->provider_auth_is_none(provider_id);
+  policy.user_defined = catalog->provider_is_user_defined(provider_id);
+  policy.api_key_env = catalog->provider_api_key_env(provider_id);
+  return policy;
+}
+
+}  // namespace
 
 ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
-                                                                   runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose)
+                                                                   runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose,
+                                                                   std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
   if (options.offline)
     return std::unexpected(offline_provider_error(purpose));
+  if (options.credential_type == "none")
+  {
+    options.access_token.clear();
+    options.openai_oauth = false;
+    options.openai_account_id.clear();
+    return options;
+  }
   if (!options.access_token.empty())
     return options;
 
-  auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport);
+  auto policy = credential_policy_for(catalog, provider_id);
+  auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport, policy);
   if (!credential)
     return std::unexpected(std::move(credential.error()));
   if (!*credential)
@@ -30,6 +52,8 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::string(purpose) + " requires auth for provider `" + std::string(provider_id) + "`");
     error.with_context("provider", std::string(provider_id));
     error.with_context("auth_file", paths.auth_file.string());
+    if (policy.user_defined && !policy.api_key_env.empty())
+      error.with_context("api_key_env", policy.api_key_env);
     error.with_context("hint", "configure a provider API key environment variable or run `ava connect " + std::string(provider_id) + "`");
     return std::unexpected(std::move(error));
   }
@@ -38,19 +62,27 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
   options.credential_type = (*credential)->credential_type;
   options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
   options.openai_account_id = (*credential)->account_id;
+  if (options.credential_type == "none")
+  {
+    options.access_token.clear();
+    options.openai_oauth = false;
+    options.openai_account_id.clear();
+  }
   if (options.openai_oauth && options.openai_account_id.empty())
     options.openai_account_id = ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
   return options;
+}
+
+ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
+                                                                   runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose)
+{
+  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, purpose, nullptr);
 }
 
 ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::Session const& session, runtime::RunOptions options,
                                                                                std::string_view purpose)
 {
   auto auth_transport = std::make_unique<ava::http::CurlCliTransport>();
-  auto prepared = prepare_runtime_credentials(session.paths(), session.model().provider_id, std::move(options), *auth_transport, purpose);
-  if (!prepared)
-    return std::unexpected(std::move(prepared.error()));
-
   auto catalog = session.provider_catalog();
   if (!catalog)
   {
@@ -59,6 +91,10 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
       return std::unexpected(std::move(built.error()));
     catalog = std::move(*built);
   }
+  auto prepared = prepare_runtime_credentials(session.paths(), session.model().provider_id, std::move(options), *auth_transport, purpose, catalog);
+  if (!prepared)
+    return std::unexpected(std::move(prepared.error()));
+
   auto provider = catalog->create(session.model().provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));

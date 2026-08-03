@@ -8,6 +8,7 @@
 #include "ava/core/json.h"
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -495,13 +496,13 @@ void apply_codex_oauth_request_options(ava::http::HttpRequest& request)
 }  // namespace
 
 ava::core::Result<ava::http::HttpRequest> build_openai_responses_request(ProviderRequest const& request, std::string_view access_token,
-                                                                         std::string_view base_url, bool include_max_output_tokens)
+                                                                         OpenAIProviderOptions const& options, bool include_max_output_tokens)
 {
   if (request.model_id.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model id is required"));
   }
-  if (access_token.empty())
+  if (options.require_credential && access_token.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "OpenAI credential is required"));
   }
@@ -518,16 +519,26 @@ ava::core::Result<ava::http::HttpRequest> build_openai_responses_request(Provide
     return std::unexpected(std::move(valid_reasoning.error()));
   }
 
+  std::map<std::string, std::string> headers{{"Content-Type", "application/json"}, {"Accept", "text/event-stream"}};
+  if (options.send_authorization_bearer && !access_token.empty())
+    headers["Authorization"] = "Bearer " + std::string(access_token);
+  auto const url = !options.endpoint.empty() ? options.endpoint : (options.base_url + "/v1/responses");
   return ava::http::HttpRequest{
       .method = "POST",
-      .url = std::string(base_url) + "/v1/responses",
-      .headers = {{"Authorization", "Bearer " + std::string(access_token)}, {"Content-Type", "application/json"}, {"Accept", "text/event-stream"}},
+      .url = url,
+      .headers = std::move(headers),
       .body = request_body_json(request, include_max_output_tokens),
       .timeout_ms = 60000,
-      .follow_redirects = true,
+      .follow_redirects = options.follow_redirects,
       .include_response_headers = false,
       .resolve_hosts = {},
   };
+}
+
+ava::core::Result<ava::http::HttpRequest> build_openai_responses_request(ProviderRequest const& request, std::string_view access_token,
+                                                                         std::string_view base_url, bool include_max_output_tokens)
+{
+  return build_openai_responses_request(request, access_token, OpenAIProviderOptions{.base_url = std::string(base_url)}, include_max_output_tokens);
 }
 
 ava::core::VoidResult apply_openai_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth)
@@ -547,12 +558,14 @@ ava::core::VoidResult apply_openai_auth_options(ava::http::HttpRequest& request,
 
 ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
-  return detail::build_openai_responses_request(request, access_token, base_url_, true);
+  bool const include_max = options_.force_include_max_output_tokens || true;
+  return detail::build_openai_responses_request(request, access_token, options_, include_max);
 }
 
 ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(ProviderRequest const& request, ProviderAuthContext const& auth) const
 {
-  auto http_request = detail::build_openai_responses_request(request, auth.access_token, base_url_, auth.credential_type != "oauth");
+  bool const include_max = options_.force_include_max_output_tokens || auth.credential_type != "oauth";
+  auto http_request = detail::build_openai_responses_request(request, auth.access_token, options_, include_max);
   if (!http_request)
     return http_request;
   if (auto applied = apply_auth_options(*http_request, auth); !applied)
@@ -564,6 +577,8 @@ ava::core::Result<ava::http::HttpRequest> OpenAIProvider::build_request(Provider
 
 ava::core::VoidResult OpenAIProvider::apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const
 {
+  if (!options_.enable_codex_oauth_mutations)
+    return {};
   return detail::apply_openai_auth_options(request, auth);
 }
 

@@ -41,6 +41,14 @@ struct ProviderProfile
   // model selection. Some profiles are intentionally connect/auth metadata only
   // until their runtime provider is implemented.
   bool runtime_selectable = true;
+  // User-defined catalog extensions. Built-ins leave these at defaults.
+  bool user_defined = false;
+  // Explicit no-credential policy from providers.json auth:none.
+  bool auth_none = false;
+  // Validated API-key environment variable for user-defined api_key providers.
+  std::string api_key_env = {};
+  // Exact canonical request endpoint when set (user-defined providers).
+  std::string endpoint = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

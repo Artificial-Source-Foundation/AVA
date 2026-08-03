@@ -9,7 +9,11 @@
 
 namespace ava::provider {
 
-OpenAIProvider::OpenAIProvider(std::string base_url) : base_url_(std::move(base_url))
+OpenAIProvider::OpenAIProvider(OpenAIProviderOptions options) : options_(std::move(options))
+{
+}
+
+OpenAIProvider::OpenAIProvider(std::string base_url) : options_(OpenAIProviderOptions{.base_url = std::move(base_url)})
 {
 }
 

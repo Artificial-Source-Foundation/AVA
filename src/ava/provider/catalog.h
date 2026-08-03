@@ -62,6 +62,12 @@ class ProviderCatalog
 
   [[nodiscard]] std::span<ava::config::UserProviderDefinition const> user_definitions() const noexcept;
 
+  // True when the catalog descriptor declares explicit auth:none.
+  [[nodiscard]] bool provider_auth_is_none(std::string_view provider_id) const noexcept;
+  // Validated api_key_env for user-defined api_key providers; empty otherwise.
+  [[nodiscard]] std::string provider_api_key_env(std::string_view provider_id) const;
+  [[nodiscard]] bool provider_is_user_defined(std::string_view provider_id) const noexcept;
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:

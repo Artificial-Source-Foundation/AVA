@@ -17,7 +17,7 @@ AVA uses XDG paths on Linux. Process environment inputs and script-only controls
 
 ## Settings Architecture And Resource Packages
 
-AVA intentionally uses narrow domain-specific config files instead of a single Pi-style merged `settings.json`. Each file has one owner and validator: `auth.json` for provider credentials, `models.json` for model registry overrides and scoped cycling, `display.json` plus `themes/*.json` for TUI appearance, `keybinds.json` for TUI actions, prompt files under the config/project resource directories, plugin/MCP/LSP config files, compaction config, trust state, and permission rules. This keeps secret handling, model context, executable resources, and UI preferences behind separate safety boundaries and avoids silently granting authority through a model-writable project settings file.
+AVA intentionally uses narrow domain-specific config files instead of a single Pi-style merged `settings.json`. Each file has one owner and validator: `providers.json` for user-defined runtime provider endpoints (see [custom providers](custom-providers.md)), `auth.json` for provider credentials, `models.json` for model registry overrides and scoped cycling, `display.json` plus `themes/*.json` for TUI appearance, `keybinds.json` for TUI actions, prompt files under the config/project resource directories, plugin/MCP/LSP config files, compaction config, trust state, and permission rules. This keeps secret handling, model context, executable resources, and UI preferences behind separate safety boundaries and avoids silently granting authority through a model-writable project settings file.
 
 Config writes that AVA performs validate the candidate before committing where possible. Display theme writes and keybinding init/import/set/reset use owner-only atomic replacement and reject symlink targets; invalid hand-edited files surface path-specific diagnostics through `/reload`, startup alerts, or the relevant validation command while the previous active runtime state remains in use. Project-local resources that can influence execution or stronger model context remain gated by `/trust project`; plain context files (`AGENTS.md`/`CLAUDE.md`) can load without trust, but project prompt commands, skills, plugins, MCP/LSP config, and project system prompt files are skipped until trusted.
 
@@ -124,6 +124,20 @@ Set `VISUAL` or `EDITOR` to the editor command AVA should use for the TUI extern
 
 Pressing Ctrl+V in the TUI imports a supported image from the clipboard as a pending attachment when AVA can read one through Linux clipboard helpers. AVA probes `wl-paste` for Wayland and `xclip` for X11, accepts PNG, JPEG, WebP, and GIF bytes, then stores the image through the same session-owned attachment path used by `/attach`. Set `AVA_CLIPBOARD_IMAGE_FILE=/absolute/path/to/image.png` to bypass the OS clipboard and import that image file; this is intended for deterministic terminal smoke tests.
 
+## Providers (`providers.json`)
+
+Optional `$XDG_CONFIG_HOME/ava/providers.json` declares user-defined runtime providers
+for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages protocols.
+The file is loaded once at process start into an immutable application catalog;
+malformed or unsafe present files fail closed. Models stay in `models.json` and must
+use a matching `api_family`. Credentials stay in `auth.json` or the configured env
+name. Provider definitions require a process restart — `/reload providers` reports
+restart-required. Full schema, ownership rules, and examples:
+[custom-providers.md](custom-providers.md).
+
+Built-in vendor status (including xAI, Groq, Cerebras, Together, Fireworks, and
+Mistral) remains in [providers.md](providers.md).
+
 ## Auth
 
 Create an OpenAI OAuth credential with:
@@ -145,7 +159,7 @@ ava connect kimi --api-key
 
 When the provider is omitted, `ava auth login`, `ava login`, and interactive `ava connect` open a searchable terminal provider picker before asking for login method and secret. Secrets are read without terminal echo when stdin is a TTY. In the TUI, use `/connect` or `/login` to open the same provider flow as a modal; OpenAI shows browser OAuth, headless OAuth, and API key options. Non-OpenAI providers use API-key setup unless their own documented auth flow is explicitly implemented.
 
-Headless API-key setup is available for OpenAI, Anthropic, DeepSeek, Gemini, Moonshot/Kimi, OpenRouter, and other provider ids:
+Headless API-key setup is available for OpenAI, Anthropic, DeepSeek, Gemini, Moonshot/Kimi, OpenRouter, Z.AI, xAI, Groq, Cerebras, Together, Fireworks, Mistral, and user-defined `api_key` provider ids:
 
 ```sh
 ava connect openai --headless-oauth
@@ -235,7 +249,7 @@ Optional model override file: `$XDG_CONFIG_HOME/ava/models.json`.
 }
 ```
 
-Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_level_map`/`thinking_level_map`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses, Anthropic Messages, and Gemini GenerateContent image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/providers [query]` reports provider runtime availability, credential source status without secret values, OAuth disposition, endpoint environment knobs, and compatibility quirks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels, plus provider/API-family mismatches, unknown API families, invalid provider ids, and unregistered providers. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
+Model entries are additive overrides. `provider` and `id` are required; omitted fields on built-in model overrides inherit the built-in metadata, including `context_window_tokens`. For brand-new custom models, set `context_window_tokens` so token percentage and context-aware compaction can work. Optional fields include `display_name`, `family`, `api_family`, `context_window_tokens`, `max_output_tokens`, `supports_tools`, `supports_streaming`, `supports_reasoning`, `reports_usage`, `input_modalities`, `output_modalities`, `reasoning_levels`, `reasoning_level_map`/`thinking_level_map`, `reasoning_format`, `compatibility_quirks`, and `pricing`. `input_modalities` currently recognizes `text` and `image`; models that omit `image` reject replayed image attachments before provider requests. Built-in OpenAI Responses, Anthropic Messages, and Gemini GenerateContent image-capable profiles declare `text` plus `image`; custom compatible-provider image models should do the same only when their endpoint accepts chat-completions image URL blocks. `/providers [query]` reports provider runtime availability (built-in and user-defined), credential source status without secret values, OAuth disposition, endpoint settings, and compatibility quirks. `/models <query>` and the TUI model selector report advisory diagnostics for custom models that omit context windows, input modalities, API family, support flags, usage/pricing metadata, or reasoning levels, plus provider/API-family mismatches, unknown API families, invalid provider ids, and unregistered providers. These diagnostics do not block switching when the provider is registered; rows for unregistered providers are disabled because backend model switching rejects them. Pricing values are USD per one million tokens and are local static metadata; AVA does not fetch live prices. Cost is reported only when the saved provider usage and configured pricing are complete for the billable token types in that assistant response.
 
 Accepted pricing aliases include `input_usd_per_1m`, `output_usd_per_1m`, `cache_read_usd_per_1m`, `cache_write_usd_per_1m`, and `reasoning_usd_per_1m`.
 

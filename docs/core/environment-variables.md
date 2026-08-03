@@ -34,8 +34,15 @@ These values are credentials; export them only into the AVA process that needs t
 | OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` |
 | Z.AI Coding Plan (Global) | `ZAI_API_KEY` | `ZAI_BASE_URL` |
 | Z.AI Coding Plan (China) | `ZAI_CODING_CN_API_KEY` | `ZAI_CODING_CN_BASE_URL` |
+| xAI | `XAI_API_KEY` | `XAI_BASE_URL` |
+| Groq | `GROQ_API_KEY` | `GROQ_BASE_URL` |
+| Cerebras | `CEREBRAS_API_KEY` | `CEREBRAS_BASE_URL` |
+| Together | `TOGETHER_API_KEY` | `TOGETHER_BASE_URL` |
+| Fireworks | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` |
+| Mistral | `MISTRAL_API_KEY` | `MISTRAL_BASE_URL` |
+| User-defined (`providers.json`) | Exactly the entry's `api_key_env` (default `<ID>_API_KEY`) | Endpoint is fixed in `providers.json` (no separate base-URL env) |
 
-Future provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` lookup only if a runtime provider is added. Do not infer support from that convention. Defaults, OAuth details, and implemented-provider boundaries are in [providers.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/core/providers.md).
+Defaults, OAuth details, custom-provider rules, and implemented-provider boundaries are in [providers.md](providers.md) and [custom-providers.md](custom-providers.md).
 
 ## Standard desktop and shell inputs
 

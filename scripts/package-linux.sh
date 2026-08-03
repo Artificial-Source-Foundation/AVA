@@ -208,6 +208,7 @@ doc_sources=(
   docs/core/usage.md
   docs/core/configuration.md
   docs/core/context-resources.md
+  docs/core/custom-providers.md
   docs/core/environment-variables.md
   docs/core/providers.md
   docs/core/subagents.md

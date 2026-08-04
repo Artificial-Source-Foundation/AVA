@@ -50,7 +50,9 @@ bool is_display_settings_command(std::string_view line) noexcept
 {
   while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
   while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
-  return line == "/theme" || (line.starts_with("/theme") && line.size() > 6 && line[6] == ' ') || line == "/reload theme" || line == "/reload themes" ||
+  return line == "/theme" || (line.starts_with("/theme") && line.size() > 6 && line[6] == ' ') || line == "/images" ||
+         (line.starts_with("/images") && line.size() > 7 && line[7] == ' ') || line == "/image-width" ||
+         (line.starts_with("/image-width") && line.size() > 12 && line[12] == ' ') || line == "/reload theme" || line == "/reload themes" ||
          line == "/reload display";
 }
 

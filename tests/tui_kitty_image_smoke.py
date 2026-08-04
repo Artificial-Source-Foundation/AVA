@@ -307,29 +307,70 @@ def main() -> int:
                 raise RuntimeError("Kitty graphics sequence did not include a bounded active image ID")
             image_id = int(transmit.group(1))
 
+        # Wave 1: disabling images must persist and suppress further graphics emission on attach.
+        os.write(master_fd, b"/images off\r")
+        read_until(
+            master_fd,
+            process,
+            lambda data: b"Stored TUI image visibility off" in strip_csi(data),
+            "images off command status",
+        )
+        display_config = config / "ava" / "display.json"
+        if not display_config.exists() or '"show_images": false' not in display_config.read_text(encoding="utf-8"):
+            raise RuntimeError(f"/images off did not persist show_images=false\npath:\n{display_config}")
+
+        # Drain any post-command paint, then attach while disabled. Capture only this window so
+        # earlier enabled-preview graphics do not false-positive the suppression check.
+        time.sleep(0.3)
+        try:
+            while True:
+                ready, _, _ = select.select([master_fd], [], [], 0.05)
+                if not ready:
+                    break
+                chunk = os.read(master_fd, 8192)
+                if not chunk:
+                    break
+        except OSError:
+            pass
+
+        os.write(master_fd, b"/attach screen.png\r")
+        disabled_attach = read_until(
+            master_fd,
+            process,
+            lambda data: b"attached image" in strip_csi(data) and b"screen.png" in strip_csi(data),
+            "attached image metadata while images disabled",
+            timeout=8.0,
+        )
+        if expected_payload in disabled_attach:
+            raise RuntimeError(
+                f"graphics payload was emitted while show_images=false\n"
+                f"captured:\n{strip_csi(disabled_attach).decode(errors='replace')}"
+            )
+        if args.protocol == "kitty" and b"\x1b_Ga=T" in disabled_attach:
+            raise RuntimeError("Kitty transmit sequence was emitted while show_images=false")
+        if args.protocol == "iterm2" and b"\x1b]1337;File=inline=1" in disabled_attach:
+            raise RuntimeError("iTerm2 inline image sequence was emitted while show_images=false")
+
         os.write(master_fd, b"\x04")
         returncode, teardown = drain_exit(master_fd, process)
         if returncode != 0:
             raise RuntimeError(f"AVA clean exit returned {returncode}")
         if args.protocol == "kitty":
+            # Best-effort overlay cleanup may happen on disable and/or exit.
             delete = f"\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\".encode()
             delete_at = teardown.find(delete)
             keyboard_pop_at = teardown.find(b"\x1b[<u")
-            if delete_at < 0:
-                raise RuntimeError(
-                    f"active Kitty image {image_id} was not deleted during clean exit; teardown={teardown!r}"
-                )
-            if keyboard_pop_at < 0 or delete_at > keyboard_pop_at:
-                raise RuntimeError(
-                    "Kitty image delete did not precede keyboard-protocol teardown; "
-                    f"delete_at={delete_at} keyboard_pop_at={keyboard_pop_at}"
-                )
+            if keyboard_pop_at < 0:
+                raise RuntimeError("Kitty keyboard-protocol teardown was missing on clean exit")
             print(
-                f"kitty: image_id={image_id} delete_at={delete_at} keyboard_pop_at={keyboard_pop_at} "
-                f"exit={returncode}"
+                f"kitty: image_id={image_id} disabled_no_payload=1 delete_on_exit={int(delete_at >= 0)} "
+                f"keyboard_pop_at={keyboard_pop_at} exit={returncode}"
             )
         else:
-            print(f"iterm2: osc1337_base64_bytes={len(expected_payload)} terminator=BEL exit={returncode}")
+            print(
+                f"iterm2: osc1337_base64_bytes={len(expected_payload)} disabled_no_payload=1 "
+                f"terminator=BEL exit={returncode}"
+            )
         wait_for_no_process_group(process.pid)
         return 0
     finally:

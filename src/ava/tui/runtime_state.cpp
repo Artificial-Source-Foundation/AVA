@@ -25,7 +25,9 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
                             .slash_commands = std::move(options.slash_commands),
                             .file_references = std::move(options.file_references),
                             .custom_themes = options.custom_themes,
-                            .project_trust = options.project_trust};
+                            .project_trust = options.project_trust,
+                            .show_images = options.show_images,
+                            .image_width_cells = options.image_width_cells};
   snapshot.active_run_hint = runtime_views::active_run_hint_for(options.key_bindings);
   return snapshot;
 }
@@ -150,6 +152,12 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
     ++snapshot.file_references_generation;
   snapshot.custom_themes = std::move(state.custom_themes);
   snapshot.project_trust = std::move(state.project_trust);
+  snapshot.show_images = state.show_images;
+  snapshot.image_width_cells = state.image_width_cells;
+  if (!snapshot.show_images)
+  {
+    for (auto& attachment : snapshot.pending_attachments) attachment.preview.reset();
+  }
   snapshot.context_source_count = state.context_source_count;
 
   sidebar.mode = snapshot.mode;

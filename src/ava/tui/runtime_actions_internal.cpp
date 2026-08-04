@@ -69,10 +69,11 @@ std::optional<std::size_t> kitty_image_id_from_sha(std::string_view sha)
 }
 
 std::optional<PendingAttachmentItem::Preview> attachment_preview(
-    ava::session::ImageAttachmentRef const& attachment, TerminalImageCapabilities const& capabilities,
+    ava::session::ImageAttachmentRef const& attachment, TerminalImageCapabilities const& capabilities, bool show_images,
     std::function<ava::core::Result<ava::session::LoadedImageAttachment>(ava::session::ImageAttachmentRef const&)> const& load_image_attachment)
 {
-  if (capabilities.images == TerminalImageProtocol::None || !load_image_attachment)
+  // Disabled image visibility must not load attachment bytes or build graphics payloads.
+  if (!show_images || capabilities.images == TerminalImageProtocol::None || !load_image_attachment)
     return std::nullopt;
   auto loaded = load_image_attachment(attachment);
   if (!loaded)
@@ -264,11 +265,13 @@ bool RuntimeActionController::queue_pending_image_attachment(ava::session::Image
 {
   if (label.empty())
     label = imported.id;
-  auto const image_capabilities = active_terminal_image_capabilities();
-  auto const detail = attachment_detail(imported, image_capabilities);
-  auto const preview = attachment_preview(imported, image_capabilities, options_.on_load_image_attachment);
-  presentation_state_.pending_image_attachments.push_back(imported);
   auto& snapshot = presentation_state_.snapshot;
+  auto const image_capabilities = active_terminal_image_capabilities();
+  auto detail = attachment_detail(imported, image_capabilities);
+  if (!snapshot.show_images)
+    detail += " (hidden)";
+  auto const preview = attachment_preview(imported, image_capabilities, snapshot.show_images, options_.on_load_image_attachment);
+  presentation_state_.pending_image_attachments.push_back(imported);
   snapshot.pending_attachments.push_back(PendingAttachmentItem{.label = label, .detail = detail, .preview = preview});
   snapshot.status = std::move(status);
   runtime_transcript::push_transcript(

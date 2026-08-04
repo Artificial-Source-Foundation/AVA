@@ -5,17 +5,25 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ava::app {
 namespace {
@@ -35,6 +43,16 @@ std::string trim_ascii(std::string_view text)
   return std::string(text);
 }
 
+bool is_json_whitespace(char ch) noexcept
+{
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
+void skip_json_whitespace(std::string_view text, std::size_t& offset) noexcept
+{
+  while (offset < text.size() && is_json_whitespace(text[offset])) ++offset;
+}
+
 ava::core::Error io_error(std::string message, std::filesystem::path const& path, std::error_code const& error)
 {
   auto result = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message)).with_context("path", path.string());
@@ -43,11 +61,12 @@ ava::core::Error io_error(std::string message, std::filesystem::path const& path
   return result;
 }
 
-std::string serialize_tui_display_settings(std::optional<std::string> const& theme)
+ava::core::Error invalid_display_error(std::string message, std::filesystem::path const& path, std::string_view field = {})
 {
-  if (!theme)
-    return "{\n}\n";
-  return std::string("{\n  \"theme\": \"") + ava::core::json::escape(*theme) + "\"\n}\n";
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, std::move(message)).with_context("path", path.string());
+  if (!field.empty())
+    error.with_context("field", std::string(field));
+  return error;
 }
 
 ava::core::Error invalid_theme_error(std::string message, std::filesystem::path const& path)
@@ -264,20 +283,417 @@ ava::core::Result<ava::tui::TuiThemePalette> parse_custom_theme_palette(std::str
   return palette;
 }
 
-ava::core::Result<TuiDisplaySettings> resolve_tui_theme_setting(ava::config::XdgPaths const& paths, std::string_view theme, std::filesystem::path path)
+struct DisplayJsonEntry
 {
-  if (auto normalized = normalize_tui_theme_setting(theme))
-    return TuiDisplaySettings{.theme = std::move(normalized), .custom_theme = std::nullopt, .path = std::move(path)};
-  auto custom = load_tui_custom_theme(paths, theme);
+  std::string key;
+  std::string raw_value;
+};
+
+std::optional<std::size_t> json_string_literal_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size() || text[start] != '"')
+    return std::nullopt;
+  bool escaped = false;
+  for (std::size_t index = start + 1; index < text.size(); ++index)
+  {
+    auto const ch = text[index];
+    if (escaped)
+    {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\')
+    {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"')
+      return index;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_balanced_value_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size() || (text[start] != '{' && text[start] != '['))
+    return std::nullopt;
+  std::vector<char> expected_closers;
+  bool in_string = false;
+  bool escaped = false;
+  for (std::size_t index = start; index < text.size(); ++index)
+  {
+    auto const ch = text[index];
+    if (in_string)
+    {
+      if (escaped)
+      {
+        escaped = false;
+        continue;
+      }
+      if (ch == '\\')
+      {
+        escaped = true;
+        continue;
+      }
+      if (ch == '"')
+        in_string = false;
+      continue;
+    }
+    if (ch == '"')
+    {
+      in_string = true;
+      continue;
+    }
+    if (ch == '{')
+    {
+      expected_closers.push_back('}');
+      continue;
+    }
+    if (ch == '[')
+    {
+      expected_closers.push_back(']');
+      continue;
+    }
+    if (ch == '}' || ch == ']')
+    {
+      if (expected_closers.empty() || expected_closers.back() != ch)
+        return std::nullopt;
+      expected_closers.pop_back();
+      if (expected_closers.empty())
+        return index + 1;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> json_value_end(std::string_view text, std::size_t start)
+{
+  if (start >= text.size())
+    return std::nullopt;
+  if (text[start] == '"')
+  {
+    auto const end = json_string_literal_end(text, start);
+    if (!end)
+      return std::nullopt;
+    return *end + 1;
+  }
+  if (text[start] == '{' || text[start] == '[')
+    return json_balanced_value_end(text, start);
+
+  auto end = start;
+  while (end < text.size() && text[end] != ',' && text[end] != '}') ++end;
+  while (end > start && is_json_whitespace(text[end - 1])) --end;
+  return end > start ? std::optional<std::size_t>(end) : std::nullopt;
+}
+
+std::optional<std::vector<DisplayJsonEntry>> top_level_display_entries(std::string_view object)
+{
+  if (!ava::core::json::is_valid_object(object))
+    return std::nullopt;
+
+  std::vector<DisplayJsonEntry> entries;
+  std::size_t offset = 0;
+  skip_json_whitespace(object, offset);
+  if (offset >= object.size() || object[offset] != '{')
+    return std::nullopt;
+  ++offset;
+  skip_json_whitespace(object, offset);
+  if (offset < object.size() && object[offset] == '}')
+    return entries;
+
+  while (offset < object.size())
+  {
+    skip_json_whitespace(object, offset);
+    auto const key_start = offset;
+    auto const key_end = json_string_literal_end(object, key_start);
+    if (!key_end)
+      return std::nullopt;
+    auto raw_key = std::string(object.substr(key_start, *key_end - key_start + 1));
+    auto const decoded_key = ava::core::json::string_field("{\"value\":" + raw_key + "}", "value");
+    if (!decoded_key)
+      return std::nullopt;
+    offset = *key_end + 1;
+    skip_json_whitespace(object, offset);
+    if (offset >= object.size() || object[offset] != ':')
+      return std::nullopt;
+    ++offset;
+    skip_json_whitespace(object, offset);
+    auto const value_start = offset;
+    auto const value_end = json_value_end(object, value_start);
+    if (!value_end)
+      return std::nullopt;
+    auto raw_value = std::string(object.substr(value_start, *value_end - value_start));
+    entries.push_back(DisplayJsonEntry{.key = *decoded_key, .raw_value = std::move(raw_value)});
+    offset = *value_end;
+    skip_json_whitespace(object, offset);
+    if (offset < object.size() && object[offset] == ',')
+    {
+      ++offset;
+      continue;
+    }
+    if (offset < object.size() && object[offset] == '}')
+      return entries;
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+ava::core::Result<std::string> decode_json_string_value(std::string_view raw_value, std::filesystem::path const& path, std::string_view field)
+{
+  if (raw_value.empty() || raw_value.front() != '"')
+    return std::unexpected(invalid_display_error(std::string(field) + " must be a JSON string", path, field));
+  auto decoded = ava::core::json::string_field(std::string("{\"value\":") + std::string(raw_value) + "}", "value");
+  if (!decoded)
+    return std::unexpected(invalid_display_error(std::string(field) + " must be a JSON string", path, field));
+  return std::move(*decoded);
+}
+
+ava::core::Result<bool> decode_json_bool_value(std::string_view raw_value, std::filesystem::path const& path, std::string_view field)
+{
+  if (raw_value == "true")
+    return true;
+  if (raw_value == "false")
+    return false;
+  return std::unexpected(invalid_display_error(std::string(field) + " must be a JSON boolean", path, field));
+}
+
+ava::core::Result<std::size_t> decode_image_width_value(std::string_view raw_value, std::filesystem::path const& path)
+{
+  if (raw_value.empty() || raw_value.front() == '"' || raw_value.front() == '{' || raw_value.front() == '[' || raw_value == "true" || raw_value == "false" ||
+      raw_value == "null")
+  {
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells"));
+  }
+
+  std::size_t index = 0;
+  if (raw_value[index] == '+')
+    ++index;
+  if (index < raw_value.size() && raw_value[index] == '-')
+  {
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells"));
+  }
+  if (index >= raw_value.size() || std::isdigit(static_cast<unsigned char>(raw_value[index])) == 0)
+  {
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells"));
+  }
+  unsigned long long value = 0;
+  bool saw_digit = false;
+  while (index < raw_value.size() && std::isdigit(static_cast<unsigned char>(raw_value[index])) != 0)
+  {
+    saw_digit = true;
+    auto const digit = static_cast<unsigned long long>(raw_value[index] - '0');
+    if (value > (std::numeric_limits<unsigned long long>::max() - digit) / 10ULL)
+    {
+      return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells"));
+    }
+    value = (value * 10ULL) + digit;
+    ++index;
+  }
+  if (!saw_digit || index != raw_value.size() || raw_value.find('.') != std::string_view::npos || raw_value.find('e') != std::string_view::npos ||
+      raw_value.find('E') != std::string_view::npos)
+  {
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells"));
+  }
+  if (value < kMinTuiImageWidthCells || value > kMaxTuiImageWidthCells)
+  {
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", path, "image_width_cells")
+                               .with_context("value", std::to_string(value)));
+  }
+  return static_cast<std::size_t>(value);
+}
+
+ava::core::Result<DisplaySettingsDocument> parse_display_settings_document(std::string_view json, std::filesystem::path path)
+{
+  if (!ava::core::json::is_valid_object(json))
+    return std::unexpected(invalid_display_error("invalid TUI display settings JSON", path));
+
+  auto entries = top_level_display_entries(json);
+  if (!entries)
+    return std::unexpected(invalid_display_error("invalid TUI display settings JSON object", path));
+
+  DisplaySettingsDocument document{
+      .theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .unknown_fields = {}, .path = std::move(path)};
+  bool saw_theme = false;
+  bool saw_show_images = false;
+  bool saw_image_width = false;
+  for (auto const& entry : *entries)
+  {
+    if (entry.key == "theme")
+    {
+      if (saw_theme)
+        return std::unexpected(invalid_display_error("duplicate theme field", document.path, "theme"));
+      saw_theme = true;
+      auto decoded = decode_json_string_value(entry.raw_value, document.path, "theme");
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      if (!decoded->empty())
+        document.theme = std::move(*decoded);
+      continue;
+    }
+    if (entry.key == "show_images")
+    {
+      if (saw_show_images)
+        return std::unexpected(invalid_display_error("duplicate show_images field", document.path, "show_images"));
+      saw_show_images = true;
+      auto decoded = decode_json_bool_value(entry.raw_value, document.path, "show_images");
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      document.show_images = *decoded;
+      continue;
+    }
+    if (entry.key == "image_width_cells")
+    {
+      if (saw_image_width)
+        return std::unexpected(invalid_display_error("duplicate image_width_cells field", document.path, "image_width_cells"));
+      saw_image_width = true;
+      auto decoded = decode_image_width_value(entry.raw_value, document.path);
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      document.image_width_cells = *decoded;
+      continue;
+    }
+    document.unknown_fields.emplace_back(entry.key, entry.raw_value);
+  }
+  return document;
+}
+
+std::string serialize_display_settings_document(DisplaySettingsDocument const& document)
+{
+  std::vector<DisplayJsonEntry> entries;
+  entries.reserve(3 + document.unknown_fields.size());
+  if (document.theme)
+    entries.push_back(DisplayJsonEntry{.key = "theme", .raw_value = std::string("\"") + ava::core::json::escape(*document.theme) + "\""});
+  if (document.show_images)
+    entries.push_back(DisplayJsonEntry{.key = "show_images", .raw_value = *document.show_images ? "true" : "false"});
+  if (document.image_width_cells)
+    entries.push_back(DisplayJsonEntry{.key = "image_width_cells", .raw_value = std::to_string(*document.image_width_cells)});
+  for (auto const& unknown : document.unknown_fields) entries.push_back(DisplayJsonEntry{.key = unknown.first, .raw_value = unknown.second});
+
+  if (entries.empty())
+    return "{\n}\n";
+  std::string out = "{\n";
+  for (std::size_t index = 0; index < entries.size(); ++index)
+  {
+    out += "  \"";
+    out += ava::core::json::escape(entries[index].key);
+    out += "\": ";
+    out += entries[index].raw_value;
+    if (index + 1 < entries.size())
+      out += ',';
+    out += '\n';
+  }
+  out += "}\n";
+  return out;
+}
+
+ava::core::Result<std::string> read_display_settings_text(std::filesystem::path const& path)
+{
+  std::error_code status_error;
+  if (!std::filesystem::is_regular_file(path, status_error))
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "TUI display settings is not a regular file").with_context("path", path.string());
+    if (status_error)
+      error.with_context("cause", status_error.message());
+    return std::unexpected(std::move(error));
+  }
+  std::error_code size_error;
+  auto const size = std::filesystem::file_size(path, size_error);
+  if (size_error || size > kMaxTuiDisplaySettingsBytes)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "TUI display settings is too large")
+                     .with_context("path", path.string())
+                     .with_context("max_bytes", std::to_string(kMaxTuiDisplaySettingsBytes));
+    if (size_error)
+      error.with_context("cause", size_error.message());
+    return std::unexpected(std::move(error));
+  }
+
+  std::ifstream input(path, std::ios::binary);
+  if (!input)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings").with_context("path", path.string()));
+
+  std::string content;
+  content.reserve(static_cast<std::size_t>(size));
+  std::array<char, 4096> buffer{};
+  while (input)
+  {
+    input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    if (input.gcount() > 0)
+      content.append(buffer.data(), static_cast<std::size_t>(input.gcount()));
+    if (content.size() > kMaxTuiDisplaySettingsBytes)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "TUI display settings is too large")
+                                 .with_context("path", path.string())
+                                 .with_context("max_bytes", std::to_string(kMaxTuiDisplaySettingsBytes)));
+    }
+  }
+  if (!input.eof() && input.fail())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading TUI display settings").with_context("path", path.string()));
+  return content;
+}
+
+ava::core::Result<DisplaySettingsDocument> load_or_default_document(ava::config::XdgPaths const& paths)
+{
+  auto const path = tui_display_settings_file(paths);
+  std::error_code exists_error;
+  auto const exists = std::filesystem::exists(path, exists_error);
+  if (exists_error)
+    return std::unexpected(io_error("failed to inspect TUI display settings", path, exists_error));
+  if (!exists)
+    return DisplaySettingsDocument{.theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .unknown_fields = {}, .path = path};
+
+  auto content = read_display_settings_text(path);
+  if (!content)
+    return std::unexpected(std::move(content.error()));
+  return parse_display_settings_document(*content, path);
+}
+
+// Image/document fields only. Theme name resolution is applied by the callers that own discovery.
+TuiDisplaySettings display_settings_from_document_fields(DisplaySettingsDocument const& document)
+{
+  TuiDisplaySettings settings{.theme = std::nullopt,
+                              .custom_theme = std::nullopt,
+                              .show_images = true,
+                              .image_width_cells = kDefaultTuiImageWidthCells,
+                              .show_images_configured = false,
+                              .image_width_configured = false,
+                              .path = document.path};
+  settings.show_images = document.show_images.value_or(true);
+  settings.image_width_cells = document.image_width_cells.value_or(kDefaultTuiImageWidthCells);
+  settings.show_images_configured = document.show_images.has_value();
+  settings.image_width_configured = document.image_width_cells.has_value();
+  return settings;
+}
+
+ava::core::Error invalid_display_theme_error(DisplaySettingsDocument const& document)
+{
+  return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI display theme")
+      .with_context("path", document.path.string())
+      .with_context("theme", document.theme.value_or(std::string{}))
+      .with_context("supported", "dark, light, plain, or a valid theme name under themes/*.json");
+}
+
+ava::core::VoidResult store_display_settings_document(DisplaySettingsDocument const& document)
+{
+  return ava::core::write_text_file_atomic(document.path, serialize_display_settings_document(document), "TUI display settings");
+}
+
+ava::core::Result<std::optional<std::string>> resolve_theme_name_for_store(ava::config::XdgPaths const& paths, std::optional<std::string> theme,
+                                                                           std::filesystem::path const& path)
+{
+  if (!theme)
+    return std::optional<std::string>{};
+  if (auto normalized = normalize_tui_theme_setting(*theme))
+    return normalized;
+  auto custom = load_tui_custom_theme(paths, *theme);
   if (!custom)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI display theme")
                                .with_context("path", path.string())
-                               .with_context("theme", std::string(theme))
+                               .with_context("theme", *theme)
                                .with_context("supported", "dark, light, plain, or a valid theme name under themes/*.json"));
   }
-  auto name = custom->name;
-  return TuiDisplaySettings{.theme = std::move(name), .custom_theme = std::move(*custom), .path = std::move(path)};
+  return custom->name;
 }
 
 }  // namespace
@@ -313,6 +729,62 @@ bool is_tui_theme_reset_value(std::string_view value)
 std::string tui_theme_setting_usage()
 {
   return "usage: /theme [dark|light|plain|custom-name|reset]";
+}
+
+std::optional<bool> normalize_tui_show_images_setting(std::string_view value)
+{
+  auto const normalized = lower_ascii(trim_ascii(value));
+  if (normalized == "on" || normalized == "true" || normalized == "yes" || normalized == "enable" || normalized == "enabled" || normalized == "1")
+    return true;
+  if (normalized == "off" || normalized == "false" || normalized == "no" || normalized == "disable" || normalized == "disabled" || normalized == "0")
+    return false;
+  return std::nullopt;
+}
+
+bool is_tui_show_images_reset_value(std::string_view value)
+{
+  auto const normalized = lower_ascii(trim_ascii(value));
+  return normalized == "reset" || normalized == "default" || normalized == "auto";
+}
+
+std::string tui_show_images_setting_usage()
+{
+  return "usage: /images [on|off|reset]";
+}
+
+std::optional<std::size_t> normalize_tui_image_width_setting(std::string_view value)
+{
+  auto const trimmed = trim_ascii(value);
+  if (trimmed.empty())
+    return std::nullopt;
+  std::size_t index = 0;
+  if (trimmed[index] == '+')
+    ++index;
+  if (index >= trimmed.size() || std::isdigit(static_cast<unsigned char>(trimmed[index])) == 0)
+    return std::nullopt;
+  unsigned long long width = 0;
+  while (index < trimmed.size() && std::isdigit(static_cast<unsigned char>(trimmed[index])) != 0)
+  {
+    auto const digit = static_cast<unsigned long long>(trimmed[index] - '0');
+    if (width > (std::numeric_limits<unsigned long long>::max() - digit) / 10ULL)
+      return std::nullopt;
+    width = (width * 10ULL) + digit;
+    ++index;
+  }
+  if (index != trimmed.size() || width < kMinTuiImageWidthCells || width > kMaxTuiImageWidthCells)
+    return std::nullopt;
+  return static_cast<std::size_t>(width);
+}
+
+bool is_tui_image_width_reset_value(std::string_view value)
+{
+  auto const normalized = lower_ascii(trim_ascii(value));
+  return normalized == "reset" || normalized == "default" || normalized == "auto";
+}
+
+std::string tui_image_width_setting_usage()
+{
+  return "usage: /image-width <8..160>|reset";
 }
 
 std::string active_tui_theme_summary()
@@ -415,28 +887,30 @@ std::vector<TuiCustomThemeSummary> available_tui_custom_themes(ava::config::XdgP
   return themes;
 }
 
+ava::core::Result<DisplaySettingsDocument> load_display_settings_document(ava::config::XdgPaths const& paths)
+{
+  return load_or_default_document(paths);
+}
+
 ava::core::Result<TuiDisplaySettings> load_tui_display_settings(ava::config::XdgPaths const& paths)
 {
-  auto const path = tui_display_settings_file(paths);
-  std::error_code exists_error;
-  auto const exists = std::filesystem::exists(path, exists_error);
-  if (exists_error)
-    return std::unexpected(io_error("failed to inspect TUI display settings", path, exists_error));
-  if (!exists)
-    return TuiDisplaySettings{.theme = std::nullopt, .custom_theme = std::nullopt, .path = path};
-
-  std::ifstream input(path, std::ios::binary);
-  if (!input)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings").with_context("path", path.string()));
-  std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  if (!ava::core::json::is_valid_object(json))
-    return std::unexpected(
-        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid TUI display settings JSON").with_context("path", path.string()));
-
-  auto theme = ava::core::json::string_field(json, "theme");
-  if (!theme || theme->empty())
-    return TuiDisplaySettings{.theme = std::nullopt, .custom_theme = std::nullopt, .path = path};
-  return resolve_tui_theme_setting(paths, *theme, path);
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+  auto settings = display_settings_from_document_fields(*document);
+  if (!document->theme)
+    return settings;
+  if (auto normalized = normalize_tui_theme_setting(*document->theme))
+  {
+    settings.theme = std::move(normalized);
+    return settings;
+  }
+  auto custom_theme = load_tui_custom_theme(paths, *document->theme);
+  if (!custom_theme)
+    return std::unexpected(invalid_display_theme_error(*document));
+  settings.theme = custom_theme->name;
+  settings.custom_theme = std::move(*custom_theme);
+  return settings;
 }
 
 ava::core::Result<TuiDisplaySettings> apply_tui_display_settings(ava::config::XdgPaths const& paths)
@@ -458,20 +932,19 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
     return std::unexpected(io_error("failed to inspect TUI display settings", path, exists_error));
   if (exists)
   {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI display settings").with_context("path", path.string()));
-    std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    display_revision = revision_for_text(json);
+    auto content = read_display_settings_text(path);
+    if (!content)
+      return std::unexpected(std::move(content.error()));
+    display_revision = revision_for_text(*content);
   }
-
   auto settings = load_tui_display_settings(paths);
   if (!settings)
     return std::unexpected(std::move(settings.error()));
-
   TuiDisplaySettingsWatchState state;
   state.display_revision = std::move(display_revision);
   state.theme = settings->theme;
+  state.show_images = settings->show_images;
+  state.image_width_cells = settings->image_width_cells;
   if (settings->custom_theme)
   {
     state.custom_theme_path = settings->custom_theme->path;
@@ -483,21 +956,41 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
 bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const& previous, TuiDisplaySettingsWatchState const& current)
 {
   return previous.display_revision != current.display_revision || previous.theme != current.theme || previous.custom_theme_path != current.custom_theme_path ||
-         previous.custom_theme_revision != current.custom_theme_revision;
+         previous.custom_theme_revision != current.custom_theme_revision || previous.show_images != current.show_images ||
+         previous.image_width_cells != current.image_width_cells;
 }
 
 ava::core::VoidResult store_tui_theme_setting(ava::config::XdgPaths const& paths, std::optional<std::string> theme)
 {
-  if (theme)
-  {
-    auto resolved = resolve_tui_theme_setting(paths, *theme, tui_display_settings_file(paths));
-    if (!resolved)
-      return std::unexpected(std::move(resolved.error()));
-    theme = resolved->theme;
-  }
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+  auto resolved = resolve_theme_name_for_store(paths, std::move(theme), document->path);
+  if (!resolved)
+    return std::unexpected(std::move(resolved.error()));
+  document->theme = std::move(*resolved);
+  return store_display_settings_document(*document);
+}
 
-  auto const path = tui_display_settings_file(paths);
-  return ava::core::write_text_file_atomic(path, serialize_tui_display_settings(theme), "TUI display settings");
+ava::core::VoidResult store_tui_show_images_setting(ava::config::XdgPaths const& paths, std::optional<bool> show_images)
+{
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+  document->show_images = show_images;
+  return store_display_settings_document(*document);
+}
+
+ava::core::VoidResult store_tui_image_width_setting(ava::config::XdgPaths const& paths, std::optional<std::size_t> image_width_cells)
+{
+  if (image_width_cells && (*image_width_cells < kMinTuiImageWidthCells || *image_width_cells > kMaxTuiImageWidthCells))
+    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", tui_display_settings_file(paths), "image_width_cells")
+                               .with_context("value", std::to_string(*image_width_cells)));
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+  document->image_width_cells = image_width_cells;
+  return store_display_settings_document(*document);
 }
 
 }  // namespace ava::app

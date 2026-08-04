@@ -108,6 +108,17 @@ void test_tui_terminal_image_support()
   expect(fallback_cell_size.columns == 10 && fallback_cell_size.rows == 5 && square_cell_size.columns == 10 && square_cell_size.rows == 10,
          "terminal image sizing documents the 9x18 fallback cell constraint and honors explicit cell dimensions when supplied");
 
+  auto const portrait = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 100, .height_px = 400}, 40, 20,
+                                                            ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 20});
+  auto const landscape = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 400, .height_px = 100}, 40, 20,
+                                                             ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 20});
+  auto const tiny = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 1, .height_px = 1}, 40);
+  auto const extreme = ava::tui::calculate_image_cell_size(ava::tui::ImageDimensions{.width_px = 10000, .height_px = 10}, 40, 10,
+                                                           ava::tui::TerminalCellDimensions{.width_px = 10, .height_px = 20});
+  expect(portrait.columns <= 40 && portrait.rows <= 20 && landscape.columns <= 40 && landscape.rows <= 20 && tiny.columns >= 1 && tiny.rows >= 1 &&
+             extreme.columns <= 40 && extreme.rows <= 10,
+         "image aspect sizing remains stable for portrait, landscape, tiny, and extreme dimensions");
+
   std::string png(24, '\0');
   png[0] = static_cast<char>(0x89);
   png[1] = 'P';

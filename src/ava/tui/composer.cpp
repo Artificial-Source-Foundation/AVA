@@ -1344,14 +1344,18 @@ struct PendingAttachmentRender
   std::vector<TerminalGraphicOverlay> graphics;
 };
 
-std::optional<ImageCellSize> pending_attachment_graphic_size(PendingAttachmentItem const& item, std::size_t width, std::size_t max_rows)
+std::optional<ImageCellSize> pending_attachment_graphic_size(PendingAttachmentItem const& item, std::size_t width, std::size_t max_rows,
+                                                             std::size_t image_width_cells)
 {
   if (!item.preview || item.preview->protocol == TerminalImageProtocol::None || !item.preview->base64_data || item.preview->base64_data->empty() ||
       max_rows == 0)
   {
     return std::nullopt;
   }
-  auto const max_width = width > 4 ? std::min<std::size_t>(60, width - 4) : std::size_t{1};
+  // image_width_cells comes from the application-owned display document and is clamped again to
+  // the current content viewport. Intrinsic aspect ratio still uses calculate_image_cell_size.
+  auto const configured_width = std::max<std::size_t>(1, image_width_cells);
+  auto const max_width = width > 4 ? std::min(configured_width, width - 4) : std::size_t{1};
   // TODO: Pass measured terminal cell pixel dimensions here once the TUI runtime has a safe
   // terminal-query seam. Until then image previews use calculate_image_cell_size's deterministic
   // fallback cell dimensions, so sizing remains bounded but not terminal-specific.
@@ -1398,6 +1402,9 @@ PendingAttachmentRender render_pending_attachment_lines(ComposerSnapshot const& 
   if (max_lines == 0 || snapshot.pending_attachments.empty())
     return render;
 
+  // Reserve preview rows whenever images are enabled so layout/line-count stays stable even when
+  // the caller only wants text measurement. Emit protocol bytes only when requested.
+  auto const reserve_preview_rows = snapshot.show_images;
   auto const visible_count = std::min(snapshot.pending_attachments.size(), max_lines);
   render.lines.reserve(max_lines);
   auto const start = snapshot.pending_attachments.size() - visible_count;
@@ -1416,9 +1423,9 @@ PendingAttachmentRender render_pending_attachment_lines(ComposerSnapshot const& 
       line += " " + std::string(kSgrDim) + "(next prompt)" + std::string(kSgrReset);
     }
     render.lines.push_back(detail::screen_surface_line(std::move(line), width));
-    if (index == snapshot.pending_attachments.size() - 1 && render.lines.size() < max_lines)
+    if (reserve_preview_rows && index == snapshot.pending_attachments.size() - 1 && render.lines.size() < max_lines)
     {
-      auto const graphic_size = pending_attachment_graphic_size(item, width, max_lines - render.lines.size());
+      auto const graphic_size = pending_attachment_graphic_size(item, width, max_lines - render.lines.size(), snapshot.image_width_cells);
       if (graphic_size)
       {
         auto const graphic_row = render.lines.size();

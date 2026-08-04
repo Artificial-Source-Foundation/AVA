@@ -566,6 +566,9 @@ struct ComposerSnapshot
   ToolPresentation tool_presentation = ToolPresentation::Rich;
   bool thinking_visible = true;
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  // Effective image presentation from the application-owned display document.
+  bool show_images = true;
+  std::size_t image_width_cells = 60;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

@@ -1675,6 +1675,28 @@ void run_tui_composer_rendering_tests_part_1()
              attachment_preview_frame.graphics[0].sequence.find("C=1") != std::string::npos &&
              std::ranges::none_of(attachment_preview_lines, [](std::string const& line) { return ava::tui::terminal_line_contains_image_sequence(line); }),
          "tui render frame reserves rows and carries trusted Kitty image graphics outside the text-only line API");
+  auto disabled_images_snapshot = attachment_preview_snapshot;
+  disabled_images_snapshot.show_images = false;
+  auto const disabled_images_frame = ava::tui::render_composer_frame(disabled_images_snapshot);
+  auto const disabled_images_lines = ava::tui::render_composer(disabled_images_snapshot);
+  expect(disabled_images_frame.graphics.empty() &&
+             std::ranges::any_of(disabled_images_lines,
+                                 [](std::string const& line) {
+                                   auto const visible = strip_sgr(line);
+                                   return visible.find("attached image screen.png") != std::string::npos;
+                                 }) &&
+             std::ranges::none_of(disabled_images_frame.lines, [](std::string const& line) { return ava::tui::terminal_line_contains_image_sequence(line); }),
+         "disabled show_images keeps textual attachment metadata and emits no graphics protocol bytes");
+  auto wide_image_snapshot = attachment_preview_snapshot;
+  wide_image_snapshot.image_width_cells = 12;
+  wide_image_snapshot.pending_attachments.front().preview->dimensions = ava::tui::ImageDimensions{.width_px = 1200, .height_px = 600};
+  auto const wide_image_frame = ava::tui::render_composer_frame(wide_image_snapshot);
+  auto narrow_viewport_snapshot = wide_image_snapshot;
+  narrow_viewport_snapshot.width = 20;
+  auto const narrow_viewport_frame = ava::tui::render_composer_frame(narrow_viewport_snapshot);
+  expect(wide_image_frame.graphics.size() == 1 && wide_image_frame.graphics.front().columns <= 12 && narrow_viewport_frame.graphics.size() == 1 &&
+             narrow_viewport_frame.graphics.front().columns <= 16,
+         "configured image width is honored and clamped again to the available viewport");
   auto centered_attachment_preview_snapshot = attachment_preview_snapshot;
   centered_attachment_preview_snapshot.width = 160;
   auto const centered_attachment_preview_frame = ava::tui::render_composer_frame(centered_attachment_preview_snapshot);

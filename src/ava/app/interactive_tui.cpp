@@ -62,13 +62,30 @@ int run_tui(ShellState state)
     *display_watch_state = std::move(*watched);
     return {};
   };
+  auto effective_display_settings =
+      std::make_shared<ava::app::TuiDisplaySettings>(ava::app::TuiDisplaySettings{.theme = std::nullopt,
+                                                                                  .custom_theme = std::nullopt,
+                                                                                  .show_images = true,
+                                                                                  .image_width_cells = ava::app::kDefaultTuiImageWidthCells,
+                                                                                  .path = ava::app::tui_display_settings_file(invocation_paths)});
+  auto effective_display_settings_mutex = std::make_shared<std::mutex>();
+  auto remember_effective_display_settings = [effective_display_settings, effective_display_settings_mutex](ava::app::TuiDisplaySettings settings) {
+    std::lock_guard lock(*effective_display_settings_mutex);
+    *effective_display_settings = std::move(settings);
+  };
+  auto copy_effective_display_presentation = [effective_display_settings, effective_display_settings_mutex]() {
+    std::lock_guard lock(*effective_display_settings_mutex);
+    return std::pair{effective_display_settings->show_images, effective_display_settings->image_width_cells};
+  };
   if (auto display_settings = ava::app::apply_tui_display_settings(invocation_paths); !display_settings)
   {
     append_status_line(keybind_status, display_settings.error().format());
   }
-  else if (auto watched = refresh_display_watch_state(); !watched)
+  else
   {
-    append_status_line(keybind_status, watched.error().format());
+    remember_effective_display_settings(*display_settings);
+    if (auto watched = refresh_display_watch_state(); !watched)
+      append_status_line(keybind_status, watched.error().format());
   }
   auto hotkeys = command_hotkeys_from_key_bindings(key_bindings);
   auto const initial_title_coordinator = ava::app::runtime::session_ts::rat(unlocked_session)->session_title_coordinator();
@@ -135,9 +152,10 @@ int run_tui(ShellState state)
                                .context_source_count = session_r->context_sources().size(),
                                .project_trust = project_trust_snapshot(session_r->project_trust())};
   };
-  auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog,
-                         &session_presentation](std::string status) {
+  auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog, &session_presentation,
+                         copy_effective_display_presentation](std::string status) {
     static_cast<void>(refresh_title_catalog());
+    auto const [show_images, image_width_cells] = copy_effective_display_presentation();
     auto delivery = application_catalog.delivery_snapshot();
     auto presentation = session_presentation();
     return ava::tui::TuiRuntimeStateSnapshot{
@@ -156,7 +174,9 @@ int run_tui(ShellState state)
         .workspace_catalog_generation = delivery.workspace_catalog_generation,
         .custom_themes = custom_theme_options(),
         .project_trust = presentation.project_trust,
-        .todos = todos_for_session(unlocked_session)};
+        .todos = todos_for_session(unlocked_session),
+        .show_images = show_images,
+        .image_width_cells = image_width_cells};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
   bool session_selector_named_only = false;
@@ -221,6 +241,7 @@ int run_tui(ShellState state)
   }
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto initial_presentation = session_presentation();
+  auto const [initial_show_images, initial_image_width_cells] = copy_effective_display_presentation();
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = std::move(initial_presentation.mode),
       .provider = std::move(initial_presentation.provider),
@@ -239,6 +260,8 @@ int run_tui(ShellState state)
       .workspace_catalog_generation = initial_catalog_snapshot.workspace_catalog_generation,
       .custom_themes = custom_theme_options(),
       .project_trust = initial_presentation.project_trust,
+      .show_images = initial_show_images,
+      .image_width_cells = initial_image_width_cells,
       .initial_todos = todos_for_session(unlocked_session),
       .key_bindings = key_bindings,
       .token_status_provider = [&unlocked_session]() { return token_status_for_session(unlocked_session); },
@@ -289,8 +312,8 @@ int run_tui(ShellState state)
                 .finish = [queue](bool canceled) { return queue->finish(canceled); }};
           },
       .on_submit =
-          [&state, &unlocked_session, &hotkeys, &refresh_display_watch_state, &refresh_session_tree_catalog, &refresh_title_catalog, &state_snapshot,
-           &application_catalog](
+          [&state, &unlocked_session, &invocation_paths, &hotkeys, &refresh_display_watch_state, &refresh_session_tree_catalog,
+           &refresh_title_catalog, &state_snapshot, &application_catalog, remember_effective_display_settings](
               std::string const& submitted, ava::tui::TuiSubmitContext context) {
             // Persistent rules resolve before the TUI fallback resolver in
             // context, so an exact durable Deny never reaches the in-memory
@@ -305,10 +328,10 @@ int run_tui(ShellState state)
                             context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch);
             if (is_display_settings_command(submitted))
             {
+              if (auto loaded = ava::app::load_tui_display_settings(invocation_paths); loaded)
+                remember_effective_display_settings(*loaded);
               if (auto watched = refresh_display_watch_state(); !watched)
-              {
                 add_output(line_result, watched.error().format());
-              }
             }
             auto const session_changed = run_queued_follow_ups_until_session_transition(
                 line_result, workspace_catalog_reload, session_id_before, context,
@@ -411,18 +434,20 @@ int run_tui(ShellState state)
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return ava::tui::TuiKeyBindingReloadResult{.key_bindings = key_bindings, .state = state_snapshot("keybindings reloaded")};
       },
-      .on_reload_display_settings = [&unlocked_session, &invocation_paths, &state_snapshot, &refresh_display_watch_state, &application_catalog,
-                                     &hotkeys]() -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .on_reload_display_settings = [&unlocked_session, &invocation_paths, &state_snapshot, &refresh_display_watch_state, &application_catalog, &hotkeys,
+                                     remember_effective_display_settings]() -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         auto loaded = ava::app::apply_tui_display_settings(invocation_paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
+        remember_effective_display_settings(*loaded);
         if (auto watched = refresh_display_watch_state(); !watched)
           return std::unexpected(std::move(watched.error()));
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot(display_theme_status("display theme reloaded"));
       },
       .on_maybe_reload_display_settings = [&unlocked_session, &invocation_paths, &state_snapshot, &application_catalog, &hotkeys, display_watch_state,
-                                           display_watch_mutex]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+                                           display_watch_mutex,
+                                           remember_effective_display_settings]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
         auto watched = ava::app::load_tui_display_settings_watch_state(invocation_paths);
         if (!watched)
           return std::unexpected(std::move(watched.error()));
@@ -434,6 +459,7 @@ int run_tui(ShellState state)
         auto loaded = ava::app::apply_tui_display_settings(invocation_paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
+        remember_effective_display_settings(*loaded);
         *display_watch_state = std::move(*watched);
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
@@ -577,8 +603,8 @@ int run_tui(ShellState state)
       .remember_permission_rule = [&unlocked_session](
                                        ava::permissions::PermissionPrompt const& prompt,
                                        ava::permissions::PermissionAction action) { return remember_permission_rule_for_prompt(unlocked_session, prompt, action); },
-      .on_settings_selected = [&unlocked_session, &state_snapshot, &refresh_display_watch_state, &application_catalog,
-                               &hotkeys](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+      .on_settings_selected = [&unlocked_session, &invocation_paths, &state_snapshot, &refresh_display_watch_state, &application_catalog, &hotkeys,
+                               remember_effective_display_settings](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value == "settings:keybindings.validate")
         {
           auto validated = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings validate"});
@@ -599,20 +625,37 @@ int run_tui(ShellState state)
           auto status = trusted->output.empty() ? std::string("trust action complete") : trusted->output.front();
           return state_snapshot(std::move(status));
         }
+        auto apply_display_command = [&](std::string command) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
+          auto ran = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = std::move(command)});
+          if (!ran)
+            return std::unexpected(std::move(ran.error()));
+          auto loaded = ava::app::load_tui_display_settings(invocation_paths);
+          if (!loaded)
+            return std::unexpected(std::move(loaded.error()));
+          remember_effective_display_settings(*loaded);
+          if (auto watched = refresh_display_watch_state(); !watched)
+            return std::unexpected(std::move(watched.error()));
+          application_catalog.refresh_values(unlocked_session, hotkeys);
+          auto status = ran->output.empty() ? std::string("display settings updated") : ran->output.front();
+          if (auto const newline = status.find('\n'); newline != std::string::npos)
+            status.erase(newline);
+          return state_snapshot(std::move(status));
+        };
+        if (value == "settings:images.on")
+          return apply_display_command("/images on");
+        if (value == "settings:images.off")
+          return apply_display_command("/images off");
+        if (value == "settings:images.reset")
+          return apply_display_command("/images reset");
+        if (value == "settings:image-width.reset")
+          return apply_display_command("/image-width reset");
+        constexpr std::string_view image_width_prefix = "settings:image-width.";
+        if (value.starts_with(image_width_prefix))
+          return apply_display_command(std::string("/image-width ") + std::string(value.substr(image_width_prefix.size())));
         constexpr std::string_view theme_prefix = "theme:";
         if (!value.starts_with(theme_prefix))
           return state_snapshot("view closed");
-        auto command = std::string("/theme ") + std::string(value.substr(theme_prefix.size()));
-        auto themed = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = std::move(command)});
-        if (!themed)
-          return std::unexpected(std::move(themed.error()));
-        if (auto watched = refresh_display_watch_state(); !watched)
-          return std::unexpected(std::move(watched.error()));
-        application_catalog.refresh_values(unlocked_session, hotkeys);
-        auto status = themed->output.empty() ? std::string("theme updated") : themed->output.front();
-        if (auto const newline = status.find('\n'); newline != std::string::npos)
-          status.erase(newline);
-        return state_snapshot(std::move(status));
+        return apply_display_command(std::string("/theme ") + std::string(value.substr(theme_prefix.size())));
       },
       .on_model_selected = [&unlocked_session, &invocation_paths, &state_snapshot](std::string_view value)
           -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {

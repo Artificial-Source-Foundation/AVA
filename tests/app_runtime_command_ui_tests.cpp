@@ -326,6 +326,84 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     expect(reset_theme && reset_theme->handled && !reset_theme->output.empty() && reset_theme->output[0].find("Reset TUI theme") != std::string::npos &&
                reset_loaded_theme && !reset_loaded_theme->theme && active_theme.kind == ava::tui::TuiThemeKind::Dark && active_theme.badge == "built-in",
            "command dispatcher /theme reset clears the persisted TUI theme and returns to the built-in default");
+
+    // Wave 1 display document: theme-only legacy files keep image defaults.
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\"\n}\n");
+    auto legacy_defaults = ava::app::load_tui_display_settings(paths);
+    expect(legacy_defaults && legacy_defaults->theme && *legacy_defaults->theme == "light" && legacy_defaults->show_images &&
+               legacy_defaults->image_width_cells == 60 && !legacy_defaults->show_images_configured && !legacy_defaults->image_width_configured,
+           "theme-only legacy display.json uses show_images=true and image_width_cells=60 defaults");
+
+    auto missing_defaults = ava::app::load_tui_display_settings(paths);
+    std::error_code remove_display_error;
+    std::filesystem::remove(paths.ava_config_dir / "display.json", remove_display_error);
+    missing_defaults = ava::app::load_tui_display_settings(paths);
+    expect(missing_defaults && !missing_defaults->theme && missing_defaults->show_images && missing_defaults->image_width_cells == 60,
+           "missing display.json uses all effective image defaults");
+
+    auto images_status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images"});
+    expect(images_status && images_status->handled && !images_status->output.empty() && images_status->output[0].find("TUI images:") != std::string::npos &&
+               images_status->output[0].find("usage: /images [on|off|reset]") != std::string::npos,
+           "command dispatcher /images reports current visibility and usage");
+    auto images_off = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images off"});
+    auto theme_after_images = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/theme dark"});
+    auto width_set = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width 80"});
+    auto preserved = ava::app::load_tui_display_settings(paths);
+    auto preserved_document = ava::app::load_display_settings_document(paths);
+    expect(images_off && images_off->handled && theme_after_images && theme_after_images->handled && width_set && width_set->handled && preserved &&
+               preserved->theme && *preserved->theme == "dark" && !preserved->show_images && preserved->image_width_cells == 80 && preserved_document &&
+               preserved_document->theme && *preserved_document->theme == "dark" && preserved_document->show_images && !*preserved_document->show_images &&
+               preserved_document->image_width_cells && *preserved_document->image_width_cells == 80,
+           "alternating theme/image setters preserve every recognized display field");
+
+    write_app_test_file(paths.ava_config_dir / "display.json",
+                        "{\n  \"theme\": \"light\",\n  \"show_images\": false,\n  \"image_width_cells\": 72,\n  \"future_flag\": true\n}\n");
+    auto with_unknown = ava::app::load_display_settings_document(paths);
+    auto store_width = ava::app::store_tui_image_width_setting(paths, 96);
+    auto after_unknown = ava::app::load_display_settings_document(paths);
+    std::ifstream after_unknown_input(paths.ava_config_dir / "display.json", std::ios::binary);
+    std::string after_unknown_text((std::istreambuf_iterator<char>(after_unknown_input)), std::istreambuf_iterator<char>());
+    expect(with_unknown && with_unknown->unknown_fields.size() == 1 && with_unknown->unknown_fields.front().first == "future_flag" && store_width &&
+               after_unknown && after_unknown->theme && *after_unknown->theme == "light" && after_unknown->show_images && !*after_unknown->show_images &&
+               after_unknown->image_width_cells && *after_unknown->image_width_cells == 96 && after_unknown->unknown_fields.size() == 1 &&
+               after_unknown->unknown_fields.front().first == "future_flag" && after_unknown_text.find("future_flag") != std::string::npos,
+           "unknown top-level display.json fields survive successful field-specific updates");
+
+    auto reset_images = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images reset"});
+    auto reset_width = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width reset"});
+    auto after_resets = ava::app::load_display_settings_document(paths);
+    expect(reset_images && reset_images->handled && reset_width && reset_width->handled && after_resets && after_resets->theme &&
+               *after_resets->theme == "light" && !after_resets->show_images && !after_resets->image_width_cells && after_resets->unknown_fields.size() == 1,
+           "each image reset removes only its key and preserves theme plus unknown fields");
+
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\",\n  \"show_images\": \"yes\"\n}\n");
+    auto invalid_show = ava::app::load_tui_display_settings(paths);
+    auto rejected_store = ava::app::store_tui_theme_setting(paths, "dark");
+    std::ifstream invalid_input(paths.ava_config_dir / "display.json", std::ios::binary);
+    std::string invalid_text((std::istreambuf_iterator<char>(invalid_input)), std::istreambuf_iterator<char>());
+    expect(!invalid_show && invalid_show.error().format().find("show_images") != std::string::npos && !rejected_store &&
+               invalid_text.find("\"show_images\": \"yes\"") != std::string::npos,
+           "malformed recognized display fields reject load/update and leave the file unchanged");
+
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"image_width_cells\": 7\n}\n");
+    auto invalid_width_low = ava::app::load_tui_display_settings(paths);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"image_width_cells\": 161\n}\n");
+    auto invalid_width_high = ava::app::load_tui_display_settings(paths);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"image_width_cells\": 60.5\n}\n");
+    auto invalid_width_float = ava::app::load_tui_display_settings(paths);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"image_width_cells\": true\n}\n");
+    auto invalid_width_bool = ava::app::load_tui_display_settings(paths);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": 1\n}\n");
+    auto invalid_theme_type = ava::app::load_tui_display_settings(paths);
+    expect(!invalid_width_low && !invalid_width_high && !invalid_width_float && !invalid_width_bool && !invalid_theme_type &&
+               invalid_theme_type.error().format().find("theme") != std::string::npos,
+           "display settings reject out-of-range, float, bool, and wrong-type recognized fields");
+
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\"\n}\n");
+    auto bad_width_command = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width 200"});
+    expect(bad_width_command && bad_width_command->handled && !bad_width_command->output.empty() &&
+               bad_width_command->output[0].find("usage: /image-width <8..160>|reset") != std::string::npos,
+           "command dispatcher /image-width rejects out-of-range widths with usage");
   }
   auto details = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/details"});
   expect(details && details->handled && !details->output.empty() && details->output[0].find("default to Rich") != std::string::npos &&

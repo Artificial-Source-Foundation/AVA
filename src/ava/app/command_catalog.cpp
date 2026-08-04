@@ -37,6 +37,9 @@ std::vector<CommandCatalogEntry> const& command_catalog()
           .command = "/search", .description = "Find literal text in currently rendered TUI transcript items", .hint = "[query]", .category = "General"},
       CommandCatalogEntry{
           .command = "/theme", .description = "Persist the TUI display theme", .hint = "[dark|light|plain|custom-name|reset]", .category = "General"},
+      CommandCatalogEntry{.command = "/images", .description = "Persist TUI image preview visibility", .hint = "[on|off|reset]", .category = "General"},
+      CommandCatalogEntry{
+          .command = "/image-width", .description = "Persist TUI image preview width in cells", .hint = "<8..160>|reset", .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details",
                           .description = "Set or toggle Compact, Rich, or Expanded tool cards",

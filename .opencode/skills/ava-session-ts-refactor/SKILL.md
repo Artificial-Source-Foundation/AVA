@@ -25,6 +25,7 @@ Convert AVA session call sites carefully, one translation unit and one object ta
 - A function that passes `unlocked_PATTERN` (e.g `unlocked_session`) should already own or receive that unlocked wrapper. Never derive a `session_ts&` from a locked `Session&`; that direction is prohibited by design.
 - Use `unlocked_PATTERN` only while no `crat`, `rat`, or `wat` created from it is locked. Before passing the wrapper to code that locks it, release the existing guard with `CRITICAL_AREA_END_R(PATTERN)` or `CRITICAL_AREA_END_W(PATTERN)`.
 - Never retain a pointer, reference, `string_view`, iterator, span, or other view into `Session` storage across the end of its critical area. Copy values that must outlive the guard.
+- Never hide a `Session&` obtained through an access guard inside a callback capture. If the callback is guaranteed to run while the guard remains locked, capture the guard itself by reference and access the Session through it. This makes the callback's lifetime and locking dependency explicit, and use after `unlock()` fails immediately instead of silently racing through a retained `Session&`.
 - Use read access for const operations. Use write access only when mutation is required or an existing API takes `Session&`.
 - Treat a temporary access guard as protecting only its full expression. Use a named guard or a critical-area macro when several statements require access.
 
@@ -87,7 +88,40 @@ return run_prompt(unlocked_session, prompt, provider, transport, options);
 
 Audit every variable crossing `CRITICAL_AREA_END_*`. It must own its data and must not refer into the protected `Session`.
 
-### 3. Extract successful results early
+### 3. Capture access guards or unlocked wrappers, never `Session&`
+
+When a callback is created and consumed entirely inside one critical area, capture the access guard by reference:
+
+```cpp
+CRITICAL_AREA_BEGIN_R(session);
+options.callback = [&session_r] {
+  return session_r->store.session_id();
+};
+consume_callback_synchronously(options.callback);
+CRITICAL_AREA_END_R(session);
+```
+
+Do not capture the dereferenced Session:
+
+```cpp
+// Wrong: the callback can retain unguarded access after session_r is unlocked.
+options.callback = [&session = *session_r] {
+  return session.store.session_id();
+};
+```
+
+If the callback can outlive the critical area or is invoked after the guard is unlocked, end the critical area before creating it. Capture `unlocked_PATTERN` by reference and acquire the narrowest guard inside the callback:
+
+```cpp
+CRITICAL_AREA_END_R(session);
+options.callback = [&unlocked_session] {
+  return runtime::session_ts::rat(unlocked_session)->store.session_id();
+};
+```
+
+Such a callback must only be invoked when its caller does not already hold a `crat`, `rat`, or `wat` for the same wrapper, or it will self-deadlock.
+
+### 4. Extract successful results early
 
 When a creator returns `Result<session_ts>`, create the conventionally named unlocked variable immediately after checking the result, rather than immediately before its first critical area:
 
@@ -101,7 +135,7 @@ runtime::session_ts& unlocked_session(*unlocked_session_result);
 CRITICAL_AREA_BEGIN_W(session);
 ```
 
-### 4. Convert struct members when necessary
+### 5. Convert struct members when necessary
 
 If a caller only has a struct's `Session`, `Session&`, or `Session const&` member, convert that member respectively to the appropriate `session_ts`, `session_ts&`, or `session_ts const&` form. Remove a parallel `session_mutex` member because `session_ts` owns the mutex.
 
@@ -120,7 +154,7 @@ Then update construction and access:
 
 Do not add such an accessor for a single use.
 
-### 5. Trace signature cascades cautiously
+### 6. Trace signature cascades cautiously
 
 If the struct is initialized where only a locked `Session&` exists, the enclosing function may also need to accept `session_ts&`. Follow callers upward one step at a time.
 
@@ -139,6 +173,7 @@ Do not perform a broad cascade preemptively. Compile and review one translation 
 - [ ] Every unlocked-wrapper call occurs outside a locked guard.
 - [ ] Every session access occurs through a live `crat`, `rat`, or `wat`.
 - [ ] No reference or view into session storage survives an unlock.
+- [ ] Callbacks capture an access guard while used inside its critical area, or capture the unlocked wrapper and lock internally when used outside it; none capture a dereferenced `Session&`.
 - [ ] Read-only code uses read access.
 - [ ] Struct mutexes made redundant by `session_ts` were removed when that struct was converted.
 - [ ] No broader build or tests were run without permission.

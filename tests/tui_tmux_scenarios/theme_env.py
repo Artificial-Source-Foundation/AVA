@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from tui_smoke_helpers import (
     SmokeContext,
-    send_keys,
-    send_literal,
     tmux,
     wait_for,
 )
+from .common import open_settings_section
 
 
 def scenario_theme_env(ctx: SmokeContext) -> None:
@@ -43,11 +42,12 @@ def scenario_theme_env(ctx: SmokeContext) -> None:
         light_env_prefix,
     )
     wait_for(tmux_exe, theme_session, r"Type a message|live session", "light-theme initial TUI frame")
-    send_literal(tmux_exe, theme_session, "/settings")
-    wait_for(tmux_exe, theme_session, r"/settings", "light-theme settings command draft")
-    send_keys(tmux_exe, theme_session, "Enter")
-    light_settings_modal = wait_for(
-        tmux_exe, theme_session, r"ava-light|AVA_TUI_THEME", "light-theme settings modal"
+    light_settings_modal = open_settings_section(
+        tmux_exe,
+        theme_session,
+        "Display",
+        r"ava-light|AVA_TUI_THEME|Search display",
+        "light-theme display settings",
     )
     if "ava-light" not in light_settings_modal or "AVA_TUI_THEME" not in light_settings_modal:
         raise RuntimeError(f"settings modal did not report AVA_TUI_THEME=light\nscreen:\n{light_settings_modal}")
@@ -76,14 +76,12 @@ def scenario_theme_env(ctx: SmokeContext) -> None:
         r"Type a message|live session",
         "terminal-background theme initial TUI frame",
     )
-    send_literal(tmux_exe, background_theme_session, "/settings")
-    wait_for(tmux_exe, background_theme_session, r"/settings", "terminal-background settings command draft")
-    send_keys(tmux_exe, background_theme_session, "Enter")
-    background_theme_modal = wait_for(
+    background_theme_modal = open_settings_section(
         tmux_exe,
         background_theme_session,
-        r"ava-light|COLORFGBG",
-        "terminal-background settings modal",
+        "Display",
+        r"ava-light|COLORFGBG|Search display",
+        "terminal-background display settings",
     )
     if "ava-light" not in background_theme_modal or "COLORFGBG" not in background_theme_modal:
         raise RuntimeError(

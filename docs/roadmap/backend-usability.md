@@ -515,7 +515,7 @@ The backend provides owner-bound list, status, wait, result, cancel, and promoti
 | ID | Status |
 | --- | --- |
 | W2-001 | Fixed and validated 2026-07-20 |
-| W2-002 | Fixed and validated 2026-07-20 |
+| W2-002 | Fixed and validated 2026-08-03 |
 | W2-003 | Fixed and validated 2026-07-20 |
 | W2-004 | Fixed and validated 2026-07-20 |
 | W2-005 | Fixed and validated 2026-07-20 |
@@ -664,7 +664,7 @@ AVA adopts the useful behavior shape, not either project's architecture, source,
 
 - Completing the master plan's full M7 canonical prompt/tool-schema artifact and cache-prefix provenance system in this usability slice.
 - Rewriting or deleting old session records or copying OpenCode's mutable output-pruning behavior.
-- Automatic provider-generated branch summaries.
+- Automatic provider-generated branch summaries; the separately implemented direct-TUI abandoned-parent summary remains metadata-only and user-confirmed.
 - Silent provider/model fallback, hidden cross-provider calls, repeated overflow retries, or extension hooks that rewrite compaction input/results.
 
 ## Implementation Record — 2026-07-20

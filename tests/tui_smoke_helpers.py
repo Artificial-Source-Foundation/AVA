@@ -631,6 +631,16 @@ class SmokeContext:
         plugin_state_dir = self.state / "ava"
         plugin_state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         plugin_state_dir.chmod(0o700)
+        # Existing scenarios expect an idle composer. Only setup_wizard exercises fresh auto-open.
+        # Cover primary/active/restore trusted HOMEs used by multi-root scenarios.
+        if self.scenario != "setup_wizard":
+            for state_home in (self.state, self.active_state, self.restore_state):
+                ava_state = state_home / "ava"
+                ava_state.mkdir(parents=True, exist_ok=True, mode=0o700)
+                ava_state.chmod(0o700)
+                marker = ava_state / "onboarding.json"
+                if not marker.exists():
+                    marker.write_text('{"version":1,"status":"skipped"}\n', encoding="utf-8")
         plugin_state_dir.joinpath("plugin-enablement.json").write_text(
             json.dumps(
                 {

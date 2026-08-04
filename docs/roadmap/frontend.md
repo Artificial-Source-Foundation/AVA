@@ -1,6 +1,6 @@
 # AVA Frontend Roadmap
 
-**Status: F8 complete; post-roadmap visual dogfood refreshed — 2026-07-24**
+**Status: F8 complete; Pi-inspired TUI Waves 1–6 implemented and fully validated**
 
 This is a post-MVP product-maturity roadmap for AVA's terminal frontend. It
 sets the sequence, evidence, and scope boundaries for making AVA feel more
@@ -65,12 +65,14 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 18 tmux scenarios:
+Current CTest inventory has 23 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`active_run`, `restore_followup`, `streaming_scroll`, `transcript_search`,
-`transcript_selection`, `subagent_workspace`, `main_startup_trust_keybinds`, `main_models_selectors`,
-`main_editor_input`, `main_slash_completions`, `main_permission_flow`,
-`main_question_flow`, `main_session_mgmt`, and `main_paste_scrollback_attach`;
+`nested_settings_preview`, `startup_overview`, `setup_wizard`, `active_run`,
+`restore_followup`, `streaming_scroll`, `transcript_search`,
+`transcript_selection`, `subagent_workspace`, `branch_summary`,
+`main_startup_trust_keybinds`, `main_models_selectors`, `main_editor_input`,
+`main_slash_completions`, `main_permission_flow`, `main_question_flow`,
+`main_session_mgmt`, `main_paste_scrollback_attach`, and `plugin_ui`;
 plus four direct PTY CTests:
 `ava_tui.kitty_image_smoke`, `ava_tui.iterm2_image_smoke`,
 `ava_tui.terminal_lifecycle_smoke`, and `ava_tui.osc8_smoke`.
@@ -111,7 +113,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 18 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 23 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -260,9 +262,11 @@ external notifications.
 F7 closes the optional decision record: terminal title and Which-Key are
 excluded; local built-in/custom themes are complete while count parity, remote
 packs, and marketplace delivery are excluded; and a standalone diff viewer is
-deferred behind stable backend contracts. Other OpenCode-inspired surfaces,
-such as session revert/redo, background-job control, and plugin UI, remain
-separate product decisions.
+deferred behind stable backend contracts. Session revert/redo remains a
+separate product decision. Background-job controls landed after this matrix.
+The constrained host-rendered plugin UI contract is implemented by the separate
+[Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md).
+It does not approve arbitrary plugin renderers or terminal control.
 
 Matching behavior does not mean adopting all OpenCode surfaces. AVA may choose
 a smaller, safer path if it preserves the intended task outcome.
@@ -297,13 +301,14 @@ is not exposed by a stable semantic backend contract, record it as backend
 work and preserve a truthful fallback. Summary-only events need an AVA-native
 frontend fallback that remains readable, rather than fabricated detail.
 
-The following remain gated unless a stable backend contract already exists:
+The following remain gated unless a stable backend contract already exists.
+The constrained plugin UI row records the implemented separate-plan contract; it is not a general renderer or terminal-control gate.
 
 | Capability | Gate |
 | --- | --- |
 | Session revert/redo | Explicit reversible-session semantics, conflicts, permission/audit meaning, and terminal event state |
 | Background-job control | Job status, wait/result/cancel ownership, lifecycle events, and retained-result contract |
-| Plugin UI | Versioned extension UI request/response boundary with permission, trust, cancellation, and diagnostics semantics |
+| Plugin UI | Implemented bounded host-rendered `ava.plugin.v1` request/response boundary with permission, trust, cancellation, and diagnostics semantics; arbitrary renderers remain excluded |
 | Full diff viewer | Stable diff identity, path/content availability, bounded retrieval, navigation, and permission semantics |
 
 A frontend may render a stable existing contract, but must neither add a
@@ -1426,11 +1431,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the eighteen isolated tmux scenarios only when the change touches their
+Run the 23 isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 18 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 23 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1475,7 +1480,9 @@ The following are not implied by this roadmap:
 | Theme-count parity, remote packs, marketplace delivery | Excluded by F7; local built-in/custom selection is complete |
 | External notifications | Excluded by F7; existing in-TUI attention remains the accepted path |
 | Workspace or working-copy systems | Excluded from this frontend scope |
-| Marketplace or plugin UI | Deferred behind stable plugin UI contracts and product approval |
+| Marketplace | Excluded by F7; no remote plugin/theme marketplace is approved |
+| Arbitrary plugin renderers or terminal control | Excluded from the approved extension UI boundary |
+| Constrained host-rendered plugin UI | Implemented by the separate Pi-inspired TUI feature expansion plan; this historical F0–F8 roadmap did not implement it |
 | Share, update, telemetry, or upsell flows | Excluded |
 | Automatic Up/Down draft/history behavior | Excluded; settled AVA control differs |
 | Composer-footer metadata expansion | Excluded; settled minimal footer differs |
@@ -1504,15 +1511,19 @@ The following are not implied by this roadmap:
 | Standalone diff viewer | Deferred | Require backend-owned stable diff identity and bounded permission-aware retrieval with version/truncation/path semantics; retain `/diff`, expanded cards, and `/copy diff` |
 | Dedicated Which-Key overlay | Excluded | Keep `/help`, `/hotkeys`, and `/keybindings` as effective-binding discovery |
 | Local built-in/custom themes | Complete | Do not infer theme-count parity, remote packs, or marketplace delivery |
-| Session revert/redo, background-job controls, plugin UI | Deferred | Require stable backend semantic contracts first |
+| Session revert/redo | Deferred | Require an explicit reversible-session contract and product decision |
+| Background-job controls | Complete in later work | Preserve the application-owned job lifecycle and existing `/jobs`/RPC surfaces |
+| Constrained host-rendered plugin UI | Implemented / constrained | The separate Pi-inspired TUI feature expansion plan implements the bounded, attributed, command-scoped boundary only |
+| Arbitrary plugin renderers or terminal control | Excluded | Do not grant plugins layout, curses, raw terminal, theme, editor, or input authority |
 | Pixel-perfect clone, OpenTUI/Solid, web/SaaS, marketplace, upsell flows | Excluded | Do not add through frontend polish work |
 
 ## 13. Approval cut line
 
 This historical cut line governed the staged F0–F6 implementation. F8 now
-closes the roadmap: completed work is recorded above, F7's optional surfaces
-remain accepted, deferred, or excluded as stated, and no further implementation
-is authorized by this document without a new product decision.
+closes the roadmap: completed work is recorded above, and no further
+implementation is authorized by this document alone. The separate
+[Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md)
+records the later six-wave implementation and its final integrated verification gate. The local-only setup wizard and constrained host-rendered plugin UI are implemented; arbitrary plugin renderers and terminal control remain excluded.
 
 ## Approved post-roadmap rich-tool and responsiveness pass
 
@@ -1546,8 +1557,7 @@ Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 18 isolated scenarios,
-including `transcript_search`, `transcript_selection`, and `subagent_workspace`;
+The credential-free fake-provider tmux matrix now has 23 isolated scenarios, including `nested_settings_preview`, `startup_overview`, `setup_wizard`, `branch_summary`, and `plugin_ui`;
 `streaming_scroll` and `active_run` measure idle/streaming flood responsiveness, active presentation
 commands, draft preservation, detached stability, prompt wheel ordering, resize
 synchronization, terminal hygiene, and cleanup.

@@ -19,16 +19,31 @@ from tui_smoke_helpers import (
 )
 
 
+def _screen_without_startup_overview(screen: str) -> str:
+    """Drop process-local startup overview chrome before parent-card leak scans."""
+    lines = []
+    for line in screen.splitlines():
+        plain = line.strip()
+        if "/overview" in plain:
+            continue
+        if plain.startswith("build ·") and "trust " in plain:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _assert_workspace_safe(screen: str, label: str, *, parent_card: bool = False) -> None:
     forbidden = ["job_", "session_", "/tmp/", "<task", "</task", "call_task_live", "ava-tui-fake", "moonshot"]
     if parent_card:
         forbidden.extend(["arguments provided", "Inspect delegated fixture"])
-    leaked = [value for value in forbidden if value in screen]
+    # Overview chrome intentionally names the active provider/model; scan the rest of the frame.
+    scanned = _screen_without_startup_overview(screen)
+    leaked = [value for value in forbidden if value in scanned]
     if leaked:
         raise RuntimeError(f"{label} leaked hidden backend data {leaked!r}\nscreen:\n{screen}")
     if "\x1b" in screen or any(ord(character) < 32 and character != "\n" for character in screen):
         raise RuntimeError(f"{label} contained ESC or unexpected C0 controls\nscreen:\n{screen}")
-    if re.search(r"(?:child|parent)[-_ ]session[-_ ]id", screen, re.IGNORECASE):
+    if re.search(r"(?:child|parent)[-_ ]session[-_ ]id", scanned, re.IGNORECASE):
         raise RuntimeError(f"{label} exposed session identity metadata\nscreen:\n{screen}")
 
 

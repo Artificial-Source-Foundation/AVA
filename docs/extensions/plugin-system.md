@@ -148,6 +148,42 @@ Permissions:
 - Event hooks require `plugin.event.observe` after launch permission.
 - A manifest `permissions` block is useful documentation for reviewers, but runtime enforcement is the permission prompt around process launch and contributed operations. The current core-service proxy slice additionally gates AVA-mediated read/search/status access behind explicit `proxy.read`, `proxy.search`, or `proxy.session` manifest capabilities.
 
+### Host-rendered foreground TUI UI
+
+`ava.plugin.v1` has one additive, bounded UI contract. A manifest opts into each surface independently with the exact capability string `ui.status`, `ui.widget`, `ui.select`, or `ui.confirm`; there is no generic `ui` capability. These capabilities authorize protocol negotiation only. They do not grant terminal access, a render callback, or permission to publish a surface.
+
+Authority is available only to the exact canonical `/plugin run <plugin-id> <command> [arguments_json]` invocation entered directly as the foreground command in the interactive TUI. The opaque authority is bound to that complete command, plugin id, command name, invocation id, live TUI runtime, and one absolute deadline no more than 120 seconds after minting. RPC, ACP, print, line-shell, non-TTY/headless, model-dispatched plugin-tool, event-hook, background, queued follow-up, synthetic, and plugin-to-plugin paths receive no UI authority. A UI record on any such path fails generically and terminates that plugin call; UI bytes are not copied into the response or event stream.
+
+For a UI-capable direct TUI command, AVA evaluates `plugin.execute` and `plugin.command.run` first. It then preflights the high-risk, default-Ask `plugin.ui.present` permission **before starting the child**, even if the child would never emit a UI record. Denial, cancellation, expiry, a missing exact enablement record, or a malformed/failed enablement read starts no process. While the command remains active, AVA re-reads the exact enablement file/workspace/plugin/scope tuple through a fail-closed predicate at a finite 25 ms cadence. Each snapshot is a no-follow, nonblocking regular-file read capped at 1 MiB; a missing, non-regular, oversized, malformed, or failed snapshot revokes authority. Revocation drives both process-runner and presenter cancellation, so an atomic external disable during command output, status/widget exchange, or a blocking modal closes the surface and terminates the child promptly. Revocation is latched for that invocation; re-enabling applies only to a later invocation. Because a foreground command owns the interactive dispatch loop, `/plugins disable` in the same AVA process cannot race that command; use another AVA process or another atomic writer to revoke it while active. A normal same-process disable after the command updates future-invocation state only.
+
+Every published surface has host-owned attribution on two separate fixed lines: `Plugin ID · <complete canonical id>` and `Command · <complete command name>`. AVA never hashes, ellipsizes, or prefix-truncates either identity. The coordinator and renderer share one display-cell fit predicate and the same dock/modal row geometry. Before applying a request, the coordinator proves that both complete identity lines and all mandatory host controls fit. If they do not, it returns `cancel` and publishes no plugin-controlled surface; because status/widget requests require `ack`, their call then fails as invalid or unauthorized. Titles, descriptions, labels, status text, and body lines may be display-cell truncated. Modal choice hit testing uses the same rendered row window. Fixed controls are `Ctrl+C stop · 120s max` for docks, plus `Enter select · Esc cancel` for selects and `Enter confirm · Esc cancel` for confirms. Confirmation is host-rendered and always opens with **Cancel** selected; plugins cannot change that default, and the attributed surface is never treated as an AVA permission/auth prompt.
+
+The plugin-to-host request records are LF-delimited JSON objects with these exact fields (unknown or duplicate fields are invalid):
+
+- `ui.status`: required string `id`, exact `type:"ui.status"`, and string `text` (empty is allowed). The only valid response is `ack`.
+- `ui.widget`: required string `id`, exact `type:"ui.widget"`, non-empty string `title`, and non-empty string array `lines`. The only valid response is `ack`.
+- `ui.select`: required string `id`, exact `type:"ui.select"`, non-empty string `title`, string `description`, and non-empty object array `choices`. Every choice has exact required string fields `id` and non-empty `label`, plus optional string `description`; choice ids must be unique. Valid responses are `select` with one declared choice id or `cancel`.
+- `ui.confirm`: required string `id`, exact `type:"ui.confirm"`, non-empty string `title`, and string `description`. Valid responses are `confirm` or `cancel`.
+
+AVA replies with an exact `ui.action` object. It always has string `id` matching the request, `type:"ui.action"`, and `action:"ack"|"select"|"confirm"|"cancel"`; `option_id` is required only for `select` and forbidden for every other action. Request ids and choice ids are 1–96 decoded UTF-8 bytes but in practice use the stricter ASCII id grammar: first character alphanumeric, remaining characters alphanumeric, `.`, `_`, or `-`.
+
+All sizes below count decoded UTF-8 bytes unless stated otherwise:
+
+- One UI JSONL record is at most 65,536 bytes and at most 128 JSON object/array levels deep.
+- One invocation accepts at most 64 plugin-to-host UI request records with unique request ids: at most one status, two widgets, and eight modal records total across selects and confirms.
+- Status text is at most 256 bytes.
+- Every title, description, label, optional choice description, and widget line is at most 256 bytes.
+- A widget has 1–8 lines and at most 2,048 aggregate bytes across its title and lines.
+- A select has 1–32 choices. A select or confirm has at most 8,192 aggregate payload bytes across its request id, title, description, and (for select) all choice ids, labels, and descriptions.
+- Host geometry further caps a modal at 160 display cells by 22 rows and a dock at 12 rows; the current terminal/composer budget can make either smaller and therefore fail the mandatory-chrome fit check.
+- The authority deadline is absolute and at most 120 seconds. It covers permission preflight, startup, and every UI exchange rather than resetting per record; expiry immediately starts bounded presenter/process cleanup, whose teardown grace does not extend UI authority.
+
+Text must be shortest-form, well-formed UTF-8 representing Unicode scalar values; malformed sequences, overlong encodings, surrogates, and values above U+10FFFF are rejected. To keep terminal control out of host rendering, AVA rejects U+0000–U+001F, U+007F–U+009F (including ESC and C1), U+061C, U+200E–U+200F, U+2028–U+2029, U+202A–U+202E, and U+2066–U+206F, whether supplied as raw UTF-8 or JSON escapes. This contains escaped CSI/OSC/control payloads and bidi reordering controls before presentation. Errors are generic and do not echo the raw record, raw UI text, enablement path, or underlying enablement parse/I/O detail.
+
+Status and up to two widgets exist only for the owning foreground invocation. One modal may be active at a time. Enter, Esc, Ctrl+C, permission denial, authority expiry, external disable, child exit, protocol failure, runtime shutdown, or invocation completion deterministically resolves/cancels pending interaction, terminates/reaps the child when needed, and invokes idempotent presenter close. A close racing coordinator polling is revalidated after queue transfer, so it cannot receive an acknowledgement or transiently publish UI after invalidation.
+
+UI state is ephemeral and is not written to sessions, RPC/ACP responses or events, exports, provider/model context, plugin diagnostics, or other persistence. The UI protocol grants no browser, network, auth, form, file, clipboard, secret, editor, shell, or arbitrary input access. Marketplace delivery, arbitrary markup/styles/geometry, native/in-process renderer code, forms or secret entry, browser/auth flows, and file pickers remain deferred. (The plugin executable itself remains local code under the separate `plugin.execute` trust model; UI authority does not sandbox or expand it.) Current evidence is deterministic protocol/coordinator/composer coverage plus the credential-free tmux smoke; this contract does not claim behavior on an untested real-terminal matrix.
+
 Local workflow:
 
 ```sh
@@ -338,7 +374,7 @@ Protocol rules:
 - Non-mutating event hooks: observe lifecycle events and optionally add diagnostics, but not rewrite provider requests in 1.0.
 - MCP servers: configured endpoints that AVA can launch and adapt into AVA tools. MCP server declarations in plugin manifests are deferred.
 
-Provider plugins, custom UI renderers, and prompt/provider interception can come later after the core event and audit model proves safe.
+Provider plugins, custom UI renderers, and prompt/provider interception remain deferred. The implemented additive host-rendered status/widget/select/confirm contract is the narrow slice approved by the [Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md); it does not authorize plugin terminal output, arbitrary geometry, styles, themes, editors, key handlers, or render callbacks.
 
 ### Pi Extension Capability Disposition
 
@@ -349,7 +385,7 @@ Provider plugins, custom UI renderers, and prompt/provider interception can come
 | Prompts | Implemented as static plugin prompt resources and command-registry entries, not automatic provider-request rewrites. |
 | Skills | Implemented as static plugin skill resources plus the built-in bounded `skill` tool. |
 | Events | Implemented as non-mutating event hooks; hooks cannot rewrite prompts, provider requests, or tool results in v1. |
-| UI/render slots | Deferred; arbitrary TUI slots/renderers are not loaded until a UI isolation/accessibility contract exists. |
+| UI/render slots | Bounded, attributed, host-rendered foreground-TUI status/widget/select/confirm records are implemented under the exact capabilities and authority rules above. Arbitrary TUI slots, markup, renderers, geometry, styles, and input capture remain deferred. |
 | Keybindings | Core AVA keybinding config exists; plugin-contributed keybindings are deferred to avoid hidden input capture and conflict complexity. |
 | Themes | Core built-in/custom theme files exist; plugin theme packages are deferred to the package/trust design. |
 | Custom providers/request interception | Deferred; provider auth, model metadata, and request mutation are security-sensitive and stay in core/config for MVP. |
@@ -365,6 +401,7 @@ Permission categories:
 - `plugin.tool.call`: call a plugin tool.
 - `plugin.command.run`: run a plugin command.
 - `plugin.event.observe`: subscribe to runtime events.
+- `plugin.ui.present`: high-risk Ask preflight for one exact UI-capable direct foreground TUI command; it grants no authority on any other route.
 - `mcp.server.launch`: launch a local MCP server process.
 - `mcp.server.connect`: connect to a configured MCP server.
 - `mcp.tool.call`: call an MCP tool.
@@ -374,7 +411,7 @@ Permission categories:
 Audit records emitted today include:
 
 - Permission request id.
-- Operation, such as `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, or `mcp.resource.read`.
+- Operation, such as `plugin.execute`, `plugin.tool.call`, `plugin.command.run`, `plugin.ui.present`, `plugin.event.observe`, `mcp.server.launch`, `mcp.server.connect`, `mcp.tool.call`, or `mcp.resource.read`.
 - Agent mode.
 - Model-facing tool or command name when applicable.
 - Policy action, reason, and risk.

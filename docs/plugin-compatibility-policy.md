@@ -9,11 +9,11 @@ The current compiled runtime version is still managed separately from this relea
 AVA treats these surfaces as the supported v1 extension contract:
 
 - Plugin manifests with `schema_version: 1` and `api_version: "ava.plugin.v1"`.
-- Out-of-process plugin JSONL records for `initialize`, `tool.call`, `command.call`, `event.observe`, and `cancel`.
+- Out-of-process plugin JSONL records for `initialize`, `tool.call`, `command.call`, `event.observe`, and the additive host-rendered `ui.status`, `ui.widget`, `ui.select`, `ui.confirm`, and `ui.action` contract.
 - Static plugin contributions: `tools`, `commands`, `prompts`, `skills`, and `event_hooks`.
 - Plugin discovery and local enablement state for global and project plugin directories.
 - Provider-facing tool schema shape for enabled plugin tools and enabled MCP tools.
-- Permission categories and audit data for plugin launch/calls/events and MCP launch/connect/tool calls.
+- Permission categories and audit data for plugin launch/calls/events, including the high-risk `plugin.ui.present` preflight, and MCP launch/connect/tool calls.
 - Stdio MCP `initialize`, `tools/list`, `tools/call`, `prompts/list`, and `prompts/get` through AVA-owned registry and command paths.
 
 The contract is intentionally narrow. Plugin code stays out-of-process, project plugins remain disabled until locally enabled, MCP servers are not trusted as safe by default, and side effects still require AVA permission checks when they go through AVA-owned operations.
@@ -31,6 +31,22 @@ The following changes are compatible with `ava.plugin.v1` when they preserve exi
 - Adding new MCP commands or transports behind explicit names and permissions while preserving current stdio tool/prompt behavior.
 
 Compatible additions should be covered by focused tests and, when they affect stable serialized shapes, by small deterministic golden fixtures.
+
+### Additive Host-Rendered UI Boundary
+
+The bounded host-rendered UI slice approved by the [Pi-inspired TUI feature expansion plan](plans/tui-pi-feature-expansion-plan.md) is now an additive `ava.plugin.v1` contract. Old manifests and every existing record retain their meaning. A new manifest opts into the exact independent capabilities `ui.status`, `ui.widget`, `ui.select`, and/or `ui.confirm`; there is no wildcard capability and none is implied by `commands`.
+
+The new requests have exact required fields: `ui.status` has `id`, `type`, and `text`; `ui.widget` has `id`, `type`, non-empty `title`, and 1–8 `lines`; `ui.select` has `id`, `type`, non-empty `title`, `description`, and 1–32 `choices`, whose objects have required unique `id` and non-empty `label` plus optional `description`; `ui.confirm` has `id`, `type`, non-empty `title`, and `description`. Unknown and duplicate fields are invalid. The host's exact `ui.action` has matching `id`, `type`, and `action`; status/widget require `ack`, select permits `select` plus a declared `option_id` or `cancel`, and confirm permits `confirm` or `cancel`. `option_id` exists only for `select`.
+
+The fixed limits are: 65,536 raw bytes and 128 JSON levels per record; 64 unique-id plugin-to-host UI requests per invocation; one status, two widgets, and eight select/confirm records; 96-byte ASCII-grammar request/choice ids; 256 decoded UTF-8 bytes for every text component; 2,048 aggregate title/line bytes per widget; 8,192 aggregate bytes per modal payload; and a single absolute invocation deadline of at most 120 seconds. A widget has at most eight lines and a select at most 32 choices. Host geometry caps modals at 160 display cells by 22 rows and docks at 12 rows, subject to a smaller terminal/composer budget. Text must be well-formed shortest-form UTF-8 with valid Unicode scalars. AVA rejects U+0000–U+001F, U+007F–U+009F, U+061C, U+200E–U+200F, U+2028–U+2029, U+202A–U+202E, and U+2066–U+206F in raw or escaped form, containing ESC/OSC/C1/control and bidi attacks before rendering.
+
+Every command context remains default-null. AVA mints opaque interaction authority only for the exact canonical direct foreground interactive-TUI `/plugin run` command, bound to full command/plugin/invocation identity, the live runtime, and the absolute deadline. RPC, ACP, print, line-shell, non-TTY/headless, model/tool, hook, background, queued follow-up, synthetic, and plugin-to-plugin routes cannot acquire it. A UI-capable eligible command receives `plugin.execute` and `plugin.command.run` checks first, then a high-risk default-Ask `plugin.ui.present` preflight before child launch even if it never emits UI. Denial, cancellation, expiry, disablement, or malformed/failed exact enablement reads start no child.
+
+While active, a fail-closed predicate re-reads the exact enablement file/workspace/plugin/scope tuple at a finite 25 ms cadence and drives both runner and presenter cancellation. Snapshots must be no-follow, nonblocking regular files no larger than 1 MiB; missing, non-regular, oversized, malformed, and failed reads revoke. External atomic disable therefore terminates output, status/widget, or blocking-modal work promptly and latches revocation; re-enable affects only a later invocation. Same-process `/plugins disable` cannot race a foreground command because that command owns interactive dispatch, so in-flight revocation requires another process/writer.
+
+The host owns all presentation and confirmation. It renders the complete canonical plugin id and command on separate fixed lines, never hashes or ellipsizes identity, and shares display-cell/row geometry between coordinator, renderer, and hit testing. If complete identity plus `Enter` where applicable, `Esc cancel`, `Ctrl+C stop`, and `120s max` cannot fit, the host returns `cancel` before publishing any surface; status/widget then fail because only `ack` is valid. Plugin body text may truncate. Confirm always defaults to Cancel. Close/poll races are revalidated after queue transfer, and cancellation, expiry, disable, child exit, protocol failure, shutdown, and command completion terminate/reap and close idempotently.
+
+UI content is ephemeral: it is excluded from sessions, RPC/ACP responses and events, exports, provider/model input, and plugin diagnostics. Failures do not echo raw UI, raw records, enablement paths, or underlying enablement errors. This contract grants no arbitrary terminal bytes, markup, renderer/native code, geometry/styles/themes, key capture, editor, browser, auth/permission impersonation, file or secret chooser, clipboard, forms, or free-form/secret input. Marketplace delivery and those richer surfaces remain deferred. The [plugin-system contract](extensions/plugin-system.md#host-rendered-foreground-tui-ui) is the full authoring reference. Evidence currently covers deterministic protocol/coordinator/composer behavior and a credential-free tmux smoke, not an untested real-terminal matrix.
 
 ## Breaking Changes
 

@@ -93,6 +93,15 @@ On final TUI exit (normal quit, SIGTERM teardown, or partial enter failure), AVA
 
 Use `/attach <path>` or Ctrl+V clipboard image import to queue PNG, JPEG, WebP, or GIF attachments. AVA displays a pending attachment row with MIME type, byte count, and preview mode. The next normal prompt sends the image to image-capable providers.
 
+Persist preview controls in `$XDG_CONFIG_HOME/ava/display.json`:
+
+```text
+/images on|off|reset
+/image-width <8..160>|reset
+```
+
+Defaults when keys are absent are `show_images=true` and `image_width_cells=60`. Width is clamped again to the current content viewport. When `show_images` is `false`, AVA keeps safe textual attachment metadata, does not load preview bytes, and emits no Kitty/iTerm2 graphics protocol bytes.
+
 AVA's preview capability is environment-detected:
 
 | Terminal environment | AVA preview behavior |
@@ -103,12 +112,13 @@ AVA's preview capability is environment-detected:
 | tmux or screen | Text-only metadata; image protocols disabled. |
 | VS Code, Windows Terminal, Alacritty, unknown terminals | Text-only image metadata. |
 | `NO_COLOR=1` or `AVA_TUI_THEME=plain` | Text-only metadata; graphics overlays are suppressed with other styling. |
+| `show_images=false` in `display.json` | Text-only metadata; no preview-byte load and no graphics emission. |
 
 Notes:
 
 - Direct terminal sessions are the intended path for inline previews.
 - iTerm2 protocol support is runtime/protocol support only. macOS packaging docs are deferred; this guide does not add a macOS install path.
-- If `/settings` reports `Image preview: text-only`, AVA will still attach the image; only the terminal-side preview is missing.
+- If `/settings` reports `Image preview: text-only` or `hidden`, AVA will still attach the image; only the terminal-side preview is missing or suppressed.
 - If Ctrl+V does not import an image on Linux, install or configure `wl-paste` for Wayland or `xclip` for X11, or use `/attach <path>` directly. `AVA_CLIPBOARD_IMAGE_FILE=/absolute/path.png` is reserved for deterministic smoke tests.
 
 References: [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/), [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), and [iTerm2 inline images](https://iterm2.com/documentation-images.html).

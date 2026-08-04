@@ -493,6 +493,7 @@ def expected_files(package_name: str) -> set[str]:
         "docs/interop/evidence/README.md",
         "docs/interop/evidence/zed-1.9.0-2026-07-14.md",
         "docs/product/mvp-coverage-ledger.md",
+        "docs/plans/tui-pi-feature-expansion-plan.md",
         "docs/schema/theme.schema.json",
     }
     return {f"{package_name}/bin/ava"} | {f"{package_name}/share/doc/ava/{doc}" for doc in docs}

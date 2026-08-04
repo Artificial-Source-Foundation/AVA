@@ -11,6 +11,7 @@ AVA uses XDG paths on Linux. Process environment inputs and script-only controls
 | Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
 | Project trust state | `$XDG_STATE_HOME/ava/project-trust.json` or `~/.local/state/ava/project-trust.json` |
+| First-run setup marker | `$XDG_STATE_HOME/ava/onboarding.json` or `~/.local/state/ava/onboarding.json` (versioned `completed`/`skipped` only; Finish/Skip write) |
 | Private diagnostic state | `$XDG_STATE_HOME/ava/diagnostics` or `~/.local/state/ava/diagnostics` |
 | Private runtime traces | `$XDG_STATE_HOME/ava/diagnostics/traces` or `~/.local/state/ava/diagnostics/traces` |
 | Local support exports | `$XDG_STATE_HOME/ava/support` or `~/.local/state/ava/support` |
@@ -19,7 +20,7 @@ AVA uses XDG paths on Linux. Process environment inputs and script-only controls
 
 AVA intentionally uses narrow domain-specific config files instead of a single Pi-style merged `settings.json`. Each file has one owner and validator: `providers.json` for user-defined runtime provider endpoints (see [custom providers](custom-providers.md)), `auth.json` for provider credentials, `models.json` for model registry overrides and scoped cycling, `display.json` plus `themes/*.json` for TUI appearance, `keybinds.json` for TUI actions, prompt files under the config/project resource directories, plugin/MCP/LSP config files, compaction config, trust state, and permission rules. This keeps secret handling, model context, executable resources, and UI preferences behind separate safety boundaries and avoids silently granting authority through a model-writable project settings file.
 
-Config writes that AVA performs validate the candidate before committing where possible. Display theme writes and keybinding init/import/set/reset use owner-only atomic replacement and reject symlink targets; invalid hand-edited files surface path-specific diagnostics through `/reload`, startup alerts, or the relevant validation command while the previous active runtime state remains in use. Project-local resources that can influence execution or stronger model context remain gated by `/trust project`; plain context files (`AGENTS.md`/`CLAUDE.md`) can load without trust, but project prompt commands, skills, plugins, MCP/LSP config, and project system prompt files are skipped until trusted.
+Config writes that AVA performs validate the candidate before committing where possible. Display theme/image writes and keybinding init/import/set/reset use owner-only atomic replacement and reject symlink targets; invalid hand-edited files surface path-specific diagnostics through `/reload`, startup alerts, or the relevant validation command while the previous active runtime state remains in use. Project-local resources that can influence execution or stronger model context remain gated by `/trust project`; plain context files (`AGENTS.md`/`CLAUDE.md`) can load without trust, but project prompt commands, skills, plugins, MCP/LSP config, and project system prompt files are skipped until trusted.
 
 Pi-style package/resource management (`packages list|install|remove|update|config` and `/packages`) is deferred. AVA does not install remote npm/git packages, self-update, or fetch marketplace resources because that needs source allowlists, provenance/signing, compatibility policy, rollback, and trust UX. Today users install resources manually by placing files in the documented global config directories or in a trusted project `.ava/` directory:
 
@@ -58,15 +59,31 @@ The TUI has built-in `dark`, `light`, and `plain` display modes. Persist a built
 /theme reset
 ```
 
-The setting is stored in `$XDG_CONFIG_HOME/ava/display.json`:
+Image preview visibility and maximum preview width (in terminal cells) are optional fields in the same file:
+
+```sh
+/images                 # show configured and effective visibility
+/images on
+/images off
+/images reset           # clear show_images and restore default on
+/image-width            # show configured and effective width
+/image-width 80
+/image-width reset      # clear image_width_cells and restore default 60
+```
+
+The settings are stored in `$XDG_CONFIG_HOME/ava/display.json`:
 
 ```json
 {
-  "theme": "light"
+  "theme": "light",
+  "show_images": true,
+  "image_width_cells": 60
 }
 ```
 
-After editing `display.json` by hand, the interactive TUI automatically reloads the file without restarting. `/reload theme` is still available for an explicit retry or diagnostic. Invalid JSON or unsupported theme values are reported with the config path and supported values, and the previous active theme remains in use.
+Defaults when keys are absent preserve historical behavior: automatic theme selection, `show_images=true`, and `image_width_cells=60`. Width accepts integers only in the inclusive range 8–160 and is clamped again to the current content viewport when rendering. Field-specific writes update or erase only the owned key and preserve every other recognized or unknown top-level field. A malformed recognized field rejects load and update, leaves the file unchanged, and keeps the last known-good presentation active.
+
+After editing `display.json` by hand, the interactive TUI automatically reloads the file without restarting. `/reload theme` is still available for an explicit retry or diagnostic. Invalid JSON, unsupported theme values, non-boolean `show_images`, or out-of-range/`float`/`string` `image_width_cells` values are reported with the config path, and the previous active presentation remains in use.
 
 Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lean Pi-style file with `name`, optional `vars`, eight required color roles, and optional surface backgrounds:
 
@@ -94,6 +111,14 @@ Custom themes live under `$XDG_CONFIG_HOME/ava/themes/*.json`. AVA accepts a lea
 
 Color values can be `""` for the terminal default, a 0-255 xterm color number, a 6-digit hex RGB string approximated to xterm-256, or a variable name from `vars`. Optional `toolBg` and `questionBg` each fall back to `composerBg` when omitted. Custom theme names must be unique, non-empty, and free of whitespace or path separators. `/settings` shows valid custom theme files as selectable theme rows; invalid custom files are ignored during discovery and reported when directly selected through `display.json` or `/theme`. An editor-facing schema for this AVA-native format lives at [`docs/schema/theme.schema.json`](../schema/theme.schema.json); the runtime loader remains the authoritative validator.
 
+Custom theme discovery and the interactive display watch are application-owned and bounded. AVA opens each candidate once with a no-follow descriptor read (no size-check/reopen race), rejects symlinks and special files, and applies these conservative limits from `display_settings.h`:
+
+- `kMaxTuiCustomThemeFileBytes` = 64 KiB per file
+- `kMaxTuiCustomThemeCandidates` = 64 candidate files/results
+- `kMaxTuiCustomThemeCatalogAggregateBytes` = 256 KiB aggregate read work per scan
+
+Candidate files are considered in normalized absolute-path order. Listing and the watch catalog keep the first valid file per theme name and omit later duplicates; configured/`/theme` named load remains fail-closed on duplicate names with an actionable local error. A single oversized, invalid, or unreadable unconfigured custom theme is skipped and must not fail a configured built-in display reload. Configured custom themes stay fail-closed: invalid or unreadable selected themes do not become authoritative.
+
 You can also override the theme for the current process:
 
 ```sh
@@ -102,7 +127,7 @@ AVA_TUI_THEME=plain ava
 NO_COLOR=1 ava
 ```
 
-`dark` is the default fallback ncurses palette. `light` selects a light built-in palette. `plain` disables ANSI styling. Precedence is `NO_COLOR`, then `AVA_TUI_THEME`, then `display.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback. The `/settings` TUI view reports the active display mode and source, and exposes selectable theme rows that write `display.json`. During an interactive TUI run, AVA polls `display.json` and the selected custom theme file and applies valid changes automatically.
+`dark` is the default fallback ncurses palette. `light` selects a light built-in palette. `plain` disables ANSI styling. Precedence is `NO_COLOR`, then an active `/settings` Display highlight preview (presentation-only), then `AVA_TUI_THEME`, then `display.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback. The `/settings` TUI opens a shallow nested root; the Display section reports the active display mode and source and exposes selectable theme/image rows. Highlighting previews without writing config; Enter confirms once through the same authoritative writers as `/theme`, `/images`, and `/image-width`. During an interactive TUI run, AVA polls `display.json` and the selected custom theme file and applies valid changes automatically.
 
 ## Terminal Hyperlinks Under tmux
 

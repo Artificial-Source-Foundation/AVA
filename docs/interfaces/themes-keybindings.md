@@ -10,7 +10,7 @@ AVA falls back to `~/.config`.
 | Setting | Path |
 | --- | --- |
 | AVA config directory | `$XDG_CONFIG_HOME/ava` or `~/.config/ava` |
-| Display theme selection | `$XDG_CONFIG_HOME/ava/display.json` |
+| Display theme, image visibility, and image width | `$XDG_CONFIG_HOME/ava/display.json` |
 | Custom theme files | `$XDG_CONFIG_HOME/ava/themes/*.json` |
 | Keybinding overrides | `$XDG_CONFIG_HOME/ava/keybinds.json` |
 
@@ -35,15 +35,37 @@ Persist the TUI theme with `/theme`:
 /theme reset           # clear the stored theme and return to automatic fallback
 ```
 
-The setting is stored as:
+The theme is stored in the shared display document:
 
 ```json
 {
-  "theme": "light"
+  "theme": "light",
+  "show_images": true,
+  "image_width_cells": 60
 }
 ```
 
-`/theme reset` writes an empty display object instead of deleting the file:
+`show_images` and `image_width_cells` are optional. When absent, AVA keeps the
+historical defaults `true` and `60`. `/theme`, `/images`, and `/image-width` each
+update or erase only their owned key and preserve every other field, including
+unknown top-level members.
+
+```text
+/images                 # show configured and effective visibility
+/images on|off|reset
+/image-width            # show configured and effective width
+/image-width <8..160>|reset
+```
+
+`image_width_cells` accepts integers only in the inclusive range 8–160. Booleans,
+strings, floats, negatives, overflow, and out-of-range integers are rejected.
+When images are disabled, AVA keeps textual attachment metadata, does not load
+preview bytes, and emits no Kitty/iTerm2 graphics. When enabled, the configured
+width is clamped again to the current content viewport while preserving aspect
+ratio.
+
+`/theme reset` removes only the theme key. If no other recognized or unknown
+fields remain, the file becomes an empty object instead of being deleted:
 
 ```json
 {
@@ -57,21 +79,31 @@ when AVA reads config, but the user-facing `/theme` form is `dark`, `light`,
 
 During an interactive TUI run, AVA watches `display.json` and the selected custom
 theme file. Valid hand edits are applied automatically; invalid JSON, unsupported
-theme names, duplicate custom theme names, or invalid custom theme files are
-reported with path-specific diagnostics while the previous active theme remains
-in use. Use `/reload theme` when you want an explicit retry or diagnostic.
+theme names, malformed `show_images`/`image_width_cells`, duplicate custom theme
+names, or invalid custom theme files are reported with path-specific diagnostics
+while the previous active presentation remains in use. Use `/reload theme` when
+you want an explicit retry or diagnostic. `/settings` opens a shallow nested root
+(Display, Models And Reasoning, Input And Keybindings, Sessions And Workspace,
+Tools And Extensions, Privacy And Setup, About). The Display section exposes
+theme and image visibility/width rows that call the same authoritative commands.
+Highlighting a previewable Display row applies a presentation-only overlay and
+never writes config; Enter confirms once through the application-owned writer.
+Esc, selector replacement, error, or shutdown restores the latest authoritative
+presentation. Mouse clicks in settings change selection/highlight only.
 
 ## Theme precedence and environment variables
 
 The active theme is resolved in this order:
 
 1. `NO_COLOR` with any non-empty value forces `plain` mode.
-2. `AVA_TUI_THEME=dark|light|plain` overrides persisted config for this process.
-3. `display.json` selects a built-in theme or a valid custom theme.
-4. Startup OSC 11 terminal-background detection selects `light` or `dark` when
+2. An active `/settings` Display highlight preview (presentation-only; cleared on
+   confirm/cancel/replacement/shutdown) sits above process and file config.
+3. `AVA_TUI_THEME=dark|light|plain` overrides persisted config for this process.
+4. `display.json` selects a built-in theme or a valid custom theme.
+5. Startup OSC 11 terminal-background detection selects `light` or `dark` when
    theme selection is still automatic.
-5. `COLORFGBG` background inference selects `light` or `dark` when available.
-6. Built-in `dark` is the fallback.
+6. `COLORFGBG` background inference selects `light` or `dark` when available.
+7. Built-in `dark` is the fallback.
 
 Examples:
 
@@ -119,6 +151,20 @@ Custom themes are global user files under `$XDG_CONFIG_HOME/ava/themes/*.json`.
 AVA matches by the theme file's `name` field, not by the filename. Names must be
 unique, non-empty, must not contain whitespace, `/`, or `\`, must not be `.` or
 `..`, and must not conflict with a built-in/reset name.
+
+Discovery and the 500 ms display watch are bounded and deterministic under app
+ownership (not the renderer). Each candidate is opened once with
+`O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOFOLLOW`, verified as a regular file via
+`fstat`, and read under `min(64 KiB per file, remaining 256 KiB aggregate budget)`
+with a 64-candidate cap. Symlinks and special files are skipped. Candidates are
+ordered by normalized absolute path; listing/watch catalog keep the first valid
+file per name as a bounded prefix. Configured or explicit named load fails closed
+on duplicates and also when discovery is incomplete (candidate cap or aggregate
+budget), even if one matching file appeared before the boundary—so a late
+duplicate cannot be silently ignored. The display watch performs one discovery
+pass and reuses it for both configured custom resolution and the catalog
+fingerprint. Oversized/invalid/unreadable unconfigured files are omitted and
+cannot break a configured built-in reload.
 
 Example:
 
@@ -185,7 +231,7 @@ but the theme system is not a full Pi clone.
 | Project-local themes | Not implemented. Themes are loaded only from the user's global XDG config directory. |
 | Package-delivered themes and package theme filters | Deferred with package/resource management. AVA does not install or activate theme packages. |
 | Remote package/theme marketplace | Deferred pending provenance, trust, compatibility, rollback, and update policy. |
-| First-run theme wizard | Deferred. Theme selection is available through `/theme` and `/settings`. |
+| Local-only first-run setup wizard with theme preview | Implemented. Interactive TTY TUI auto-opens when `$XDG_STATE_HOME/ava/onboarding.json` is absent and height ≥12; exact `/setup` always reopens. Theme highlighting reuses the Wave 2 presentation-only preview; Enter confirms once through the normal display writer. Finish/Skip alone persist onboarding status. No telemetry, browser, provider call, auth write, or session append. |
 
 ## Keybinding overrides
 
@@ -258,8 +304,8 @@ Common user-facing action groups:
 | Completion and palettes | `tui.input.tab` (`autocomplete_accept`), `history_prev`, `history_next`, `palette_prev`, `palette_next`, `mode_toggle` |
 | Select-list modals | `tui.select.up/down/pageUp/pageDown/confirm/cancel`, plus aliases like `select_prev`, `selectPrev`, `select_confirm`, and `selectConfirm` |
 | Transcript and tool details | `tui.editor.pageUp`, `tui.editor.pageDown`, `app.tools.expand` (`details_toggle`, `expandTools`), `jump_to_bottom` (default Ctrl+End), `message_prev` (default Alt+K), `message_next` (default Alt+J) |
-| Models and thinking | `app.model.select`, `app.model.cycleForward`, `app.model.cycleBackward`, `app.thinking.cycle`, `app.thinking.toggle`, `app.models.save`, `app.models.enableAll`, `app.models.clearAll`, `app.models.toggleProvider`, `app.models.reorderUp`, `app.models.reorderDown` |
-| Sessions and trees | `app.session.new/tree/fork/resume/togglePath/toggleSort/toggleNamedFilter/rename/delete/deleteNoninvasive`, `app.tree.foldOrUp/unfoldOrDown/editLabel/toggleLabelTimestamp/filter.labeledOnly/filter.all` |
+| Models and thinking | `app.model.select`, `app.model.cycleForward`, `app.model.cycleBackward`, `app.thinking.cycle`, `app.thinking.toggle`, `app.overview.toggle` (unbound by default; toggles the path-free startup overview), `app.models.save`, `app.models.enableAll`, `app.models.clearAll`, `app.models.toggleProvider`, `app.models.reorderUp`, `app.models.reorderDown` |
+| Sessions and trees | `app.session.new/tree/fork/resume/togglePath/toggleSort/toggleNamedFilter/rename/delete/deleteNoninvasive`, unbound-by-default `app.sessions.summarizeParent` for an eligible direct abandoned parent, `app.tree.foldOrUp/unfoldOrDown/editLabel/toggleLabelTimestamp/filter.labeledOnly/filter.all` |
 
 Run `/keybindings` to see the exact effective actions and keys for your build.
 `/help`, `/hotkeys`, and the keybindings selector lead with concise human

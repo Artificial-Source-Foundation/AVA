@@ -19,7 +19,7 @@ from tui_smoke_helpers import (
     wait_for_absent,
     wait_for_screen_change,
 )
-from .common import _finish_main, _main_session
+from .common import _finish_main, _main_session, close_settings, open_settings_section
 
 
 def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
@@ -264,16 +264,28 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(f"/copy without prior AVA messages did not report the empty copy state\nscreen:\n{empty_copy}")
     send_keys(tmux_exe, session, "C-u")
 
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft")
-    send_keys(tmux_exe, session, "Enter")
-    settings_modal = wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal")
+    settings_modal = open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"plain|NO_COLOR|Search display",
+        "settings display section for NO_COLOR",
+    )
     if "plain" not in settings_modal or "NO_COLOR" not in settings_modal:
         raise RuntimeError(f"settings modal did not report the active NO_COLOR plain mode\nscreen:\n{settings_modal}")
     save_evidence(root, "settings-plain-no-color", settings_modal)
     styled_settings = capture_styled(tmux_exe, session)
     if "\x1b[" in styled_settings:
         raise RuntimeError(f"NO_COLOR=1 settings modal still captured ANSI style escapes\nscreen:\n{styled_settings}")
+    close_settings(tmux_exe, session, "settings closed after plain display check")
+
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Sessions",
+        r"Search sessions|Project trust|Trust status",
+        "settings sessions section for trust rows",
+    )
     send_literal(tmux_exe, session, "trust")
     settings_trust_rows = wait_for(
         tmux_exe, session, r"filter\s+trust", "settings trust filtered rows"
@@ -288,13 +300,15 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(
             f"settings modal did not expose project trust status and actions\nscreen:\n{settings_trust_rows}"
         )
-    send_keys(tmux_exe, session, "Escape")
-    wait_for_absent(tmux_exe, session, r"Settings", "settings modal closed after trust rows")
+    close_settings(tmux_exe, session, "settings modal closed after trust rows")
 
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before trust status action")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before trust status action")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Sessions",
+        r"Search sessions|Trust status",
+        "settings sessions section before trust status action",
+    )
     send_literal(tmux_exe, session, "trust status")
     settings_trust_status_row = wait_for(
         tmux_exe, session, r"filter\s+trust status", "settings trust status filtered row"
@@ -315,10 +329,13 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
             f"settings trust status action did not render protected-resource diagnostics\nscreen:\n{settings_trust_status}"
         )
 
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding rows")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding rows")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Input",
+        r"Search input|Keybindings file",
+        "settings input section before keybinding rows",
+    )
     send_literal(tmux_exe, session, "Keybindings")
     wait_for(tmux_exe, session, r"filter\s+Keybindings", "settings keybinding filter state")
     settings_keybinding_rows = wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding filtered rows")
@@ -340,13 +357,42 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         )
     keybindings_row_number, keybindings_row_text = keybindings_row
     keybindings_column = max(1, len(keybindings_row_text) - len(keybindings_row_text.lstrip()) + 4)
+    # Click a non-selected sibling first so the later open-row click must move selection.
+    file_row = next(
+        (
+            (index + 1, line)
+            for index, line in enumerate(settings_keybinding_rows.splitlines())
+            if "Keybindings file" in line
+        ),
+        None,
+    )
+    if file_row is not None:
+        file_row_number, file_row_text = file_row
+        file_column = max(1, len(file_row_text) - len(file_row_text.lstrip()) + 4)
+        before_file = capture(tmux_exe, session)
+        send_literal(tmux_exe, session, f"\x1b[<0;{file_column};{file_row_number}M")
+        wait_for_screen_change(tmux_exe, session, before_file, "settings keybindings file mouse select")
+    before_mouse = capture(tmux_exe, session)
     send_literal(tmux_exe, session, f"\x1b[<0;{keybindings_column};{keybindings_row_number}M")
+    # Settings mouse clicks select/highlight only; Enter still confirms the route.
+    mouse_selected = wait_for_screen_change(
+        tmux_exe, session, before_mouse, "settings keybindings mouse selection redraw"
+    )
+    if "Search keybindings" in mouse_selected:
+        raise RuntimeError(
+            f"settings mouse click persisted/opened keybindings instead of selecting only\nscreen:\n{mouse_selected}"
+        )
+    if "Search input" not in mouse_selected and "Keybindings" not in mouse_selected:
+        raise RuntimeError(
+            f"settings mouse click left the input settings section unexpectedly\nscreen:\n{mouse_selected}"
+        )
+    send_keys(tmux_exe, session, "Enter")
     settings_opened_hotkeys = wait_for(
-        tmux_exe, session, r"Search keybindings|Toggle build/plan mode|mode_toggle", "settings mouse click opens keybindings view"
+        tmux_exe, session, r"Search keybindings|Toggle build/plan mode|mode_toggle", "settings Enter opens keybindings view"
     )
     if "Search keybindings" not in settings_opened_hotkeys:
         raise RuntimeError(
-            f"settings keybindings row mouse click did not open the active keybindings view\nscreen:\n{settings_opened_hotkeys}"
+            f"settings keybindings row Enter did not open the active keybindings view\nscreen:\n{settings_opened_hotkeys}"
         )
     send_literal(tmux_exe, session, "cursor_left")
     filtered_cursor_left = wait_for(
@@ -366,10 +412,13 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         )
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding validate")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding validate")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Input",
+        r"Search input|Keybindings file",
+        "settings input section before keybinding validate",
+    )
     send_literal(tmux_exe, session, "validate")
     wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding validate row")
     send_keys(tmux_exe, session, "Enter")
@@ -378,22 +427,35 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(f"settings keybinding validate row did not run validation\nscreen:\n{settings_validate}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding edit")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding edit")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Input",
+        r"Search input|Keybindings edit",
+        "settings input section before keybinding edit",
+    )
     send_literal(tmux_exe, session, "keybindings edit")
     wait_for(tmux_exe, session, r"Keybindings edit", "settings keybinding edit row")
     send_keys(tmux_exe, session, "Enter")
-    settings_edit_draft = wait_for(tmux_exe, session, r"/keybindings set", "settings keybinding edit drafts command")
-    if "/keybindings set" not in settings_edit_draft:
+    # Anchor on the composer draft row. Bare "/keybindings set" already appears in the
+    # settings row description, so an unanchored wait races into open_settings_root while
+    # the modal is still closing and can lose the leading "/s" under ESC coalescing.
+    settings_edit_draft = wait_for(
+        tmux_exe,
+        session,
+        r"(?m)^\s*│\s+/keybindings set(?:\s|$)",
+        "settings keybinding edit drafts command",
+    )
+    if not re.search(r"(?m)^\s*│\s+/keybindings set(?:\s|$)", settings_edit_draft):
         raise RuntimeError(f"settings keybinding edit row did not draft /keybindings set\nscreen:\n{settings_edit_draft}")
 
-    send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before keybinding reload")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before keybinding reload")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Input",
+        r"Search input|Keybindings reload",
+        "settings input section before keybinding reload",
+    )
     send_literal(tmux_exe, session, "reload")
     settings_reload_row = wait_for(
         tmux_exe, session, r"filter\s+reload[^\n]*\n(?:[^\n]*\n)*[^\n]*Keybindings reload", "settings keybinding reload row"
@@ -408,13 +470,16 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(f"settings keybinding reload row did not reload live bindings\nscreen:\n{settings_reload}")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before model selector")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before model selector")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Models",
+        r"Search models|Model selector",
+        "settings models section before model selector",
+    )
     send_literal(tmux_exe, session, "Model selector")
     settings_model_selector_row = wait_for(
-        tmux_exe, session, r"Model selector|/models selector", "settings model selector row"
+        tmux_exe, session, r"filter\s+Model selector", "settings model selector row"
     )
     if "Model selector" not in settings_model_selector_row or "openai/GPT" not in settings_model_selector_row:
         raise RuntimeError(
@@ -433,13 +498,16 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     wait_for_absent(tmux_exe, session, r"Select model|Search models", "settings-opened model selector canceled")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/settings")
-    wait_for(tmux_exe, session, r"/settings", "settings command draft before scoped models")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"Settings|Search settings", "settings modal before scoped models")
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Models",
+        r"Search models|Model cycle scope",
+        "settings models section before scoped models",
+    )
     send_literal(tmux_exe, session, "cycle scope")
     settings_scoped_model_row = wait_for(
-        tmux_exe, session, r"Model cycle scope|/scoped-models|Ctrl\+S", "settings scoped model row"
+        tmux_exe, session, r"filter\s+cycle scope", "settings scoped model row"
     )
     if (
         "Model cycle scope" not in settings_scoped_model_row

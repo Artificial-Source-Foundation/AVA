@@ -6,3 +6,4 @@ These documents describe proposed, approved, staged, or deferred work. They are 
 - [Tooling plan](tooling-plan.md): desired tool contracts and evolution.
 - [Package manager and resource package plan](package-manager-plan.md): approval-gated package architecture.
 - [Parallel ordinary tool execution plan](parallel-tools-plan.md): default-off staged scheduler work and rollout constraints.
+- [Pi-inspired TUI feature expansion plan](tui-pi-feature-expansion-plan.md): implemented image, settings, startup, setup, branch-summary, and constrained plugin-UI waves; final integrated verification remains pending.

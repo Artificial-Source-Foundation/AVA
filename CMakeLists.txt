@@ -271,6 +271,11 @@ install(
   COMPONENT ava
 )
 install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/plans/tui-pi-feature-expansion-plan.md"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/plans"
+  COMPONENT ava
+)
+install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/schema/theme.schema.json"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/schema"
   COMPONENT ava

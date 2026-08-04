@@ -10,6 +10,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
 )
+from .common import close_settings, open_settings_section
 
 
 def scenario_theme_persisted(ctx: SmokeContext) -> None:
@@ -40,12 +41,15 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
         persisted_theme_env_prefix,
     )
     wait_for(tmux_exe, persisted_theme_session, r"Type a message|live session", "persisted-theme initial TUI frame")
-    send_literal(tmux_exe, persisted_theme_session, "/settings")
-    wait_for(tmux_exe, persisted_theme_session, r"/settings", "persisted-theme settings command draft")
-    send_keys(tmux_exe, persisted_theme_session, "Enter")
-    wait_for(tmux_exe, persisted_theme_session, r"Settings|Search settings", "persisted-theme settings modal")
-    send_literal(tmux_exe, persisted_theme_session, "Theme light")
-    wait_for(tmux_exe, persisted_theme_session, r"Theme light", "persisted-theme filtered theme row")
+    open_settings_section(
+        tmux_exe,
+        persisted_theme_session,
+        "Display",
+        r"Search display|Theme dark|Theme light",
+        "persisted-theme display settings",
+    )
+    send_literal(tmux_exe, persisted_theme_session, "theme light")
+    wait_for(tmux_exe, persisted_theme_session, r"filter\s+theme light", "persisted-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
     applied_theme = wait_for(
         tmux_exe, persisted_theme_session, r"Stored TUI theme light", "settings theme selection applied"
@@ -71,23 +75,26 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
         persisted_theme_env_prefix,
     )
     wait_for(tmux_exe, persisted_theme_session, r"Type a message|live session", "persisted-theme restart TUI frame")
-    send_literal(tmux_exe, persisted_theme_session, "/settings")
-    wait_for(tmux_exe, persisted_theme_session, r"/settings", "persisted-theme restart settings draft")
-    send_keys(tmux_exe, persisted_theme_session, "Enter")
-    persisted_theme_modal = wait_for(
-        tmux_exe, persisted_theme_session, r"ava-light|display\.json", "persisted-theme settings modal after restart"
+    persisted_theme_modal = open_settings_section(
+        tmux_exe,
+        persisted_theme_session,
+        "Display",
+        r"ava-light|display\.json|Search display",
+        "persisted-theme display settings after restart",
     )
     if "ava-light" not in persisted_theme_modal or "display.json" not in persisted_theme_modal:
         raise RuntimeError(f"settings modal did not report persisted display.json light theme\nscreen:\n{persisted_theme_modal}")
-    send_keys(tmux_exe, persisted_theme_session, "Escape")
-    wait_for_absent(tmux_exe, persisted_theme_session, r"Search settings", "persisted-theme settings modal canceled")
+    close_settings(tmux_exe, persisted_theme_session, "persisted-theme settings modal canceled")
     send_keys(tmux_exe, persisted_theme_session, "C-u")
-    send_literal(tmux_exe, persisted_theme_session, "/settings")
-    wait_for(tmux_exe, persisted_theme_session, r"/settings", "custom-theme settings draft")
-    send_keys(tmux_exe, persisted_theme_session, "Enter")
-    wait_for(tmux_exe, persisted_theme_session, r"Settings|Search settings", "custom-theme settings modal")
-    send_literal(tmux_exe, persisted_theme_session, "Theme ocean")
-    wait_for(tmux_exe, persisted_theme_session, r"Theme ocean", "custom-theme filtered theme row")
+    open_settings_section(
+        tmux_exe,
+        persisted_theme_session,
+        "Display",
+        r"Search display|Theme ocean|Theme light",
+        "custom-theme display settings",
+    )
+    send_literal(tmux_exe, persisted_theme_session, "theme ocean")
+    wait_for(tmux_exe, persisted_theme_session, r"filter\s+theme ocean", "custom-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
     applied_custom_theme = wait_for(
         tmux_exe, persisted_theme_session, r"Stored TUI theme ocean", "settings custom theme selection applied"
@@ -97,6 +104,8 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     if '"theme": "ocean"' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"settings custom theme selection did not write display.json\npath:\n{display_config}")
     display_config.write_text('{\n  "theme": "plain"\n}\n', encoding="utf-8")
+    # Confirm keeps Display open; leave settings before drafting composer commands.
+    close_settings(tmux_exe, persisted_theme_session, "closed settings before reload theme")
     send_keys(tmux_exe, persisted_theme_session, "C-u")
     send_literal(tmux_exe, persisted_theme_session, "/reload theme")
     wait_for(tmux_exe, persisted_theme_session, r"/reload theme", "display theme reload draft")
@@ -107,16 +116,16 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     if "display theme reloaded: plain" not in reloaded_theme:
         raise RuntimeError(f"/reload theme did not report the externally edited plain theme\nscreen:\n{reloaded_theme}")
     send_keys(tmux_exe, persisted_theme_session, "C-u")
-    send_literal(tmux_exe, persisted_theme_session, "/settings")
-    wait_for(tmux_exe, persisted_theme_session, r"/settings", "reloaded-theme settings draft")
-    send_keys(tmux_exe, persisted_theme_session, "Enter")
-    reloaded_theme_modal = wait_for(
-        tmux_exe, persisted_theme_session, r"plain|display\.json", "settings modal after display theme reload"
+    reloaded_theme_modal = open_settings_section(
+        tmux_exe,
+        persisted_theme_session,
+        "Display",
+        r"plain|display\.json|Search display",
+        "settings modal after display theme reload",
     )
     if "plain" not in reloaded_theme_modal or "display.json" not in reloaded_theme_modal:
         raise RuntimeError(f"settings modal did not report reloaded display.json plain theme\nscreen:\n{reloaded_theme_modal}")
-    send_keys(tmux_exe, persisted_theme_session, "Escape")
-    wait_for_absent(tmux_exe, persisted_theme_session, r"Search settings", "reloaded-theme settings modal canceled")
+    close_settings(tmux_exe, persisted_theme_session, "reloaded-theme settings modal canceled")
     display_config.write_text('{\n  "theme": "light"\n}\n', encoding="utf-8")
     auto_reloaded_theme = wait_for(
         tmux_exe,
@@ -127,13 +136,11 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     if "display theme auto-reloaded: ava-light" not in auto_reloaded_theme:
         raise RuntimeError(f"display.json edit did not auto-reload the light theme\nscreen:\n{auto_reloaded_theme}")
     send_keys(tmux_exe, persisted_theme_session, "C-u")
-    send_literal(tmux_exe, persisted_theme_session, "/settings")
-    wait_for(tmux_exe, persisted_theme_session, r"/settings", "auto-reloaded-theme settings draft")
-    send_keys(tmux_exe, persisted_theme_session, "Enter")
-    auto_reloaded_theme_modal = wait_for(
+    auto_reloaded_theme_modal = open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        r"ava-light|display\.json",
+        "Display",
+        r"ava-light|display\.json|Search display",
         "settings modal after automatic display theme reload",
     )
     if "ava-light" not in auto_reloaded_theme_modal or "display.json" not in auto_reloaded_theme_modal:

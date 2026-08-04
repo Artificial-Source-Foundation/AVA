@@ -236,6 +236,7 @@ doc_sources=(
   docs/interop/evidence/README.md
   docs/interop/evidence/zed-1.9.0-2026-07-14.md
   docs/product/mvp-coverage-ledger.md
+  docs/plans/tui-pi-feature-expansion-plan.md
   docs/schema/theme.schema.json
 )
 

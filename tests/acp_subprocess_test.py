@@ -40,6 +40,12 @@ def environment(root):
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
         "AVA_SESSION_TITLES": "off",
+        # Match the libcwd suppression applied to ava_tests.* so ava's debug
+        # initialization cannot write to the streams this test parses. The
+        # libcwdrc below silences channels; AVA_NO_DEBUG_OUTPUT additionally
+        # skips NAMESPACE_DEBUG::init() in ava::app::debug_init().
+        "LIBCWD_NO_STARTUP_MSGS": "1",
+        "AVA_NO_DEBUG_OUTPUT": "1",
         # Debug builds must remain protocol-quiet even when an isolated HOME
         # has no developer libcwd configuration.
         "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),

@@ -25,6 +25,11 @@ def clean_environment(root):
         "TMPDIR": str(root),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
+        # Match the libcwd suppression applied to ava_tests.*: this clean env
+        # does not inherit os.environ, so set the pair explicitly to keep ava's
+        # debug initialization from writing to the streams this test inspects.
+        "LIBCWD_NO_STARTUP_MSGS": "1",
+        "AVA_NO_DEBUG_OUTPUT": "1",
     }
 
 

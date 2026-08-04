@@ -73,6 +73,11 @@ def main() -> int:
                 "XDG_STATE_HOME": str(temp / "state"),
                 "XDG_DATA_HOME": str(temp / "data"),
                 "NO_COLOR": "1",
+                # Match the libcwd suppression applied to ava_tests.* so ava's
+                # debug initialization cannot contaminate the wire output this
+                # contract check compares against.
+                "LIBCWD_NO_STARTUP_MSGS": "1",
+                "AVA_NO_DEBUG_OUTPUT": "1",
             }
         )
         workspace = temp / "workspace"

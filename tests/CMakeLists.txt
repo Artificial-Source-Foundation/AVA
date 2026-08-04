@@ -865,3 +865,21 @@ get_property(AVA_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
 if(AVA_REGISTERED_TESTS)
   set_property(TEST ${AVA_REGISTERED_TESTS} APPEND PROPERTY ENVIRONMENT "AVA_SESSION_TITLES=off")
 endif()
+
+# ava_cli.* and ava_tui.* drive the real `ava` binary (cmake -P shell drivers
+# or python harnesses). Give them the same libcwd-suppression pair ava_tests.*
+# gets above so ava::app::debug_init() skips NAMESPACE_DEBUG::init() and cannot
+# emit on the stdout/stderr those tests parse. The pair is inherited by the
+# cmake driver processes (and thus their `ava` child) and by python harnesses
+# that start from os.environ.copy(). ava_debug.libcwd_output_routing is
+# deliberately excluded: it runs libcwd_debug_output_test.py, which exercises
+# debug-output routing and must not suppress it.
+set(AVA_AVA_LAUNCHING_TESTS "")
+foreach(_ava_test IN LISTS AVA_REGISTERED_TESTS)
+  if(_ava_test MATCHES "^(ava_cli\\.|ava_tui\\.)")
+    list(APPEND AVA_AVA_LAUNCHING_TESTS "${_ava_test}")
+  endif()
+endforeach()
+if(AVA_AVA_LAUNCHING_TESTS)
+  set_property(TEST ${AVA_AVA_LAUNCHING_TESTS} APPEND PROPERTY ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
+endif()

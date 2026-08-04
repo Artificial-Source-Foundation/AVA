@@ -60,7 +60,13 @@ def set_winsize(fd: int, rows: int, cols: int) -> None:
 
 
 def allowlisted_environment() -> dict[str, str]:
-    return {key: os.environ[key] for key in ENVIRONMENT_ALLOWLIST if key in os.environ}
+    env = {key: os.environ[key] for key in ENVIRONMENT_ALLOWLIST if key in os.environ}
+    # Match the libcwd suppression applied to ava_tests.*: this sealed env does
+    # not inherit os.environ, so set the pair explicitly to keep ava's debug
+    # initialization from writing to the streams this smoke inspects.
+    env["LIBCWD_NO_STARTUP_MSGS"] = "1"
+    env["AVA_NO_DEBUG_OUTPUT"] = "1"
+    return env
 
 
 def strip_csi(text: bytes) -> bytes:

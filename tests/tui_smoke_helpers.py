@@ -53,6 +53,10 @@ def _compatibility_environment(*, home: pathlib.Path, tmpdir: pathlib.Path) -> d
         "TERM": "xterm-256color",
         "TMPDIR": str(tmpdir),
         "TZ": "UTC",
+        # Match the libcwd suppression applied to ava_tests.* so ava's debug
+        # initialization cannot write to the pane streams this harness inspects.
+        "LIBCWD_NO_STARTUP_MSGS": "1",
+        "AVA_NO_DEBUG_OUTPUT": "1",
     }
     for name in ("LANG", "LC_ALL", "LC_CTYPE"):
         value = os.environ.get(name)

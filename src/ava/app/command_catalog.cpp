@@ -31,6 +31,7 @@ std::vector<CommandCatalogEntry> const& command_catalog()
                           .aliases = {"/keybindings"},
                           .description = "Show, initialize, import, edit, reset, or validate effective TUI keybindings",
                           .category = "General"},
+      CommandCatalogEntry{.command = "/overview", .description = "Toggle the path-free startup resources overview", .category = "General"},
       CommandCatalogEntry{.command = "/settings", .description = "Open TUI settings", .category = "General"},
       CommandCatalogEntry{.command = "/sidebar", .description = "Open the current session overview", .category = "General"},
       CommandCatalogEntry{

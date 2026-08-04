@@ -228,7 +228,7 @@ bool test_changed_session_snapshot_resets_presentation()
   auto const previous_generation = presentation.snapshot.transcript_generation;
 
   auto changed = ava::tui::apply_runtime_state_snapshot_with_presentation_transition(
-      options, presentation, draft_state, renderer, transcript_search, subagent_workspace,
+      options, presentation, draft_state, renderer, transcript_search, subagent_workspace, active_select_list,
       ava::tui::TuiRuntimeStateSnapshot{.mode = "plan",
                                         .provider = "fake-next",
                                         .model = "new-model",
@@ -266,7 +266,7 @@ bool test_changed_session_snapshot_resets_presentation()
   presentation.sidebar.activity = {{.id = "activity-new", .label = "tool", .detail = "new activity"}};
   auto const unchanged_generation = presentation.snapshot.transcript_generation;
   auto unchanged = ava::tui::apply_runtime_state_snapshot_with_presentation_transition(
-      options, presentation, draft_state, renderer, transcript_search, subagent_workspace,
+      options, presentation, draft_state, renderer, transcript_search, subagent_workspace, active_select_list,
       ava::tui::TuiRuntimeStateSnapshot{.mode = "build",
                                         .provider = "fake-next",
                                         .model = "same-session-model-update",
@@ -1088,8 +1088,119 @@ bool test_display_settings_reload_poll_outcome_and_preview_staging()
   return applied_signal && hydrate_kept_prior_overlay && staged_before_render && rendered && esc_restores_new_authority && unchanged_signal;
 }
 
+bool test_display_settings_reload_rebuilds_open_startup_overview()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  set_term(screen);
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(24, 100));
+
+  ava::tui::clear_tui_theme_preview();
+  ava::tui::set_tui_config_theme("dark");
+
+  ava::tui::StartupOverviewSnapshot initial_overview{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-5.5",
+      .theme_name = "dark",
+      .theme_badge = "built-in",
+      .compact_line = "build · openai/gpt-5.5 · dark · /overview",
+  };
+  ava::tui::StartupOverviewSnapshot refreshed_overview = initial_overview;
+  refreshed_overview.theme_name = "sunrise";
+  refreshed_overview.theme_badge = "custom";
+  refreshed_overview.compact_line = "build · openai/gpt-5.5 · sunrise · /overview";
+
+  int applied_callback_count = 0;
+  ava::tui::TuiRuntimeOptions options;
+  options.mode = "build";
+  options.provider = "openai";
+  options.model = "gpt-5.5";
+  options.session_id = "session_overview_display_reload";
+  options.session_path = "/tmp/session_overview_display_reload.jsonl";
+  options.workspace = "/workspace";
+  options.startup_overview = initial_overview;
+  options.on_maybe_reload_display_settings = [&]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+    ++applied_callback_count;
+    return std::optional<ava::tui::TuiRuntimeStateSnapshot>{ava::tui::TuiRuntimeStateSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_overview_display_reload",
+        .session_path = "/tmp/session_overview_display_reload.jsonl",
+        .workspace = "/workspace",
+        .git_branch = "develop",
+        .status = "display theme auto-reloaded",
+        .custom_themes = {ava::tui::ThemeOptionItem{
+            .name = "sunrise",
+            .detail = "/tmp/ava/sunrise.json",
+            .palette =
+                ava::tui::TuiThemePalette{
+                    .text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 254, .composer_bg = 237},
+            .revision = "sunrise-v2"}},
+        .startup_overview = refreshed_overview,
+    }};
+  };
+
+  ava::tui::RuntimePresentationState presentation(options);
+  presentation.snapshot.startup_overview = initial_overview;
+  presentation.snapshot.select_list = ava::tui::overview_select_list_view(initial_overview);
+  presentation.snapshot.select_list->query = "theme";
+  presentation.snapshot.select_list->selected_item_index = 0;
+  ava::tui::RuntimeDraftState draft_state;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  auto active_select_list = ava::tui::ActiveSelectList::Overview;
+  std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
+  ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
+
+  auto const outcome = action_controller.maybe_reload_display_settings();
+  bool const rebuilt = outcome == ava::tui::DisplaySettingsReloadPollOutcome::Applied && applied_callback_count == 1 &&
+                       active_select_list == ava::tui::ActiveSelectList::Overview && presentation.snapshot.startup_overview &&
+                       presentation.snapshot.startup_overview->theme_name == "sunrise" && presentation.snapshot.select_list &&
+                       presentation.snapshot.select_list->query == "theme" &&
+                       std::ranges::any_of(presentation.snapshot.select_list->items,
+                                           [](auto const& item) { return item.group == "Display" && item.label == "Theme" && item.detail == "sunrise"; }) &&
+      // Open overview suppresses the idle transcript receipt; status still updates.
+                       presentation.snapshot.status == "display theme auto-reloaded" &&
+                       std::ranges::none_of(presentation.snapshot.transcript,
+                                            [](auto const& item) { return item.text.find("display theme auto-reloaded") != std::string::npos; });
+
+  // Outer idle path still owns settings-preview rebase + single final paint after Applied.
+  bool const rendered = renderer.render();
+
+  ava::tui::clear_tui_theme_preview();
+  ava::tui::set_tui_config_theme(std::nullopt);
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return rebuilt && rendered;
+}
+
 void run_tui_composer_rendering_tests_part_1()
 {
+  test_display_settings_reload_rebuilds_open_startup_overview();
   expect(test_display_settings_reload_poll_outcome_and_preview_staging(),
          "application-signaled display reload rebases and reapplies staged settings preview before one final paint");
   expect(
@@ -3520,4 +3631,113 @@ void run_tui_composer_rendering_tests_part_4()
              narrow_body.valid && narrow_without_body.valid && narrow_body.transcript_height < narrow_without_body.transcript_height &&
              narrow_scroll > narrow_without_scroll,
          "143xH active-todo layout still paints the narrow dock and reserves matching scroll/hit geometry");
+
+  // Startup overview collapsed chrome: 2 rows >=12, 1 row 8-11, hidden <8; footer unchanged.
+  {
+    ava::tui::StartupOverviewSnapshot overview{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-test",
+        .trust_decision = "trusted",
+        .overview_toggle_keys = {},
+        .compact_line = "build · openai/gpt-test · trust trusted · /overview",
+        .detail_line = "detail row",
+    };
+    ava::tui::ComposerSnapshot snap;
+    snap.width = 80;
+    snap.height = 24;
+    snap.startup_overview = overview;
+    snap.input = "";
+    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 2, "overview shows 2 collapsed rows at height >= 12");
+    auto const lines24 = ava::tui::render_startup_overview_collapsed_lines(snap, 80);
+    expect(lines24.size() == 2 && strip_sgr(lines24[0]).find("/overview") != std::string::npos && strip_sgr(lines24[1]).find("detail row") != std::string::npos,
+           "overview collapsed renderer emits compact+detail at roomy heights");
+    auto frame24 = ava::tui::render_composer(snap);
+    expect(frame24.size() == 24 && strip_sgr(frame24.front()).find("/overview") != std::string::npos &&
+               strip_sgr(frame24.back()).find("/overview") == std::string::npos,
+           "overview collapsed card occupies the first frame rows without changing total height or footer");
+    snap.height = 10;
+    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 1, "overview shows 1 collapsed row at height 8-11");
+    auto frame10 = ava::tui::render_composer(snap);
+    expect(frame10.size() == 10 && strip_sgr(frame10.front()).find("/overview") != std::string::npos, "short height still paints one overview row");
+    snap.height = 7;
+    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 0 && ava::tui::render_startup_overview_collapsed_lines(snap, 80).empty(),
+           "overview collapses away below 8 rows");
+    auto frame7 = ava::tui::render_composer(snap);
+    // Overview row budget keys off snapshot.height (hidden <8). Frame paint still clamps to kMinHeight.
+    expect(frame7.size() == 8 && strip_sgr(frame7.front()).find("/overview") == std::string::npos,
+           "sub-8 snapshot height hides overview chrome even when the frame paint clamps to min height");
+    // Modal replacement suppresses collapsed card.
+    snap.height = 24;
+    ava::tui::SelectListView list;
+    list.title = "Startup overview";
+    snap.select_list = list;
+    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 0, "expanded select-list replaces collapsed overview chrome");
+    // Mouse hit region shares renderer geometry.
+    snap.select_list.reset();
+    expect(ava::tui::startup_overview_card_contains_screen_position(snap, 1, 2) && !ava::tui::startup_overview_card_contains_screen_position(snap, 5, 2),
+           "overview mouse hit-testing uses the shared collapsed row window");
+
+    // Shared snapshot sync: open overview rebuilds from a refreshed DTO and preserves query/selection.
+    {
+      ava::tui::TuiRuntimeOptions options;
+      options.session_id = "session_overview_sync";
+      options.mode = "build";
+      options.provider = "fake";
+      options.model = "m1";
+      ava::tui::RuntimePresentationState presentation(options);
+      presentation.snapshot.startup_overview = overview;
+      presentation.snapshot.select_list = ava::tui::overview_select_list_view(overview);
+      presentation.snapshot.select_list->query = "mode";
+      presentation.snapshot.select_list->selected_item_index = 0;
+      auto active = ava::tui::ActiveSelectList::Overview;
+
+      ava::tui::StartupOverviewSnapshot refreshed = overview;
+      refreshed.model = "m2-refreshed";
+      refreshed.compact_line = "build · fake/m2-refreshed · /overview";
+      ava::tui::apply_runtime_state_snapshot_with_overview_sync(options, presentation, active,
+                                                                ava::tui::TuiRuntimeStateSnapshot{.mode = "build",
+                                                                                                  .provider = "fake",
+                                                                                                  .model = "m2-refreshed",
+                                                                                                  .session_id = "session_overview_sync",
+                                                                                                  .session_path = "/sessions/overview-sync.jsonl",
+                                                                                                  .workspace = "/workspace",
+                                                                                                  .git_branch = "main",
+                                                                                                  .status = "overview refreshed",
+                                                                                                  .startup_overview = refreshed});
+      expect(active == ava::tui::ActiveSelectList::Overview && presentation.snapshot.select_list && presentation.snapshot.select_list->query == "mode" &&
+                 presentation.snapshot.startup_overview && presentation.snapshot.startup_overview->model == "m2-refreshed" &&
+                 std::ranges::any_of(presentation.snapshot.select_list->items,
+                                     [](auto const& item) { return item.label == "Model" && item.detail == "m2-refreshed"; }),
+             "shared overview snapshot sync rebuilds an open list from the new DTO while preserving local query identity");
+
+      // Competing authority / explicit close.
+      ava::tui::close_startup_overview_presentation(presentation.snapshot, active);
+      expect(active == ava::tui::ActiveSelectList::None && !presentation.snapshot.select_list,
+             "prompt/competing authority closes ActiveSelectList::Overview and clears the select-list");
+
+      // Re-open then session transition must close overview.
+      presentation.snapshot.startup_overview = refreshed;
+      presentation.snapshot.select_list = ava::tui::overview_select_list_view(refreshed);
+      active = ava::tui::ActiveSelectList::Overview;
+      ava::tui::RuntimeDraftState draft_state;
+      ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+      ava::tui::RuntimeNavigationController navigation(options, presentation.snapshot, presentation.sidebar, draft_state, renderer);
+      ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active);
+      ava::tui::RuntimeSubagentWorkspaceController subagent_workspace(options, presentation.snapshot);
+      auto const session_changed = ava::tui::apply_runtime_state_snapshot_with_presentation_transition(
+          options, presentation, draft_state, renderer, transcript_search, subagent_workspace, active,
+          ava::tui::TuiRuntimeStateSnapshot{.mode = "plan",
+                                            .provider = "fake",
+                                            .model = "other",
+                                            .session_id = "session_overview_other",
+                                            .session_path = "/sessions/overview-other.jsonl",
+                                            .workspace = "/workspace",
+                                            .git_branch = "main",
+                                            .status = "session switched",
+                                            .startup_overview = refreshed});
+      expect(session_changed && active == ava::tui::ActiveSelectList::None && !presentation.snapshot.select_list,
+             "session transition closes an open startup overview through the shared presentation path");
+    }
+  }
 }

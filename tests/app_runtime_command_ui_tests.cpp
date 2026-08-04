@@ -6,12 +6,18 @@
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/startup_overview.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime.h"
 #include "ava/tui/theme.h"
 #include "ava/permissions/permission.h"
+#include "ava/core/fingerprint.h"
+#include "ava/core/json.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <ranges>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -879,6 +885,11 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
              missing_find_alias->output[0].find("/find <pattern>") != std::string::npos,
          "empty /find alias reports Pi-style usage instead of the native /glob name");
 
+  auto overview_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/overview"});
+  expect(overview_cmd && overview_cmd->handled && !overview_cmd->output.empty() && overview_cmd->output[0].find("/overview") != std::string::npos &&
+             overview_cmd->output[0].find("interactive TUI") != std::string::npos,
+         "command dispatcher /overview is a TUI-owned view with a non-mutating headless notice");
+
   auto plugins_usage = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins"});
   expect(plugins_usage && plugins_usage->handled && !plugins_usage->output.empty() && plugins_usage->output[0].find("usage: /plugins") != std::string::npos,
          "command dispatcher /plugins without a subcommand reports usage");
@@ -900,6 +911,294 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   expect(plugins_after_enable && plugins_after_enable->handled && !plugins_after_enable->output.empty() &&
              plugins_after_enable->output[0].find("com.example.project  enabled") != std::string::npos,
          "command dispatcher /plugins list reflects enablement state");
+}
+
+void test_startup_overview_snapshot_bounds_order_redaction()
+{
+  using ava::app::build_startup_overview_snapshot;
+  using ava::app::kMaxStartupOverviewInputSources;
+  using ava::app::kMaxStartupOverviewLabelBytes;
+  using ava::app::kMaxStartupOverviewNamedItems;
+  using ava::app::kMaxStartupOverviewResourceGroups;
+  using ava::app::StartupOverviewBuildInput;
+
+  auto default_bindings = ava::tui::default_key_bindings();
+  std::vector<ava::app::runtime::ContextSourceMetadata> context_sources;
+  std::vector<ava::app::runtime::FreshnessSourceMetadata> freshness_sources;
+  for (std::size_t i = 0; i < kMaxStartupOverviewInputSources + 8; ++i)
+  {
+    context_sources.push_back(ava::app::runtime::ContextSourceMetadata{
+        .path = std::filesystem::path("/private/home/user/.ava/AGENTS.md"),
+        .source_type = ava::context::ContextSourceType::Global,
+        .byte_count = 12,
+        .content_fingerprint = 1 + i,
+    });
+  }
+
+  auto push_freshness = [&](ava::app::runtime::FreshnessSourceKind kind, std::string scope, std::string source_id, std::string name, std::size_t bytes,
+                            std::uint64_t fingerprint) {
+    freshness_sources.push_back(ava::app::runtime::FreshnessSourceMetadata{.kind = kind,
+                                                                           .scope = std::move(scope),
+                                                                           .source_id = std::move(source_id),
+                                                                           .name = std::move(name),
+                                                                           .path = {},
+                                                                           .byte_count = bytes,
+                                                                           .content_fingerprint = fingerprint});
+  };
+  for (auto const* name : {"zeta-skill", "alpha-skill", "zeta-skill", "/tmp/evil", "api_key_holder"})
+    push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", name, name, 4, 42);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginManifest, "project", "com.example.plugin", "manifest", 8, 7);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "project", "com.example.plugin", "broken-prompt", 0, 0);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginSkill, "project", "com.example.plugin", "empty-ok", 0, ava::core::content_fingerprint(""));
+  auto long_name = std::string(kMaxStartupOverviewLabelBytes + 20, 'x');
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PromptCommand, "global", long_name, long_name, 3, 9);
+
+  // Multibyte / invalid sequences that would be split by naive byte resize.
+  std::string const utf8_cross = std::string(kMaxStartupOverviewLabelBytes - 1, 'a') + "\xE4\xBD\xA0";  // 你 straddles the byte cap
+  std::string const invalid_mid = std::string("ok") + std::string("\xC3", 1) + std::string(kMaxStartupOverviewLabelBytes, 'z');
+  std::string const control_mid = std::string("hi\x1b[31m") + std::string(kMaxStartupOverviewLabelBytes, 'q');
+  push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", "utf8-cross", utf8_cross, 4, 99);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", "invalid-mid", invalid_mid, 4, 100);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", "control-mid", control_mid, 4, 101);
+
+  StartupOverviewBuildInput input{
+      .mode = "build\x1b[31m",
+      .provider = "openai",
+      .model = "/secret/path/model",
+      .trust_decision = "trusted",
+      .project_resources = "enabled",
+      .context_sources = context_sources,
+      .freshness_sources = freshness_sources,
+      .theme_name = "ava-dark",
+      .theme_badge = "built-in",
+      .key_bindings = &default_bindings,
+  };
+
+  auto const first = build_startup_overview_snapshot(input);
+  auto const second = build_startup_overview_snapshot(input);
+  expect(first.compact_line == second.compact_line && first.detail_line == second.detail_line && first.skill_names == second.skill_names &&
+             first.plugin_ids == second.plugin_ids && first.resource_groups.size() == second.resource_groups.size(),
+         "startup overview builder is deterministic for identical inputs");
+  expect(first.model.empty(), "path-like model labels are redacted from the overview snapshot");
+  expect(first.compact_line.find("/secret") == std::string::npos && first.compact_line.find("api_key") == std::string::npos &&
+             first.compact_line.find("AGENTS.md") == std::string::npos && first.compact_line.find("/private") == std::string::npos &&
+             first.compact_line.find("\x1b") == std::string::npos,
+         "compact overview card never includes private leaves, paths, secrets, or terminal controls");
+  expect(first.instruction_source_count == context_sources.size(),
+         "overview reports the truthful instruction-source total without pretending the work cap is the total");
+  expect(first.compact_line.find(std::to_string(context_sources.size()) + " ctx") != std::string::npos &&
+             first.compact_line.find(std::to_string(context_sources.size()) + "+ ctx") == std::string::npos,
+         "overview compact chrome keeps the O(1) instruction total exact (no N+) when only group aggregation was capped");
+  expect(first.resource_groups.size() <= kMaxStartupOverviewResourceGroups, "overview bounds total resource groups");
+  auto instruction_group_count = std::size_t{0};
+  bool instruction_groups_lower_bound = false;
+  for (auto const& group : first.resource_groups)
+  {
+    if (group.kind == "instruction")
+    {
+      instruction_group_count += group.count;
+      instruction_groups_lower_bound = instruction_groups_lower_bound || group.count_is_lower_bound;
+      expect(group.count_is_lower_bound, "capped context input marks every instruction group count as a lower bound");
+    }
+  }
+  expect(instruction_group_count == kMaxStartupOverviewInputSources && instruction_groups_lower_bound,
+         "overview instruction grouping work is hard-capped and surfaces lower-bound metadata when the truthful total is larger");
+  expect(first.skill_names.size() <= kMaxStartupOverviewNamedItems && first.skill_names.size() >= 2 &&
+             std::ranges::find(first.skill_names, "alpha-skill") != first.skill_names.end() &&
+             std::ranges::find(first.skill_names, "zeta-skill") != first.skill_names.end() && std::ranges::is_sorted(first.skill_names) &&
+             std::ranges::none_of(first.skill_names,
+                                  [](std::string const& name) { return name.find('/') != std::string::npos || name.find("api_key") != std::string::npos; }),
+         "overview skill names are unique, sorted, redacted, and bounded");
+  expect(first.plugin_ids.size() == 1 && first.plugin_ids.front() == "com.example.plugin", "overview plugin ids stay path-free and deduped");
+  expect(first.plugin_resource_failure_count && *first.plugin_resource_failure_count == 1 && !first.plugin_resource_failure_count_is_lower_bound,
+         "overview counts only retained dual-zero plugin resource failures without a lower-bound flag when freshness fit in the cap");
+  expect(!first.prompt_command_names.empty() && first.prompt_command_names.front().size() <= kMaxStartupOverviewLabelBytes &&
+             first.prompt_command_names.front().ends_with("..."),
+         "overview labels are byte-bounded with an in-budget ellipsis");
+  for (auto const& name : first.skill_names)
+  {
+    expect(name.size() <= kMaxStartupOverviewLabelBytes && ava::core::json::is_valid_utf8(name),
+           "overview skill labels stay within the byte cap as valid UTF-8");
+    expect(!name.empty() && (static_cast<unsigned char>(name.back()) & 0xC0U) != 0xC0U, "overview labels never end on a split multibyte lead");
+  }
+  auto const utf8_skill = std::ranges::find_if(first.skill_names, [](std::string const& name) { return name.ends_with("..."); });
+  expect(utf8_skill != first.skill_names.end() && utf8_skill->size() == kMaxStartupOverviewLabelBytes &&
+             utf8_skill->find("\xE4\xBD\xA0") == std::string::npos && utf8_skill->find('\x1b') == std::string::npos,
+         "overview UTF-8/control-crossing labels truncate on a codepoint boundary and stay terminal-safe");
+  expect(!first.key_hints.empty() && first.key_hints.front().label == "overview" && first.key_hints.front().keys == "/overview",
+         "unbound overview toggle still surfaces the /overview key hint");
+  expect(first.overview_toggle_keys.empty(), "default bindings leave app.overview.toggle unbound");
+
+  auto bound = ava::tui::parse_key_bindings_json(R"({"app.overview.toggle":"F6"})");
+  expect(bound.has_value(), "overview toggle keybinding parses");
+  input.key_bindings = &(*bound);
+  input.model = "safe-model";
+  auto const with_key = build_startup_overview_snapshot(input);
+  expect(with_key.overview_toggle_keys == "F6" && with_key.compact_line.find("F6") != std::string::npos && with_key.model == "safe-model",
+         "overview key hints and compact chrome refresh from effective bindings and refreshed snapshot fields");
+
+  // Session titles/ids are never part of the overview surface (privacy).
+  auto overview_view = ava::tui::overview_select_list_view(first);
+  expect(std::ranges::none_of(overview_view.items, [](auto const& item) { return item.group == "Session"; }),
+         "overview expanded view omits session title/id/origin rows entirely");
+  expect(first.compact_line.find("Hello") == std::string::npos && first.detail_line.find("Hello") == std::string::npos &&
+             first.detail_line.find("sess-") == std::string::npos,
+         "overview collapsed chrome never includes free-form session titles or raw session ids");
+  expect(std::ranges::any_of(overview_view.items,
+                             [](auto const& item) {
+                               return item.group == "Resources" && item.label.find("instruction") != std::string::npos &&
+                                      item.detail.find('+') != std::string::npos;
+                             }) &&
+             std::ranges::any_of(overview_view.items,
+                                 [&](auto const& item) {
+                                   return item.group == "Instructions" && item.label == "Sources" && item.detail == std::to_string(context_sources.size()) &&
+                                          item.detail.find('+') == std::string::npos;
+                                 }),
+         "expanded overview renders instruction group lower bounds as N+ while keeping the exact source total");
+}
+
+void test_startup_overview_bounded_lower_bound_counts()
+{
+  using ava::app::build_startup_overview_snapshot;
+  using ava::app::kMaxStartupOverviewInputSources;
+  using ava::app::StartupOverviewBuildInput;
+
+  auto default_bindings = ava::tui::default_key_bindings();
+
+  // Context >64 with mixed kinds: every instruction group is a lower bound; total stays exact.
+  std::vector<ava::app::runtime::ContextSourceMetadata> context_sources;
+  for (std::size_t i = 0; i < kMaxStartupOverviewInputSources + 5; ++i)
+  {
+    auto const type = (i % 2 == 0) ? ava::context::ContextSourceType::Global : ava::context::ContextSourceType::Workspace;
+    context_sources.push_back(ava::app::runtime::ContextSourceMetadata{
+        .path = std::filesystem::path("/private/context/") / std::to_string(i),
+        .source_type = type,
+        .byte_count = 8,
+        .content_fingerprint = 100 + i,
+    });
+  }
+
+  // Freshness >64: observed group counts and plugin-failure count are lower bounds.
+  // First 64 include one plugin resource failure and successful plugin rows; past-cap
+  // failures must not be scanned, so the observed failure count is a truthful N+.
+  std::vector<ava::app::runtime::FreshnessSourceMetadata> freshness_sources;
+  auto push_freshness = [&](ava::app::runtime::FreshnessSourceKind kind, std::string scope, std::string source_id, std::string name, std::size_t bytes,
+                            std::uint64_t fingerprint) {
+    freshness_sources.push_back(ava::app::runtime::FreshnessSourceMetadata{.kind = kind,
+                                                                           .scope = std::move(scope),
+                                                                           .source_id = std::move(source_id),
+                                                                           .name = std::move(name),
+                                                                           .path = {},
+                                                                           .byte_count = bytes,
+                                                                           .content_fingerprint = fingerprint});
+  };
+  for (std::size_t i = 0; i < kMaxStartupOverviewInputSources - 2; ++i)
+    push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", "skill-" + std::to_string(i), "skill-" + std::to_string(i), 4, 10 + i);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "project", "plug.a", "broken-a", 0, 0);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginSkill, "project", "plug.a", "ok-a", 0, ava::core::content_fingerprint(""));
+  // Beyond the first-64 work cap: more skills and an additional plugin failure that must not
+  // be counted exactly, only force lower-bound marking of already-observed aggregates.
+  for (std::size_t i = 0; i < 6; ++i)
+    push_freshness(ava::app::runtime::FreshnessSourceKind::Skill, "global", "past-cap-skill-" + std::to_string(i), "past-cap-skill-" + std::to_string(i), 4,
+                   900 + i);
+  push_freshness(ava::app::runtime::FreshnessSourceKind::PluginPrompt, "project", "plug.b", "broken-past-cap", 0, 0);
+
+  StartupOverviewBuildInput input{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-test",
+      .trust_decision = "trusted",
+      .project_resources = "enabled",
+      .context_sources = context_sources,
+      .freshness_sources = freshness_sources,
+      .theme_name = "ava-dark",
+      .theme_badge = "built-in",
+      .key_bindings = &default_bindings,
+  };
+
+  auto const snapshot = build_startup_overview_snapshot(input);
+  expect(snapshot.instruction_source_count == context_sources.size(), "bounded lower-bound case keeps exact instruction total from span size");
+
+  bool saw_instruction_lower_bound = false;
+  bool saw_freshness_lower_bound = false;
+  for (auto const& group : snapshot.resource_groups)
+  {
+    if (group.kind == "instruction")
+    {
+      expect(group.count_is_lower_bound && group.count > 0, "context >64 marks instruction groups as positive lower bounds");
+      saw_instruction_lower_bound = true;
+    }
+    else
+    {
+      expect(group.count_is_lower_bound && group.count > 0, "freshness >64 marks every observed freshness group as a lower bound");
+      saw_freshness_lower_bound = true;
+    }
+  }
+  expect(saw_instruction_lower_bound && saw_freshness_lower_bound, "both context and freshness lower-bound groups are present when inputs exceed the cap");
+
+  expect(snapshot.plugin_resource_failure_count && *snapshot.plugin_resource_failure_count == 1 && snapshot.plugin_resource_failure_count_is_lower_bound,
+         "plugin-resource failure count from the capped freshness prefix is a lower bound (does not scan past-cap failures)");
+  expect(snapshot.detail_line.find("1+ plugin fails") != std::string::npos, "compact detail renders plugin-failure lower bounds as N+");
+
+  auto const view = ava::tui::overview_select_list_view(snapshot);
+  expect(std::ranges::any_of(view.items,
+                             [](auto const& item) {
+                               return item.group == "Resources" && item.label.find("instruction") != std::string::npos &&
+                                      item.detail.starts_with("0") == false && item.detail.find('+') != std::string::npos;
+                             }),
+         "expanded overview renders instruction group lower bounds as N+");
+  expect(std::ranges::any_of(view.items,
+                             [](auto const& item) {
+                               return item.group == "Resources" && item.label.find("skill") != std::string::npos && item.detail.find('+') != std::string::npos;
+                             }),
+         "expanded overview renders freshness group lower bounds as N+");
+  expect(std::ranges::any_of(view.items, [](auto const& item) { return item.group == "Plugins" && item.label == "Resource failures" && item.detail == "1+"; }),
+         "expanded overview renders plugin-failure lower bounds as N+");
+  expect(std::ranges::any_of(view.items,
+                             [&](auto const& item) {
+                               return item.group == "Instructions" && item.label == "Sources" && item.detail == std::to_string(context_sources.size());
+                             }),
+         "expanded overview keeps the exact instruction source total without a plus marker");
+
+  // Truthful 0+ when plugin resources were observed in the capped prefix with zero failures.
+  std::vector<ava::app::runtime::FreshnessSourceMetadata> zero_fail_freshness;
+  for (std::size_t i = 0; i < kMaxStartupOverviewInputSources; ++i)
+  {
+    zero_fail_freshness.push_back(ava::app::runtime::FreshnessSourceMetadata{
+        .kind = ava::app::runtime::FreshnessSourceKind::PluginSkill,
+        .scope = "project",
+        .source_id = "plug.zero",
+        .name = "ok-" + std::to_string(i),
+        .path = {},
+        .byte_count = 0,
+        .content_fingerprint = ava::core::content_fingerprint("ok"),
+    });
+  }
+  zero_fail_freshness.push_back(ava::app::runtime::FreshnessSourceMetadata{
+      .kind = ava::app::runtime::FreshnessSourceKind::PluginPrompt,
+      .scope = "project",
+      .source_id = "plug.zero",
+      .name = "past-cap-broken",
+      .path = {},
+      .byte_count = 0,
+      .content_fingerprint = 0,
+  });
+  StartupOverviewBuildInput zero_fail_input{
+      .mode = "build",
+      .provider = "openai",
+      .model = "gpt-test",
+      .context_sources = {},
+      .freshness_sources = zero_fail_freshness,
+      .key_bindings = &default_bindings,
+  };
+  auto const zero_fail = build_startup_overview_snapshot(zero_fail_input);
+  expect(zero_fail.plugin_resource_failure_count && *zero_fail.plugin_resource_failure_count == 0 && zero_fail.plugin_resource_failure_count_is_lower_bound,
+         "zero observed plugin failures under a capped freshness prefix remain a truthful 0+ lower bound");
+  expect(zero_fail.detail_line.find("0+ plugin fails") != std::string::npos, "compact detail can show truthful 0+ plugin-failure lower bounds");
+  auto const zero_view = ava::tui::overview_select_list_view(zero_fail);
+  expect(std::ranges::any_of(zero_view.items,
+                             [](auto const& item) { return item.group == "Plugins" && item.label == "Resource failures" && item.detail == "0+"; }),
+         "expanded overview can show truthful 0+ plugin-failure lower bounds");
 }
 
 }  // namespace ava::tests::app_runtime_tests

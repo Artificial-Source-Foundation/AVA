@@ -40,6 +40,8 @@ class RuntimeActionController final
   [[nodiscard]] bool open_reasoning_selector(bool chained_from_model_selection = false);
   [[nodiscard]] bool open_scoped_model_selector();
   [[nodiscard]] bool open_session_selector();
+  [[nodiscard]] bool toggle_startup_overview();
+  [[nodiscard]] ActiveSelectList& active_select_list() noexcept { return active_select_list_; }
   [[nodiscard]] bool open_fork_user_turn_selector(std::string_view initial_query = {});
   [[nodiscard]] bool open_copy_user_turn_selector(std::string_view initial_query = {});
   void cycle_model(bool forward);

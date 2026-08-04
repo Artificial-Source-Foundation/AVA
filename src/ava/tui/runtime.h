@@ -84,6 +84,7 @@ struct TuiRuntimeStateSnapshot
   // Effective display presentation owned by the application display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -174,6 +175,7 @@ struct TuiRuntimeOptions
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
   std::vector<TodoItem> initial_todos = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
@@ -260,6 +262,7 @@ enum class SettingsSection
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint = {});
+[[nodiscard]] SelectListView overview_select_list_view(StartupOverviewSnapshot const& overview, std::string footer_hint = {});
 [[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt);
 
 }  // namespace ava::tui

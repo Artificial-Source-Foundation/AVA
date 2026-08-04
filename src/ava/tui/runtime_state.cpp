@@ -27,7 +27,8 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
                             .custom_themes = options.custom_themes,
                             .project_trust = options.project_trust,
                             .show_images = options.show_images,
-                            .image_width_cells = options.image_width_cells};
+                            .image_width_cells = options.image_width_cells,
+                            .startup_overview = options.startup_overview};
   snapshot.active_run_hint = runtime_views::active_run_hint_for(options.key_bindings);
   return snapshot;
 }
@@ -152,13 +153,14 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
     ++snapshot.file_references_generation;
   snapshot.custom_themes = std::move(state.custom_themes);
   snapshot.project_trust = std::move(state.project_trust);
+  snapshot.context_source_count = state.context_source_count;
   snapshot.show_images = state.show_images;
   snapshot.image_width_cells = state.image_width_cells;
+  snapshot.startup_overview = std::move(state.startup_overview);
   if (!snapshot.show_images)
   {
     for (auto& attachment : snapshot.pending_attachments) attachment.preview.reset();
   }
-  snapshot.context_source_count = state.context_source_count;
 
   sidebar.mode = snapshot.mode;
   sidebar.provider = snapshot.provider;
@@ -174,10 +176,44 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   refresh_reasoning_status(options);
 }
 
+void close_startup_overview_presentation(ComposerSnapshot& snapshot, ActiveSelectList& active_select_list)
+{
+  if (active_select_list != ActiveSelectList::Overview)
+    return;
+  snapshot.select_list.reset();
+  active_select_list = ActiveSelectList::None;
+}
+
+void synchronize_startup_overview_presentation(ComposerSnapshot& snapshot, ActiveSelectList& active_select_list)
+{
+  if (active_select_list != ActiveSelectList::Overview)
+    return;
+  if (!snapshot.startup_overview)
+  {
+    close_startup_overview_presentation(snapshot, active_select_list);
+    return;
+  }
+  // Rebuild from the new DTO while preserving safe local filter/selection identity.
+  auto query = snapshot.select_list ? snapshot.select_list->query : std::string{};
+  auto selected = snapshot.select_list ? snapshot.select_list->selected_item_index : std::size_t{0};
+  auto view = overview_select_list_view(*snapshot.startup_overview);
+  view.query = std::move(query);
+  view.selected_item_index = clamp_select_list_selection(view, selected);
+  snapshot.select_list = std::move(view);
+}
+
+void apply_runtime_state_snapshot_with_overview_sync(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
+                                                     ActiveSelectList& active_select_list, TuiRuntimeStateSnapshot state)
+{
+  presentation_state.apply_runtime_state_snapshot(options, std::move(state));
+  synchronize_startup_overview_presentation(presentation_state.snapshot, active_select_list);
+}
+
 bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
                                                                RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                                                                TranscriptSearchController& transcript_search,
-                                                               RuntimeSubagentWorkspaceController& subagent_workspace, TuiRuntimeStateSnapshot state)
+                                                               RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list,
+                                                               TuiRuntimeStateSnapshot state)
 {
   auto& snapshot = presentation_state.snapshot;
   auto& sidebar = presentation_state.sidebar;
@@ -206,6 +242,12 @@ bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions
     snapshot.path_completion_force_active = false;
     snapshot.draft_scroll_offset = 0;
     snapshot.reasoning_feedback.reset();
+    // Expanded overview is process-local presentation; close on session switch.
+    close_startup_overview_presentation(snapshot, active_select_list);
+    if (snapshot.select_list)
+      snapshot.select_list.reset();
+    if (active_select_list != ActiveSelectList::None)
+      active_select_list = ActiveSelectList::None;
 
     sidebar.activity.clear();
     sidebar.modified_files.clear();
@@ -213,7 +255,7 @@ bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions
     sidebar.session_entry_count.reset();
   }
 
-  presentation_state.apply_runtime_state_snapshot(options, std::move(state));
+  apply_runtime_state_snapshot_with_overview_sync(options, presentation_state, active_select_list, std::move(state));
   return session_changed;
 }
 

@@ -324,7 +324,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
     return apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,
-                                                                     subagent_workspace_, std::move(runtime_state));
+                                                                     subagent_workspace_, action_controller_.active_select_list(), std::move(runtime_state));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
   auto refresh_active_context_status = [&]() { presentation_state_.refresh_active_context_status(options); };
@@ -447,7 +447,10 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       prompt_coordinator.fail_pending_requests();
     };
     auto service_pending_prompt = [&]() {
-      if (!prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() { transcript_search_.close_before_prompt(); }))
+      if (!prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() {
+            transcript_search_.close_before_prompt();
+            close_startup_overview_presentation(presentation_state_.snapshot, action_controller_.active_select_list());
+          }))
         return detail::PendingPromptServiceResult::None;
       if (drain_events(state) == RuntimeEventDrainResult::RenderFailed)
         return detail::PendingPromptServiceResult::Failed;

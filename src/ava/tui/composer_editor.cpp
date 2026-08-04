@@ -963,6 +963,7 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::TreeToggleLabelTimestamp:
     case TuiAction::TreeFilterLabeledOnly:
     case TuiAction::TreeFilterAll:
+    case TuiAction::OverviewToggle:
       return false;
   }
   return false;

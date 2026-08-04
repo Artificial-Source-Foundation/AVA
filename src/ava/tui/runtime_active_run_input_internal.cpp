@@ -3,6 +3,7 @@
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_active_run_state_internal.h"
 #include "ava/tui/runtime_commands_internal.h"
@@ -140,6 +141,12 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     detached_sidebar_snapshot.reset();
     snapshot.status = "session overview opened";
     return renderer_.request_render();
+  }
+  if (runtime_commands::exact_command(draft.text, "/overview"))
+  {
+    push_history(input_history, draft.text);
+    clear_local_command_draft();
+    return action_controller_.toggle_startup_overview();
   }
   if (draft.text.empty())
     return std::nullopt;

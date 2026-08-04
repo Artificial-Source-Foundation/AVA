@@ -338,6 +338,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     // Paint exactly once after overlay staging so the first frame is the final staged state.
     return render();
   };
+  auto toggle_startup_overview = [&]() -> bool {
+    if (settings_session_open)
+      close_settings();
+    return action_controller.toggle_startup_overview();
+  };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
   auto suspend_to_background = [&]() -> bool { return action_controller.suspend_to_background(); };
@@ -583,7 +588,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool announce) {
         auto status = state.status;
         static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state, draft_state, renderer, transcript_search,
-                                                                                    subagent_workspace, std::move(state)));
+                                                                                    subagent_workspace, active_select_list, std::move(state)));
         if (announce && !status.empty())
         {
           push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
@@ -1730,6 +1735,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       cycle_model(false);
     }
+    else if (is_action(TuiAction::OverviewToggle))
+    {
+      pending_escape_clear = false;
+      if (!toggle_startup_overview())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+    }
     else if (is_action(TuiAction::SessionResume) || is_action(TuiAction::SessionTree))
     {
       if (!open_session_selector())
@@ -1789,7 +1803,18 @@ int run_interactive_composer(TuiRuntimeOptions options)
       bool palette_claimed = false;
       if (begins_click)
       {
-        if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        if (startup_overview_card_contains_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        {
+          renderer.clear_transcript_selection();
+          draft_state.clear_selection();
+          if (!toggle_startup_overview())
+          {
+            terminal_write_failed = true;
+            break;
+          }
+          palette_claimed = true;
+        }
+        else         if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
         {
           renderer.clear_transcript_selection();
           draft_state.clear_selection();

@@ -26,6 +26,7 @@ namespace detail {
 
 struct ComposerSnapshot;
 struct TuiRuntimeOptions;
+enum class ActiveSelectList;
 class RuntimeRenderer;
 class TuiSessionGrantRegistry;
 
@@ -63,7 +64,8 @@ enum class SearchInputPromptDispatchResult
 class RuntimePromptCoordinator final
 {
  public:
-  RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants, RuntimeRenderer& renderer);
+  RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants, RuntimeRenderer& renderer,
+                           ActiveSelectList* active_select_list = nullptr);
   RuntimePromptCoordinator(RuntimePromptCoordinator const&) = delete;
   RuntimePromptCoordinator& operator=(RuntimePromptCoordinator const&) = delete;
 
@@ -111,6 +113,8 @@ class RuntimePromptCoordinator final
   ComposerSnapshot& snapshot_;
   TuiSessionGrantRegistry& session_grants_;
   RuntimeRenderer& renderer_;
+  // Optional: when set, prompt acquisition closes an open startup overview select-list.
+  ActiveSelectList* active_select_list_ = nullptr;
   std::mutex prompt_request_mutex_;
   std::deque<std::shared_ptr<PendingPermissionRequest>> pending_permission_requests_;
   std::deque<std::shared_ptr<PendingQuestionRequest>> pending_question_requests_;

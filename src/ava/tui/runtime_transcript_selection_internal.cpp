@@ -645,7 +645,8 @@ std::optional<TranscriptSelectionViewport> RuntimeTranscriptSelectionState::view
   auto const scroll = std::min(snapshot.transcript_scroll_offset, max_scroll);
   auto const visible_start =
       cache.layout.lines.size() > body.transcript_height ? (cache.layout.lines.size() - body.transcript_height - scroll) : std::size_t{0};
-  return TranscriptSelectionViewport{.transcript_height = body.transcript_height,
+  return TranscriptSelectionViewport{.overview_height = body.overview_height,
+                                     .transcript_height = body.transcript_height,
                                      .content_width = body.content_width,
                                      .canvas_left = body.canvas_left,
                                      .max_scroll_offset = max_scroll,
@@ -664,9 +665,12 @@ std::optional<TranscriptSelectionHit> RuntimeTranscriptSelectionState::hit_test(
     return std::nullopt;
   auto const content_column = column - viewport->canvas_left;
   auto const row_index = row - 1;
-  if (row_index >= viewport->transcript_height)
+  if (row_index < viewport->overview_height)
     return std::nullopt;
-  auto const absolute = viewport->visible_start + row_index;
+  auto const transcript_row = row_index - viewport->overview_height;
+  if (transcript_row >= viewport->transcript_height)
+    return std::nullopt;
+  auto const absolute = viewport->visible_start + transcript_row;
   if (absolute >= cache.layout.lines.size())
     return std::nullopt;
 
@@ -806,18 +810,31 @@ bool RuntimeTranscriptSelectionState::finish_header_click(ComposerSnapshot const
 }
 
 bool RuntimeTranscriptSelectionState::autoscroll_for_row(ComposerSnapshot& snapshot, TranscriptSelectionViewport const& viewport, std::size_t screen_row,
-                                                         std::size_t& transcript_scroll_offset)
+                                                         std::size_t& transcript_scroll_offset, bool treat_overview_as_top_edge)
 {
   if (viewport.transcript_height == 0 || screen_row == 0)
     return false;
   auto const row_index = screen_row - 1;
+  std::size_t transcript_row = 0;
+  if (row_index < viewport.overview_height)
+  {
+    // New presses still exclude overview chrome via hit_test. During an owned drag,
+    // overview rows (and anything above the first transcript row) act as the upper edge.
+    if (!treat_overview_as_top_edge)
+      return false;
+    transcript_row = 0;
+  }
+  else
+  {
+    transcript_row = row_index - viewport.overview_height;
+  }
   bool changed = false;
-  if (row_index == 0 && transcript_scroll_offset < viewport.max_scroll_offset)
+  if (transcript_row == 0 && transcript_scroll_offset < viewport.max_scroll_offset)
   {
     ++transcript_scroll_offset;
     changed = true;
   }
-  else if (row_index + 1 >= viewport.transcript_height && transcript_scroll_offset > 0)
+  else if (transcript_row + 1 >= viewport.transcript_height && transcript_scroll_offset > 0)
   {
     --transcript_scroll_offset;
     changed = true;
@@ -887,7 +904,11 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
 
     auto viewport = viewport_for(snapshot, layout_cache);
     if (viewport)
-      static_cast<void>(autoscroll_for_row(snapshot, *viewport, event.mouse_row, transcript_scroll_offset));
+    {
+      // During an owned drag (or extending an existing range), overview chrome is the top edge.
+      auto const treat_overview_as_top = drag_ == DragKind::Selecting || drag_ == DragKind::HeaderArmed || range_.has_value();
+      static_cast<void>(autoscroll_for_row(snapshot, *viewport, event.mouse_row, transcript_scroll_offset, treat_overview_as_top));
+    }
 
     // Re-hit after possible autoscroll against the same frozen authority.
     auto drag_hit = hit_test(snapshot, layout_cache, event.mouse_row, event.mouse_column, frozen_to_live_item_index_shift);
@@ -897,7 +918,8 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
       viewport = viewport_for(snapshot, layout_cache);
       if (!viewport || layout_cache.layout.lines.empty())
         return dragging() ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
-      auto const edge_row = event.mouse_row <= 1 ? std::size_t{1} : viewport->transcript_height;
+      auto const edge_row =
+          event.mouse_row <= viewport->overview_height + 1 ? viewport->overview_height + 1 : viewport->overview_height + viewport->transcript_height;
       auto const edge_column = std::clamp(event.mouse_column, viewport->canvas_left + 1, viewport->canvas_left + viewport->content_width);
       drag_hit = hit_test(snapshot, layout_cache, edge_row, edge_column, frozen_to_live_item_index_shift);
       if (!drag_hit)

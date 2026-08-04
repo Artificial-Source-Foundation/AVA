@@ -35,6 +35,11 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
     auto const begins_click = active_event.key == Key::MouseLeftPress || active_event.key == Key::MouseLeftClick;
     if (begins_click)
     {
+      if (startup_overview_card_contains_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
+      {
+        renderer_.clear_transcript_selection();
+        return to_input_handling(action_controller_.toggle_startup_overview());
+      }
       if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
       {
         renderer_.clear_transcript_selection();
@@ -159,6 +164,10 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_res
     snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
     snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
     return to_input_handling(renderer_.request_render());
+  }
+  if (is_action(active_event, TuiAction::OverviewToggle))
+  {
+    return to_input_handling(action_controller_.toggle_startup_overview());
   }
   if (is_action(active_event, TuiAction::VariantCycle))
   {

@@ -6,6 +6,8 @@ using namespace ava::tests::app_runtime_tests;
 void run_app_command_classification_tests()
 {
   test_command_classification();
+  test_startup_overview_snapshot_bounds_order_redaction();
+  test_startup_overview_bounded_lower_bound_counts();
   test_repository_build_test_headless_decision_matrix();
 }
 

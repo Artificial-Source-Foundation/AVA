@@ -224,6 +224,33 @@ void run_tui_transcript_selection_tests()
       handle(autoscroll_state, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), snapshot, scrolling_cache, &draft, scroll, never_toggle, never_toggle));
   expect(scroll == 1 && autoscroll_state.range(), "transcript selection drag beyond the top edge autoscrolls while retaining selection authority");
 
+  // Overview chrome: new presses stay excluded, but an owned drag treats overview rows as the upper autoscroll edge.
+  {
+    ava::tui::ComposerSnapshot overview_snapshot = snapshot;
+    overview_snapshot.width = 80;
+    overview_snapshot.height = 24;
+    overview_snapshot.startup_overview = ava::tui::StartupOverviewSnapshot{
+        .mode = "build",
+        .compact_line = "build · /overview",
+        .detail_line = "detail",
+    };
+    overview_snapshot.transcript_scroll_offset = 0;
+    auto overview_cache = selection_cache(scrolling_layout, overview_snapshot.transcript_generation);
+    ava::tui::RuntimeTranscriptSelectionState overview_drag;
+    std::size_t overview_scroll = 0;
+    // Press on overview chrome must not start selection.
+    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+                             never_toggle, never_toggle));
+    expect(overview_drag.empty() && overview_scroll == 0, "overview chrome excludes new transcript selection presses");
+    // Press on the first transcript row (below 2 overview rows => screen row 3), then drag into overview row 1.
+    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftPress, 3, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+                             never_toggle, never_toggle));
+    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+                             never_toggle, never_toggle));
+    expect(overview_scroll == 1 && overview_drag.range(),
+           "transcript selection drag into overview chrome autoscrolls at the upper edge while retaining selection authority");
+  }
+
   auto remapped_layout = header_layout;
   remapped_layout.lines = {"tool header"};
   remapped_layout.block_boundaries = {0, 1};

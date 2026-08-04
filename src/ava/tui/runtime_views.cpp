@@ -831,6 +831,107 @@ SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::str
   return runtime_views::build_hotkeys_select_list_view(bindings, std::move(footer_hint));
 }
 
+namespace {
+
+void push_overview_row(SelectListView& view, std::string group, std::string label, std::string detail = {}, std::string badge = {}, std::string value = {})
+{
+  if (label.empty() && detail.empty())
+    return;
+  if (value.empty())
+    value = group + ":" + label + ":" + detail;
+  view.items.push_back(SelectListItemView{.value = std::move(value),
+                                          .label = std::move(label),
+                                          .description = {},
+                                          .group = std::move(group),
+                                          .detail = std::move(detail),
+                                          .badge = std::move(badge),
+                                          .current = false,
+                                          .enabled = true,
+                                          .disabled_reason = {}});
+}
+
+}  // namespace
+
+SelectListView overview_select_list_view(StartupOverviewSnapshot const& overview, std::string footer_hint)
+{
+  SelectListView view{.title = "Startup overview",
+                      .subtitle = "Path-free runtime resources · read-only · Esc close",
+                      .items = {},
+                      .selected_item_index = 0,
+                      .query = {},
+                      .placeholder = "Filter overview",
+                      .empty_text = "No overview rows match",
+                      .footer_hint = footer_hint.empty() ? std::string("Type to filter · PgUp/PgDn page · Enter/Esc close") : std::move(footer_hint),
+                      .freeze_underlying_transcript_layout = true};
+
+  push_overview_row(view, "Runtime", "Mode", overview.mode);
+  push_overview_row(view, "Runtime", "Provider", overview.provider);
+  push_overview_row(view, "Runtime", "Model", overview.model);
+  if (!overview.trust_decision.empty())
+  {
+    auto detail = overview.trust_decision;
+    if (!overview.project_resources.empty())
+      detail += " · project " + overview.project_resources;
+    if (overview.protected_resource_count > 0)
+      detail += " · protected " + std::to_string(overview.protected_resource_count);
+    push_overview_row(view, "Trust", "Decision", std::move(detail));
+  }
+  if (!overview.theme_name.empty())
+    push_overview_row(view, "Display", "Theme", overview.theme_name, overview.theme_badge);
+
+  // Session titles/ids/origins are omitted: free-form and prompt-derived labels are not safe.
+
+  // Exact O(1) instruction total. Group/plugin-failure aggregates may be lower bounds.
+  auto format_bounded_count = [](std::size_t count, bool is_lower_bound) {
+    auto text = std::to_string(count);
+    if (is_lower_bound)
+      text += '+';
+    return text;
+  };
+  if (overview.instruction_source_count > 0)
+    push_overview_row(view, "Instructions", "Sources", std::to_string(overview.instruction_source_count));
+  for (auto const& group : overview.resource_groups)
+  {
+    auto label = group.kind;
+    if (!group.scope.empty())
+      label += " · " + group.scope;
+    auto detail = format_bounded_count(group.count, group.count_is_lower_bound);
+    if (!group.labels.empty())
+    {
+      detail += " · ";
+      for (std::size_t index = 0; index < group.labels.size(); ++index)
+      {
+        if (index > 0)
+          detail += ", ";
+        detail += group.labels[index];
+      }
+    }
+    push_overview_row(view, "Resources", std::move(label), std::move(detail));
+  }
+
+  for (auto const& name : overview.skill_names) push_overview_row(view, "Skills", name);
+  for (auto const& name : overview.prompt_command_names) push_overview_row(view, "Prompt commands", name);
+  for (auto const& id : overview.plugin_ids) push_overview_row(view, "Plugins", id);
+  if (overview.plugin_resource_failure_count && (*overview.plugin_resource_failure_count > 0 || overview.plugin_resource_failure_count_is_lower_bound))
+  {
+    push_overview_row(view, "Plugins", "Resource failures",
+                      format_bounded_count(*overview.plugin_resource_failure_count, overview.plugin_resource_failure_count_is_lower_bound));
+  }
+
+  // MCP/LSP statuses are not retained path-free at startup; omit rather than claim counts.
+
+  for (auto const& hint : overview.key_hints)
+  {
+    if (hint.label.empty())
+      continue;
+    push_overview_row(view, "Keys", hint.label, {}, hint.keys);
+  }
+
+  if (view.items.empty())
+    push_overview_row(view, "Runtime", "Status", "no retained startup resources");
+  return view;
+}
+
 SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint)
 {
   return settings_select_list_view(snapshot, default_key_bindings(), std::move(footer_hint));

@@ -5,6 +5,7 @@ from .keybind_conflict import scenario_keybind_conflict
 from .theme_env import scenario_theme_env
 from .theme_persisted import scenario_theme_persisted
 from .nested_settings_preview import scenario_nested_settings_preview
+from .startup_overview import scenario_startup_overview
 from .active_run import scenario_active_run
 from .restore_followup import scenario_restore_followup
 from .streaming_scroll import scenario_streaming_scroll
@@ -27,6 +28,7 @@ SCENARIOS = (
     "theme_env",
     "theme_persisted",
     "nested_settings_preview",
+    "startup_overview",
     "active_run",
     "restore_followup",
     "streaming_scroll",
@@ -49,6 +51,7 @@ SCENARIO_HANDLERS = {
     "theme_env": scenario_theme_env,
     "theme_persisted": scenario_theme_persisted,
     "nested_settings_preview": scenario_nested_settings_preview,
+    "startup_overview": scenario_startup_overview,
     "active_run": scenario_active_run,
     "restore_followup": scenario_restore_followup,
     "streaming_scroll": scenario_streaming_scroll,

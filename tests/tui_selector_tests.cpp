@@ -1880,4 +1880,52 @@ void run_tui_selector_tests()
   expect(permission_precedence_screen.find("Permission required") != std::string::npos &&
              permission_precedence_screen.find("Committed result line.") == std::string::npos,
          "permission prompts render ahead of the jobs workspace");
+
+  {
+    ava::tui::StartupOverviewSnapshot overview{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-test",
+        .trust_decision = "trusted",
+        .project_resources = "enabled",
+        .instruction_source_count = 2,
+        .skill_names = {"alpha", "zeta"},
+        .plugin_ids = {"com.example"},
+        .plugin_resource_failure_count = 1,
+        .theme_name = "ava-dark",
+        .theme_badge = "built-in",
+        .key_hints = {ava::tui::StartupOverviewKeyHint{.label = "overview", .keys = "/overview"}},
+        .compact_line = "build · /overview",
+    };
+    auto view = ava::tui::overview_select_list_view(overview);
+    expect(view.title == "Startup overview" && !view.items.empty() &&
+               std::ranges::any_of(view.items, [](auto const& item) { return item.label == "Mode" && item.detail == "build"; }) &&
+               std::ranges::any_of(view.items, [](auto const& item) { return item.group == "Skills" && item.label == "alpha"; }) &&
+               std::ranges::none_of(view.items, [](auto const& item) { return item.group == "Extensions" || item.detail.find("MCP") != std::string::npos; }),
+           "overview select-list is read-only host-owned content without MCP/LSP claims");
+    auto short_snapshot = ava::tui::ComposerSnapshot{};
+    short_snapshot.select_list = view;
+    short_snapshot.width = 48;
+    short_snapshot.height = 8;
+    auto frame = ava::tui::render_composer(short_snapshot);
+    expect(std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("Startup overview") != std::string::npos; }) &&
+               std::ranges::any_of(frame, [](std::string const& line) { return strip_sgr(line).find("Mode") != std::string::npos; }),
+           "overview select-list remains usable at short heights");
+    auto filtered = view;
+    filtered.query = "skills";
+    auto matches = ava::tui::filter_select_list_items(filtered);
+    expect(!matches.empty() && filtered.items[matches.front()].group == "Skills", "overview select-list supports ordinary filter behavior");
+    auto hit_snapshot = ava::tui::ComposerSnapshot{};
+    hit_snapshot.select_list = view;
+    hit_snapshot.width = 48;
+    hit_snapshot.height = 12;
+    auto const hit_frame = ava::tui::render_composer(hit_snapshot);
+    auto const mode_line = std::ranges::find_if(hit_frame, [](std::string const& line) { return strip_sgr(line).find("Mode") != std::string::npos; });
+    expect(mode_line != hit_frame.end(), "overview short frame exposes a Mode row for hit-testing");
+    if (mode_line != hit_frame.end())
+    {
+      auto hit = ava::tui::select_list_selection_for_screen_position(hit_snapshot, static_cast<std::size_t>(mode_line - hit_frame.begin()) + 1, 24);
+      expect(hit.has_value(), "overview mouse hit-testing shares select-list geometry");
+    }
+  }
 }

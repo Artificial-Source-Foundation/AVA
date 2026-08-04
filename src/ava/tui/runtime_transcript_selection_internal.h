@@ -77,6 +77,8 @@ struct TranscriptSelectionHit
 
 struct TranscriptSelectionViewport
 {
+  // Leading collapsed overview rows above the transcript body (0 when hidden).
+  std::size_t overview_height = 0;
   std::size_t transcript_height = 0;
   std::size_t content_width = 0;
   std::size_t canvas_left = 0;
@@ -199,7 +201,7 @@ class RuntimeTranscriptSelectionState final
                                                   std::ptrdiff_t frozen_to_live_item_index_shift, std::function<bool(std::size_t)> const& toggle_tool,
                                                   std::function<bool(std::size_t)> const& toggle_thinking) const;
   [[nodiscard]] bool autoscroll_for_row(ComposerSnapshot& snapshot, TranscriptSelectionViewport const& viewport, std::size_t screen_row,
-                                        std::size_t& transcript_scroll_offset);
+                                        std::size_t& transcript_scroll_offset, bool treat_overview_as_top_edge = false);
 
   std::optional<TranscriptSelectionRange> range_ = std::nullopt;
   std::optional<ItemSourceAuthority> anchor_source_authority_ = std::nullopt;

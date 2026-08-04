@@ -740,6 +740,7 @@ if(Python3_Interpreter_FOUND)
     theme_env
     theme_persisted
     nested_settings_preview
+    startup_overview
     active_run
     restore_followup
     streaming_scroll

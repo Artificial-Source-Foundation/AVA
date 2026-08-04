@@ -94,6 +94,9 @@ enum class TuiAction
   TreeToggleLabelTimestamp,
   TreeFilterLabeledOnly,
   TreeFilterAll,
+  // Process-local startup overview toggle. Intentionally unbound by default;
+  // public config id is app.overview.toggle. /overview remains always available.
+  OverviewToggle,
 };
 
 struct TuiKeyBindings

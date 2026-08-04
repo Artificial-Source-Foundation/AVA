@@ -93,7 +93,8 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::TreeEditLabel,
                                  TuiAction::TreeToggleLabelTimestamp,
                                  TuiAction::TreeFilterLabeledOnly,
-                                 TuiAction::TreeFilterAll};
+                                 TuiAction::TreeFilterAll,
+                                 TuiAction::OverviewToggle};
 
 struct ActionAlias
 {
@@ -247,6 +248,8 @@ constexpr std::array kActionAliases = {
     ActionAlias{"treeFilterLabeledOnly", TuiAction::TreeFilterLabeledOnly, 1},
     ActionAlias{"app.tree.filter.all", TuiAction::TreeFilterAll, 2},
     ActionAlias{"treeFilterAll", TuiAction::TreeFilterAll, 1},
+    ActionAlias{"app.overview.toggle", TuiAction::OverviewToggle, 2},
+    ActionAlias{"overviewToggle", TuiAction::OverviewToggle, 1},
 };
 
 std::string normalize_token(std::string_view text)
@@ -718,6 +721,7 @@ bool is_select_action(TuiAction action)
     case TuiAction::SessionTree:
     case TuiAction::SessionFork:
     case TuiAction::SessionResume:
+    case TuiAction::OverviewToggle:
       return false;
   }
   return false;
@@ -936,6 +940,8 @@ std::string_view config_action_id(TuiAction action)
       return "app.tree.filter.labeledOnly";
     case TuiAction::TreeFilterAll:
       return "app.tree.filter.all";
+    case TuiAction::OverviewToggle:
+      return "app.overview.toggle";
   }
   return "unknown";
 }
@@ -1068,6 +1074,7 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::TreeToggleLabelTimestamp, {Key::ShiftT}},
                                      {TuiAction::TreeFilterLabeledOnly, {}},
                                      {TuiAction::TreeFilterAll, {}},
+                                     {TuiAction::OverviewToggle, {}},
                                      {TuiAction::ModelsSave, {Key::CtrlS}},
                                      {TuiAction::ModelsEnableAll, {Key::CtrlA}},
                                      {TuiAction::ModelsClearAll, {Key::CtrlX}},
@@ -1763,6 +1770,8 @@ std::string action_name(TuiAction action)
       return "tree_filter_labeled_only";
     case TuiAction::TreeFilterAll:
       return "tree_filter_all";
+    case TuiAction::OverviewToggle:
+      return "overview_toggle";
   }
   return "unknown";
 }
@@ -1931,6 +1940,8 @@ std::string action_label(TuiAction action)
       return "Filter labeled only";
     case TuiAction::TreeFilterAll:
       return "Toggle archived sessions";
+    case TuiAction::OverviewToggle:
+      return "Toggle startup overview";
   }
   return "Unknown action";
 }
@@ -2112,6 +2123,8 @@ std::string action_description(TuiAction action)
       return "Toggle named/labeled session filtering in the session selector";
     case TuiAction::TreeFilterAll:
       return "Toggle archived-session visibility in the session selector";
+    case TuiAction::OverviewToggle:
+      return "Open or close the path-free startup overview";
   }
   return "Unknown action";
 }

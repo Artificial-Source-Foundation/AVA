@@ -5,6 +5,7 @@
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
+#include "ava/tui/runtime_state_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
@@ -42,10 +43,25 @@ PendingQuestionRequest::PendingQuestionRequest(ava::agent::QuestionPrompt prompt
 }
 
 RuntimePromptCoordinator::RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants,
-                                                   RuntimeRenderer& renderer)
-    : options_(options), snapshot_(snapshot), session_grants_(session_grants), renderer_(renderer)
+                                                   RuntimeRenderer& renderer, ActiveSelectList* active_select_list)
+    : options_(options), snapshot_(snapshot), session_grants_(session_grants), renderer_(renderer), active_select_list_(active_select_list)
 {
 }
+
+namespace {
+
+void close_overview_for_prompt(ComposerSnapshot& snapshot, ActiveSelectList* active_select_list)
+{
+  if (!active_select_list)
+    return;
+  // Competing prompt authority closes overview so it cannot hide under the prompt.
+  if (*active_select_list != ActiveSelectList::Overview)
+    return;
+  snapshot.select_list.reset();
+  *active_select_list = ActiveSelectList::None;
+}
+
+}  // namespace
 
 bool RuntimePromptCoordinator::render()
 {
@@ -119,6 +135,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
   }
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+    // Competing prompt authority closes overview so it cannot hide under the prompt and reappear.
+    close_overview_for_prompt(snapshot, active_select_list_);
     snapshot.permission_prompt = permission_prompt_view(prompt);
     snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
     snapshot.permission_prompt->allow_session_available = allow_session_available;
@@ -399,6 +417,8 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
   emit_prompt_audit("tui:question_request", prompt.question.empty() ? std::string("question requested") : "question requested: " + prompt.question);
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+    // Competing prompt authority closes overview so it cannot hide under the prompt and reappear.
+    close_overview_for_prompt(snapshot, active_select_list_);
     snapshot.question_prompt = question_prompt_view(prompt);
     snapshot.status =
         prompt.multiple ? "question required: Space toggles, Enter sends, Esc cancels" : "question required: Enter sends, numbers choose, Esc cancels";

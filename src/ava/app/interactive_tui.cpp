@@ -10,6 +10,7 @@
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
+#include "ava/app/startup_overview.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/runtime.h"
@@ -18,6 +19,7 @@
 #include "ava/app/subagent_workspace.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
+#include "ava/tui/theme.h"
 #include "ava/config/model_profiles.h"
 #include "ava/session/attachments.h"
 #include "ava/core/ids.h"
@@ -152,10 +154,11 @@ int run_tui(ShellState state)
                                .context_source_count = session_r->context_sources().size(),
                                .project_trust = project_trust_snapshot(session_r->project_trust())};
   };
-  auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog, &session_presentation,
+  auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog, &session_presentation, &key_bindings,
                          copy_effective_display_presentation](std::string status) {
     static_cast<void>(refresh_title_catalog());
     auto const [show_images, image_width_cells] = copy_effective_display_presentation();
+    auto startup_overview = build_startup_overview_snapshot(unlocked_session, key_bindings, ava::tui::active_tui_theme());
     auto delivery = application_catalog.delivery_snapshot();
     auto presentation = session_presentation();
     return ava::tui::TuiRuntimeStateSnapshot{
@@ -176,7 +179,8 @@ int run_tui(ShellState state)
         .project_trust = presentation.project_trust,
         .todos = todos_for_session(unlocked_session),
         .show_images = show_images,
-        .image_width_cells = image_width_cells};
+        .image_width_cells = image_width_cells,
+        .startup_overview = std::move(startup_overview)};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
   bool session_selector_named_only = false;
@@ -242,6 +246,7 @@ int run_tui(ShellState state)
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto initial_presentation = session_presentation();
   auto const [initial_show_images, initial_image_width_cells] = copy_effective_display_presentation();
+  auto initial_startup_overview = build_startup_overview_snapshot(unlocked_session, key_bindings, ava::tui::active_tui_theme());
   auto result = ava::tui::run_interactive_composer(ava::tui::TuiRuntimeOptions{
       .mode = std::move(initial_presentation.mode),
       .provider = std::move(initial_presentation.provider),
@@ -262,6 +267,7 @@ int run_tui(ShellState state)
       .project_trust = initial_presentation.project_trust,
       .show_images = initial_show_images,
       .image_width_cells = initial_image_width_cells,
+      .startup_overview = std::move(initial_startup_overview),
       .initial_todos = todos_for_session(unlocked_session),
       .key_bindings = key_bindings,
       .token_status_provider = [&unlocked_session]() { return token_status_for_session(unlocked_session); },

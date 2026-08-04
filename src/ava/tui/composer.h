@@ -294,6 +294,63 @@ struct ProjectTrustSnapshot
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Path-free, process-local startup/resources chrome. Built only by the
+// application from already-loaded runtime state; never reopened or persisted.
+struct StartupOverviewResourceGroup
+{
+  std::string kind;
+  std::string scope = {};
+  std::size_t count = 0;
+  // True when count is a first-N lower bound because input aggregation stopped at the
+  // work cap. Renderers must show N+ rather than an exact-looking partial total.
+  bool count_is_lower_bound = false;
+  std::vector<std::string> labels = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct StartupOverviewKeyHint
+{
+  std::string label = {};
+  std::string keys = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Path-free startup/resources chrome. Session titles, raw session ids, and any
+// prompt-derived free-form text are intentionally omitted — automatic titles can
+// be private and blocklists cannot make them safe.
+struct StartupOverviewSnapshot
+{
+  std::string mode = {};
+  std::string provider = {};
+  std::string model = {};
+  std::string trust_decision = {};
+  std::string project_resources = {};
+  std::size_t protected_resource_count = 0;
+  // Truthful total from already-loaded context metadata (O(1) span size). Exact even
+  // when per-group aggregation only inspected a capped prefix.
+  std::size_t instruction_source_count = 0;
+  std::vector<StartupOverviewResourceGroup> resource_groups = {};
+  std::vector<std::string> skill_names = {};
+  std::vector<std::string> prompt_command_names = {};
+  std::vector<std::string> plugin_ids = {};
+  // Derived only from retained freshness (plugin prompt/skill with empty load snapshot).
+  // When freshness input was capped, the optional count is a lower bound (including 0+).
+  std::optional<std::size_t> plugin_resource_failure_count = std::nullopt;
+  bool plugin_resource_failure_count_is_lower_bound = false;
+  std::string theme_name = {};
+  std::string theme_badge = {};
+  // Empty when app.overview.toggle is unbound; collapsed chrome still shows /overview.
+  std::string overview_toggle_keys = {};
+  std::vector<StartupOverviewKeyHint> key_hints = {};
+  // Precomputed compact summary lines (already sanitized/bounded).
+  std::string compact_line = {};
+  std::string detail_line = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 enum class PermissionPromptChoice
 {
   Deny,
@@ -573,6 +630,9 @@ struct ComposerSnapshot
   // Effective image presentation from the application-owned display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  // Application-owned, path-free startup/resources snapshot. Omitted rather than
+  // rebuilt inside the TUI. Presentation-only; never session/provider content.
+  std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -679,6 +739,9 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
+[[nodiscard]] std::size_t startup_overview_collapsed_row_count(ComposerSnapshot const& snapshot) noexcept;
+[[nodiscard]] std::vector<std::string> render_startup_overview_collapsed_lines(ComposerSnapshot const& snapshot, std::size_t width);
+[[nodiscard]] bool startup_overview_card_contains_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);

@@ -137,7 +137,7 @@ DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_s
     // Hydrate authoritative snapshot and rebuild an open overview list from the refreshed
     // startup DTO while preserving local filter/selection. Callers still rebase/reapply any
     // settings preview and paint exactly once afterward so the first frame is final.
-    presentation_state_.apply_runtime_state_snapshot(options_, std::move(state));
+    apply_runtime_state_snapshot_with_overview_sync(options_, presentation_state_, active_select_list_, std::move(state));
     auto& snapshot = presentation_state_.snapshot;
     // Idle (no modal) applied reloads still surface a transcript receipt before the caller renders.
     // An open overview keeps select_list set, so this path stays quiet while expanded.
@@ -426,6 +426,34 @@ bool RuntimeActionController::open_session_selector()
   snapshot.select_list = options_.session_selector_view();
   active_select_list_ = ActiveSelectList::Session;
   snapshot.status = "session selector opened";
+  renderer_.transcript_scroll_offset = 0;
+  return renderer_.request_render();
+}
+
+bool RuntimeActionController::toggle_startup_overview()
+{
+  auto& snapshot = presentation_state_.snapshot;
+  draft_state_.pending_escape_clear = false;
+  session_archive_confirmation_.reset();
+  if (active_select_list_ == ActiveSelectList::Overview && snapshot.select_list)
+  {
+    snapshot.select_list.reset();
+    active_select_list_ = ActiveSelectList::None;
+    snapshot.status = "overview closed";
+    return renderer_.request_render();
+  }
+  if (!snapshot.startup_overview)
+  {
+    snapshot.status = "startup overview unavailable";
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  // Replace any other modal with the read-only overview; Enter/Esc close without mutation.
+  snapshot.sidebar_drawer_visible = false;
+  snapshot.sidebar_drawer_scroll_offset = 0;
+  snapshot.select_list = overview_select_list_view(*snapshot.startup_overview);
+  active_select_list_ = ActiveSelectList::Overview;
+  snapshot.status = "overview opened";
   renderer_.transcript_scroll_offset = 0;
   return renderer_.request_render();
 }

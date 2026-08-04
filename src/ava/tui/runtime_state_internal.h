@@ -72,7 +72,8 @@ enum class ActiveSelectList
   Session,
   TranscriptSearch,
   ForkUserTurn,
-  CopyUserTurn
+  CopyUserTurn,
+  Overview
 };
 
 enum class ComposerJumpMode
@@ -115,12 +116,23 @@ class RuntimePresentationState final
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// Shared overview presentation helpers. Normal and active-run snapshot application
+// both route through these so an open overview rebuilds from the new DTO while
+// preserving local query/selection identity, and competing authority closes it.
+void close_startup_overview_presentation(ComposerSnapshot& snapshot, ActiveSelectList& active_select_list);
+void synchronize_startup_overview_presentation(ComposerSnapshot& snapshot, ActiveSelectList& active_select_list);
+
+// Applies an authoritative runtime snapshot and synchronizes any open overview list.
+void apply_runtime_state_snapshot_with_overview_sync(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
+                                                     ActiveSelectList& active_select_list, TuiRuntimeStateSnapshot state);
+
 // Applies every authoritative runtime snapshot, but clears session-scoped TUI
 // presentation first only when the authoritative session identity changed.
+// Session transitions always close an open overview select-list.
 [[nodiscard]] bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
                                                                              RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                                                                              TranscriptSearchController& transcript_search,
-                                                                             RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                                             RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list,
                                                                              TuiRuntimeStateSnapshot state);
 
 }  // namespace ava::tui

@@ -129,6 +129,14 @@ struct TuiSubmitContext
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// Narrow TUI outcome for application-owned display settings polls.
+enum class DisplaySettingsReloadPollOutcome
+{
+  TerminalFailure,
+  Unchanged,
+  Applied,
+};
+
 // Narrow TUI outcomes for live subagent workspace controls. Mappers and
 // callbacks must never surface Error::format, ids, paths, or backend text.
 enum class SubagentWorkspaceCancelOutcome
@@ -231,6 +239,22 @@ struct TuiRuntimeOptions
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+// Shallow nested settings hierarchy used by /settings.
+enum class SettingsSection
+{
+  Root,
+  Display,
+  ModelsAndReasoning,
+  InputAndKeybindings,
+  SessionsAndWorkspace,
+  ToolsAndExtensions,
+  PrivacyAndSetup,
+  About,
+};
+
+[[nodiscard]] SelectListView settings_select_list_view_for_section(SettingsSection section, ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings,
+                                                                   std::string footer_hint = {});
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});

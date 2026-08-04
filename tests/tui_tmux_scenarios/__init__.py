@@ -4,6 +4,7 @@ from .suspend_resume import scenario_suspend_resume
 from .keybind_conflict import scenario_keybind_conflict
 from .theme_env import scenario_theme_env
 from .theme_persisted import scenario_theme_persisted
+from .nested_settings_preview import scenario_nested_settings_preview
 from .active_run import scenario_active_run
 from .restore_followup import scenario_restore_followup
 from .streaming_scroll import scenario_streaming_scroll
@@ -25,6 +26,7 @@ SCENARIOS = (
     "keybind_conflict",
     "theme_env",
     "theme_persisted",
+    "nested_settings_preview",
     "active_run",
     "restore_followup",
     "streaming_scroll",
@@ -46,6 +48,7 @@ SCENARIO_HANDLERS = {
     "keybind_conflict": scenario_keybind_conflict,
     "theme_env": scenario_theme_env,
     "theme_persisted": scenario_theme_persisted,
+    "nested_settings_preview": scenario_nested_settings_preview,
     "active_run": scenario_active_run,
     "restore_followup": scenario_restore_followup,
     "streaming_scroll": scenario_streaming_scroll,

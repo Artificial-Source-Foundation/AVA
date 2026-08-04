@@ -793,12 +793,195 @@ std::string active_tui_theme_summary()
   return active.name + " (" + active.badge + ")";
 }
 
-ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::filesystem::path const& path)
+namespace {
+
+class ScopedThemeFd
 {
-  std::ifstream input(path, std::ios::binary);
-  if (!input)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read TUI custom theme").with_context("path", path.string()));
-  std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+ public:
+  explicit ScopedThemeFd(int fd) noexcept : fd_(fd) { }
+  ScopedThemeFd(ScopedThemeFd const&) = delete;
+  ScopedThemeFd& operator=(ScopedThemeFd const&) = delete;
+  ScopedThemeFd(ScopedThemeFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) { }
+  ScopedThemeFd& operator=(ScopedThemeFd&& other) noexcept
+  {
+    if (this != &other)
+    {
+      close_if_open();
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  ~ScopedThemeFd() { close_if_open(); }
+
+  [[nodiscard]] int get() const noexcept { return fd_; }
+
+ private:
+  void close_if_open() noexcept
+  {
+    if (fd_ >= 0)
+      static_cast<void>(::close(fd_));
+  }
+
+  int fd_ = -1;
+};
+
+std::string errno_message()
+{
+  return std::generic_category().message(errno);
+}
+
+// Lexicographic path key used for deterministic discovery/watch ordering.
+std::string normalized_theme_path_key(std::filesystem::path const& path)
+{
+  std::error_code error;
+  auto absolute = std::filesystem::absolute(path, error);
+  if (error)
+    absolute = path;
+  return absolute.lexically_normal().generic_string();
+}
+
+bool theme_filename_is_json_candidate(std::filesystem::path const& path)
+{
+  return path.extension() == ".json" && !path.filename().empty() && path.filename() != "." && path.filename() != "..";
+}
+
+// One-descriptor open+fstat+bounded-read path. Caller supplies the effective read budget
+// (min of per-file cap and remaining aggregate). Never reads more than max_bytes. Distinguishes
+// an exact-cap complete file from truncated/oversized content via pre- and post-read fstat only
+// (no post-budget probe byte). bytes_read is always the physical byte count actually pulled.
+struct BoundedThemeTextRead
+{
+  enum class Status : std::uint8_t
+  {
+    Complete,
+    Truncated,
+  };
+
+  std::string content;
+  std::size_t bytes_read = 0;
+  Status status = Status::Complete;
+};
+
+ava::core::Result<BoundedThemeTextRead> read_custom_theme_text_bounded(std::filesystem::path const& path, std::size_t max_bytes)
+{
+  if (max_bytes == 0)
+    return BoundedThemeTextRead{.content = {}, .bytes_read = 0, .status = BoundedThemeTextRead::Status::Truncated};
+
+  int flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  ScopedThemeFd fd(::open(path.c_str(), flags));
+  if (fd.get() < 0)
+  {
+    auto category = (errno == EACCES || errno == EPERM || errno == ELOOP) ? ava::core::ErrorCategory::PermissionDenied : ava::core::ErrorCategory::Io;
+    return std::unexpected(
+        ava::core::Error(category, "failed to open TUI custom theme").with_context("path", path.string()).with_context("cause", errno_message()));
+  }
+
+  struct stat pre_status{};
+  if (::fstat(fd.get(), &pre_status) != 0)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect TUI custom theme descriptor")
+                               .with_context("path", path.string())
+                               .with_context("cause", errno_message()));
+  }
+  if (!S_ISREG(pre_status.st_mode))
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "TUI custom theme must be a regular file").with_context("path", path.string()));
+  }
+  if (pre_status.st_size < 0)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect TUI custom theme descriptor")
+                               .with_context("path", path.string())
+                               .with_context("cause", "negative size"));
+  }
+  auto const pre_size = static_cast<std::uintmax_t>(pre_status.st_size);
+  // Known oversized from pre-read metadata: reject without pulling content. bytes_read stays 0.
+  if (pre_size > static_cast<std::uintmax_t>(max_bytes))
+    return BoundedThemeTextRead{.content = {}, .bytes_read = 0, .status = BoundedThemeTextRead::Status::Truncated};
+
+#ifndef O_NOFOLLOW
+  struct stat path_status{};
+  if (::lstat(path.c_str(), &path_status) != 0)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect TUI custom theme")
+                               .with_context("path", path.string())
+                               .with_context("cause", errno_message()));
+  }
+  if (S_ISLNK(path_status.st_mode) || path_status.st_dev != pre_status.st_dev || path_status.st_ino != pre_status.st_ino)
+  {
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "TUI custom theme must not be a symlink").with_context("path", path.string()));
+  }
+#endif
+
+  BoundedThemeTextRead result;
+  result.content.reserve(static_cast<std::size_t>(pre_size));
+  std::array<char, 4096> buffer{};
+  for (;;)
+  {
+    auto const remaining_budget = max_bytes - result.content.size();
+    if (remaining_budget == 0)
+      break;
+    auto const want = static_cast<std::size_t>(std::min<std::size_t>(buffer.size(), remaining_budget));
+    auto const count = ::read(fd.get(), buffer.data(), want);
+    if (count == 0)
+      break;
+    if (count < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed while reading TUI custom theme")
+                                 .with_context("path", path.string())
+                                 .with_context("cause", errno_message()));
+    }
+    result.content.append(buffer.data(), static_cast<std::size_t>(count));
+  }
+  // Physical work actually performed — retained even when the candidate is later classified truncated.
+  result.bytes_read = result.content.size();
+
+  struct stat post_status{};
+  if (::fstat(fd.get(), &post_status) != 0)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to inspect TUI custom theme descriptor")
+                               .with_context("path", path.string())
+                               .with_context("cause", errno_message()));
+  }
+  if (!S_ISREG(post_status.st_mode) || post_status.st_size < 0)
+  {
+    result.content.clear();
+    result.status = BoundedThemeTextRead::Status::Truncated;
+    return result;
+  }
+  auto const post_size = static_cast<std::uintmax_t>(post_status.st_size);
+  auto const read_size = static_cast<std::uintmax_t>(result.bytes_read);
+
+  // Classify complete vs truncated from descriptor metadata only — never read past max_bytes.
+  // Growth/shrink/inconsistent descriptor metadata is handled conservatively: any disagreement
+  // among pre_size, post_size, and bytes_read fails closed as Truncated while still reporting
+  // the bytes physically read.
+  if (result.bytes_read < max_bytes)
+  {
+    // Hit EOF before filling the budget. Complete only when pre/post/read sizes all agree.
+    bool const stable_below_cap = pre_size == post_size && post_size == read_size;
+    result.status = stable_below_cap ? BoundedThemeTextRead::Status::Complete : BoundedThemeTextRead::Status::Truncated;
+  }
+  else
+  {
+    // Filled the budget. Exact-cap complete requires stable pre/post metadata equal to max_bytes.
+    bool const exact_stable_cap = pre_size == static_cast<std::uintmax_t>(max_bytes) && post_size == static_cast<std::uintmax_t>(max_bytes);
+    result.status = exact_stable_cap ? BoundedThemeTextRead::Status::Complete : BoundedThemeTextRead::Status::Truncated;
+  }
+
+  if (result.status == BoundedThemeTextRead::Status::Truncated)
+    result.content.clear();
+  return result;
+}
+
+ava::core::Result<ava::tui::TuiCustomTheme> parse_custom_theme_text(std::string json, std::filesystem::path const& path)
+{
   if (!ava::core::json::is_valid_object(json))
     return std::unexpected(invalid_theme_error("invalid TUI custom theme JSON", path));
 
@@ -818,6 +1001,256 @@ ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::file
   return ava::tui::TuiCustomTheme{.name = std::move(*name), .path = path, .palette = std::move(*palette), .revision = revision_for_text(json)};
 }
 
+struct ThemeCandidatePath
+{
+  std::filesystem::path path;
+  std::string order_key;
+};
+
+struct ThemeCandidateCollection
+{
+  std::vector<ThemeCandidatePath> candidates;
+  // True when more regular .json candidates existed than the bounded read/result cap.
+  bool exceeded_cap = false;
+};
+
+// Collect non-symlink .json candidates under themes/, ordered by normalized path.
+// Symlinks/special files are skipped without opening. Cap is applied after sort; exceeded_cap
+// records that uniqueness-sensitive lookup must fail closed because later files were not read.
+ThemeCandidateCollection collect_custom_theme_candidate_paths(std::filesystem::path const& dir)
+{
+  ThemeCandidateCollection collection;
+  std::error_code exists_error;
+  if (!std::filesystem::exists(dir, exists_error) || exists_error)
+    return collection;
+
+  std::error_code iter_error;
+  auto const options = std::filesystem::directory_options::skip_permission_denied;
+  for (std::filesystem::directory_iterator it(dir, options, iter_error), end; !iter_error && it != end; it.increment(iter_error))
+  {
+    auto const entry_path = it->path();
+    if (!theme_filename_is_json_candidate(entry_path))
+      continue;
+
+    std::error_code symlink_error;
+    if (it->is_symlink(symlink_error) || symlink_error)
+      continue;
+
+    // Prefer symlink_status so special files/FIFOs are rejected without following.
+    std::error_code status_error;
+    auto const status = it->symlink_status(status_error);
+    if (status_error || !std::filesystem::is_regular_file(status))
+      continue;
+
+    collection.candidates.push_back(ThemeCandidatePath{.path = entry_path, .order_key = normalized_theme_path_key(entry_path)});
+  }
+
+  std::ranges::sort(collection.candidates, [](ThemeCandidatePath const& left, ThemeCandidatePath const& right) {
+    if (left.order_key != right.order_key)
+      return left.order_key < right.order_key;
+    return left.path.generic_string() < right.path.generic_string();
+  });
+  if (collection.candidates.size() > kMaxTuiCustomThemeCandidates)
+  {
+    collection.exceeded_cap = true;
+    collection.candidates.resize(kMaxTuiCustomThemeCandidates);
+  }
+  return collection;
+}
+
+struct DiscoveredCustomThemes
+{
+  std::vector<TuiCustomThemeSummary> themes;
+  // Valid themes encountered while scanning, including duplicates, in path order.
+  std::vector<ava::tui::TuiCustomTheme> valid_in_path_order;
+  bool complete = true;
+  TuiCustomThemeDiscoveryIncompleteReason incomplete_reason = TuiCustomThemeDiscoveryIncompleteReason::None;
+  std::size_t aggregate_bytes_read = 0;
+};
+
+void mark_discovery_incomplete(DiscoveredCustomThemes& discovered, TuiCustomThemeDiscoveryIncompleteReason reason)
+{
+  discovered.complete = false;
+  discovered.incomplete_reason = reason;
+}
+
+char const* discovery_incomplete_reason_token(TuiCustomThemeDiscoveryIncompleteReason reason)
+{
+  switch (reason)
+  {
+    case TuiCustomThemeDiscoveryIncompleteReason::CandidateCap:
+      return "candidate_cap";
+    case TuiCustomThemeDiscoveryIncompleteReason::AggregateBudget:
+      return "aggregate_budget";
+    case TuiCustomThemeDiscoveryIncompleteReason::None:
+      return "none";
+  }
+  return "truncated";
+}
+
+// Bounded deterministic discovery used by listing, watch catalog, and named lookup.
+// Policy:
+// - candidate files ordered by normalized absolute path
+// - each open reads at most min(per-file cap, remaining aggregate budget)
+// - skip symlinks/special/unreadable/oversized/invalid files for unconfigured catalog listing
+// - first valid file per theme name wins for available/catalog results
+// - later same-name valid files remain visible to named lookup so configured load can fail closed
+// - incomplete scans (candidate cap or aggregate budget) are recorded; listing keeps the prefix
+DiscoveredCustomThemes discover_custom_themes_bounded(ava::config::XdgPaths const& paths)
+{
+  DiscoveredCustomThemes discovered;
+  auto const collection = collect_custom_theme_candidate_paths(tui_theme_directory(paths));
+  std::size_t aggregate_bytes = 0;
+
+  for (auto const& candidate : collection.candidates)
+  {
+    if (aggregate_bytes >= kMaxTuiCustomThemeCatalogAggregateBytes)
+    {
+      mark_discovery_incomplete(discovered, TuiCustomThemeDiscoveryIncompleteReason::AggregateBudget);
+      break;
+    }
+
+    auto const remaining = kMaxTuiCustomThemeCatalogAggregateBytes - aggregate_bytes;
+    auto const max_read = std::min(kMaxTuiCustomThemeFileBytes, remaining);
+    auto text = read_custom_theme_text_bounded(candidate.path, max_read);
+    if (!text)
+      continue;
+
+    // Charge physical work before any skip/incomplete decision so accounting never under-reports.
+    // bytes_read is already clamped to max_read <= remaining, so this cannot exceed the aggregate cap.
+    aggregate_bytes += text->bytes_read;
+
+    if (text->status == BoundedThemeTextRead::Status::Truncated)
+    {
+      if (max_read < kMaxTuiCustomThemeFileBytes)
+      {
+        // Could not finish within the remaining aggregate budget; stop without parsing a prefix.
+        mark_discovery_incomplete(discovered, TuiCustomThemeDiscoveryIncompleteReason::AggregateBudget);
+        break;
+      }
+      // Per-file oversized/unstable relative to the file cap: skip and keep scanning within budget.
+      continue;
+    }
+
+    auto theme = parse_custom_theme_text(std::move(text->content), candidate.path);
+    if (!theme)
+      continue;
+
+    discovered.valid_in_path_order.push_back(*theme);
+    bool const duplicate_name = std::ranges::any_of(discovered.themes, [&](TuiCustomThemeSummary const& existing) { return existing.name == theme->name; });
+    if (duplicate_name)
+      continue;
+
+    discovered.themes.push_back(TuiCustomThemeSummary{.name = theme->name, .path = theme->path, .palette = theme->palette, .revision = theme->revision});
+  }
+
+  discovered.aggregate_bytes_read = aggregate_bytes;
+  if (discovered.complete && collection.exceeded_cap)
+    mark_discovery_incomplete(discovered, TuiCustomThemeDiscoveryIncompleteReason::CandidateCap);
+
+  // Stable result order by theme name (path order already resolved duplicate winners).
+  std::ranges::sort(discovered.themes, {}, &TuiCustomThemeSummary::name);
+  return discovered;
+}
+
+TuiCustomThemeDiscoveryResult to_public_discovery_result(DiscoveredCustomThemes discovered)
+{
+  return TuiCustomThemeDiscoveryResult{
+      .themes = std::move(discovered.themes),
+      .complete = discovered.complete,
+      .incomplete_reason = discovered.incomplete_reason,
+      .aggregate_bytes_read = discovered.aggregate_bytes_read,
+  };
+}
+
+ava::core::Result<ava::tui::TuiCustomTheme> resolve_named_custom_theme(std::string_view name, DiscoveredCustomThemes const& discovered,
+                                                                       std::filesystem::path const& directory)
+{
+  std::optional<ava::tui::TuiCustomTheme> match;
+  for (auto const& theme : discovered.valid_in_path_order)
+  {
+    if (theme.name != name)
+      continue;
+    if (match)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "duplicate TUI custom theme name")
+                                 .with_context("theme", std::string(name))
+                                 .with_context("path", match->path.string())
+                                 .with_context("path", theme.path.string()));
+    }
+    match = theme;
+  }
+
+  // Uniqueness-sensitive lookup must fail closed when the scan stopped early: a late duplicate or
+  // sole match may lie beyond the candidate/byte boundary even if one file already matched.
+  if (!discovered.complete)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "TUI custom theme discovery is incomplete")
+                     .with_context("theme", std::string(name))
+                     .with_context("reason", discovery_incomplete_reason_token(discovered.incomplete_reason))
+                     .with_context("directory", directory.string());
+    if (discovered.incomplete_reason == TuiCustomThemeDiscoveryIncompleteReason::CandidateCap)
+      error.with_context("max_candidates", std::to_string(kMaxTuiCustomThemeCandidates));
+    if (discovered.incomplete_reason == TuiCustomThemeDiscoveryIncompleteReason::AggregateBudget)
+      error.with_context("max_aggregate_bytes", std::to_string(kMaxTuiCustomThemeCatalogAggregateBytes));
+    return std::unexpected(std::move(error));
+  }
+
+  if (!match)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "TUI custom theme was not found")
+                               .with_context("theme", std::string(name))
+                               .with_context("directory", directory.string()));
+  }
+  return std::move(*match);
+}
+
+ava::core::Result<TuiDisplaySettings> resolve_theme_into_settings(ava::config::XdgPaths const& paths, DisplaySettingsDocument document,
+                                                                  DiscoveredCustomThemes const* discovered)
+{
+  auto settings = display_settings_from_document_fields(document);
+  if (!document.theme)
+    return settings;
+
+  if (auto normalized = normalize_tui_theme_setting(*document.theme))
+  {
+    settings.theme = std::move(normalized);
+    return settings;
+  }
+
+  ava::core::Result<ava::tui::TuiCustomTheme> custom = std::unexpected(invalid_display_theme_error(document));
+  if (discovered != nullptr)
+    custom = resolve_named_custom_theme(*document.theme, *discovered, tui_theme_directory(paths));
+  else
+    custom = load_tui_custom_theme(paths, *document.theme);
+  if (!custom)
+    return std::unexpected(invalid_display_theme_error(document));
+  settings.theme = custom->name;
+  settings.custom_theme = std::move(*custom);
+  return settings;
+}
+
+ava::core::Result<TuiDisplaySettings> resolve_theme_into_settings(ava::config::XdgPaths const& paths, DisplaySettingsDocument document)
+{
+  return resolve_theme_into_settings(paths, std::move(document), nullptr);
+}
+
+}  // namespace
+
+ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::filesystem::path const& path)
+{
+  auto text = read_custom_theme_text_bounded(path, kMaxTuiCustomThemeFileBytes);
+  if (!text)
+    return std::unexpected(std::move(text.error()));
+  if (text->status == BoundedThemeTextRead::Status::Truncated)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "TUI custom theme is too large")
+                               .with_context("path", path.string())
+                               .with_context("max_bytes", std::to_string(kMaxTuiCustomThemeFileBytes)));
+  }
+  return parse_custom_theme_text(std::move(text->content), path);
+}
+
 ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::XdgPaths const& paths, std::string_view name)
 {
   if (!valid_custom_theme_name(name))
@@ -835,56 +1268,20 @@ ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::X
                                .with_context("directory", dir.string()));
   }
 
-  std::error_code iter_error;
-  std::optional<ava::tui::TuiCustomTheme> match;
-  for (std::filesystem::directory_iterator it(dir, iter_error), end; !iter_error && it != end; it.increment(iter_error))
-  {
-    if (!it->is_regular_file() || it->path().extension() != ".json")
-      continue;
-    auto theme = load_tui_custom_theme_file(it->path());
-    if (!theme)
-      continue;
-    if (theme->name != name)
-      continue;
-    if (match)
-    {
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "duplicate TUI custom theme name")
-                                 .with_context("theme", std::string(name))
-                                 .with_context("path", match->path.string())
-                                 .with_context("path", theme->path.string()));
-    }
-    match = std::move(*theme);
-  }
-  if (iter_error)
-    return std::unexpected(io_error("failed to inspect TUI custom themes", dir, iter_error));
-  if (!match)
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "TUI custom theme was not found")
-                               .with_context("theme", std::string(name))
-                               .with_context("directory", dir.string()));
-  }
-  return std::move(*match);
+  // Named/configured lookup uses the same bounded deterministic scan. Duplicate valid names and
+  // incomplete scans fail closed with an actionable local error (no raw theme content).
+  auto const discovered = discover_custom_themes_bounded(paths);
+  return resolve_named_custom_theme(name, discovered, dir);
+}
+
+TuiCustomThemeDiscoveryResult discover_tui_custom_themes(ava::config::XdgPaths const& paths)
+{
+  return to_public_discovery_result(discover_custom_themes_bounded(paths));
 }
 
 std::vector<TuiCustomThemeSummary> available_tui_custom_themes(ava::config::XdgPaths const& paths)
 {
-  std::vector<TuiCustomThemeSummary> themes;
-  auto const dir = tui_theme_directory(paths);
-  std::error_code exists_error;
-  if (!std::filesystem::exists(dir, exists_error))
-    return themes;
-  std::error_code iter_error;
-  for (std::filesystem::directory_iterator it(dir, iter_error), end; !iter_error && it != end; it.increment(iter_error))
-  {
-    if (!it->is_regular_file() || it->path().extension() != ".json")
-      continue;
-    auto theme = load_tui_custom_theme_file(it->path());
-    if (!theme)
-      continue;
-    themes.push_back(TuiCustomThemeSummary{.name = theme->name, .path = theme->path});
-  }
-  std::ranges::sort(themes, {}, &TuiCustomThemeSummary::name);
-  return themes;
+  return discover_tui_custom_themes(paths).themes;
 }
 
 ava::core::Result<DisplaySettingsDocument> load_display_settings_document(ava::config::XdgPaths const& paths)
@@ -897,20 +1294,7 @@ ava::core::Result<TuiDisplaySettings> load_tui_display_settings(ava::config::Xdg
   auto document = load_or_default_document(paths);
   if (!document)
     return std::unexpected(std::move(document.error()));
-  auto settings = display_settings_from_document_fields(*document);
-  if (!document->theme)
-    return settings;
-  if (auto normalized = normalize_tui_theme_setting(*document->theme))
-  {
-    settings.theme = std::move(normalized);
-    return settings;
-  }
-  auto custom_theme = load_tui_custom_theme(paths, *document->theme);
-  if (!custom_theme)
-    return std::unexpected(invalid_display_theme_error(*document));
-  settings.theme = custom_theme->name;
-  settings.custom_theme = std::move(*custom_theme);
-  return settings;
+  return resolve_theme_into_settings(paths, std::move(*document));
 }
 
 ava::core::Result<TuiDisplaySettings> apply_tui_display_settings(ava::config::XdgPaths const& paths)
@@ -937,9 +1321,17 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
       return std::unexpected(std::move(content.error()));
     display_revision = revision_for_text(*content);
   }
-  auto settings = load_tui_display_settings(paths);
+
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+
+  // One bounded discovery feeds both configured custom resolution and the watch catalog fingerprint.
+  auto const discovered = discover_custom_themes_bounded(paths);
+  auto settings = resolve_theme_into_settings(paths, std::move(*document), &discovered);
   if (!settings)
     return std::unexpected(std::move(settings.error()));
+
   TuiDisplaySettingsWatchState state;
   state.display_revision = std::move(display_revision);
   state.theme = settings->theme;
@@ -950,6 +1342,7 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
     state.custom_theme_path = settings->custom_theme->path;
     state.custom_theme_revision = settings->custom_theme->revision;
   }
+  for (auto const& theme : discovered.themes) state.custom_theme_catalog.push_back(TuiCustomThemeCatalogEntry{.name = theme.name, .revision = theme.revision});
   return state;
 }
 
@@ -957,7 +1350,11 @@ bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const
 {
   return previous.display_revision != current.display_revision || previous.theme != current.theme || previous.custom_theme_path != current.custom_theme_path ||
          previous.custom_theme_revision != current.custom_theme_revision || previous.show_images != current.show_images ||
-         previous.image_width_cells != current.image_width_cells;
+         previous.image_width_cells != current.image_width_cells || previous.custom_theme_catalog.size() != current.custom_theme_catalog.size() ||
+         !std::equal(previous.custom_theme_catalog.begin(), previous.custom_theme_catalog.end(), current.custom_theme_catalog.begin(),
+                     [](TuiCustomThemeCatalogEntry const& left, TuiCustomThemeCatalogEntry const& right) {
+                       return left.name == right.name && left.revision == right.revision;
+                     });
 }
 
 ava::core::VoidResult store_tui_theme_setting(ava::config::XdgPaths const& paths, std::optional<std::string> theme)
@@ -965,6 +1362,7 @@ ava::core::VoidResult store_tui_theme_setting(ava::config::XdgPaths const& paths
   auto document = load_or_default_document(paths);
   if (!document)
     return std::unexpected(std::move(document.error()));
+
   auto resolved = resolve_theme_name_for_store(paths, std::move(theme), document->path);
   if (!resolved)
     return std::unexpected(std::move(resolved.error()));
@@ -984,8 +1382,11 @@ ava::core::VoidResult store_tui_show_images_setting(ava::config::XdgPaths const&
 ava::core::VoidResult store_tui_image_width_setting(ava::config::XdgPaths const& paths, std::optional<std::size_t> image_width_cells)
 {
   if (image_width_cells && (*image_width_cells < kMinTuiImageWidthCells || *image_width_cells > kMaxTuiImageWidthCells))
-    return std::unexpected(invalid_display_error("image_width_cells must be an integer between 8 and 160", tui_display_settings_file(paths), "image_width_cells")
-                               .with_context("value", std::to_string(*image_width_cells)));
+  {
+    return std::unexpected(
+        invalid_display_error("image_width_cells must be an integer between 8 and 160", tui_display_settings_file(paths), "image_width_cells")
+            .with_context("value", std::to_string(*image_width_cells)));
+  }
   auto document = load_or_default_document(paths);
   if (!document)
     return std::unexpected(std::move(document.error()));

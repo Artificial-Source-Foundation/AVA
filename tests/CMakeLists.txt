@@ -739,6 +739,7 @@ if(Python3_Interpreter_FOUND)
     keybind_conflict
     theme_env
     theme_persisted
+    nested_settings_preview
     active_run
     restore_followup
     streaming_scroll

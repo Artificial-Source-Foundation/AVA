@@ -1,0 +1,361 @@
+"""Tmux coverage for nested settings navigation and reversible display preview."""
+
+from __future__ import annotations
+
+import time
+
+from tui_smoke_helpers import (
+    SmokeContext,
+    capture,
+    save_evidence,
+    send_keys,
+    send_literal,
+    tmux,
+    wait_for,
+    wait_for_absent,
+    wait_for_screen_change,
+)
+from .common import clear_settings_filter, close_settings, open_settings_root, open_settings_section
+
+
+def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
+    tmux_exe = ctx.tmux
+    root = ctx.root
+    workspace = ctx.workspace
+    ava_config = ctx.ava_config
+    display_config = ava_config / "display.json"
+    session = ctx.session_name("nested-settings")
+    env_prefix = ctx.pane_command(
+        home=ctx.home,
+        config=ctx.config,
+        state=ctx.state,
+        data=ctx.data,
+        extra={"NO_COLOR": "", "AVA_TUI_THEME": "", "COLORFGBG": ""},
+    )
+    (ava_config / "keybinds.json").write_text(
+        '{"tui.editor.cursorLineStart":["Home","Ctrl+A"]}\n', encoding="utf-8"
+    )
+    if display_config.exists():
+        display_config.unlink()
+
+    tmux(
+        tmux_exe,
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        "100",
+        "-y",
+        "24",
+        "-c",
+        str(workspace),
+        env_prefix,
+    )
+    wait_for(tmux_exe, session, r"Type a message|live session", "nested-settings initial TUI frame")
+
+    root_modal = open_settings_root(tmux_exe, session, "nested settings root")
+    if "Display" not in root_modal or "Models And Reasoning" not in root_modal:
+        raise RuntimeError(f"settings root did not expose shallow sections\nscreen:\n{root_modal}")
+    save_evidence(root, "nested-settings-root", root_modal)
+
+    # Section-local filter: root filter must not surface nested Theme rows.
+    send_literal(tmux_exe, session, "theme light")
+    root_theme_filter = wait_for(tmux_exe, session, r"filter\s+theme light|No settings match", "root theme filter")
+    if "Theme light" in root_theme_filter and "highlight previews" in root_theme_filter:
+        raise RuntimeError(f"root settings filter leaked nested theme rows\nscreen:\n{root_theme_filter}")
+    clear_settings_filter(tmux_exe, session, "root theme filter cleared")
+    wait_for(tmux_exe, session, r"Display|Models And Reasoning", "root sections restored after filter clear")
+
+    send_literal(tmux_exe, session, "Display")
+    wait_for(tmux_exe, session, r"filter\s+Display", "display section filter")
+    send_keys(tmux_exe, session, "Enter")
+    display_modal = wait_for(tmux_exe, session, r"Search display|Theme dark|Theme light", "display section opened")
+    save_evidence(root, "nested-settings-display", display_modal)
+
+    # Back-stack restores the root frame (including the prior root filter).
+    send_keys(tmux_exe, session, "Escape")
+    back_to_root = wait_for(tmux_exe, session, r"Choose a section|Models And Reasoning|filter\s+Display", "esc returns to settings root")
+    if "Search display" in back_to_root and "Choose a section" not in back_to_root and "Models And Reasoning" not in back_to_root:
+        raise RuntimeError(f"Esc from display did not restore settings root\nscreen:\n{back_to_root}")
+    clear_settings_filter(tmux_exe, session, "root filter cleared after display back-stack")
+
+    # Short-height nested navigation keeps the selected section visible.
+    tmux(tmux_exe, "resize-window", "-t", session, "-x", "72", "-y", "10")
+    short_root = wait_for(tmux_exe, session, r"Settings|Display", "short-height settings root")
+    send_literal(tmux_exe, session, "About")
+    short_about = wait_for(tmux_exe, session, r"filter\s+About", "short-height about filter")
+    if "About" not in short_about:
+        raise RuntimeError(f"short-height settings root hid the filtered About section\nscreen:\n{short_about}")
+    send_keys(tmux_exe, session, "Enter")
+    short_about_section = wait_for(tmux_exe, session, r"Search about|AVA version|native C\+\+ TUI", "short-height about section")
+    save_evidence(root, "nested-settings-short-about", short_about_section)
+    send_keys(tmux_exe, session, "Escape")
+    wait_for(tmux_exe, session, r"Choose a section|Display", "short-height back to root")
+    tmux(tmux_exe, "resize-window", "-t", session, "-x", "100", "-y", "24")
+    wait_for(tmux_exe, session, r"Choose a section|Display", "restored normal-height settings root")
+    close_settings(tmux_exe, session, "closed before preview checks")
+    send_keys(tmux_exe, session, "C-u")
+
+    # Theme highlight previews without writing display.json; Esc restores authority.
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"Search display|Theme light",
+        "display section before theme preview cancel",
+    )
+    before_preview = display_config.read_text(encoding="utf-8") if display_config.exists() else ""
+    send_literal(tmux_exe, session, "theme light")
+    preview_row = wait_for(tmux_exe, session, r"filter\s+theme light", "theme light highlight row")
+    if display_config.exists() and display_config.read_text(encoding="utf-8") != before_preview:
+        raise RuntimeError("theme highlight wrote display.json before confirmation")
+    save_evidence(root, "nested-settings-theme-preview", preview_row)
+    send_keys(tmux_exe, session, "Escape")
+    wait_for(tmux_exe, session, r"Choose a section|Display", "esc cancels display preview to root")
+    if display_config.exists() and display_config.read_text(encoding="utf-8") != before_preview:
+        raise RuntimeError("cancel path wrote display.json")
+    close_settings(tmux_exe, session, "closed after preview cancel")
+    send_keys(tmux_exe, session, "C-u")
+
+    # Confirm writes exactly once and survives restart.
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"Search display|Theme light",
+        "display section before theme confirm",
+    )
+    send_literal(tmux_exe, session, "theme light")
+    wait_for(tmux_exe, session, r"filter\s+theme light", "theme light confirm row")
+    send_keys(tmux_exe, session, "Enter")
+    confirmed = wait_for(tmux_exe, session, r"Stored TUI theme light", "theme confirm write")
+    if "Stored TUI theme light" not in confirmed:
+        raise RuntimeError(f"theme confirm did not persist light theme\nscreen:\n{confirmed}")
+    if not display_config.exists() or '"theme": "light"' not in display_config.read_text(encoding="utf-8"):
+        raise RuntimeError(f"theme confirm did not write display.json\npath:\n{display_config}")
+    save_evidence(root, "nested-settings-theme-confirm", confirmed)
+    tmux(tmux_exe, "kill-session", "-t", session, check=False)
+
+    tmux(
+        tmux_exe,
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        "100",
+        "-y",
+        "24",
+        "-c",
+        str(workspace),
+        env_prefix,
+    )
+    wait_for(tmux_exe, session, r"Type a message|live session", "nested-settings restart after confirm")
+    restarted = open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"ava-light|display\.json|Search display",
+        "display section after restart",
+    )
+    if "ava-light" not in restarted or "display.json" not in restarted:
+        raise RuntimeError(f"restart did not keep confirmed light theme\nscreen:\n{restarted}")
+    save_evidence(root, "nested-settings-theme-restart", restarted)
+
+    # External edit during an active preview rebases authority then keeps the staged highlight.
+    send_literal(tmux_exe, session, "theme plain")
+    wait_for(tmux_exe, session, r"filter\s+theme plain", "plain theme staged during external edit")
+    before_external = display_config.read_text(encoding="utf-8")
+    display_config.write_text('{\n  "theme": "dark",\n  "show_images": true,\n  "image_width_cells": 60\n}\n', encoding="utf-8")
+    # The Display filter may still be "Theme plain", so dark "current" rows are hidden.
+    # Synchronize on the watched file and a live settings frame instead of the covered status dock.
+    deadline = time.monotonic() + 8.0
+    rebased = capture(tmux_exe, session)
+    while time.monotonic() < deadline:
+        rebased = capture(tmux_exe, session)
+        disk = display_config.read_text(encoding="utf-8")
+        settings_still_open = (
+            "Settings · Display" in rebased or "Search display" in rebased or "filter" in rebased
+        )
+        if '"theme": "dark"' in disk and settings_still_open:
+            break
+        time.sleep(0.05)
+    disk = display_config.read_text(encoding="utf-8")
+    if '"theme": "dark"' not in disk:
+        raise RuntimeError(f"external display.json edit was not observed\npath text:\n{disk}\nscreen:\n{rebased}")
+    if '"theme": "plain"' in disk:
+        raise RuntimeError("external reload path persisted the staged plain preview")
+    if "Settings · Display" not in rebased and "Search display" not in rebased and "filter" not in rebased:
+        raise RuntimeError(f"external reload discarded the settings display frame\nscreen:\n{rebased}")
+    save_evidence(root, "nested-settings-external-during-preview", rebased)
+    send_keys(tmux_exe, session, "Escape")
+    wait_for(tmux_exe, session, r"Choose a section|Display", "esc after external rebase")
+    close_settings(tmux_exe, session, "closed after external rebase")
+    send_keys(tmux_exe, session, "C-u")
+
+    # W2-002: while configured theme is dark, a valid edit to an unconfigured previewed custom
+    # theme must reload through the catalog watch and refresh the staged overlay.
+    themes_dir = ava_config / "themes"
+    themes_dir.mkdir(parents=True, exist_ok=True)
+    sunrise_path = themes_dir / "sunrise.json"
+
+    def write_sunrise(composer_bg: int) -> None:
+        sunrise_path.write_text(
+            "{\n"
+            '  "name": "sunrise",\n'
+            '  "vars": {"primary": "#0066cc", "paper": 255},\n'
+            '  "colors": {\n'
+            '    "text": "",\n'
+            '    "muted": 242,\n'
+            '    "success": 34,\n'
+            '    "warning": "#ffaa00",\n'
+            '    "error": "#ff0000",\n'
+            '    "accent": "primary",\n'
+            '    "screenBg": "paper",\n'
+            f'    "composerBg": {composer_bg},\n'
+            '    "toolBg": 235,\n'
+            '    "questionBg": 234\n'
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+    write_sunrise(236)
+    # Ensure configured authority stays dark (unconfigured sunrise is only a preview candidate).
+    display_config.write_text(
+        '{\n  "theme": "dark",\n  "show_images": true,\n  "image_width_cells": 60\n}\n',
+        encoding="utf-8",
+    )
+    # Give the display watcher a beat to observe dark authority before opening settings.
+    time.sleep(0.6)
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"Search display|Theme sunrise|sunrise",
+        "display section before unconfigured custom theme preview",
+    )
+    send_literal(tmux_exe, session, "theme sunrise")
+    sunrise_row = wait_for(tmux_exe, session, r"filter\s+theme sunrise|Theme sunrise", "sunrise custom theme staged")
+    if "Theme sunrise" not in sunrise_row and "sunrise" not in sunrise_row.lower():
+        raise RuntimeError(f"sunrise custom theme was not listed for preview\nscreen:\n{sunrise_row}")
+    before_sunrise_edit = display_config.read_text(encoding="utf-8")
+    write_sunrise(238)
+    deadline = time.monotonic() + 8.0
+    sunrise_reloaded = capture(tmux_exe, session)
+    while time.monotonic() < deadline:
+        sunrise_reloaded = capture(tmux_exe, session)
+        disk = display_config.read_text(encoding="utf-8")
+        settings_still_open = (
+            "Settings · Display" in sunrise_reloaded
+            or "Search display" in sunrise_reloaded
+            or "filter" in sunrise_reloaded
+        )
+        if settings_still_open and disk == before_sunrise_edit:
+            # Catalog-only reload must not persist the staged preview.
+            break
+        time.sleep(0.05)
+    if display_config.read_text(encoding="utf-8") != before_sunrise_edit:
+        raise RuntimeError("unconfigured custom theme edit wrote display.json during preview")
+    if "Settings · Display" not in sunrise_reloaded and "Search display" not in sunrise_reloaded and "filter" not in sunrise_reloaded:
+        raise RuntimeError(
+            f"custom theme catalog reload discarded the settings display frame\nscreen:\n{sunrise_reloaded}"
+        )
+    save_evidence(root, "nested-settings-custom-theme-catalog-reload", sunrise_reloaded)
+
+    # Invalidating the previewed custom theme must keep the session open and must not persist sunrise.
+    sunrise_path.write_text(
+        '{\n  "name": "sunrise",\n  "colors": {"text":"","muted":242,"success":34,"warning":220,"error":196,"accent":39,"screenBg":235}\n}\n',
+        encoding="utf-8",
+    )
+    deadline = time.monotonic() + 8.0
+    sunrise_invalid = capture(tmux_exe, session)
+    while time.monotonic() < deadline:
+        sunrise_invalid = capture(tmux_exe, session)
+        disk = display_config.read_text(encoding="utf-8")
+        settings_still_open = (
+            "Settings · Display" in sunrise_invalid
+            or "Search display" in sunrise_invalid
+            or "filter" in sunrise_invalid
+        )
+        if settings_still_open and '"theme": "dark"' in disk and '"theme": "sunrise"' not in disk:
+            break
+        time.sleep(0.05)
+    disk = display_config.read_text(encoding="utf-8")
+    if '"theme": "sunrise"' in disk:
+        raise RuntimeError("invalid custom theme edit/confirm path persisted sunrise into display.json")
+    if '"theme": "dark"' not in disk:
+        raise RuntimeError(f"invalid custom theme path disturbed configured dark theme\npath text:\n{disk}")
+    save_evidence(root, "nested-settings-custom-theme-invalid-retained", sunrise_invalid)
+    send_keys(tmux_exe, session, "Escape")
+    wait_for(tmux_exe, session, r"Choose a section|Display", "esc after custom theme catalog reload")
+    close_settings(tmux_exe, session, "closed after custom theme catalog reload")
+    send_keys(tmux_exe, session, "C-u")
+    # Restore a valid sunrise file so later image checks are unaffected.
+    write_sunrise(236)
+
+    # Image visibility/width preview and persistence.
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Display",
+        r"Search display|Images off|Image width",
+        "display section before image controls",
+    )
+    image_before = display_config.read_text(encoding="utf-8")
+    send_literal(tmux_exe, session, "Images off")
+    images_off_row = wait_for(tmux_exe, session, r"filter\s+Images off", "images off highlight")
+    if display_config.read_text(encoding="utf-8") != image_before:
+        raise RuntimeError("images highlight wrote display.json before confirmation")
+    save_evidence(root, "nested-settings-images-preview", images_off_row)
+    send_keys(tmux_exe, session, "Enter")
+    images_off_saved = wait_for(tmux_exe, session, r"Stored TUI image visibility off", "images off confirm")
+    if '"show_images": false' not in display_config.read_text(encoding="utf-8"):
+        raise RuntimeError(f"images off confirm did not persist show_images=false\nscreen:\n{images_off_saved}")
+
+    clear_settings_filter(tmux_exe, session, "cleared images filter before width")
+    send_literal(tmux_exe, session, "Image width 80")
+    width_row = wait_for(tmux_exe, session, r"filter\s+Image width 80", "image width highlight")
+    width_before_confirm = display_config.read_text(encoding="utf-8")
+    if '"image_width_cells": 80' in width_before_confirm:
+        raise RuntimeError("image width highlight persisted before confirmation")
+    save_evidence(root, "nested-settings-width-preview", width_row)
+    send_keys(tmux_exe, session, "Enter")
+    width_saved = wait_for(tmux_exe, session, r"Stored TUI image width 80", "image width confirm")
+    if '"image_width_cells": 80' not in display_config.read_text(encoding="utf-8"):
+        raise RuntimeError(f"image width confirm did not persist width 80\nscreen:\n{width_saved}")
+    save_evidence(root, "nested-settings-images-width-confirm", width_saved)
+
+    # Mouse selection in nested display stays non-persisting.
+    clear_settings_filter(tmux_exe, session, "cleared width filter before mouse theme")
+    send_literal(tmux_exe, session, "theme")
+    mouse_rows = wait_for(tmux_exe, session, r"filter\s+theme", "theme rows for mouse select")
+    dark_row = next(
+        ((index + 1, line) for index, line in enumerate(mouse_rows.splitlines()) if "Theme dark" in line),
+        None,
+    )
+    light_row = next(
+        ((index + 1, line) for index, line in enumerate(mouse_rows.splitlines()) if "Theme light" in line),
+        None,
+    )
+    if dark_row is None or light_row is None:
+        raise RuntimeError(f"could not locate Theme dark/light rows for mouse selection\nscreen:\n{mouse_rows}")
+    before_mouse_config = display_config.read_text(encoding="utf-8")
+    # Move selection with the mouse onto dark, then light; neither click may persist.
+    for label, row in (("dark", dark_row), ("light", light_row)):
+        row_number, row_text = row
+        column = max(1, len(row_text) - len(row_text.lstrip()) + 4)
+        before_mouse = capture(tmux_exe, session)
+        send_literal(tmux_exe, session, f"\x1b[<0;{column};{row_number}M")
+        after_mouse = wait_for_screen_change(
+            tmux_exe, session, before_mouse, f"display mouse selection redraw ({label})"
+        )
+        if display_config.read_text(encoding="utf-8") != before_mouse_config:
+            raise RuntimeError(f"settings mouse selection wrote display.json on {label}")
+        if "Stored TUI theme" in after_mouse:
+            raise RuntimeError(f"settings mouse selection confirmed a theme write\nscreen:\n{after_mouse}")
+    save_evidence(root, "nested-settings-mouse-no-persist", capture(tmux_exe, session))
+
+    close_settings(tmux_exe, session, "nested settings closed")
+    tmux(tmux_exe, "kill-session", "-t", session, check=False)

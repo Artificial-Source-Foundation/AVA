@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/tui/runtime.h"
 #include "ava/tui/runtime_state_internal.h"
 
 #include <chrono>
@@ -25,7 +26,8 @@ class RuntimeActionController final
   RuntimeActionController(RuntimeActionController const&) = delete;
   RuntimeActionController& operator=(RuntimeActionController const&) = delete;
 
-  [[nodiscard]] bool maybe_reload_display_settings();
+  // Applied hydrates without a final render so the caller can reapply preview before one paint.
+  [[nodiscard]] DisplaySettingsReloadPollOutcome maybe_reload_display_settings();
   bool clear_draft_for_interrupt();
   [[nodiscard]] bool open_external_editor();
   [[nodiscard]] bool suspend_to_background();

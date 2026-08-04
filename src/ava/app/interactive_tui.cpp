@@ -100,7 +100,7 @@ int run_tui(ShellState state)
     std::vector<ava::tui::ThemeOptionItem> themes;
     for (auto const& theme : ava::app::available_tui_custom_themes(invocation_paths))
     {
-      themes.push_back(ava::tui::ThemeOptionItem{.name = theme.name, .detail = theme.path.string()});
+      themes.push_back(ava::tui::ThemeOptionItem{.name = theme.name, .detail = theme.path.string(), .palette = theme.palette, .revision = theme.revision});
     }
     return themes;
   };

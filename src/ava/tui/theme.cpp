@@ -3,12 +3,14 @@
 
 #include <cctype>
 #include <charconv>
+#include <cstdint>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace ava::tui {
 namespace {
@@ -29,6 +31,18 @@ std::optional<TuiCustomTheme>& config_custom_theme_storage()
 {
   static std::optional<TuiCustomTheme> theme;
   return theme;
+}
+
+std::optional<TuiThemeInfo>& theme_preview_storage()
+{
+  static std::optional<TuiThemeInfo> preview;
+  return preview;
+}
+
+std::uint64_t& theme_preview_generation_storage()
+{
+  static std::uint64_t generation = 0;
+  return generation;
 }
 
 std::optional<TerminalBackgroundAppearance>& detected_terminal_background_storage()
@@ -262,6 +276,35 @@ void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCus
   config_custom_theme_storage() = std::move(custom_theme);
 }
 
+void set_tui_theme_preview(std::optional<TuiThemeInfo> preview)
+{
+  std::lock_guard lock(config_theme_mutex());
+  if (preview)
+  {
+    // Ensure each preview identity invalidates composer style caches even when
+    // the palette values match a previous candidate.
+    ++theme_preview_generation_storage();
+    preview->revision = preview->revision.empty() ? ("preview-" + std::to_string(theme_preview_generation_storage()))
+                                                  : (preview->revision + "|preview-" + std::to_string(theme_preview_generation_storage()));
+  }
+  else
+  {
+    ++theme_preview_generation_storage();
+  }
+  theme_preview_storage() = std::move(preview);
+}
+
+void clear_tui_theme_preview()
+{
+  set_tui_theme_preview(std::nullopt);
+}
+
+bool tui_theme_preview_active()
+{
+  std::lock_guard lock(config_theme_mutex());
+  return theme_preview_storage().has_value();
+}
+
 void set_detected_terminal_background_appearance(std::optional<TerminalBackgroundAppearance> appearance)
 {
   std::lock_guard lock(config_theme_mutex());
@@ -289,6 +332,12 @@ TuiThemeInfo active_tui_theme()
   if (env_enabled("NO_COLOR"))
   {
     return TuiThemeInfo{.kind = TuiThemeKind::Plain, .name = "plain", .detail = "NO_COLOR disables ANSI styling", .badge = "NO_COLOR"};
+  }
+
+  {
+    std::lock_guard lock(config_theme_mutex());
+    if (theme_preview_storage())
+      return *theme_preview_storage();
   }
 
   auto const requested = theme_env_value();

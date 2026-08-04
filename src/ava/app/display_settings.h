@@ -1,8 +1,8 @@
 #pragma once
 
+#include "ava/tui/theme.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/core/result.h"
-#include "ava/tui/theme.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,11 +18,19 @@ inline constexpr std::size_t kDefaultTuiImageWidthCells = 60;
 inline constexpr std::size_t kMinTuiImageWidthCells = 8;
 inline constexpr std::size_t kMaxTuiImageWidthCells = 160;
 inline constexpr std::size_t kMaxTuiDisplaySettingsBytes = 64 * 1024;
+// Conservative application-owned bounds for custom theme discovery and the 500ms display watch.
+// One oversized/invalid unconfigured file is skipped and must not fail built-in display reload.
+inline constexpr std::size_t kMaxTuiCustomThemeFileBytes = 64 * 1024;
+inline constexpr std::size_t kMaxTuiCustomThemeCandidates = 64;
+inline constexpr std::size_t kMaxTuiCustomThemeCatalogAggregateBytes = 256 * 1024;
 
 struct TuiCustomThemeSummary
 {
   std::string name;
   std::filesystem::path path;
+  // Parsed/validated palette + content revision. Invalid theme files are never listed.
+  ava::tui::TuiThemePalette palette;
+  std::string revision;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -53,6 +61,42 @@ struct TuiDisplaySettings
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// One validated previewable custom theme observed by the application-owned watcher.
+// Invalid/oversized/unreadable theme files are omitted; ordering is stable by name.
+// Discovery is bounded (see kMaxTuiCustomTheme* constants): candidate files are scanned in
+// normalized-path order, symlinks/special files are skipped, first valid file per name wins
+// for catalog/listing, and configured/named load remains fail-closed on duplicates or when the
+// bounded scan is incomplete (candidate cap or aggregate budget), even if one match appeared.
+enum class TuiCustomThemeDiscoveryIncompleteReason : std::uint8_t
+{
+  None = 0,
+  CandidateCap,
+  AggregateBudget,
+};
+
+struct TuiCustomThemeCatalogEntry
+{
+  std::string name;
+  std::string revision;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Observable bounded discovery result used by listing, watch catalog, and uniqueness-sensitive
+// named/configured load. Listing may return the validated prefix when complete is false.
+struct TuiCustomThemeDiscoveryResult
+{
+  std::vector<TuiCustomThemeSummary> themes;
+  bool complete = true;
+  TuiCustomThemeDiscoveryIncompleteReason incomplete_reason = TuiCustomThemeDiscoveryIncompleteReason::None;
+  // Bytes physically read from candidate descriptors during this scan, including truncated/oversized
+  // candidates that were skipped after work (overflow-safe, <= aggregate cap). Pre-fstat rejects of
+  // known-oversized files contribute 0 because no content bytes were pulled.
+  std::size_t aggregate_bytes_read = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TuiDisplaySettingsWatchState
 {
   std::string display_revision;
@@ -61,6 +105,9 @@ struct TuiDisplaySettingsWatchState
   std::optional<std::string> custom_theme_revision;
   bool show_images = true;
   std::size_t image_width_cells = kDefaultTuiImageWidthCells;
+  // Bounded deterministic catalog of every validated custom theme candidate (stable name order),
+  // including themes that are only previewable and not currently configured.
+  std::vector<TuiCustomThemeCatalogEntry> custom_theme_catalog;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -79,6 +126,7 @@ struct TuiDisplaySettingsWatchState
 [[nodiscard]] std::string active_tui_theme_summary();
 [[nodiscard]] ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme_file(std::filesystem::path const& path);
 [[nodiscard]] ava::core::Result<ava::tui::TuiCustomTheme> load_tui_custom_theme(ava::config::XdgPaths const& paths, std::string_view name);
+[[nodiscard]] TuiCustomThemeDiscoveryResult discover_tui_custom_themes(ava::config::XdgPaths const& paths);
 [[nodiscard]] std::vector<TuiCustomThemeSummary> available_tui_custom_themes(ava::config::XdgPaths const& paths);
 [[nodiscard]] ava::core::Result<DisplaySettingsDocument> load_display_settings_document(ava::config::XdgPaths const& paths);
 [[nodiscard]] ava::core::Result<TuiDisplaySettings> load_tui_display_settings(ava::config::XdgPaths const& paths);

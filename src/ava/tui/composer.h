@@ -5,6 +5,7 @@
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text.h"
+#include "ava/tui/theme.h"
 
 #include <cstddef>
 #include <memory>
@@ -273,6 +274,9 @@ struct ThemeOptionItem
 {
   std::string name;
   std::string detail;
+  // Already-parsed/validated custom palette delivered by the application.
+  std::optional<TuiThemePalette> palette = std::nullopt;
+  std::string revision = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

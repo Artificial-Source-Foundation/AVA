@@ -951,8 +951,147 @@ void run_tui_prompt_search_race_tests()
          "consumed");
 }
 
+bool test_display_settings_reload_poll_outcome_and_preview_staging()
+{
+  // Reproduces W2-001 through RuntimeActionController + preview reapply: optional snapshot is the
+  // applied signal (no value inference), hydrate does not final-render, overlay is staged before paint.
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar no_color_guard("NO_COLOR", "");
+  ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    return false;
+  }
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  if (has_colors())
+  {
+    static_cast<void>(start_color());
+    static_cast<void>(use_default_colors());
+  }
+  static_cast<void>(resizeterm(24, 100));
+
+  ava::tui::clear_tui_theme_preview();
+  ava::tui::set_tui_config_theme("dark");
+
+  int applied_callback_count = 0;
+  ava::tui::TuiRuntimeOptions options;
+  options.mode = "build";
+  options.provider = "openai";
+  options.model = "gpt-5.5";
+  options.session_id = "session_display_reload";
+  options.session_path = "/tmp/session_display_reload.jsonl";
+  options.workspace = "/workspace";
+  options.show_images = true;
+  options.image_width_cells = 60;
+  options.custom_themes = {ava::tui::ThemeOptionItem{
+      .name = "sunrise",
+      .detail = "/tmp/ava/sunrise.json",
+      .palette =
+          ava::tui::TuiThemePalette{.text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255, .composer_bg = 236},
+      .revision = "sunrise-v1"}};
+  options.on_maybe_reload_display_settings = [&]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+    ++applied_callback_count;
+    // Authoritative reload to show_images=false while an images-off overlay is already active
+    // (presentation already false). Applied must come from the optional snapshot, not value diffs.
+    return std::optional<ava::tui::TuiRuntimeStateSnapshot>{ava::tui::TuiRuntimeStateSnapshot{
+        .mode = "build",
+        .provider = "openai",
+        .model = "gpt-5.5",
+        .session_id = "session_display_reload",
+        .session_path = "/tmp/session_display_reload.jsonl",
+        .workspace = "/workspace",
+        .git_branch = "develop",
+        .status = "display theme auto-reloaded",
+        .custom_themes = {ava::tui::ThemeOptionItem{
+            .name = "sunrise",
+            .detail = "/tmp/ava/sunrise.json",
+            .palette =
+                ava::tui::TuiThemePalette{
+                    .text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 254, .composer_bg = 237},
+            .revision = "sunrise-v2"}},
+        .show_images = false,
+        .image_width_cells = 60}};
+  };
+
+  ava::tui::RuntimePresentationState presentation(options);
+  ava::tui::RuntimeDraftState draft_state;
+  ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft_state);
+  auto active_select_list = ava::tui::ActiveSelectList::None;
+  std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
+  ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
+
+  using ava::tui::runtime_views::DisplayPresentationBaseline;
+  using ava::tui::runtime_views::DisplayPreviewTransaction;
+  using ava::tui::runtime_views::reapply_settings_preview_after_display_reload;
+  using ava::tui::runtime_views::settings_preview_overlay_for_action;
+
+  DisplayPreviewTransaction preview;
+  preview.begin(DisplayPresentationBaseline{.show_images = true, .image_width_cells = 60});
+  if (auto off = settings_preview_overlay_for_action("settings:images.off", presentation.snapshot))
+    preview.update(std::move(*off));
+  preview.apply_image_overlay(presentation.snapshot);
+  // Stage sunrise so the applied custom-theme catalog refresh is visible before any final render.
+  if (auto sunrise = settings_preview_overlay_for_action("theme:sunrise", presentation.snapshot))
+    preview.update(std::move(*sunrise));
+  preview.apply_image_overlay(presentation.snapshot);
+
+  auto const outcome = action_controller.maybe_reload_display_settings();
+  bool const applied_signal = outcome == ava::tui::DisplaySettingsReloadPollOutcome::Applied && applied_callback_count == 1 &&
+                              !presentation.snapshot.show_images && presentation.snapshot.custom_themes.size() == 1 &&
+                              presentation.snapshot.custom_themes.front().revision == "sunrise-v2";
+  // Hydrate-only: theme overlay must still be the pre-reapply staged identity until caller restages.
+  // set_tui_theme_preview appends a generation suffix to the live active revision.
+  bool const hydrate_kept_prior_overlay =
+      ava::tui::tui_theme_preview_active() && ava::tui::active_tui_theme().name == "sunrise" && ava::tui::active_tui_theme().revision.find("sunrise-v1") == 0;
+
+  reapply_settings_preview_after_display_reload(preview, presentation.snapshot);
+  bool const staged_before_render = preview.authoritative.show_images == false && preview.active() && preview.overlay && preview.overlay->theme &&
+                                    preview.overlay->theme->revision == "sunrise-v2" && ava::tui::active_tui_theme().revision.find("sunrise-v2") == 0 &&
+                                    ava::tui::active_tui_theme().palette && ava::tui::active_tui_theme().palette->composer_bg == 237 &&
+                                    !presentation.snapshot.show_images;
+
+  // Final paint happens only after overlay staging (controller did not final-render on Applied).
+  bool const rendered = renderer.render();
+
+  preview.cancel();
+  preview.apply_image_overlay(presentation.snapshot);
+  bool const esc_restores_new_authority = !preview.active() && !presentation.snapshot.show_images && !ava::tui::tui_theme_preview_active();
+
+  // Unchanged poll uses explicit nullopt signal.
+  options.on_maybe_reload_display_settings = []() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+    return std::optional<ava::tui::TuiRuntimeStateSnapshot>{};
+  };
+  // Force the rate limit open for a second poll.
+  std::this_thread::sleep_for(std::chrono::milliseconds(510));
+  auto const unchanged_after_wait = action_controller.maybe_reload_display_settings();
+  bool const unchanged_signal = unchanged_after_wait == ava::tui::DisplaySettingsReloadPollOutcome::Unchanged;
+
+  ava::tui::clear_tui_theme_preview();
+  ava::tui::set_tui_config_theme(std::nullopt);
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  return applied_signal && hydrate_kept_prior_overlay && staged_before_render && rendered && esc_restores_new_authority && unchanged_signal;
+}
+
 void run_tui_composer_rendering_tests_part_1()
 {
+  expect(test_display_settings_reload_poll_outcome_and_preview_staging(),
+         "application-signaled display reload rebases and reapplies staged settings preview before one final paint");
   expect(
       test_transcript_message_boundary_navigation_and_live_tail_reset(),
       "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, applies the "

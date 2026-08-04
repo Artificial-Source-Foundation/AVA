@@ -62,6 +62,11 @@ struct TuiThemeInfo
 };
 
 void set_tui_config_theme(std::optional<std::string> theme, std::optional<TuiCustomTheme> custom_theme = std::nullopt);
+// Presentation-only theme overlay for settings preview. Does not write config.
+// Cleared by cancel/confirm/modal replacement/runtime exit. NO_COLOR still wins.
+void set_tui_theme_preview(std::optional<TuiThemeInfo> preview);
+void clear_tui_theme_preview();
+[[nodiscard]] bool tui_theme_preview_active();
 void set_detected_terminal_background_appearance(std::optional<TerminalBackgroundAppearance> appearance);
 void reset_detected_terminal_background_appearance();
 [[nodiscard]] std::optional<TerminalBackgroundAppearance> detected_terminal_background_appearance();

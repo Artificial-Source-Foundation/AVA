@@ -318,7 +318,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto& transcript_scroll_offset = renderer_.transcript_scroll_offset;
   auto& ui_mutex = renderer_.ui_mutex;
   auto render = [&]() -> bool { return renderer_.render(); };
-  auto maybe_reload_display_settings = [&]() -> bool { return action_controller_.maybe_reload_display_settings(); };
+  auto maybe_reload_display_settings = [&]() -> bool {
+    return action_controller_.maybe_reload_display_settings() != DisplaySettingsReloadPollOutcome::TerminalFailure;
+  };
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
     return apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,

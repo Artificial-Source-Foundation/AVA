@@ -7,7 +7,16 @@ import pathlib
 import re
 import time
 
-from tui_smoke_helpers import SmokeContext, send_keys, wait_for, wait_for_session_exit
+from tui_smoke_helpers import (
+    SmokeContext,
+    capture,
+    send_keys,
+    send_literal,
+    wait_for,
+    wait_for_absent,
+    wait_for_screen_change,
+    wait_for_session_exit,
+)
 
 
 _TITLE_GENERATION_SYSTEM_PROMPT = (
@@ -99,6 +108,125 @@ def _main_session(ctx: SmokeContext) -> tuple[object, pathlib.Path, pathlib.Path
 def _finish_main(tmux_exe: object, session: str) -> None:
     send_keys(tmux_exe, session, "C-d")
     wait_for_session_exit(tmux_exe, session)
+
+
+# Match settings while open even when a non-empty filter hides the placeholder text.
+_SETTINGS_OPEN_PATTERN = (
+    r"Search settings|Search display|Search models|Search input|Search sessions|"
+    r"Search tools|Search privacy|Search about|Choose a section|"
+    r"Settings · |filter\s+\S|Type to filter · highlight previews|Type to filter · Enter open"
+)
+# Root-only markers: do not match section titles like "Settings · Display".
+_SETTINGS_ROOT_PATTERN = r"Choose a section|Search settings|Models And Reasoning"
+# Composer rows only: reject transcript/modal copy that mentions the same text.
+_COMPOSER_EMPTY_PATTERN = r"(?m)^\s*│\s+Type a message\.\.\."
+_COMPOSER_SETTINGS_DRAFT_PATTERN = r"(?m)^\s*│\s+/settings(?:\s|$)"
+
+
+def _ensure_empty_composer(tmux_exe: object, session: str, label: str, timeout: float = 8.0) -> str:
+    """Clear any composer draft and synchronize on the visible empty composer row.
+
+    A prior Escape used to dismiss settings can swallow the next clear key under load,
+    so retry from visible state instead of bursting Escape/C-u/literal immediately.
+    """
+
+    deadline = time.monotonic() + timeout
+    last = capture(tmux_exe, session)
+    while time.monotonic() < deadline:
+        if re.search(_SETTINGS_OPEN_PATTERN, last):
+            close_settings(tmux_exe, session, f"{label} pre-close")
+            last = capture(tmux_exe, session)
+            continue
+        if re.search(_COMPOSER_EMPTY_PATTERN, last):
+            return last
+        send_keys(tmux_exe, session, "C-u")
+        remaining = max(0.1, deadline - time.monotonic())
+        try:
+            last = wait_for(
+                tmux_exe,
+                session,
+                _COMPOSER_EMPTY_PATTERN,
+                f"{label} empty composer",
+                timeout=min(2.0, remaining),
+            )
+            if not re.search(_SETTINGS_OPEN_PATTERN, last):
+                return last
+        except RuntimeError:
+            last = capture(tmux_exe, session)
+    raise RuntimeError(f"{label}; composer did not become empty before /settings\nscreen:\n{last}")
+
+
+def open_settings_root(tmux_exe: object, session: str, label: str = "settings root") -> str:
+    """Open `/settings` to the shallow root section list."""
+
+    # Ensure any previous settings frame is gone and the composer is idle before drafting.
+    _ensure_empty_composer(tmux_exe, session, label)
+    send_literal(tmux_exe, session, "/settings")
+    wait_for(tmux_exe, session, _COMPOSER_SETTINGS_DRAFT_PATTERN, f"{label} command draft")
+    before = capture(tmux_exe, session)
+    send_keys(tmux_exe, session, "Enter")
+    wait_for_screen_change(tmux_exe, session, before, f"{label} open redraw")
+    return wait_for(tmux_exe, session, _SETTINGS_ROOT_PATTERN, label)
+
+
+def open_settings_section(
+    tmux_exe: object,
+    session: str,
+    section_query: str,
+    section_marker: str,
+    label: str,
+) -> str:
+    """Open `/settings`, filter the root to one section, and Enter into it."""
+
+    open_settings_root(tmux_exe, session, f"{label} root")
+    send_literal(tmux_exe, session, section_query)
+    wait_for(tmux_exe, session, rf"filter\s+{re.escape(section_query)}", f"{label} section filter")
+    # Jump to the best/first match. Weak fuzzy hits can leave the previous root row
+    # selected (for example Display's value settings:section.display matching "Sessions").
+    send_keys(tmux_exe, session, "Home")
+    before = capture(tmux_exe, session)
+    send_keys(tmux_exe, session, "Enter")
+    # Wait for the section frame itself before typing nested filters so the first
+    # filter character is not lost to the still-closing root key handler.
+    wait_for_screen_change(tmux_exe, session, before, f"{label} section open redraw")
+    return wait_for(tmux_exe, session, section_marker, label)
+
+
+def clear_settings_filter(tmux_exe: object, session: str, label: str = "settings filter cleared") -> str:
+    """Clear the current section filter with Backspace (Ctrl+U is a composer-only draft clear)."""
+
+    before = capture(tmux_exe, session)
+    # Select-list filters are short; bound the clear so a stuck modal cannot hang the smoke.
+    for _ in range(48):
+        screen = capture(tmux_exe, session)
+        if re.search(r"filter\s+(?:Search |█)", screen) or not re.search(r"filter\s+\S", screen):
+            return screen
+        send_keys(tmux_exe, session, "BSpace")
+    after = capture(tmux_exe, session)
+    if after == before or re.search(r"filter\s+\S", after):
+        raise RuntimeError(f"{label}; filter did not clear\nscreen:\n{after}")
+    return after
+
+
+def close_settings(tmux_exe: object, session: str, label: str = "settings closed") -> None:
+    """Escape until the settings selector is gone (section back-stack then root close)."""
+
+    # Wave 2 keeps at most root + one section frame. Prefer Escape only: Ctrl+C can be
+    # delivered as SIGINT depending on the terminal path and is not reliable here.
+    for attempt in range(4):
+        screen = capture(tmux_exe, session)
+        if not re.search(_SETTINGS_OPEN_PATTERN, screen):
+            return
+        before = screen
+        send_keys(tmux_exe, session, "Escape")
+        try:
+            wait_for_screen_change(tmux_exe, session, before, f"{label} esc {attempt + 1}", timeout=2.0)
+        except RuntimeError:
+            # Already closed or visually identical root/composer transition.
+            pass
+    final = capture(tmux_exe, session)
+    if re.search(_SETTINGS_OPEN_PATTERN, final):
+        raise RuntimeError(f"{label}; settings still open\nscreen:\n{final}")
 
 
 def assert_title_first_new_receipt(screen: str, created_title: str, previous_title: str, label: str) -> str:

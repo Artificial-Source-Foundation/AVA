@@ -48,6 +48,27 @@ using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
+using runtime_views::DisplayPresentationBaseline;
+using runtime_views::kSettingsDraftDetails;
+using runtime_views::kSettingsDraftJobs;
+using runtime_views::kSettingsDraftMcp;
+using runtime_views::kSettingsDraftPermissions;
+using runtime_views::kSettingsDraftPlugins;
+using runtime_views::kSettingsDraftSessions;
+using runtime_views::kSettingsDraftSetup;
+using runtime_views::kSettingsDraftThinking;
+using runtime_views::kSettingsDraftTools;
+using runtime_views::kSettingsEditKeybindings;
+using runtime_views::kSettingsOpenKeybindings;
+using runtime_views::kSettingsOpenModels;
+using runtime_views::kSettingsOpenReasoning;
+using runtime_views::kSettingsOpenScopedModels;
+using runtime_views::kSettingsReloadKeybindings;
+using runtime_views::reapply_settings_preview_after_display_reload;
+using runtime_views::reselect_settings_display_row_after_rebuild;
+using runtime_views::settings_preview_overlay_for_action;
+using runtime_views::settings_section_for_action;
+using runtime_views::SettingsNavigationState;
 using runtime_views::kSettingsEditKeybindings;
 using runtime_views::kSettingsOpenKeybindings;
 using runtime_views::kSettingsOpenModels;
@@ -187,6 +208,79 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& completion_cache = renderer.completion_cache;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  SettingsNavigationState settings_nav;
+  bool settings_session_open = false;
+  struct ClearThemePreviewOnExit
+  {
+    ~ClearThemePreviewOnExit() { clear_tui_theme_preview(); }
+  } clear_theme_preview_on_exit;
+  auto clear_settings_preview = [&]() {
+    settings_nav.preview.cancel();
+    settings_nav.preview.apply_image_overlay(snapshot);
+  };
+  auto begin_settings_preview_baseline = [&]() {
+    settings_nav.preview.begin(DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells});
+  };
+  auto ensure_settings_session = [&]() {
+    if (settings_session_open)
+      return;
+    settings_nav.reset();
+    begin_settings_preview_baseline();
+    settings_session_open = true;
+  };
+  auto rebuild_settings_view = [&](SettingsSection section, std::string query = {}, std::optional<std::size_t> selected = std::nullopt) {
+    ensure_settings_session();
+    auto settings_snapshot = snapshot;
+    settings_snapshot.sidebar = sidebar;
+    // Build rows from authoritative presentation so preview overlays do not rewrite candidate labels.
+    settings_snapshot.show_images = settings_nav.preview.authoritative.show_images;
+    settings_snapshot.image_width_cells = settings_nav.preview.authoritative.image_width_cells;
+    // active_tui_theme() consults the presentation overlay; clear it only while constructing rows.
+    auto const restage_theme_preview = settings_nav.preview.active();
+    settings_nav.preview.clear_theme_overlay();
+    auto view = settings_select_list_view_for_section(section, settings_snapshot, options.key_bindings);
+    if (restage_theme_preview)
+      settings_nav.preview.apply_theme_overlay();
+    view.query = std::move(query);
+    if (selected)
+      view.selected_item_index = *selected;
+    view.selected_item_index = clamp_select_list_selection(view, view.selected_item_index);
+    snapshot.select_list = std::move(view);
+    active_select_list = ActiveSelectList::Settings;
+    settings_nav.section = section;
+    settings_nav.preview.apply_image_overlay(snapshot);
+  };
+  auto apply_settings_highlight_preview = [&]() {
+    if (active_select_list != ActiveSelectList::Settings || !snapshot.select_list || !settings_nav.in_display())
+    {
+      if (settings_nav.preview.active())
+      {
+        settings_nav.preview.cancel();
+        settings_nav.preview.apply_image_overlay(snapshot);
+      }
+      return;
+    }
+    auto const index = snapshot.select_list->selected_item_index;
+    if (index >= snapshot.select_list->items.size())
+    {
+      settings_nav.preview.cancel();
+      settings_nav.preview.apply_image_overlay(snapshot);
+      return;
+    }
+    auto const& item = snapshot.select_list->items[index];
+    if (auto overlay = settings_preview_overlay_for_action(item.value, snapshot))
+      settings_nav.preview.update(std::move(*overlay));
+    else
+      settings_nav.preview.cancel();
+    settings_nav.preview.apply_image_overlay(snapshot);
+  };
+  auto close_settings = [&]() {
+    snapshot.select_list.reset();
+    active_select_list = ActiveSelectList::None;
+    clear_settings_preview();
+    settings_nav.reset();
+    settings_session_open = false;
+  };
   TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
@@ -198,7 +292,52 @@ int run_interactive_composer(TuiRuntimeOptions options)
   RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
   RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
                                                    transcript_search, subagent_workspace);
-  auto maybe_reload_display_settings = [&]() -> bool { return action_controller.maybe_reload_display_settings(); };
+  auto maybe_reload_display_settings = [&]() -> bool {
+    auto const outcome = action_controller.maybe_reload_display_settings();
+    if (outcome == DisplaySettingsReloadPollOutcome::TerminalFailure)
+      return false;
+    if (outcome != DisplaySettingsReloadPollOutcome::Applied)
+      return true;
+
+    // Applied is an explicit app signal. Always rebase/reapply while settings are open — never
+    // infer from post-hydration value equality (overlay can mask true→false authority changes).
+    if (settings_session_open && active_select_list == ActiveSelectList::Settings)
+    {
+      // Capture the actionable selection identity before hydration rebuild can shift indexes.
+      std::string selected_action_value;
+      std::optional<std::size_t> prior_selected_index;
+      std::string query;
+      std::string staged_overlay_action;
+      if (snapshot.select_list)
+      {
+        query = snapshot.select_list->query;
+        prior_selected_index = snapshot.select_list->selected_item_index;
+        if (*prior_selected_index < snapshot.select_list->items.size())
+        {
+          auto const& item = snapshot.select_list->items[*prior_selected_index];
+          if (!item.value.empty())
+            selected_action_value = item.value;
+        }
+      }
+      if (settings_nav.preview.overlay && !settings_nav.preview.overlay->action_token.empty())
+        staged_overlay_action = settings_nav.preview.overlay->action_token;
+
+      reapply_settings_preview_after_display_reload(settings_nav.preview, snapshot);
+      if (settings_nav.in_display() && snapshot.select_list)
+      {
+        rebuild_settings_view(SettingsSection::Display, query, std::nullopt);
+        if (snapshot.select_list)
+        {
+          snapshot.select_list->selected_item_index =
+              reselect_settings_display_row_after_rebuild(*snapshot.select_list, selected_action_value, staged_overlay_action, prior_selected_index);
+          // Keep overlay and Enter target aligned with the restored row identity.
+          apply_settings_highlight_preview();
+        }
+      }
+    }
+    // Paint exactly once after overlay staging so the first frame is the final staged state.
+    return render();
+  };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
   auto suspend_to_background = [&]() -> bool { return action_controller.suspend_to_background(); };
@@ -333,16 +472,24 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (snapshot.select_list)
     {
+      if (active_select_list == ActiveSelectList::Settings)
+        ensure_settings_session();
+      else if (settings_session_open)
+      {
+        // Another selector replaced settings: drop any presentation-only preview.
+        clear_settings_preview();
+        settings_nav.reset();
+        settings_session_open = false;
+      }
       auto input_result = [&]() {
         if (input.event.key == Key::MouseLeftPress || input.event.key == Key::MouseLeftClick)
         {
           if (auto const clicked = select_list_selection_for_screen_position(snapshot, input.event.mouse_row, input.event.mouse_column))
           {
-            auto action = SelectListInputAction::Resolve;
+            // Settings mouse clicks change selection/highlight only; Enter confirms.
+            auto action = active_select_list == ActiveSelectList::Settings ? SelectListInputAction::Redraw : SelectListInputAction::Resolve;
             if (*clicked >= snapshot.select_list->items.size() || !snapshot.select_list->items[*clicked].enabled)
-            {
               action = SelectListInputAction::Redraw;
-            }
             return SelectListInputResult{.selected_item_index = *clicked, .query = snapshot.select_list->query, .action = action};
           }
         }
@@ -447,6 +594,213 @@ int run_interactive_composer(TuiRuntimeOptions options)
         session_archive_confirmation.reset();
         snapshot.select_list->selected_item_index = input_result.selected_item_index;
         snapshot.select_list->query = std::move(input_result.query);
+        if (active_select_list == ActiveSelectList::Settings)
+          apply_settings_highlight_preview();
+      }
+      else if (input_result.action == SelectListInputAction::Cancel && active_select_list == ActiveSelectList::Settings && snapshot.select_list)
+      {
+        // Esc in a section returns to root (restoring root query/selection when available).
+        // Esc at root closes. If a section is open without a root frame (reload/confirm edge),
+        // still pop to root rather than trapping the user in the section.
+        if (!settings_nav.is_root())
+        {
+          std::string root_query;
+          std::optional<std::size_t> root_selected;
+          if (settings_nav.root_frame)
+          {
+            root_query = settings_nav.root_frame->query;
+            root_selected = settings_nav.root_frame->selected_item_index;
+          }
+          settings_nav.root_frame.reset();
+          clear_settings_preview();
+          begin_settings_preview_baseline();
+          rebuild_settings_view(SettingsSection::Root, std::move(root_query), root_selected);
+          snapshot.status = "settings";
+        }
+        else
+        {
+          close_settings();
+          snapshot.status = "view canceled";
+        }
+      }
+      else if (input_result.action == SelectListInputAction::Resolve && active_select_list == ActiveSelectList::Settings && snapshot.select_list)
+      {
+        auto const* selected_item = selected_select_list_item();
+        std::string selected_value = selected_item ? selected_item->value : std::string{};
+        auto const current_query = input_result.query;
+        auto const current_selected = input_result.selected_item_index;
+
+        if (auto section = settings_section_for_action(selected_value))
+        {
+          // Section Enter rebuilds in place rather than generic teardown-first Resolve.
+          settings_nav.root_frame =
+              runtime_views::SettingsFrameState{.section = SettingsSection::Root, .query = current_query, .selected_item_index = current_selected};
+          clear_settings_preview();
+          begin_settings_preview_baseline();
+          rebuild_settings_view(*section);
+          snapshot.status = "settings section opened";
+        }
+        else if (selected_value == kSettingsOpenModels)
+        {
+          close_settings();
+          if (!open_model_selector())
+          {
+            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
+            transcript_scroll_offset = 0;
+          }
+        }
+        else if (selected_value == kSettingsOpenScopedModels)
+        {
+          close_settings();
+          if (!open_scoped_model_selector())
+          {
+            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
+            transcript_scroll_offset = 0;
+          }
+        }
+        else if (selected_value == kSettingsOpenReasoning)
+        {
+          close_settings();
+          if (!open_reasoning_selector(false))
+          {
+            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
+            transcript_scroll_offset = 0;
+          }
+        }
+        else if (selected_value == kSettingsOpenKeybindings)
+        {
+          close_settings();
+          snapshot.select_list = hotkeys_select_list_view(options.key_bindings);
+          active_select_list = ActiveSelectList::Hotkeys;
+          snapshot.status = "keybindings opened";
+          transcript_scroll_offset = 0;
+        }
+        else if (selected_value == kSettingsEditKeybindings)
+        {
+          close_settings();
+          draft_state.clear_selection();
+          static_cast<void>(replace_composer_draft(draft, "/keybindings set "));
+          selected_slash_command_index = 0;
+          path_completion_force_active = false;
+          draft_scroll_offset = 0;
+          history_index.reset();
+          draft_input.clear();
+          snapshot.status = "keybinding edit command drafted";
+        }
+        else if (selected_value == kSettingsReloadKeybindings)
+        {
+          close_settings();
+          if (!options.on_reload_key_bindings)
+          {
+            snapshot.status = "reload unavailable";
+            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
+            transcript_scroll_offset = 0;
+            static_cast<void>(beep());
+          }
+          else
+          {
+            auto reloaded = options.on_reload_key_bindings();
+            if (!reloaded)
+            {
+              snapshot.status = reloaded.error().format();
+              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+              static_cast<void>(beep());
+            }
+            else
+            {
+              options.key_bindings = std::move(reloaded->key_bindings);
+              snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+              apply_runtime_state_snapshot(std::move(reloaded->state));
+              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
+              transcript_scroll_offset = 0;
+            }
+          }
+        }
+        else if (selected_value == kSettingsDraftPermissions || selected_value == kSettingsDraftTools || selected_value == kSettingsDraftPlugins ||
+                 selected_value == kSettingsDraftMcp || selected_value == kSettingsDraftJobs || selected_value == kSettingsDraftSessions ||
+                 selected_value == kSettingsDraftThinking || selected_value == kSettingsDraftDetails || selected_value == kSettingsDraftSetup)
+        {
+          std::string draft_command = "/help";
+          if (selected_value == kSettingsDraftPermissions)
+            draft_command = "/permissions";
+          else if (selected_value == kSettingsDraftTools)
+            draft_command = "/details";
+          else if (selected_value == kSettingsDraftPlugins)
+            draft_command = "/plugins";
+          else if (selected_value == kSettingsDraftMcp)
+            draft_command = "/mcp";
+          else if (selected_value == kSettingsDraftJobs)
+            draft_command = "/jobs";
+          else if (selected_value == kSettingsDraftSessions)
+            draft_command = "/sessions";
+          else if (selected_value == kSettingsDraftThinking)
+            draft_command = "/thinking";
+          else if (selected_value == kSettingsDraftDetails)
+            draft_command = "/details";
+          else if (selected_value == kSettingsDraftSetup)
+            draft_command = "/setup";
+          close_settings();
+          draft_state.clear_selection();
+          static_cast<void>(replace_composer_draft(draft, std::move(draft_command)));
+          selected_slash_command_index = 0;
+          path_completion_force_active = false;
+          draft_scroll_offset = 0;
+          history_index.reset();
+          draft_input.clear();
+          snapshot.status = "command drafted";
+        }
+        else if (selected_value.empty() || (selected_item && !selected_item->enabled))
+        {
+          snapshot.status = "settings action unavailable from this row";
+          static_cast<void>(beep());
+        }
+        else if (options.on_settings_selected)
+        {
+          // Confirm persists exactly once through the app callback; preview is cleared first so
+          // authoritative reload becomes the new baseline.
+          auto const confirm_token = selected_value;
+          clear_settings_preview();
+          auto selected = options.on_settings_selected(confirm_token);
+          if (selected)
+          {
+            auto status = selected->status;
+            apply_runtime_state_snapshot(std::move(*selected));
+            begin_settings_preview_baseline();
+            if (settings_nav.in_display())
+            {
+              // Remain in Display with refreshed authoritative rows after a successful confirm.
+              // Push a transcript receipt too: the centered modal can cover the status alert dock.
+              auto const receipt = status.empty() ? std::string("display setting saved") : status;
+              rebuild_settings_view(SettingsSection::Display, current_query, current_selected);
+              snapshot.status = receipt;
+              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = receipt, .meta = assistant_meta_for_snapshot(snapshot)});
+              transcript_scroll_offset = 0;
+            }
+            else
+            {
+              close_settings();
+              if (!status.empty())
+              {
+                push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
+                transcript_scroll_offset = 0;
+              }
+            }
+          }
+          else
+          {
+            // Error restores latest authoritative presentation and keeps the section open.
+            begin_settings_preview_baseline();
+            settings_nav.preview.apply_image_overlay(snapshot);
+            snapshot.status = selected.error().format();
+            static_cast<void>(beep());
+          }
+        }
+        else
+        {
+          close_settings();
+          snapshot.status = "view closed";
+        }
       }
       else if (input_result.action == SelectListInputAction::Resolve && active_select_list == ActiveSelectList::ScopedModels && snapshot.select_list)
       {

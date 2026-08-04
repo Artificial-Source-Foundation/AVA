@@ -315,6 +315,333 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     expect(changed_custom_watch && changed_display_watch && ava::app::tui_display_settings_watch_state_changed(*changed_custom_watch, *changed_display_watch) &&
                changed_display_watch->theme && *changed_display_watch->theme == "plain" && !changed_display_watch->custom_theme_revision,
            "display settings watch state detects display.json edits and clears custom theme tracking");
+
+    // W2-002: while config is a built-in theme, edits to an unconfigured previewable custom theme must
+    // still change the application-owned watch catalog so live preview can reload.
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"dark\"\n}\n");
+    write_app_test_file(paths.ava_config_dir / "themes" / "sunrise.json",
+                        "{\n"
+                        "  \"name\": \"sunrise\",\n"
+                        "  \"vars\": {\"primary\": \"#0066cc\", \"paper\": 255},\n"
+                        "  \"colors\": {\n"
+                        "    \"text\": \"\",\n"
+                        "    \"muted\": 242,\n"
+                        "    \"success\": 34,\n"
+                        "    \"warning\": \"#ffaa00\",\n"
+                        "    \"error\": \"#ff0000\",\n"
+                        "    \"accent\": \"primary\",\n"
+                        "    \"screenBg\": \"paper\",\n"
+                        "    \"composerBg\": 236,\n"
+                        "    \"toolBg\": 235,\n"
+                        "    \"questionBg\": 234\n"
+                        "  }\n"
+                        "}\n");
+    auto dark_with_sunrise_watch = ava::app::load_tui_display_settings_watch_state(paths);
+    expect(dark_with_sunrise_watch && dark_with_sunrise_watch->theme && *dark_with_sunrise_watch->theme == "dark" &&
+               !dark_with_sunrise_watch->custom_theme_revision &&
+               std::ranges::any_of(dark_with_sunrise_watch->custom_theme_catalog,
+                                   [](ava::app::TuiCustomThemeCatalogEntry const& entry) { return entry.name == "sunrise"; }),
+           "watch catalog includes validated unconfigured custom themes while a built-in theme is configured");
+    write_app_test_file(paths.ava_config_dir / "themes" / "sunrise.json",
+                        "{\n"
+                        "  \"name\": \"sunrise\",\n"
+                        "  \"vars\": {\"primary\": \"#0066cc\", \"paper\": 255},\n"
+                        "  \"colors\": {\n"
+                        "    \"text\": \"\",\n"
+                        "    \"muted\": 242,\n"
+                        "    \"success\": 34,\n"
+                        "    \"warning\": \"#ffaa00\",\n"
+                        "    \"error\": \"#ff0000\",\n"
+                        "    \"accent\": \"primary\",\n"
+                        "    \"screenBg\": \"paper\",\n"
+                        "    \"composerBg\": 238,\n"
+                        "    \"toolBg\": 235,\n"
+                        "    \"questionBg\": 234\n"
+                        "  }\n"
+                        "}\n");
+    auto dark_sunrise_edited_watch = ava::app::load_tui_display_settings_watch_state(paths);
+    expect(dark_with_sunrise_watch && dark_sunrise_edited_watch &&
+               ava::app::tui_display_settings_watch_state_changed(*dark_with_sunrise_watch, *dark_sunrise_edited_watch) &&
+               !dark_sunrise_edited_watch->custom_theme_revision,
+           "watch state detects valid edits to an unconfigured previewable custom theme via catalog revision");
+    auto sunrise_after_edit = ava::app::load_tui_custom_theme(paths, "sunrise");
+    expect(sunrise_after_edit && sunrise_after_edit->palette.composer_bg == 238,
+           "valid unconfigured custom theme edit reloads through ordinary theme discovery with the new palette");
+
+    // Invalid edit drops the candidate from the catalog without making invalid bytes authoritative.
+    write_app_test_file(paths.ava_config_dir / "themes" / "sunrise.json",
+                        "{\n"
+                        "  \"name\": \"sunrise\",\n"
+                        "  \"colors\": {\"text\":\"\",\"muted\":242,\"success\":34,\"warning\":220,\"error\":196,\"accent\":39,\"screenBg\":235}\n"
+                        "}\n");
+    auto dark_sunrise_invalid_watch = ava::app::load_tui_display_settings_watch_state(paths);
+    expect(dark_sunrise_edited_watch && dark_sunrise_invalid_watch &&
+               ava::app::tui_display_settings_watch_state_changed(*dark_sunrise_edited_watch, *dark_sunrise_invalid_watch) &&
+               std::ranges::none_of(dark_sunrise_invalid_watch->custom_theme_catalog,
+                                    [](ava::app::TuiCustomThemeCatalogEntry const& entry) { return entry.name == "sunrise"; }),
+           "invalid custom theme edits drop the candidate from the watch catalog without adopting invalid bytes");
+    auto available_after_invalid = ava::app::available_tui_custom_themes(paths);
+    expect(std::ranges::none_of(available_after_invalid, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "sunrise"; }),
+           "invalid custom themes cannot be newly selected from validated discovery");
+
+    // Confirm-after-invalid must not persist the newly invalid theme name; prior display.json is preserved.
+    auto const display_before_confirm = (paths.ava_config_dir / "display.json");
+    auto const prior_display_text = [&]() {
+      std::ifstream in(display_before_confirm);
+      std::ostringstream buffer;
+      buffer << in.rdbuf();
+      return buffer.str();
+    }();
+    auto confirm_invalid = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/theme sunrise"});
+    auto const display_after_confirm = [&]() {
+      std::ifstream in(display_before_confirm);
+      std::ostringstream buffer;
+      buffer << in.rdbuf();
+      return buffer.str();
+    }();
+    auto loaded_after_failed_confirm = ava::app::load_tui_display_settings(paths);
+    expect((!confirm_invalid ||
+            (confirm_invalid->handled && !confirm_invalid->output.empty() &&
+             (confirm_invalid->output[0].find("unsupported theme") != std::string::npos || confirm_invalid->output[0].find("invalid") != std::string::npos ||
+              confirm_invalid->output[0].find("composerBg") != std::string::npos))) &&
+               display_after_confirm == prior_display_text && loaded_after_failed_confirm && loaded_after_failed_confirm->theme &&
+               *loaded_after_failed_confirm->theme == "dark",
+           "confirm of a newly invalid custom theme fails closed and preserves prior display.json");
+
+    // Restore a valid sunrise for subsequent tests in this fixture.
+    write_app_test_file(paths.ava_config_dir / "themes" / "sunrise.json",
+                        "{\n"
+                        "  \"name\": \"sunrise\",\n"
+                        "  \"vars\": {\"primary\": \"#0066cc\", \"paper\": 255},\n"
+                        "  \"colors\": {\n"
+                        "    \"text\": \"\",\n"
+                        "    \"muted\": 242,\n"
+                        "    \"success\": 34,\n"
+                        "    \"warning\": \"#ffaa00\",\n"
+                        "    \"error\": \"#ff0000\",\n"
+                        "    \"accent\": \"primary\",\n"
+                        "    \"screenBg\": \"paper\",\n"
+                        "    \"composerBg\": 236,\n"
+                        "    \"toolBg\": 235,\n"
+                        "    \"questionBg\": 234\n"
+                        "  }\n"
+                        "}\n");
+
+    // W2-002 boundary coverage for bounded deterministic custom-theme discovery/watch.
+    {
+      auto const themes_dir = paths.ava_config_dir / "themes";
+      auto const valid_colors = std::string(
+          "\"colors\": {\"text\":\"\",\"muted\":242,\"success\":34,\"warning\":220,\"error\":196,\"accent\":39,\"screenBg\":255,\"composerBg\":236}");
+      auto write_valid_theme = [&](std::filesystem::path const& file, std::string const& name, std::size_t pad_bytes = 0) {
+        std::string body = "{\"name\":\"" + name + "\"," + valid_colors;
+        if (pad_bytes > 0)
+          body += ",\"pad\":\"" + std::string(pad_bytes, 'y') + "\"";
+        body += "}\n";
+        write_app_test_file(file, body);
+        return body.size();
+      };
+
+      // Oversized unconfigured file is rejected from discovery and must not fail built-in watch reload.
+      write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"dark\"\n}\n");
+      std::string oversized =
+          std::string("{\"name\":\"huge\",") + valid_colors + ",\"pad\":\"" + std::string(ava::app::kMaxTuiCustomThemeFileBytes, 'x') + "\"}";
+      write_app_test_file(themes_dir / "huge.json", oversized);
+      auto oversized_file = ava::app::load_tui_custom_theme_file(themes_dir / "huge.json");
+      auto dark_with_huge = ava::app::load_tui_display_settings_watch_state(paths);
+      auto available_with_huge = ava::app::available_tui_custom_themes(paths);
+      expect(!oversized_file && oversized_file.error().format().find("too large") != std::string::npos &&
+                 oversized_file.error().format().find(std::to_string(ava::app::kMaxTuiCustomThemeFileBytes)) != std::string::npos && dark_with_huge &&
+                 dark_with_huge->theme && *dark_with_huge->theme == "dark" &&
+                 std::ranges::none_of(dark_with_huge->custom_theme_catalog,
+                                      [](ava::app::TuiCustomThemeCatalogEntry const& entry) { return entry.name == "huge"; }) &&
+                 std::ranges::none_of(available_with_huge, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "huge"; }) &&
+                 std::ranges::any_of(available_with_huge, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "sunrise"; }),
+             "oversized unconfigured custom theme is rejected with max_bytes context, skipped from catalog/listing, and does not fail built-in display watch");
+      std::error_code remove_error;
+      std::filesystem::remove(themes_dir / "huge.json", remove_error);
+
+      // Exact per-file boundary: a complete file whose size equals the cap is accepted when valid.
+      {
+        std::string exact_prefix = std::string("{\"name\":\"exactcap\",") + valid_colors + ",\"pad\":\"";
+        std::string exact_suffix = "\"}";
+        auto const pad = ava::app::kMaxTuiCustomThemeFileBytes - exact_prefix.size() - exact_suffix.size();
+        expect(pad > 0, "exact-cap fixture math stays positive");
+        auto const exact_body = exact_prefix + std::string(pad, 'z') + exact_suffix;
+        expect(exact_body.size() == ava::app::kMaxTuiCustomThemeFileBytes, "exact-cap fixture is precisely the per-file byte cap");
+        write_app_test_file(themes_dir / "exact-cap.json", exact_body);
+        auto exact_file = ava::app::load_tui_custom_theme_file(themes_dir / "exact-cap.json");
+        auto exact_named = ava::app::load_tui_custom_theme(paths, "exactcap");
+        auto exact_discovery = ava::app::discover_tui_custom_themes(paths);
+        expect(exact_file && exact_file->name == "exactcap" && exact_named && exact_named->name == "exactcap" && exact_discovery.complete &&
+                   std::ranges::any_of(exact_discovery.themes, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "exactcap"; }) &&
+                   exact_discovery.aggregate_bytes_read >= ava::app::kMaxTuiCustomThemeFileBytes,
+               "exact per-file byte-cap complete theme is accepted by file load, named load, and discovery with charged bytes");
+        std::filesystem::remove(themes_dir / "exact-cap.json", remove_error);
+      }
+
+      // Below-cap valid complete file is accepted and charges physical bytes_read.
+      // Mutation between pre/post fstat has no normal production seam for a deterministic test
+      // (no production-only hook, no fixed sleeps, no blocking/probabilistic races); the reader
+      // algorithm is conservatively evident: complete requires pre_size == post_size == bytes_read
+      // below cap, and exact-cap requires stable pre/post equal to max_bytes. Boundary coverage
+      // below relies on that classification plus known oversize / exact-cap / incomplete paths.
+      {
+        auto const below_bytes = write_valid_theme(themes_dir / "below-cap.json", "belowcap", 128);
+        expect(below_bytes < ava::app::kMaxTuiCustomThemeFileBytes, "below-cap fixture stays under the per-file byte cap");
+        auto const below_file = ava::app::load_tui_custom_theme_file(themes_dir / "below-cap.json");
+        auto const below_named = ava::app::load_tui_custom_theme(paths, "belowcap");
+        auto const below_discovery = ava::app::discover_tui_custom_themes(paths);
+        expect(below_file && below_file->name == "belowcap" && below_named && below_named->name == "belowcap" && below_discovery.complete &&
+                   std::ranges::any_of(below_discovery.themes, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "belowcap"; }) &&
+                   below_discovery.aggregate_bytes_read >= below_bytes,
+               "below-cap valid complete theme is accepted by file load, named load, and discovery with charged bytes");
+        std::filesystem::remove(themes_dir / "below-cap.json", remove_error);
+      }
+
+      // Deterministic static +1 oversize: rejected from load/catalog (pre-fstat may charge 0).
+      {
+        std::string over_prefix = std::string("{\"name\":\"overcap\",") + valid_colors + ",\"pad\":\"";
+        std::string over_suffix = "\"}";
+        auto const pad = ava::app::kMaxTuiCustomThemeFileBytes - over_prefix.size() - over_suffix.size();
+        expect(pad > 0, "over-cap fixture math stays positive");
+        auto const exact_body = over_prefix + std::string(pad, 'w') + over_suffix;
+        expect(exact_body.size() == ava::app::kMaxTuiCustomThemeFileBytes, "over-cap base body is exactly the per-file byte cap");
+        auto const over_path = themes_dir / "over-cap.json";
+        write_app_test_file(over_path, exact_body + "X");
+        auto const static_over_file = ava::app::load_tui_custom_theme_file(over_path);
+        auto const static_over_discovery = ava::app::discover_tui_custom_themes(paths);
+        bool const static_listed =
+            std::ranges::any_of(static_over_discovery.themes, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "overcap"; });
+        expect(!static_over_file && static_over_file.error().format().find("too large") != std::string::npos && !static_listed &&
+                   static_over_discovery.aggregate_bytes_read <= ava::app::kMaxTuiCustomThemeCatalogAggregateBytes,
+               "known static +1 oversize is rejected from load/catalog without exceeding the aggregate cap");
+        std::filesystem::remove(over_path, remove_error);
+      }
+
+      // Deterministic path-order duplicate-name policy: first normalized path wins listing; named load fails closed.
+      write_app_test_file(themes_dir / "a-dup.json", "{\"name\":\"twin\"," + valid_colors + "}\n");
+      write_app_test_file(themes_dir / "z-dup.json",
+                          "{\"name\":\"twin\",\"colors\":{\"text\":\"\",\"muted\":242,\"success\":34,\"warning\":220,\"error\":196,\"accent\":39,"
+                          "\"screenBg\":254,\"composerBg\":237}}\n");
+      auto available_dups = ava::app::available_tui_custom_themes(paths);
+      auto twin_load = ava::app::load_tui_custom_theme(paths, "twin");
+      auto twin_entries =
+          std::count_if(available_dups.begin(), available_dups.end(), [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "twin"; });
+      auto const twin_it = std::ranges::find_if(available_dups, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "twin"; });
+      expect(twin_entries == 1 && twin_it != available_dups.end() && twin_it->path.filename() == "a-dup.json" && twin_it->palette.composer_bg == 236 &&
+                 !twin_load && twin_load.error().format().find("duplicate") != std::string::npos &&
+                 twin_load.error().format().find("a-dup.json") != std::string::npos && twin_load.error().format().find("z-dup.json") != std::string::npos,
+             "duplicate theme names keep the first normalized-path winner in listing and fail closed for configured/named load");
+      std::filesystem::remove(themes_dir / "a-dup.json", remove_error);
+      std::filesystem::remove(themes_dir / "z-dup.json", remove_error);
+
+      // Deterministic name ordering for distinct validated themes.
+      write_app_test_file(themes_dir / "m-mid.json", "{\"name\":\"mid\"," + valid_colors + "}\n");
+      write_app_test_file(themes_dir / "c-early.json", "{\"name\":\"early\"," + valid_colors + "}\n");
+      write_app_test_file(themes_dir / "t-late.json", "{\"name\":\"late\"," + valid_colors + "}\n");
+      auto ordered = ava::app::available_tui_custom_themes(paths);
+      std::vector<std::string> ordered_names;
+      for (auto const& theme : ordered)
+      {
+        if (theme.name == "early" || theme.name == "late" || theme.name == "mid" || theme.name == "legacy" || theme.name == "sunrise")
+          ordered_names.push_back(theme.name);
+      }
+      expect(ordered_names.size() >= 5 && std::is_sorted(ordered_names.begin(), ordered_names.end()),
+             "validated custom theme discovery returns stable sorted name order");
+      auto watch_ordered = ava::app::load_tui_display_settings_watch_state(paths);
+      auto discovery_ordered = ava::app::discover_tui_custom_themes(paths);
+      expect(watch_ordered && discovery_ordered.complete &&
+                 std::is_sorted(watch_ordered->custom_theme_catalog.begin(), watch_ordered->custom_theme_catalog.end(),
+                                [](ava::app::TuiCustomThemeCatalogEntry const& left, ava::app::TuiCustomThemeCatalogEntry const& right) {
+                                  return left.name < right.name;
+                                }) &&
+                 watch_ordered->custom_theme_catalog.size() == discovery_ordered.themes.size() &&
+                 std::equal(watch_ordered->custom_theme_catalog.begin(), watch_ordered->custom_theme_catalog.end(), discovery_ordered.themes.begin(),
+                            [](ava::app::TuiCustomThemeCatalogEntry const& left, ava::app::TuiCustomThemeSummary const& right) {
+                              return left.name == right.name && left.revision == right.revision;
+                            }),
+             "watch catalog preserves stable sorted name order and matches the single discovery snapshot");
+
+      // Candidate-count cap + late duplicate beyond the cap must fail named/configured lookup.
+      std::vector<std::filesystem::path> cap_files;
+      write_valid_theme(themes_dir / "00-late-dup-first.json", "latecap");
+      cap_files.push_back(themes_dir / "00-late-dup-first.json");
+      for (std::size_t index = 0; index < ava::app::kMaxTuiCustomThemeCandidates + 4; ++index)
+      {
+        auto file = themes_dir / ("cap" + std::to_string(index) + ".json");
+        write_valid_theme(file, "cap" + std::to_string(index));
+        cap_files.push_back(file);
+      }
+      write_valid_theme(themes_dir / "zz-late-dup-second.json", "latecap");
+      cap_files.push_back(themes_dir / "zz-late-dup-second.json");
+      auto capped_discovery = ava::app::discover_tui_custom_themes(paths);
+      auto late_dup_load = ava::app::load_tui_custom_theme(paths, "latecap");
+      auto capped_listed = ava::app::available_tui_custom_themes(paths);
+      expect(!capped_discovery.complete && capped_discovery.incomplete_reason == ava::app::TuiCustomThemeDiscoveryIncompleteReason::CandidateCap &&
+                 capped_listed.size() <= ava::app::kMaxTuiCustomThemeCandidates &&
+                 std::ranges::any_of(capped_listed, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "latecap"; }) && !late_dup_load &&
+                 late_dup_load.error().format().find("discovery is incomplete") != std::string::npos &&
+                 late_dup_load.error().format().find("candidate_cap") != std::string::npos &&
+                 late_dup_load.error().format().find(std::to_string(ava::app::kMaxTuiCustomThemeCandidates)) != std::string::npos,
+             "candidate cap keeps a bounded listing prefix but fail-closes named load when a late duplicate may exist beyond the boundary");
+      for (auto const& file : cap_files) std::filesystem::remove(file, remove_error);
+
+      // Aggregate read budget: observable bytes_read never exceeds the cap, and named load fails closed when incomplete.
+      auto const chunk = ava::app::kMaxTuiCustomThemeFileBytes - 256;
+      std::size_t expected_budget_files = (ava::app::kMaxTuiCustomThemeCatalogAggregateBytes / chunk) + 2;
+      std::vector<std::filesystem::path> agg_files;
+      std::size_t first_agg_bytes = 0;
+      for (std::size_t index = 0; index < expected_budget_files; ++index)
+      {
+        auto name = "agg" + std::to_string(index);
+        auto file = themes_dir / (name + ".json");
+        auto const bytes = write_valid_theme(file, name, chunk);
+        if (index == 0)
+          first_agg_bytes = bytes;
+        agg_files.push_back(file);
+      }
+      auto aggregate_discovery = ava::app::discover_tui_custom_themes(paths);
+      auto aggregate_named = ava::app::load_tui_custom_theme(paths, "agg0");
+      std::size_t aggregate_hits = 0;
+      for (auto const& theme : aggregate_discovery.themes)
+      {
+        if (theme.name.rfind("agg", 0) == 0)
+          ++aggregate_hits;
+      }
+      expect(!aggregate_discovery.complete && aggregate_discovery.incomplete_reason == ava::app::TuiCustomThemeDiscoveryIncompleteReason::AggregateBudget &&
+                 aggregate_discovery.aggregate_bytes_read <= ava::app::kMaxTuiCustomThemeCatalogAggregateBytes &&
+                 aggregate_discovery.aggregate_bytes_read >= first_agg_bytes && aggregate_hits < expected_budget_files && aggregate_hits >= 1 &&
+                 !aggregate_named && aggregate_named.error().format().find("discovery is incomplete") != std::string::npos &&
+                 aggregate_named.error().format().find("aggregate_budget") != std::string::npos &&
+                 aggregate_named.error().format().find(std::to_string(ava::app::kMaxTuiCustomThemeCatalogAggregateBytes)) != std::string::npos,
+             "aggregate discovery reports incomplete budget, never reads past the aggregate cap, and fail-closes named lookup for an early match");
+      for (auto const& file : agg_files) std::filesystem::remove(file, remove_error);
+
+      // Watch path: configured custom resolution and catalog fingerprint share one discovery snapshot.
+      write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"sunrise\"\n}\n");
+      auto watch_custom = ava::app::load_tui_display_settings_watch_state(paths);
+      auto discovery_for_watch = ava::app::discover_tui_custom_themes(paths);
+      auto sunrise_summary =
+          std::ranges::find_if(discovery_for_watch.themes, [](ava::app::TuiCustomThemeSummary const& theme) { return theme.name == "sunrise"; });
+      expect(watch_custom && discovery_for_watch.complete && watch_custom->theme && *watch_custom->theme == "sunrise" && watch_custom->custom_theme_revision &&
+                 sunrise_summary != discovery_for_watch.themes.end() && *watch_custom->custom_theme_revision == sunrise_summary->revision &&
+                 watch_custom->custom_theme_catalog.size() == discovery_for_watch.themes.size() &&
+                 std::equal(watch_custom->custom_theme_catalog.begin(), watch_custom->custom_theme_catalog.end(), discovery_for_watch.themes.begin(),
+                            [](ava::app::TuiCustomThemeCatalogEntry const& left, ava::app::TuiCustomThemeSummary const& right) {
+                              return left.name == right.name && left.revision == right.revision;
+                            }),
+             "watch state configured custom revision and catalog fingerprint come from one consistent discovery result");
+
+      write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"dark\"\n}\n");
+      std::filesystem::remove(themes_dir / "m-mid.json", remove_error);
+      std::filesystem::remove(themes_dir / "c-early.json", remove_error);
+      std::filesystem::remove(themes_dir / "t-late.json", remove_error);
+
+      // Valid edit detection + invalid removal/last-good stay covered above; re-assert built-in watch remains healthy.
+      auto healthy = ava::app::load_tui_display_settings_watch_state(paths);
+      expect(healthy && healthy->theme && *healthy->theme == "dark", "after boundary fixtures, configured built-in display watch reload remains healthy");
+    }
+
     auto invalid_theme = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/theme sepia"});
     expect(invalid_theme && invalid_theme->handled && !invalid_theme->output.empty() &&
                invalid_theme->output[0].find("unsupported theme: sepia") != std::string::npos &&
@@ -341,13 +668,13 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     expect(missing_defaults && !missing_defaults->theme && missing_defaults->show_images && missing_defaults->image_width_cells == 60,
            "missing display.json uses all effective image defaults");
 
-    auto images_status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images"});
+    auto images_status = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images"});
     expect(images_status && images_status->handled && !images_status->output.empty() && images_status->output[0].find("TUI images:") != std::string::npos &&
                images_status->output[0].find("usage: /images [on|off|reset]") != std::string::npos,
            "command dispatcher /images reports current visibility and usage");
-    auto images_off = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images off"});
-    auto theme_after_images = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/theme dark"});
-    auto width_set = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width 80"});
+    auto images_off = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images off"});
+    auto theme_after_images = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/theme dark"});
+    auto width_set = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/image-width 80"});
     auto preserved = ava::app::load_tui_display_settings(paths);
     auto preserved_document = ava::app::load_display_settings_document(paths);
     expect(images_off && images_off->handled && theme_after_images && theme_after_images->handled && width_set && width_set->handled && preserved &&
@@ -369,8 +696,8 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
                after_unknown->unknown_fields.front().first == "future_flag" && after_unknown_text.find("future_flag") != std::string::npos,
            "unknown top-level display.json fields survive successful field-specific updates");
 
-    auto reset_images = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/images reset"});
-    auto reset_width = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width reset"});
+    auto reset_images = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images reset"});
+    auto reset_width = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/image-width reset"});
     auto after_resets = ava::app::load_display_settings_document(paths);
     expect(reset_images && reset_images->handled && reset_width && reset_width->handled && after_resets && after_resets->theme &&
                *after_resets->theme == "light" && !after_resets->show_images && !after_resets->image_width_cells && after_resets->unknown_fields.size() == 1,
@@ -400,7 +727,7 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
            "display settings reject out-of-range, float, bool, and wrong-type recognized fields");
 
     write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\"\n}\n");
-    auto bad_width_command = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/image-width 200"});
+    auto bad_width_command = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/image-width 200"});
     expect(bad_width_command && bad_width_command->handled && !bad_width_command->output.empty() &&
                bad_width_command->output[0].find("usage: /image-width <8..160>|reset") != std::string::npos,
            "command dispatcher /image-width rejects out-of-range widths with usage");

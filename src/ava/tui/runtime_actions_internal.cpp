@@ -100,39 +100,47 @@ RuntimeActionController::RuntimeActionController(TuiRuntimeOptions& options, Run
 {
 }
 
-bool RuntimeActionController::maybe_reload_display_settings()
+DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_settings()
 {
   if (!options_.on_maybe_reload_display_settings)
-    return true;
+    return DisplaySettingsReloadPollOutcome::Unchanged;
   auto const now = std::chrono::steady_clock::now();
   if (now < next_display_reload_check_)
-    return true;
+    return DisplaySettingsReloadPollOutcome::Unchanged;
   next_display_reload_check_ = now + kDisplayReloadPollInterval;
 
+  // Preserve the app callback's optional snapshot as the explicit applied/unchanged signal.
+  // Do not infer applied state by comparing presentation values (overlays can mask them).
   auto reloaded = options_.on_maybe_reload_display_settings();
   if (!reloaded)
   {
     auto status = reloaded.error().format();
     if (last_display_reload_error_ && *last_display_reload_error_ == status)
-      return true;
+      return DisplaySettingsReloadPollOutcome::Unchanged;
     last_display_reload_error_ = status;
     static_cast<void>(beep());
     {
       std::lock_guard<std::recursive_mutex> lock(renderer_.ui_mutex);
       presentation_state_.snapshot.status = std::move(status);
     }
-    return renderer_.render();
+    // Failure path keeps last-good presentation and still paints the status when possible.
+    return renderer_.render() ? DisplaySettingsReloadPollOutcome::Unchanged : DisplaySettingsReloadPollOutcome::TerminalFailure;
   }
   last_display_reload_error_.reset();
   if (!*reloaded)
-    return true;
+    return DisplaySettingsReloadPollOutcome::Unchanged;
 
   auto state = std::move(**reloaded);
   auto status = state.status.empty() ? std::string("display theme auto-reloaded") : state.status;
   {
     std::lock_guard<std::recursive_mutex> lock(renderer_.ui_mutex);
+    // Hydrate authoritative snapshot and rebuild an open overview list from the refreshed
+    // startup DTO while preserving local filter/selection. Callers still rebase/reapply any
+    // settings preview and paint exactly once afterward so the first frame is final.
     presentation_state_.apply_runtime_state_snapshot(options_, std::move(state));
     auto& snapshot = presentation_state_.snapshot;
+    // Idle (no modal) applied reloads still surface a transcript receipt before the caller renders.
+    // An open overview keeps select_list set, so this path stays quiet while expanded.
     if (!snapshot.processing && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list)
     {
       runtime_transcript::push_transcript(snapshot, TranscriptItem{.label = "ava", .text = status});
@@ -140,7 +148,7 @@ bool RuntimeActionController::maybe_reload_display_settings()
     }
     snapshot.status = std::move(status);
   }
-  return renderer_.render();
+  return DisplaySettingsReloadPollOutcome::Applied;
 }
 
 bool RuntimeActionController::clear_draft_for_interrupt()

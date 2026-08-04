@@ -632,6 +632,24 @@ void append_session_tree_items(tui::SelectListView& view, std::vector<ava::sessi
   }
 }
 
+void add_parent_summary_hint(tui::SelectListView& view, ava::session::SessionTreeIndex const& tree, std::string summarize_parent_keys)
+{
+  auto const current =
+      std::ranges::find_if(tree.sessions, [&](ava::session::SessionTreeNode const& node) { return node.summary.session_id == tree.current_session_id; });
+  if (current == tree.sessions.end() || current->metadata.parent_session_id.empty())
+    return;
+  auto const parent = std::ranges::find_if(view.items, [&](tui::SelectListItemView const& item) { return item.value == current->metadata.parent_session_id; });
+  if (parent == view.items.end())
+    return;
+  if (summarize_parent_keys.size() > 64)
+    summarize_parent_keys.resize(64);
+  auto hint = summarize_parent_keys.empty() ? std::string("bind app.sessions.summarizeParent") : summarize_parent_keys + " summarize abandoned parent";
+  if (parent->detail.empty())
+    parent->detail = std::move(hint);
+  else
+    parent->detail += " · " + hint;
+}
+
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::session_ts const& unlocked_session,
                                       std::vector<CommandHotkey> const& hotkeys,
                                       std::vector<WorkspacePathCandidate> const& path_completions, ava::session::SessionTreeIndex const* session_tree)
@@ -1250,10 +1268,26 @@ std::size_t ApplicationCatalogCoordinator::title_catalog_cursor() const
 }
 
 tui::SelectListView ApplicationCatalogCoordinator::session_view(SessionSelectorSort sort, std::string footer_hint, bool named_only, bool show_paths,
-                                                                bool show_archived, bool show_label_time) const
+                                                                bool show_archived, bool show_label_time, std::string summarize_parent_keys) const
 {
   std::lock_guard lock(mutex_);
-  return ava::app::session_selector_view(cache_, sort, std::move(footer_hint), named_only, show_paths, show_archived, show_label_time);
+  auto view = ava::app::session_selector_view(cache_, sort, std::move(footer_hint), named_only, show_paths, show_archived, show_label_time);
+  if (cache_.session_tree)
+    add_parent_summary_hint(view, *cache_.session_tree, std::move(summarize_parent_keys));
+  return view;
+}
+
+ava::core::Result<std::optional<ava::session::SessionSummary>> ApplicationCatalogCoordinator::session_summary(std::string_view session_id) const
+{
+  std::lock_guard lock(mutex_);
+  if (!cache_.session_tree)
+    return std::unexpected(
+        ava::core::Error(ava::core::ErrorCategory::Session, cache_.session_tree_error.empty() ? "unable to load session tree" : cache_.session_tree_error));
+  auto const found =
+      std::ranges::find_if(cache_.session_tree->sessions, [&](ava::session::SessionTreeNode const& node) { return node.summary.session_id == session_id; });
+  if (found == cache_.session_tree->sessions.end())
+    return std::optional<ava::session::SessionSummary>{};
+  return std::optional<ava::session::SessionSummary>{found->summary};
 }
 
 ava::core::Result<std::optional<std::string>> ApplicationCatalogCoordinator::parent_target(std::string_view session_id) const

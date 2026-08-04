@@ -39,9 +39,21 @@ std::string_view trim_rpc_text(std::string_view text)
 
 ava::core::Result<bool> reject_active_run_if_needed(RpcSessionCommandContext const& context)
 {
-  if (!active_run(context.run_state))
+  if (active_run(context.run_state))
+    return handled(write_error(context.output, context.command.id, active_run_reject_error(context.command.type)));
+
+  bool maintenance_reserved = false;
+  {
+    runtime::session_ts::rat session_r(context.unlocked_session);
+    auto const controller = session_r->run_controller();
+    maintenance_reserved = controller && controller->snapshot().maintenance_reserved;
+  }
+  if (!maintenance_reserved)
     return false;
-  return handled(write_error(context.output, context.command.id, active_run_reject_error(context.command.type)));
+
+  auto error = invalid_rpc("RPC command is unavailable while exclusive session maintenance is active");
+  error.with_context("type", context.command.type);
+  return handled(write_error(context.output, context.command.id, error));
 }
 
 void reset_cancel_after_session_switch(RpcRunState& run_state)
@@ -50,8 +62,8 @@ void reset_cancel_after_session_switch(RpcRunState& run_state)
   run_state.cancel_requested.store(false, std::memory_order_relaxed);
 }
 
-ava::core::Result<std::string> resolve_branch_source_session_id(runtime::session_ts::crat const& current_r,
-    runtime::OpenContext const& open_context, RpcCommand const& command)
+ava::core::Result<std::string> resolve_branch_source_session_id(runtime::session_ts::crat const& current_r, runtime::OpenContext const& open_context,
+                                                                RpcCommand const& command)
 {
   if (command.session_id && command.session_id->empty())
     return std::unexpected(invalid_rpc(command.type + " session_id must be non-empty when provided"));
@@ -585,7 +597,9 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
                                                       .provider = *command.provider,
                                                       .model = *command.model,
                                                       .reason = *command.reason,
+                                                      .read_limits = session_w->session_read_limits(),
                                                       .source_lease = source_lease,
+                                                      .cancel_requested = [&run_state = context.run_state] { return cancel_requested(run_state); },
                                                       .actor = "rpc"};
 
     if (current_source)
@@ -593,18 +607,24 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       auto prepared = ava::session::prepare_branch_summary(std::move(options));
       if (!prepared)
         return handled(write_error(context.output, command.id, prepared.error()));
-      auto owner_append = session_w->owner_append_route_1();
+      if (prepared->disposition == ava::session::BranchSummaryDisposition::Existing)
+        return handled(write_success(context.output, command.id, branch_summary_result_json(*prepared)));
+      auto owner = session_w->run_controller();
       session_w.unlock();
-      if (!owner_append)
+      if (!owner)
         return handled(write_error(context.output, command.id,
                                    ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session owner append route is unavailable")));
-      if (auto appended = owner_append(prepared->entry); !appended)
+      auto appended = owner->append_branch_summary_if_absent(prepared->entry, [&run_state = context.run_state] { return cancel_requested(run_state); });
+      if (!appended)
         return handled(write_error(context.output, command.id, appended.error()));
+      prepared->entry = std::move(appended->entry);
+      prepared->disposition = appended->disposition == ava::session::SessionAppendDisposition::Existing ? ava::session::BranchSummaryDisposition::Existing
+                                                                                                        : ava::session::BranchSummaryDisposition::Appended;
       return handled(write_success(context.output, command.id, branch_summary_result_json(*prepared)));
     }
 
     // The temporary lease remains local and active after releasing the runtime
-    // session mutex; noncurrent summaries intentionally append directly through it.
+    // session mutex; the helper duplicates it into a policy-bound append target.
     session_w.unlock();
     auto summary = ava::session::append_branch_summary(std::move(options));
     if (!summary)

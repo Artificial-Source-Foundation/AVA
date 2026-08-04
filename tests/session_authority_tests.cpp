@@ -124,8 +124,8 @@ void test_assistant_output_append_target_state_and_batches()
                        : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
     if (store && lease)
     {
-      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
-      auto stale_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
+      auto stale_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (first_target && stale_target)
       {
         auto first = (*first_target)->append_batch({commit("stale-first", "stale-turn", 0)});
@@ -164,8 +164,8 @@ void test_assistant_output_append_target_state_and_batches()
         }
         return ::write(fd, bytes.data(), bytes.size());
       });
-      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
-      auto second_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto first_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
+      auto second_target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       auto partial = first_target ? (*first_target)->append(ordinary("partial-first-target")) : ava::core::VoidResult(std::unexpected(first_target.error()));
       fail_first_write = false;
       auto bypass = second_target ? (*second_target)->append(ordinary("partial-second-target")) : ava::core::VoidResult(std::unexpected(second_target.error()));
@@ -180,7 +180,7 @@ void test_assistant_output_append_target_state_and_batches()
                        : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
     if (store && lease)
     {
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       auto staged = item("persistent-staged-0", "persistent-turn", 0, "persistent-item-0", 0);
       auto seeded = target ? (*target)->append(staged) : ava::core::VoidResult(std::unexpected(target.error()));
       if (target && seeded)
@@ -323,7 +323,7 @@ void test_assistant_output_append_target_state_and_batches()
         errno = EIO;
         return -1;
       });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto first_failure = (*target)->append_batch({commit("no-durable-commit", "no-durable-turn", 0)});
@@ -357,7 +357,7 @@ void test_assistant_output_append_target_state_and_batches()
         errno = EIO;
         return -1;
       });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto partial = (*target)->append(ordinary("single-short-write"));
@@ -396,7 +396,7 @@ void test_assistant_output_append_target_state_and_batches()
         errno = EIO;
         return -1;
       });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto partial = (*target)->append_batch({commit("batch-short-write", "batch-short-turn", 0)});
@@ -431,7 +431,7 @@ void test_assistant_output_append_target_state_and_batches()
         errno = EIO;
         return -1;
       });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto partial = (*target)->append_batch({item("batch-staged-0", "batch-turn", 0, "batch-item-0", 0),
@@ -462,7 +462,7 @@ void test_assistant_output_append_target_state_and_batches()
     if (store && lease)
     {
       store->set_after_append_write_for_test([] { throw 1; });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto staged = (*target)->append(item("post-write-staged", "post-write-turn", 0, "post-write-item", 0));
@@ -487,7 +487,7 @@ void test_assistant_output_append_target_state_and_batches()
         if (++writes == 2)
           throw 1;
       });
-      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease);
+      auto target = ava::session::SessionAppendTarget::create_persistent(*store, *lease, ava::session::SessionReadLimits{});
       if (target)
       {
         auto partial = (*target)->append_batch(
@@ -621,7 +621,7 @@ void test_incomplete_assistant_output_suffix_recovery()
     auto entries = recovered && *recovered ? reopened->load(*recovery_lease)
                                            : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(
                                                  ava::core::Error(ava::core::ErrorCategory::Unknown, "staging recovery did not return metadata")));
-    auto target = entries ? ava::session::SessionAppendTarget::create_persistent(*reopened, *recovery_lease)
+    auto target = entries ? ava::session::SessionAppendTarget::create_persistent(*reopened, *recovery_lease, ava::session::SessionReadLimits{})
                           : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(entries.error()));
     auto next = target ? (*target)->append(ordinary("ordinary-after-" + std::to_string(count))) : ava::core::VoidResult(std::unexpected(target.error()));
     struct stat quarantine_status{};
@@ -1142,7 +1142,7 @@ void test_session_append_authority_and_commit_state()
   expect(has_one_state(wrong, "not_started") && store.load() && store.load()->size() == 2,
          "persistent append rejects an active lease for another exact path with exactly one not-started state");
 
-  auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+  auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease, ava::session::SessionReadLimits{});
   expect(target.has_value(), "persistent append target duplicates a matching lease");
   if (target)
   {
@@ -1167,7 +1167,7 @@ void test_session_append_authority_and_commit_state()
   {
     auto ephemeral_target = ava::session::SessionAppendTarget::create_ephemeral(*ephemeral);
     auto direct = ephemeral->append_ephemeral(entry("ephemeral"));
-    auto persistent_target = ava::session::SessionAppendTarget::create_persistent(*ephemeral, ava::session::SessionLease{});
+    auto persistent_target = ava::session::SessionAppendTarget::create_persistent(*ephemeral, ava::session::SessionLease{}, ava::session::SessionReadLimits{});
     auto ephemeral_with_lease = ephemeral->append(ava::session::SessionLease{}, entry("ephemeral-with-lease"));
     auto invalid_ephemeral = entry("invalid-ephemeral");
     invalid_ephemeral.data_json.clear();
@@ -1185,7 +1185,7 @@ void test_session_append_authority_and_commit_state()
     if (allocation_lease)
     {
       allocation_store.fail_persistent_append_target_allocation_for_test();
-      auto failed_target = ava::session::SessionAppendTarget::create_persistent(allocation_store, *allocation_lease);
+      auto failed_target = ava::session::SessionAppendTarget::create_persistent(allocation_store, *allocation_lease, ava::session::SessionReadLimits{});
       allocation_store.fail_persistent_append_target_allocation_for_test(false);
       *allocation_lease = ava::session::SessionLease{};
       auto reacquired = ava::session::SessionLease::acquire(allocation_store.session_path());

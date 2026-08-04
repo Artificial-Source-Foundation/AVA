@@ -8,6 +8,7 @@
 #include <deque>
 #include <exception>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include "debug.h"
 
@@ -50,6 +51,13 @@ ava::core::Error queue_limit_error(std::string_view queue, std::size_t limit)
 ava::core::Error reentrant_append_error()
 {
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reentrant session append is not allowed");
+}
+
+ava::core::Error maintenance_reservation_error(std::string_view reason)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is reserved for exclusive maintenance");
+  error.with_context("maintenance_conflict", std::string(reason));
+  return error;
 }
 
 bool legal_transition(RunPhase from, RunPhase to)
@@ -128,6 +136,11 @@ std::shared_ptr<ava::core::Error const> make_append_exception_fallback()
   return std::make_shared<ava::core::Error>(std::move(error));
 }
 
+std::shared_ptr<ava::core::Error const> make_conditional_rejection_fallback()
+{
+  return std::make_shared<ava::core::Error>(ava::core::ErrorCategory::Unknown, "conditional branch summary was rejected before append");
+}
+
 ava::core::Result<std::size_t> entry_byte_count(ava::session::SessionEntry const& entry)
 {
   std::size_t bytes = 32;
@@ -167,12 +180,16 @@ struct ActiveRunGuard::State
     {
       Pending,
       Succeeded,
+      Rejected,
       PersistenceFailed,
       Closing,
     };
 
     std::vector<ava::session::SessionEntry> entries;
     std::size_t bytes = 0;
+    bool conditional_branch_summary = false;
+    ava::session::SessionCancelCallback cancel_requested = nullptr;
+    std::optional<ava::session::SessionConditionalAppendResult> conditional_result = std::nullopt;
     Completion completion = Completion::Pending;
     std::shared_ptr<ava::core::Error const> failure;
   };
@@ -183,9 +200,11 @@ struct ActiveRunGuard::State
   std::condition_variable outcome_changed;
   std::stop_source stop_source;
   bool active = false;
+  bool maintenance_reserved = false;
   bool closing = false;
   bool shutting_down = false;
   std::uint64_t generation = 0;
+  std::uint64_t maintenance_generation = 0;
   std::string run_id;
   RunPhase phase = RunPhase::Admitted;
   std::optional<StopReason> requested_stop;
@@ -197,6 +216,7 @@ struct ActiveRunGuard::State
   std::shared_ptr<ava::core::Error const> persistence_failure;
   std::uint64_t persistence_failure_generation = 0;
   std::shared_ptr<ava::core::Error const> append_exception_fallback = make_append_exception_fallback();
+  std::shared_ptr<ava::core::Error const> conditional_rejection_fallback = make_conditional_rejection_fallback();
   std::shared_ptr<ava::session::SessionAppendTarget> append_target;
   std::deque<RunCommand> commands;
   std::deque<std::shared_ptr<AppendItem>> appends;
@@ -294,6 +314,8 @@ AdmissionDisposition SessionRunController::inspect_admission(RunRequest const& r
     return AdmissionDisposition::RejectClosing;
   if (state_->persistence_failure)
     return AdmissionDisposition::RejectPersistenceFailure;
+  if (state_->maintenance_reserved)
+    return AdmissionDisposition::RejectMaintenanceReservation;
   if (!state_->active)
     return AdmissionDisposition::Admit;
   return request.request_id == state_->run_id ? AdmissionDisposition::JoinExistingOutcome : AdmissionDisposition::RejectDifferentRequest;
@@ -308,6 +330,8 @@ ava::core::Result<ActiveRunGuard> SessionRunController::admit(RunRequest request
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is closing"));
   if (state_->persistence_failure)
     return std::unexpected(*state_->persistence_failure);
+  if (state_->maintenance_reserved)
+    return std::unexpected(maintenance_reservation_error("run_admission"));
   if (state_->active)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session already has an active run");
@@ -325,6 +349,35 @@ ava::core::Result<ActiveRunGuard> SessionRunController::admit(RunRequest request
   state_->outcome.reset();
   state_->commands.clear();
   return ActiveRunGuard(state_, state_->generation);
+}
+
+ava::core::Result<SessionMaintenanceReservation> SessionRunController::reserve_maintenance()
+{
+  auto state = state_;
+  if (!state)
+    return std::unexpected(maintenance_reservation_error("controller_unavailable"));
+
+  // Never wait out an accepted append and then mistake the resulting idle
+  // state for an atomic reservation opportunity.
+  std::unique_lock append_lock(state->append_mutex, std::try_to_lock);
+  if (!append_lock.owns_lock())
+    return std::unexpected(maintenance_reservation_error("append_queued_or_in_flight"));
+
+  std::lock_guard state_lock(state->mutex);
+  if (state->shutting_down || !state->append_target)
+    return std::unexpected(maintenance_reservation_error("closing"));
+  if (state->persistence_failure)
+    return std::unexpected(*state->persistence_failure);
+  if (state->active)
+    return std::unexpected(maintenance_reservation_error("active_run"));
+  if (state->maintenance_reserved)
+    return std::unexpected(maintenance_reservation_error("already_reserved"));
+  if (!state->appends.empty())
+    return std::unexpected(maintenance_reservation_error("append_queued_or_in_flight"));
+
+  state->maintenance_reserved = true;
+  ++state->maintenance_generation;
+  return SessionMaintenanceReservation(state, state->maintenance_generation);
 }
 
 ava::core::Result<RunOutcome> SessionRunController::wait_outcome(std::string_view correlation_id)
@@ -398,6 +451,7 @@ RunSnapshot SessionRunController::snapshot() const
 {
   std::lock_guard lock(state_->mutex);
   return {.active = state_->active,
+          .maintenance_reserved = state_->maintenance_reserved,
           .run_id = state_->run_id,
           .phase = state_->phase,
           .stop_requested = state_->stop_source.stop_requested(),
@@ -408,7 +462,9 @@ RunSnapshot SessionRunController::snapshot() const
 }
 
 ava::core::VoidResult SessionRunController::append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
-                                                                  std::vector<ava::session::SessionEntry> entries, bool owner_route)
+                                                                  std::vector<ava::session::SessionEntry> entries, bool owner_route,
+                                                                  ava::session::SessionConditionalAppendResult* conditional_result,
+                                                                  ava::session::SessionCancelCallback cancel_requested)
 {
   if (!state)
     return std::unexpected(inactive_error());
@@ -428,10 +484,14 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   auto item = std::make_shared<ActiveRunGuard::State::AppendItem>();
   item->bytes = *bytes;
   item->entries = std::move(entries);
+  item->conditional_branch_summary = conditional_result != nullptr;
+  item->cancel_requested = std::move(cancel_requested);
   {
     std::lock_guard lock(state->mutex);
     if (state->persistence_failure)
       return std::unexpected(*state->persistence_failure);
+    if (state->maintenance_reserved)
+      return std::unexpected(maintenance_reservation_error("owner_append_admission"));
     // The stable owner route is valid between runs as well as during one. Only
     // shutdown and an explicitly latched persistence failure revoke it.
     if (state->shutting_down || !state->append_target)
@@ -467,6 +527,7 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     std::shared_ptr<ActiveRunGuard::State::AppendItem> head;
     std::shared_ptr<ava::session::SessionAppendTarget> target;
     std::shared_ptr<ava::core::Error const> fallback;
+    std::shared_ptr<ava::core::Error const> rejection_fallback;
     {
       std::lock_guard lock(state->mutex);
       if (item->completion != ActiveRunGuard::State::AppendItem::Completion::Pending)
@@ -485,6 +546,7 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
         head = state->appends.front();
         target = state->append_target;
         fallback = state->append_exception_fallback;
+        rejection_fallback = state->conditional_rejection_fallback;
       }
     }
     state->appends_drained.notify_all();
@@ -496,9 +558,41 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     // affected by this append then shares the exact same terminal error and
     // append_commit_state, even if error-detail allocation itself fails.
     std::shared_ptr<ava::core::Error const> failure;
+    std::shared_ptr<ava::core::Error const> rejection;
     try
     {
-      auto persisted = head->entries.size() == 1 ? target->append(head->entries.front()) : target->append_batch(std::move(head->entries));
+      ava::core::VoidResult persisted;
+      if (head->conditional_branch_summary)
+      {
+        auto conditional = target->append_branch_summary_if_absent_classified(head->entries.front(), head->cancel_requested);
+        if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::Succeeded)
+        {
+          if (!conditional.result)
+            throw std::logic_error("successful conditional append has no result");
+          head->conditional_result = std::move(*conditional.result);
+        }
+        else if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::RejectedBeforeAppend)
+        {
+          try
+          {
+            rejection = conditional.error ? std::make_shared<ava::core::Error>(std::move(*conditional.error)) : rejection_fallback;
+          }
+          catch (...)
+          {
+            rejection = rejection_fallback;
+          }
+        }
+        else
+        {
+          persisted = conditional.error ? ava::core::VoidResult(std::unexpected(std::move(*conditional.error)))
+                                        : ava::core::VoidResult(std::unexpected(ava::core::Error(
+                                              ava::core::ErrorCategory::Unknown, "conditional branch summary append failed without a stable error")));
+        }
+      }
+      else
+      {
+        persisted = head->entries.size() == 1 ? target->append(head->entries.front()) : target->append_batch(std::move(head->entries));
+      }
       if (!persisted)
       {
         try
@@ -544,7 +638,7 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
         state->append_bytes -= head->bytes;
         state->appends.erase(found);
       }
-      else if (!failure)
+      else if (!failure && !rejection)
       {
         failure = fallback;
       }
@@ -562,6 +656,11 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
           request_stop = true;
         }
         drain_locked(ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed, failure);
+      }
+      else if (rejection)
+      {
+        head->failure = rejection;
+        head->completion = ActiveRunGuard::State::AppendItem::Completion::Rejected;
       }
       else
       {
@@ -637,16 +736,33 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
 
   if (completion == ActiveRunGuard::State::AppendItem::Completion::PersistenceFailed)
     return std::unexpected(failure ? *failure : *state->append_exception_fallback);
+  if (completion == ActiveRunGuard::State::AppendItem::Completion::Rejected)
+    return std::unexpected(failure ? *failure : *state->conditional_rejection_fallback);
   if (completion == ActiveRunGuard::State::AppendItem::Completion::Closing)
     return std::unexpected(inactive_error());
   if (completion != ActiveRunGuard::State::AppendItem::Completion::Succeeded)
     return std::unexpected(*state->append_exception_fallback);
+  if (conditional_result != nullptr)
+  {
+    if (!item->conditional_result)
+      return std::unexpected(*state->append_exception_fallback);
+    *conditional_result = std::move(*item->conditional_result);
+  }
   return {};
 }
 
 ava::core::VoidResult SessionRunController::append(ava::session::SessionEntry entry)
 {
   return append_for_generation(state_, 0, {std::move(entry)}, true);
+}
+
+ava::core::Result<ava::session::SessionConditionalAppendResult> SessionRunController::append_branch_summary_if_absent(
+    ava::session::SessionEntry entry, ava::session::SessionCancelCallback cancel_requested)
+{
+  ava::session::SessionConditionalAppendResult result;
+  if (auto appended = append_for_generation(state_, 0, {std::move(entry)}, true, &result, std::move(cancel_requested)); !appended)
+    return std::unexpected(std::move(appended.error()));
+  return result;
 }
 
 ava::core::VoidResult SessionRunController::append_batch(std::vector<ava::session::SessionEntry> entries)
@@ -679,8 +795,8 @@ ava::core::VoidResult SessionRunController::reset_persistence_failure()
   ava::core::VoidResult result;
   {
     std::lock_guard lock(state->mutex);
-    if (state->active || !state->appends.empty())
-      result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run"));
+    if (state->active || state->maintenance_reserved || !state->appends.empty())
+      result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run or maintenance"));
     else if (state->shutting_down || !state->append_target)
       result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover persistence for a closing runtime session"));
     else if (!state->persistence_failure)
@@ -705,8 +821,8 @@ ava::core::VoidResult SessionRunController::reset_persistence_failure()
     else
     {
       std::lock_guard lock(state->mutex);
-      if (state->active || !state->appends.empty() || state->shutting_down || state->append_target != target || !state->persistence_failure ||
-          state->persistence_failure_generation != failure_generation)
+      if (state->active || state->maintenance_reserved || !state->appends.empty() || state->shutting_down || state->append_target != target ||
+          !state->persistence_failure || state->persistence_failure_generation != failure_generation)
       {
         result = std::unexpected(
             ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistence recovery completed after runtime session authority changed"));
@@ -739,6 +855,53 @@ ava::core::VoidResult SessionRunController::reset_persistence_failure()
   state->appends_drained.notify_all();
   released_target.reset();
   return result;
+}
+
+SessionMaintenanceReservation::SessionMaintenanceReservation(std::shared_ptr<ActiveRunGuard::State> state, std::uint64_t generation)
+    : state_(std::move(state)), generation_(generation)
+{
+}
+
+SessionMaintenanceReservation::~SessionMaintenanceReservation()
+{
+  release();
+}
+
+SessionMaintenanceReservation::SessionMaintenanceReservation(SessionMaintenanceReservation&& other) noexcept
+    : state_(std::move(other.state_)), generation_(std::exchange(other.generation_, 0))
+{
+}
+
+SessionMaintenanceReservation& SessionMaintenanceReservation::operator=(SessionMaintenanceReservation&& other) noexcept
+{
+  if (this != &other)
+  {
+    release();
+    state_ = std::move(other.state_);
+    generation_ = std::exchange(other.generation_, 0);
+  }
+  return *this;
+}
+
+bool SessionMaintenanceReservation::active() const noexcept
+{
+  if (!state_)
+    return false;
+  std::lock_guard lock(state_->mutex);
+  return state_->maintenance_reserved && state_->maintenance_generation == generation_;
+}
+
+void SessionMaintenanceReservation::release() noexcept
+{
+  if (!state_)
+    return;
+  {
+    std::lock_guard lock(state_->mutex);
+    if (state_->maintenance_reserved && state_->maintenance_generation == generation_)
+      state_->maintenance_reserved = false;
+  }
+  state_.reset();
+  generation_ = 0;
 }
 
 ActiveRunGuard::ActiveRunGuard(std::shared_ptr<State> state, std::uint64_t generation) : state_(std::move(state)), generation_(generation)
@@ -920,7 +1083,8 @@ std::string_view to_string(StopReason reason)
 
 std::string_view to_string(AdmissionDisposition disposition)
 {
-  constexpr std::string_view names[] = {"admit", "join_existing_outcome", "rejected_different_prompt", "rejected_closing", "rejected_persistence_failure"};
+  constexpr std::string_view names[] = {
+      "admit", "join_existing_outcome", "rejected_different_prompt", "rejected_maintenance_reservation", "rejected_closing", "rejected_persistence_failure"};
   return names[static_cast<std::size_t>(disposition)];
 }
 

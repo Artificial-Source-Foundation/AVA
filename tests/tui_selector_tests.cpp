@@ -35,6 +35,145 @@ void run_tui_selector_tests()
              !ava::tui::runtime_commands::session_switching_command("/clearance Fresh session"),
          "session-switch attachment safety recognizes exact /clear submissions and rejects ambiguous prefixes");
 
+  auto branch_item = [](std::string value, std::string label) {
+    ava::tui::SelectListItemView item;
+    item.value = std::move(value);
+    item.label = std::move(label);
+    return item;
+  };
+  auto branch_snapshot = [](ava::tui::TuiBranchSummaryPhase phase) {
+    ava::tui::TuiBranchSummarySnapshot snapshot;
+    snapshot.phase = phase;
+    return snapshot;
+  };
+  ava::tui::SelectListView branch_dispatch_view;
+  branch_dispatch_view.items.push_back(branch_item("opaque-parent", "Parent"));
+  auto const branch_dispatch_bindings = ava::tui::parse_key_bindings_json("{\"app.sessions.summarizeParent\":\"F8\"}");
+  auto const branch_dispatch = branch_dispatch_bindings ? ava::tui::handle_select_list_input(
+                                                              branch_dispatch_view, ava::tui::InputEvent{.key = ava::tui::Key::F8}, *branch_dispatch_bindings)
+                                                        : ava::tui::SelectListInputResult{};
+  auto const default_branch_dispatch =
+      ava::tui::handle_select_list_input(branch_dispatch_view, ava::tui::InputEvent{.key = ava::tui::Key::F8}, ava::tui::default_key_bindings());
+  expect(branch_dispatch.action == ava::tui::SelectListInputAction::SummarizeParent && branch_dispatch.selected_item_index == std::size_t{0} &&
+             default_branch_dispatch.action == ava::tui::SelectListInputAction::None,
+         "session parent-summary key dispatch is semantic, configurable, and default-unbound");
+
+  auto const branch_input_bindings = ava::tui::default_key_bindings();
+  expect(
+      ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::AwaitingConfirmation,
+                                                           ava::tui::InputEvent{.key = ava::tui::Key::Enter},
+                                                           branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Confirm &&
+          ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::Generating, ava::tui::InputEvent{.key = ava::tui::Key::Enter},
+                                                               branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Block &&
+          ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::Preparing, ava::tui::InputEvent{.key = ava::tui::Key::Escape},
+                                                               branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Cancel &&
+          ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::Appending, ava::tui::InputEvent{.key = ava::tui::Key::CtrlD},
+                                                               branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Exit &&
+          ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::AwaitingConfirmation,
+                                                               ava::tui::InputEvent{.key = ava::tui::Key::CtrlL},
+                                                               branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Block &&
+          ava::tui::runtime_views::branch_summary_input_intent(ava::tui::TuiBranchSummaryPhase::AwaitingConfirmation,
+                                                               ava::tui::InputEvent{.key = ava::tui::Key::ArrowDown},
+                                                               branch_input_bindings) == ava::tui::runtime_views::BranchSummaryInputIntent::Block,
+      "nonterminal parent-summary state gates submission, model selection, and navigation while preserving only confirm, cancel, and exit intents");
+
+  ava::tui::SelectListView prior_branch_selector;
+  prior_branch_selector.title = "Sessions";
+  prior_branch_selector.items = {branch_item("a", "A"), branch_item("parent", "Parent"), branch_item("c", "C")};
+  prior_branch_selector.selected_item_index = 1;
+  prior_branch_selector.query = "résumé";
+  ava::tui::SelectListView refreshed_branch_selector;
+  refreshed_branch_selector.title = "Sessions";
+  refreshed_branch_selector.items = {branch_item("c", "C"), branch_item("a", "A"), branch_item("parent", "Parent")};
+  auto const restored_branch_selector = ava::tui::runtime_views::restore_branch_summary_session_view(
+      std::move(refreshed_branch_selector), prior_branch_selector, "parent", prior_branch_selector.selected_item_index);
+  bool callback_failures_are_fixed = true;
+  for (auto const failure : {ava::tui::runtime_views::BranchSummaryCallbackFailure::Prepare, ava::tui::runtime_views::BranchSummaryCallbackFailure::Snapshot,
+                             ava::tui::runtime_views::BranchSummaryCallbackFailure::Confirm, ava::tui::runtime_views::BranchSummaryCallbackFailure::Cancel,
+                             ava::tui::runtime_views::BranchSummaryCallbackFailure::Refresh})
+  {
+    auto const status = ava::tui::runtime_views::branch_summary_callback_failure_status(failure);
+    callback_failures_are_fixed = callback_failures_are_fixed && !status.empty() && status.find("backend-secret") == std::string_view::npos;
+  }
+  expect(restored_branch_selector.query == "résumé" && restored_branch_selector.selected_item_index == 2 &&
+             restored_branch_selector.items[2].value == "parent" && callback_failures_are_fixed,
+         "parent-summary completion restores exact query/selection identity across refreshed ordering and callback failures use fixed text");
+
+  auto branch_operation = branch_snapshot(ava::tui::TuiBranchSummaryPhase::AwaitingConfirmation);
+  branch_operation.generation = 7;
+  branch_operation.source_label = "Résumé 父";
+  branch_operation.model_label = "模型 β";
+  auto const branch_confirmation_view = ava::tui::runtime_views::branch_summary_operation_view(branch_operation);
+  auto const branch_confirmation_rows_8 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 64, 8);
+  auto const branch_confirmation_rows_12 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 64, 12);
+  auto const branch_confirmation_screen_8 = tui_test_support::join_visible_lines(branch_confirmation_rows_8);
+  auto const branch_confirmation_screen_12 = tui_test_support::join_visible_lines(branch_confirmation_rows_12);
+  branch_operation.phase = ava::tui::TuiBranchSummaryPhase::Generating;
+  auto const branch_progress_view = ava::tui::runtime_views::branch_summary_operation_view(branch_operation);
+  auto const branch_progress_screen = tui_test_support::join_visible_lines(ava::tui::detail::render_select_list_modal(branch_progress_view, 64, 8));
+  expect(branch_confirmation_view.items.size() == 1 && branch_confirmation_view.items.front().enabled &&
+             branch_confirmation_view.items.front().label == "Generate summary",
+         "parent-summary confirmation modal exposes one explicit generation action");
+  expect(branch_confirmation_screen_8.find("Résumé 父") != std::string::npos && branch_confirmation_view.subtitle.find("模型 β") != std::string::npos &&
+             branch_confirmation_screen_8.find("Generate summary") != std::string::npos,
+         "parent-summary confirmation modal preserves bounded Unicode labels at eight rows");
+  expect(branch_confirmation_screen_12.find("Enter generate") != std::string::npos && !branch_progress_view.items.front().enabled &&
+             branch_progress_screen.find("Generating summary") != std::string::npos && branch_progress_screen.find("模型 β") != std::string::npos &&
+             branch_progress_screen.find("generated payload") == std::string::npos,
+         "parent-summary confirmation and progress modals render fixed actions at twelve and eight rows without summary payload text");
+
+  std::vector<ava::tui::TuiBranchSummaryEligibilityCode> const eligibility_codes = {ava::tui::TuiBranchSummaryEligibilityCode::CurrentSessionEphemeral,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::CurrentSessionUnavailable,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::ActiveRun,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::InvalidSourceSelection,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::NotDirectSource,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::InvalidFork,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::SourceUnavailable,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::SourceLeaseBusy,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::SourceCorrupt,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::ForkEntryNotFound,
+                                                                                    ava::tui::TuiBranchSummaryEligibilityCode::EmptySuffix};
+  bool eligibility_statuses_are_fixed = true;
+  for (auto const code : eligibility_codes)
+  {
+    auto snapshot = branch_snapshot(ava::tui::TuiBranchSummaryPhase::Ineligible);
+    snapshot.eligibility_code = code;
+    auto const text = ava::tui::runtime_views::branch_summary_terminal_status(snapshot);
+    eligibility_statuses_are_fixed =
+        eligibility_statuses_are_fixed && !text.empty() && text.find("/private/") == std::string::npos && text.find("backend-secret") == std::string::npos;
+  }
+  std::vector<ava::tui::TuiBranchSummaryFailureCode> const failure_codes = {ava::tui::TuiBranchSummaryFailureCode::Deadline,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::RecoveryFailed,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProjectionRecordLimit,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProjectionTextLimit,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProjectionByteLimit,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProjectionInvalidText,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProjectionEmpty,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ModelUnavailable,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::AuthenticationUnavailable,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::ProviderFailed,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::InvalidGeneratedSummary,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::StaleSource,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::AppendFailed,
+                                                                            ava::tui::TuiBranchSummaryFailureCode::Internal};
+  bool failure_statuses_are_fixed = true;
+  for (auto const code : failure_codes)
+  {
+    auto snapshot = branch_snapshot(ava::tui::TuiBranchSummaryPhase::Failed);
+    snapshot.failure_code = code;
+    auto const text = ava::tui::runtime_views::branch_summary_terminal_status(snapshot);
+    failure_statuses_are_fixed = failure_statuses_are_fixed && !text.empty() && text.find("provider raw response") == std::string::npos;
+  }
+  auto uncertain_append = branch_snapshot(ava::tui::TuiBranchSummaryPhase::Failed);
+  uncertain_append.failure_code = ava::tui::TuiBranchSummaryFailureCode::AppendFailed;
+  uncertain_append.append_commit_state = ava::tui::TuiBranchSummaryAppendCommitState::PartialOrUnknown;
+  auto const uncertain_append_status = ava::tui::runtime_views::branch_summary_terminal_status(uncertain_append);
+  expect(eligibility_statuses_are_fixed && failure_statuses_are_fixed && uncertain_append_status.find("uncertain") != std::string::npos &&
+             uncertain_append_status.find("no automatic retry") != std::string::npos &&
+             ava::tui::runtime_views::branch_summary_terminal(branch_snapshot(ava::tui::TuiBranchSummaryPhase::Existing)) &&
+             !ava::tui::runtime_views::branch_summary_terminal(branch_snapshot(ava::tui::TuiBranchSummaryPhase::Revalidating)),
+         "parent-summary terminal mapping is exhaustive, fixed-text, and append-commit aware");
+
   auto make_model = [](std::string provider, std::string id, std::string name, std::string family, std::optional<bool> reasoning,
                        std::vector<std::string> levels = {}) {
     ava::config::ModelInfo model;

@@ -354,6 +354,254 @@ ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_view(Question
   return answer;
 }
 
+bool branch_summary_terminal(TuiBranchSummarySnapshot const& snapshot) noexcept
+{
+  switch (snapshot.phase)
+  {
+    case TuiBranchSummaryPhase::Succeeded:
+    case TuiBranchSummaryPhase::Existing:
+    case TuiBranchSummaryPhase::Ineligible:
+    case TuiBranchSummaryPhase::Canceled:
+    case TuiBranchSummaryPhase::Failed:
+      return true;
+    case TuiBranchSummaryPhase::Idle:
+    case TuiBranchSummaryPhase::Preparing:
+    case TuiBranchSummaryPhase::AwaitingConfirmation:
+    case TuiBranchSummaryPhase::Generating:
+    case TuiBranchSummaryPhase::Revalidating:
+    case TuiBranchSummaryPhase::Appending:
+      return false;
+  }
+  return true;
+}
+
+BranchSummaryInputIntent branch_summary_input_intent(TuiBranchSummaryPhase phase, InputEvent const& event, TuiKeyBindings const& bindings)
+{
+  if (key_matches_action(bindings, TuiAction::Exit, event.key))
+    return BranchSummaryInputIntent::Exit;
+  if (key_matches_action(bindings, TuiAction::SelectCancel, event.key))
+    return BranchSummaryInputIntent::Cancel;
+  if (phase == TuiBranchSummaryPhase::AwaitingConfirmation && key_matches_action(bindings, TuiAction::SelectConfirm, event.key))
+    return BranchSummaryInputIntent::Confirm;
+  return BranchSummaryInputIntent::Block;
+}
+
+SelectListView restore_branch_summary_session_view(SelectListView refreshed, SelectListView const& prior, std::string_view selected_value,
+                                                   std::size_t prior_selected_index)
+{
+  refreshed.query = prior.query;
+  auto const selected = std::ranges::find_if(refreshed.items, [&](SelectListItemView const& item) { return item.value == selected_value; });
+  if (selected != refreshed.items.end())
+    refreshed.selected_item_index = static_cast<std::size_t>(selected - refreshed.items.begin());
+  else
+    refreshed.selected_item_index = clamp_select_list_selection(refreshed, prior_selected_index);
+  return refreshed;
+}
+
+std::string_view branch_summary_callback_failure_status(BranchSummaryCallbackFailure failure) noexcept
+{
+  switch (failure)
+  {
+    case BranchSummaryCallbackFailure::Prepare:
+      return "parent summary could not be prepared";
+    case BranchSummaryCallbackFailure::Snapshot:
+      return "parent summary status is unavailable";
+    case BranchSummaryCallbackFailure::Confirm:
+      return "parent summary confirmation was not accepted";
+    case BranchSummaryCallbackFailure::Cancel:
+      return "parent summary cancel could not be requested";
+    case BranchSummaryCallbackFailure::Refresh:
+      return "parent summary completed, but session list refresh failed";
+  }
+  return "parent summary callback failed";
+}
+
+SelectListView branch_summary_operation_view(TuiBranchSummarySnapshot const& snapshot)
+{
+  auto bounded_label = [](std::string_view value, std::string_view fallback) {
+    std::string label;
+    label.reserve(std::min<std::size_t>(value.size(), 256));
+    bool previous_space = false;
+    for (unsigned char const byte : value)
+    {
+      if (byte < 0x20 || byte == 0x7f)
+      {
+        if (!previous_space && !label.empty())
+          label.push_back(' ');
+        previous_space = true;
+        continue;
+      }
+      label.push_back(static_cast<char>(byte));
+      previous_space = byte == ' ';
+    }
+    if (label.size() > 256)
+    {
+      std::size_t prefix = 256;
+      while (prefix > 0 && (static_cast<unsigned char>(label[prefix]) & 0xc0U) == 0x80U) --prefix;
+      label.resize(prefix);
+    }
+    while (!label.empty() && label.back() == ' ') label.pop_back();
+    return label.empty() ? std::string(fallback) : label;
+  };
+  auto const source = bounded_label(snapshot.source_label, "selected parent");
+  auto const model = bounded_label(snapshot.model_label, "active model");
+
+  std::string title;
+  std::string action_label;
+  bool actionable = false;
+  switch (snapshot.phase)
+  {
+    case TuiBranchSummaryPhase::Preparing:
+      title = "Preparing parent summary";
+      action_label = "Checking abandoned parent…";
+      break;
+    case TuiBranchSummaryPhase::AwaitingConfirmation:
+      title = "Summarize abandoned parent?";
+      action_label = "Generate summary";
+      actionable = true;
+      break;
+    case TuiBranchSummaryPhase::Generating:
+      title = "Generating parent summary";
+      action_label = "Generating summary…";
+      break;
+    case TuiBranchSummaryPhase::Revalidating:
+      title = "Revalidating parent summary";
+      action_label = "Checking unchanged source…";
+      break;
+    case TuiBranchSummaryPhase::Appending:
+      title = "Saving parent summary";
+      action_label = "Appending metadata…";
+      break;
+    case TuiBranchSummaryPhase::Idle:
+      title = "Preparing parent summary";
+      action_label = "Starting…";
+      break;
+    case TuiBranchSummaryPhase::Succeeded:
+    case TuiBranchSummaryPhase::Existing:
+    case TuiBranchSummaryPhase::Ineligible:
+    case TuiBranchSummaryPhase::Canceled:
+    case TuiBranchSummaryPhase::Failed:
+      title = "Parent summary complete";
+      action_label = "Closing…";
+      break;
+  }
+
+  return SelectListView{.title = std::move(title),
+                        .subtitle = "Source: " + source + " · Model: " + model,
+                        .items = {SelectListItemView{.value = actionable ? std::string("branch-summary:generate") : std::string{},
+                                                     .label = std::move(action_label),
+                                                     .description = actionable ? std::string("Provider work starts only after confirmation") : std::string{},
+                                                     .group = "Parent summary",
+                                                     .detail = {},
+                                                     .badge = actionable ? std::string("confirm") : std::string("working"),
+                                                     .current = false,
+                                                     .enabled = actionable,
+                                                     .disabled_reason = actionable ? std::string{} : std::string("operation in progress")}},
+                        .selected_item_index = 0,
+                        .query = {},
+                        .placeholder = {},
+                        .empty_text = {},
+                        .footer_hint = actionable ? std::string("Enter generate · Esc cancel") : std::string("Esc cancel")};
+}
+
+std::string branch_summary_terminal_status(TuiBranchSummarySnapshot const& snapshot)
+{
+  if (snapshot.append_commit_state)
+  {
+    switch (*snapshot.append_commit_state)
+    {
+      case TuiBranchSummaryAppendCommitState::NotStarted:
+        return "parent summary append did not start; inspect the source; no automatic retry";
+      case TuiBranchSummaryAppendCommitState::PartialOrUnknown:
+        return "parent summary append state is uncertain; inspect the source; no automatic retry";
+      case TuiBranchSummaryAppendCommitState::CommittedToLeasedInode:
+        return "parent summary may be committed; inspect the source; no automatic retry";
+    }
+  }
+
+  switch (snapshot.phase)
+  {
+    case TuiBranchSummaryPhase::Succeeded:
+      return "abandoned parent summary saved";
+    case TuiBranchSummaryPhase::Existing:
+      return "abandoned parent summary already exists";
+    case TuiBranchSummaryPhase::Canceled:
+      return "abandoned parent summary canceled";
+    case TuiBranchSummaryPhase::Ineligible:
+      if (!snapshot.eligibility_code)
+        return "selected parent is not eligible for summarization";
+      switch (*snapshot.eligibility_code)
+      {
+        case TuiBranchSummaryEligibilityCode::CurrentSessionEphemeral:
+          return "parent summary is unavailable for a temporary current session";
+        case TuiBranchSummaryEligibilityCode::CurrentSessionUnavailable:
+          return "current session is unavailable for parent summarization";
+        case TuiBranchSummaryEligibilityCode::ActiveRun:
+          return "finish the active run before summarizing the parent";
+        case TuiBranchSummaryEligibilityCode::InvalidSourceSelection:
+          return "select the current session's direct parent";
+        case TuiBranchSummaryEligibilityCode::NotDirectSource:
+          return "selected session is not the current direct parent";
+        case TuiBranchSummaryEligibilityCode::InvalidFork:
+          return "current branch origin is not eligible for parent summarization";
+        case TuiBranchSummaryEligibilityCode::SourceUnavailable:
+          return "selected parent session is unavailable";
+        case TuiBranchSummaryEligibilityCode::SourceLeaseBusy:
+          return "selected parent is active in another AVA host";
+        case TuiBranchSummaryEligibilityCode::SourceCorrupt:
+          return "selected parent needs recovery before summarization";
+        case TuiBranchSummaryEligibilityCode::ForkEntryNotFound:
+          return "branch point is missing from the selected parent";
+        case TuiBranchSummaryEligibilityCode::EmptySuffix:
+          return "selected parent has no abandoned work to summarize";
+      }
+      break;
+    case TuiBranchSummaryPhase::Failed:
+      if (!snapshot.failure_code)
+        return "parent summary failed";
+      switch (*snapshot.failure_code)
+      {
+        case TuiBranchSummaryFailureCode::Deadline:
+          return "parent summary timed out";
+        case TuiBranchSummaryFailureCode::RecoveryFailed:
+          return "parent recovery failed; inspect the source before retrying";
+        case TuiBranchSummaryFailureCode::ProjectionRecordLimit:
+          return "abandoned parent range exceeds the summary record limit";
+        case TuiBranchSummaryFailureCode::ProjectionTextLimit:
+          return "abandoned parent range exceeds the summary text limit";
+        case TuiBranchSummaryFailureCode::ProjectionByteLimit:
+          return "abandoned parent projection exceeds the summary byte limit";
+        case TuiBranchSummaryFailureCode::ProjectionInvalidText:
+          return "abandoned parent range contains invalid summary text";
+        case TuiBranchSummaryFailureCode::ProjectionEmpty:
+          return "abandoned parent range has no summarizable text";
+        case TuiBranchSummaryFailureCode::ModelUnavailable:
+          return "active model is unavailable for parent summarization";
+        case TuiBranchSummaryFailureCode::AuthenticationUnavailable:
+          return "provider authentication is unavailable for parent summarization";
+        case TuiBranchSummaryFailureCode::ProviderFailed:
+          return "provider failed to generate the parent summary";
+        case TuiBranchSummaryFailureCode::InvalidGeneratedSummary:
+          return "provider returned an invalid parent summary";
+        case TuiBranchSummaryFailureCode::StaleSource:
+          return "parent changed after confirmation; no summary was saved";
+        case TuiBranchSummaryFailureCode::AppendFailed:
+          return "parent summary append failed; inspect the source; no automatic retry";
+        case TuiBranchSummaryFailureCode::Internal:
+          return "parent summary failed internally";
+      }
+      break;
+    case TuiBranchSummaryPhase::Idle:
+    case TuiBranchSummaryPhase::Preparing:
+    case TuiBranchSummaryPhase::AwaitingConfirmation:
+    case TuiBranchSummaryPhase::Generating:
+    case TuiBranchSummaryPhase::Revalidating:
+    case TuiBranchSummaryPhase::Appending:
+      return "parent summary operation in progress";
+  }
+  return "parent summary failed";
+}
+
 std::string permission_prompt_status(bool allow_session_available, bool allow_remember_available, bool deny_remember_available)
 {
   bool const remember_available = allow_remember_available || deny_remember_available;

@@ -5,6 +5,7 @@
 #include "ava/session/assistant_output.h"
 #include "ava/core/result.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -16,6 +17,10 @@
 #include <string_view>
 #include <vector>
 #include <sys/types.h>
+
+namespace ava::app {
+class SessionRunController;
+}
 
 namespace ava::session {
 
@@ -90,6 +95,27 @@ struct SessionListLimits
   SessionReadLimits per_session = {};
   std::size_t max_sessions = 4096;
   std::size_t max_total_file_bytes = 32U * 1024U * 1024U;
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Collision-resistant identity of every exact byte in one bounded leased
+// snapshot. It deliberately excludes inode metadata so consent can remain
+// content-bound across an identical exact-path replacement.
+struct SessionByteFingerprint
+{
+  std::uint64_t byte_count = 0;
+  std::array<std::uint8_t, 32> sha256 = {};
+
+  [[nodiscard]] friend bool operator==(SessionByteFingerprint const&, SessionByteFingerprint const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct SessionRecoverableSnapshot
+{
+  std::vector<SessionEntry> entries;
+  SessionByteFingerprint fingerprint;
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
@@ -246,6 +272,16 @@ class SessionStore
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_bounded(SessionLease const& lease, SessionReadLimits limits,
                                                                           SessionCancelCallback cancel_requested = nullptr) const;
+  // Read-only recovery preview pinned to the exact leased inode. Every consumed
+  // record is strict; only an invalid final unterminated suffix is omitted so a
+  // caller can decide whether to request explicit lease-gated recovery later.
+  [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> load_recoverable_prefix_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                                             SessionCancelCallback cancel_requested = nullptr) const;
+  // Captures the same strict recoverable prefix plus a SHA-256 identity of all
+  // exact bytes (including an invalid final unterminated suffix) in one stable,
+  // size-bounded leased snapshot.
+  [[nodiscard]] ava::core::Result<SessionRecoverableSnapshot> load_recoverable_snapshot_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                                                SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult visit_entries(SessionReadLimits limits, SessionEntryVisitor const& visitor,
                                                     SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::Result<SessionSummary> inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested = nullptr) const;
@@ -276,7 +312,8 @@ class SessionStore
                                                                               SessionCancelCallback cancel_requested = nullptr) const;
   [[nodiscard]] ava::core::VoidResult visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
                                                            SessionCancelCallback cancel_requested = nullptr,
-                                                           bool invoke_after_lease_bound_read_test_hook = true) const;
+                                                           bool invoke_after_lease_bound_read_test_hook = true, bool tolerate_invalid_final_suffix = false,
+                                                           SessionByteFingerprint* exact_fingerprint = nullptr) const;
   [[nodiscard]] ava::core::Result<std::optional<AssistantOutputSuffixRecovery>> recover_incomplete_assistant_output_suffix_ephemeral_impl(
       SessionReadLimits limits, SessionCancelCallback cancel_requested, bool mutation_serialization_held) const;
   [[nodiscard]] ava::core::VoidResult append_impl(SessionLease const* lease, SessionEntry const& entry, bool append_serialization_held = false);
@@ -363,6 +400,20 @@ class SessionReadAuthority
   std::shared_ptr<State const> state_;
 };
 
+enum class SessionAppendDisposition
+{
+  Appended,
+  Existing,
+};
+
+struct SessionConditionalAppendResult
+{
+  SessionEntry entry;
+  SessionAppendDisposition disposition = SessionAppendDisposition::Appended;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 // The sole copyable append authority for runtime routes. Persistent targets
 // duplicate the caller's locked open-file description and revalidate the exact
 // published inode before accepting it. Ephemeral targets retain only the
@@ -371,12 +422,20 @@ class SessionReadAuthority
 class SessionAppendTarget
 {
  public:
-  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(
-      SessionStore const& store, SessionLease const& lease, SessionReadLimits read_limits = legacy_unbounded_session_read_limits());
+  [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_persistent(SessionStore const& store, SessionLease const& lease,
+                                                                                                 SessionReadLimits read_limits,
+                                                                                                 SessionCancelCallback cancel_requested = nullptr);
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SessionAppendTarget>> create_ephemeral(
       SessionStore const& store, SessionReadLimits read_limits = legacy_unbounded_session_read_limits());
 
   [[nodiscard]] ava::core::VoidResult append(SessionEntry const& entry);
+  // Atomically revalidates one prepared BranchSummary against a fresh bounded
+  // exact-lease snapshot and suppresses an existing matching final identity.
+  // Cancellation linearizes under per-path serialization after the bounded
+  // scan and immediately before append preflight. Cancellation after that point
+  // may race with a committed append and is reported by the append result.
+  [[nodiscard]] ava::core::Result<SessionConditionalAppendResult> append_branch_summary_if_absent(SessionEntry const& entry,
+                                                                                                  SessionCancelCallback cancel_requested = nullptr);
   // One all-or-nothing preflight reservation for exactly one complete bounded
   // v4 assistant transaction: zero or more ordered output items followed by
   // its one matching commit. Durable writes remain append-only. Once any
@@ -393,6 +452,25 @@ class SessionAppendTarget
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
+  enum class ConditionalAppendCompletion
+  {
+    Succeeded,
+    RejectedBeforeAppend,
+    AppendFailed,
+  };
+
+  struct ConditionalAppendOutcome
+  {
+    ConditionalAppendCompletion completion = ConditionalAppendCompletion::RejectedBeforeAppend;
+    std::optional<SessionConditionalAppendResult> result;
+    std::optional<ava::core::Error> error;
+  };
+
+  // Controller queue policy needs this typed mutation-boundary outcome so only
+  // errors from append_impl latch persistence. The public wrapper preserves the
+  // ordinary Result API for direct append-target callers.
+  [[nodiscard]] ConditionalAppendOutcome append_branch_summary_if_absent_classified(SessionEntry const& entry, SessionCancelCallback const& cancel_requested);
+
   SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state, SessionReadLimits read_limits);
 
   // Reload assistant_output_state_ from storage when another writer advanced the
@@ -413,6 +491,8 @@ class SessionAppendTarget
   // The shared append epoch for this target's destination: the per-path epoch
   // for persistent targets, or the ephemeral store's in-memory epoch otherwise.
   [[nodiscard]] std::atomic<std::uint64_t>& append_epoch_ref() const;
+
+  friend class ava::app::SessionRunController;
 
   SessionStore store_;
   std::optional<SessionLease> lease_;

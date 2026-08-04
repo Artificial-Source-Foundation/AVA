@@ -94,19 +94,207 @@ using detail::path_io_error;
 using detail::ScopedFd;
 using detail::strict_session_record_error;
 
+void wipe_bytes(void* data, std::size_t size) noexcept
+{
+  auto* cursor = static_cast<unsigned char volatile*>(data);
+  while (size-- > 0) *cursor++ = 0;
+}
+
+class ByteVectorWiper final
+{
+ public:
+  explicit ByteVectorWiper(std::vector<std::uint8_t>& bytes) noexcept : bytes_(bytes) { }
+  ~ByteVectorWiper() noexcept { wipe_bytes(bytes_.data(), bytes_.size()); }
+  ByteVectorWiper(ByteVectorWiper const&) = delete;
+  ByteVectorWiper& operator=(ByteVectorWiper const&) = delete;
+
+ private:
+  std::vector<std::uint8_t>& bytes_;
+};
+
+void wipe_string(std::string& value) noexcept
+{
+  wipe_bytes(value.data(), value.size());
+  value.clear();
+}
+
+void wipe_session_entry(SessionEntry& entry) noexcept
+{
+  wipe_string(entry.id);
+  wipe_string(entry.parent_id);
+  wipe_string(entry.timestamp);
+  wipe_string(entry.data_json);
+}
+
+class StringWiper final
+{
+ public:
+  explicit StringWiper(std::string& value) noexcept : value_(value) { }
+  ~StringWiper() noexcept { wipe_string(value_); }
+  StringWiper(StringWiper const&) = delete;
+  StringWiper& operator=(StringWiper const&) = delete;
+
+ private:
+  std::string& value_;
+};
+
+template <std::size_t Size>
+class CharArrayWiper final
+{
+ public:
+  explicit CharArrayWiper(std::array<char, Size>& value) noexcept : value_(value) { }
+  ~CharArrayWiper() noexcept { wipe_bytes(value_.data(), value_.size()); }
+  CharArrayWiper(CharArrayWiper const&) = delete;
+  CharArrayWiper& operator=(CharArrayWiper const&) = delete;
+
+ private:
+  std::array<char, Size>& value_;
+};
+
+class SessionEntryWiper final
+{
+ public:
+  explicit SessionEntryWiper(SessionEntry& entry) noexcept : entry_(entry) { }
+  ~SessionEntryWiper() noexcept { wipe_session_entry(entry_); }
+  SessionEntryWiper(SessionEntryWiper const&) = delete;
+  SessionEntryWiper& operator=(SessionEntryWiper const&) = delete;
+
+ private:
+  SessionEntry& entry_;
+};
+
+class SessionEntryVectorWiper final
+{
+ public:
+  explicit SessionEntryVectorWiper(std::vector<SessionEntry>& entries) noexcept : entries_(entries) { }
+  ~SessionEntryVectorWiper() noexcept
+  {
+    if (!active_)
+      return;
+    for (auto& entry : entries_) wipe_session_entry(entry);
+    entries_.clear();
+  }
+  SessionEntryVectorWiper(SessionEntryVectorWiper const&) = delete;
+  SessionEntryVectorWiper& operator=(SessionEntryVectorWiper const&) = delete;
+  void dismiss() noexcept { active_ = false; }
+
+ private:
+  std::vector<SessionEntry>& entries_;
+  bool active_ = true;
+};
+
+std::uint32_t rotate_right(std::uint32_t value, std::uint32_t count) noexcept
+{
+  return (value >> count) | (value << (32U - count));
+}
+
+std::array<std::uint8_t, 32> sha256(std::vector<std::uint8_t> const& bytes)
+{
+  static constexpr std::array<std::uint32_t, 64> constants{
+      0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U, 0xd807aa98U, 0x12835b01U, 0x243185beU,
+      0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U, 0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU, 0x2de92c6fU, 0x4a7484aaU,
+      0x5cb0a9dcU, 0x76f988daU, 0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U, 0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U, 0x27b70a85U,
+      0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U, 0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U, 0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
+      0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U, 0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U, 0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU,
+      0x682e6ff3U, 0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U, 0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U};
+
+  std::vector<std::uint8_t> data = bytes;
+  ByteVectorWiper wipe_data(data);
+  auto const bit_length = static_cast<std::uint64_t>(data.size()) * 8ULL;
+  data.push_back(0x80U);
+  while ((data.size() % 64U) != 56U) data.push_back(0U);
+  for (int shift = 56; shift >= 0; shift -= 8) data.push_back(static_cast<std::uint8_t>((bit_length >> shift) & 0xffU));
+
+  std::array<std::uint32_t, 8> hash{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU, 0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
+  for (std::size_t chunk = 0; chunk < data.size(); chunk += 64U)
+  {
+    std::array<std::uint32_t, 64> words{};
+    for (std::size_t index = 0; index < 16U; ++index)
+    {
+      auto const offset = chunk + index * 4U;
+      words[index] = (static_cast<std::uint32_t>(data[offset]) << 24U) | (static_cast<std::uint32_t>(data[offset + 1U]) << 16U) |
+                     (static_cast<std::uint32_t>(data[offset + 2U]) << 8U) | static_cast<std::uint32_t>(data[offset + 3U]);
+    }
+    for (std::size_t index = 16U; index < words.size(); ++index)
+    {
+      auto const s0 = rotate_right(words[index - 15U], 7U) ^ rotate_right(words[index - 15U], 18U) ^ (words[index - 15U] >> 3U);
+      auto const s1 = rotate_right(words[index - 2U], 17U) ^ rotate_right(words[index - 2U], 19U) ^ (words[index - 2U] >> 10U);
+      words[index] = words[index - 16U] + s0 + words[index - 7U] + s1;
+    }
+    auto a = hash[0];
+    auto b = hash[1];
+    auto c = hash[2];
+    auto d = hash[3];
+    auto e = hash[4];
+    auto f = hash[5];
+    auto g = hash[6];
+    auto h = hash[7];
+    for (std::size_t index = 0; index < words.size(); ++index)
+    {
+      auto const s1 = rotate_right(e, 6U) ^ rotate_right(e, 11U) ^ rotate_right(e, 25U);
+      auto const choose = (e & f) ^ ((~e) & g);
+      auto const temporary_one = h + s1 + choose + constants[index] + words[index];
+      auto const s0 = rotate_right(a, 2U) ^ rotate_right(a, 13U) ^ rotate_right(a, 22U);
+      auto const majority = (a & b) ^ (a & c) ^ (b & c);
+      auto const temporary_two = s0 + majority;
+      h = g;
+      g = f;
+      f = e;
+      e = d + temporary_one;
+      d = c;
+      c = b;
+      b = a;
+      a = temporary_one + temporary_two;
+    }
+    hash[0] += a;
+    hash[1] += b;
+    hash[2] += c;
+    hash[3] += d;
+    hash[4] += e;
+    hash[5] += f;
+    hash[6] += g;
+    hash[7] += h;
+  }
+
+  std::array<std::uint8_t, 32> digest{};
+  for (std::size_t index = 0; index < hash.size(); ++index)
+  {
+    digest[index * 4U] = static_cast<std::uint8_t>((hash[index] >> 24U) & 0xffU);
+    digest[index * 4U + 1U] = static_cast<std::uint8_t>((hash[index] >> 16U) & 0xffU);
+    digest[index * 4U + 2U] = static_cast<std::uint8_t>((hash[index] >> 8U) & 0xffU);
+    digest[index * 4U + 3U] = static_cast<std::uint8_t>(hash[index] & 0xffU);
+  }
+  return digest;
+}
+
+bool exact_snapshot_metadata_matches(struct stat const& before, struct stat const& after) noexcept
+{
+  if (before.st_size != after.st_size)
+    return false;
+#if defined(__linux__)
+  return before.st_mtim.tv_sec == after.st_mtim.tv_sec && before.st_mtim.tv_nsec == after.st_mtim.tv_nsec && before.st_ctim.tv_sec == after.st_ctim.tv_sec &&
+         before.st_ctim.tv_nsec == after.st_ctim.tv_nsec;
+#else
+  return before.st_mtime == after.st_mtime && before.st_ctime == after.st_ctime;
+#endif
+}
+
 ava::core::VoidResult visit_session_snapshot_fd(int fd, off_t snapshot_size, std::filesystem::path const& path, SessionReadLimits const& limits,
                                                 SessionEntryVisitor const& visitor, SessionCancelCallback const& cancel_requested,
-                                                bool tolerate_invalid_final_suffix, std::function<void()> const* after_first_read_for_test = nullptr)
+                                                bool tolerate_invalid_final_suffix, std::function<void()> const* after_first_read_for_test = nullptr,
+                                                std::vector<std::uint8_t>* exact_bytes = nullptr)
 {
   std::array<char, 8192> buffer{};
+  CharArrayWiper wipe_buffer(buffer);
   std::string line;
+  StringWiper wipe_line(line);
   line.reserve(std::min<std::size_t>(limits.max_line_bytes, buffer.size()));
   std::size_t entry_count = 0;
   auto consume_line = [&](bool final_unterminated) -> ava::core::Result<bool> {
     auto const strict_status = ava::core::validate_strict_json(line, ava::core::json::kMaxNestingDepth);
     if (tolerate_invalid_final_suffix && final_unterminated && strict_status == ava::core::StrictJsonStatus::Invalid)
     {
-      line.clear();
+      wipe_string(line);
       return false;
     }
     if (strict_status != ava::core::StrictJsonStatus::Valid)
@@ -120,10 +308,11 @@ ava::core::VoidResult visit_session_snapshot_fd(int fd, off_t snapshot_size, std
     auto entry = parse_strict_session_record(line, path, final_unterminated);
     if (!entry)
       return std::unexpected(std::move(entry.error()));
+    SessionEntryWiper wipe_entry(*entry);
     auto keep_going = visitor(*entry);
     if (!keep_going)
       return std::unexpected(std::move(keep_going.error()));
-    line.clear();
+    wipe_string(line);
     return *keep_going;
   };
 
@@ -145,6 +334,11 @@ ava::core::VoidResult visit_session_snapshot_fd(int fd, off_t snapshot_size, std
     if (count == 0 || static_cast<std::size_t>(count) > wanted)
       return std::unexpected(path_io_error("session file shrank or became unreadable during bounded read", path));
     offset += count;
+    if (exact_bytes != nullptr)
+    {
+      auto const* begin = reinterpret_cast<std::uint8_t const*>(buffer.data());
+      exact_bytes->insert(exact_bytes->end(), begin, begin + count);
+    }
 
     if (!ran_read_hook && after_first_read_for_test != nullptr && *after_first_read_for_test)
     {
@@ -352,7 +546,8 @@ ava::core::VoidResult SessionStore::visit_entries(SessionReadLimits limits, Sess
 }
 
 ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lease, SessionReadLimits limits, SessionEntryVisitor const& visitor,
-                                                         SessionCancelCallback cancel_requested, bool invoke_after_lease_bound_read_test_hook) const
+                                                         SessionCancelCallback cancel_requested, bool invoke_after_lease_bound_read_test_hook,
+                                                         bool tolerate_invalid_final_suffix, SessionByteFingerprint* exact_fingerprint) const
 {
   if (auto valid = validate_read_limits(limits); !valid)
     return valid;
@@ -450,14 +645,23 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     return std::unexpected(std::move(error));
   }
 
+  std::vector<std::uint8_t> exact_bytes;
+  ByteVectorWiper wipe_exact_bytes(exact_bytes);
+  if (exact_fingerprint != nullptr)
+    exact_bytes.reserve(static_cast<std::size_t>(initial_size));
   auto visited =
-      visit_session_snapshot_fd(lease.fd_, initial_size, path, limits, visitor, cancel_requested, false,
-                                invoke_after_lease_bound_read_test_hook && after_lease_bound_read_for_test_ ? &after_lease_bound_read_for_test_ : nullptr);
+      visit_session_snapshot_fd(lease.fd_, initial_size, path, limits, visitor, cancel_requested, tolerate_invalid_final_suffix,
+                                invoke_after_lease_bound_read_test_hook && after_lease_bound_read_for_test_ ? &after_lease_bound_read_for_test_ : nullptr,
+                                exact_fingerprint != nullptr ? &exact_bytes : nullptr);
   auto final = validate_identity("after snapshot");
+  bool const exact_changed = exact_fingerprint != nullptr && final &&
+                             (!exact_snapshot_metadata_matches(initial->lease_status, final->lease_status) ||
+                              !exact_snapshot_metadata_matches(initial->named_status, final->named_status));
   if (final && (!same_file_identity(initial->lease_status, final->lease_status) || final->lease_status.st_size < initial_size ||
-                final->named_status.st_size < initial_size))
+                final->named_status.st_size < initial_size || exact_changed))
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Session, "leased session inode shrank or changed during snapshot");
+    auto error = ava::core::Error(ava::core::ErrorCategory::Session, exact_fingerprint != nullptr ? "leased session content changed during exact snapshot"
+                                                                                                  : "leased session inode shrank or changed during snapshot");
     error.with_context("path", path.string());
     final = std::unexpected(std::move(error));
   }
@@ -468,6 +672,12 @@ ava::core::VoidResult SessionStore::visit_entries_leased(SessionLease const& lea
     return std::unexpected(std::move(visited.error()));
   if (parent_close_error != 0)
     return std::unexpected(path_io_error("failed to close lease-bound session read directory", parent_path, parent_close_error));
+  if (exact_fingerprint != nullptr)
+  {
+    if (exact_bytes.size() != static_cast<std::size_t>(initial_size))
+      return std::unexpected(path_io_error("exact leased session snapshot byte count changed", path));
+    *exact_fingerprint = SessionByteFingerprint{.byte_count = static_cast<std::uint64_t>(exact_bytes.size()), .sha256 = sha256(exact_bytes)};
+  }
   return {};
 }
 
@@ -479,6 +689,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load(SessionLease con
 ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const
 {
   std::vector<SessionEntry> entries;
+  SessionEntryVectorWiper wipe_entries(entries);
   entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
   auto visited = visit_entries(
       limits,
@@ -489,6 +700,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionR
       std::move(cancel_requested));
   if (!visited)
     return std::unexpected(std::move(visited.error()));
+  wipe_entries.dismiss();
   return entries;
 }
 
@@ -496,6 +708,7 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionL
                                                                         SessionCancelCallback cancel_requested) const
 {
   std::vector<SessionEntry> entries;
+  SessionEntryVectorWiper wipe_entries(entries);
   entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
   auto visited = visit_entries_leased(
       lease, limits,
@@ -506,7 +719,46 @@ ava::core::Result<std::vector<SessionEntry>> SessionStore::load_bounded(SessionL
       std::move(cancel_requested));
   if (!visited)
     return std::unexpected(std::move(visited.error()));
+  wipe_entries.dismiss();
   return entries;
+}
+
+ava::core::Result<std::vector<SessionEntry>> SessionStore::load_recoverable_prefix_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                                           SessionCancelCallback cancel_requested) const
+{
+  std::vector<SessionEntry> entries;
+  SessionEntryVectorWiper wipe_entries(entries);
+  entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
+  auto visited = visit_entries_leased(
+      lease, limits,
+      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
+        entries.push_back(entry);
+        return true;
+      },
+      std::move(cancel_requested), true, true);
+  if (!visited)
+    return std::unexpected(std::move(visited.error()));
+  wipe_entries.dismiss();
+  return entries;
+}
+
+ava::core::Result<SessionRecoverableSnapshot> SessionStore::load_recoverable_snapshot_bounded(SessionLease const& lease, SessionReadLimits limits,
+                                                                                              SessionCancelCallback cancel_requested) const
+{
+  SessionRecoverableSnapshot snapshot;
+  SessionEntryVectorWiper wipe_entries(snapshot.entries);
+  snapshot.entries.reserve(std::min<std::size_t>(limits.max_entries, 256));
+  auto visited = visit_entries_leased(
+      lease, limits,
+      [&](SessionEntry const& entry) -> ava::core::Result<bool> {
+        snapshot.entries.push_back(entry);
+        return true;
+      },
+      std::move(cancel_requested), true, true, &snapshot.fingerprint);
+  if (!visited)
+    return std::unexpected(std::move(visited.error()));
+  wipe_entries.dismiss();
+  return snapshot;
 }
 
 ava::core::Result<SessionSummary> SessionStore::inspect_bounded(SessionReadLimits limits, SessionCancelCallback cancel_requested) const

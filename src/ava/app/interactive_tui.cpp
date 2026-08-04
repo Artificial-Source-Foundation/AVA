@@ -96,6 +96,18 @@ int run_tui(ShellState state)
       initial_title_coordinator ? initial_title_coordinator->catalog_changes_since(0).cursor : std::size_t{0};
   auto initial_application_catalog = ava::app::build_application_catalog_cache(unlocked_session, hotkeys);
   ava::app::ApplicationCatalogCoordinator application_catalog(std::move(initial_application_catalog), initial_title_catalog_cursor);
+  auto branch_summary_created = ava::app::BranchSummaryCoordinator::create();
+  if (!branch_summary_created)
+  {
+    std::cerr << "error: parent summary coordinator unavailable\n";
+    return 1;
+  }
+  auto branch_summary_coordinator = std::move(*branch_summary_created);
+  struct BranchSummaryShutdownGuard
+  {
+    std::shared_ptr<ava::app::BranchSummaryCoordinator> coordinator;
+    ~BranchSummaryShutdownGuard() { coordinator->shutdown(); }
+  } branch_summary_shutdown{branch_summary_coordinator};
   auto model_display = [](ava::config::ModelInfo const& model) {
     return model.display_name.empty() ? ava::config::model_display_label(model.model_id) : model.display_name;
   };
@@ -188,13 +200,17 @@ int run_tui(ShellState state)
   bool session_selector_show_paths = false;
   bool session_selector_show_archived = false;
   bool session_selector_show_label_time = false;
-  auto session_selector_snapshot = [&]() {
-    static_cast<void>(refresh_title_catalog());
+  auto session_selector_view_from_catalog = [&]() {
     return application_catalog.session_view(session_selector_sort,
                                             session_selector_footer_hint(session_selector_sort, session_selector_named_only, session_selector_show_paths,
                                                                          session_selector_show_archived, session_selector_show_label_time),
                                             session_selector_named_only, session_selector_show_paths, session_selector_show_archived,
-                                            session_selector_show_label_time);
+                                            session_selector_show_label_time,
+                                            ava::tui::keys_display(key_bindings, ava::tui::TuiAction::SessionSummarizeParent));
+  };
+  auto session_selector_snapshot = [&]() {
+    static_cast<void>(refresh_title_catalog());
+    return session_selector_view_from_catalog();
   };
   auto open_session_selector_target = [&unlocked_session, &open_requested_session, &state_snapshot, &application_catalog, &hotkeys](
                                            std::string target_session_id, std::string status_prefix) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
@@ -238,6 +254,29 @@ int run_tui(ShellState state)
       return std::unexpected(std::move(error));
     }
     return open_session_selector_target(std::move(**target), parent ? std::string("opened parent branch ") : std::string("opened child branch "));
+  };
+  auto branch_summary_prepare = [&state, &application_catalog,
+                                 branch_summary_coordinator](std::string_view selected_session_id) -> ava::core::Result<ava::tui::TuiBranchSummarySnapshot> {
+    auto source = application_catalog.session_summary(selected_session_id);
+    if (!source)
+      return std::unexpected(std::move(source.error()));
+    if (!*source)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::NotFound, "selected parent session is unavailable"));
+    auto request = make_branch_summary_operation_request(unlocked_session, std::move(**source));
+    if (!request)
+      return std::unexpected(std::move(request.error()));
+    auto prepared = branch_summary_coordinator->prepare(std::move(*request));
+    if (!prepared)
+      return std::unexpected(std::move(prepared.error()));
+    auto operation = branch_summary_coordinator->snapshot();
+    if (operation.generation != *prepared)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "parent summary generation is unavailable"));
+    return tui_branch_summary_snapshot(operation);
+  };
+  auto branch_summary_refresh_catalog = [&refresh_session_tree_catalog, &session_selector_view_from_catalog]() -> ava::core::Result<ava::tui::SelectListView> {
+    if (auto refreshed = refresh_session_tree_catalog(); !refreshed)
+      return std::unexpected(std::move(refreshed.error()));
+    return session_selector_view_from_catalog();
   };
   std::vector<ava::tui::TranscriptItem> initial_transcript;
   if (auto onboarding = ava::app::first_run_auth_onboarding_message(unlocked_session))
@@ -617,6 +656,11 @@ int run_tui(ShellState state)
       .on_session_selector_branch_child = [open_selector_branch](std::string_view session_id) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         return open_selector_branch(session_id, false);
       },
+      .on_branch_summary_prepare = std::move(branch_summary_prepare),
+      .branch_summary_snapshot = [branch_summary_coordinator]() { return tui_branch_summary_snapshot(branch_summary_coordinator->snapshot()); },
+      .on_branch_summary_confirm = [branch_summary_coordinator](std::uint64_t generation) { return branch_summary_coordinator->confirm(generation); },
+      .on_branch_summary_cancel = [branch_summary_coordinator](std::uint64_t generation) { return branch_summary_coordinator->cancel(generation); },
+      .on_branch_summary_refresh_catalog = std::move(branch_summary_refresh_catalog),
       .remember_permission_rule = [&unlocked_session](
                                        ava::permissions::PermissionPrompt const& prompt,
                                        ava::permissions::PermissionAction action) { return remember_permission_rule_for_prompt(unlocked_session, prompt, action); },
@@ -817,8 +861,10 @@ int run_tui(ShellState state)
         application_catalog.retarget_session(ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id());
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot("session opened");
-      }});
+      },
+      .on_before_tui_shutdown = [branch_summary_coordinator]() { branch_summary_coordinator->shutdown(); }});
   std::cout << std::flush;
+  branch_summary_coordinator->shutdown();
   return result;
 }
 

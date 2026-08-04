@@ -5,10 +5,13 @@
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/command_sessions.h"
+#include "ava/app/line_shell_internal.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/tui/composer_internal.h"
+#include "ava/tui/runtime_views_internal.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
@@ -127,6 +130,54 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   ava::app::refresh_application_session_tree(cache, unlocked_session, {}, tree_builder);
   expect(workspace_walks == 2 && session_tree_builds == 2 && cache.operations.session_tree_builds == 2,
          "explicit session metadata mutation invalidation performs exactly one fresh tree build");
+
+  auto parent_hint_cache = cache;
+  auto& parent_hint_tree = *parent_hint_cache.session_tree;
+  auto& current_node = parent_hint_tree.sessions.front();
+  current_node.metadata.parent_session_id = "opaque-parent";
+  parent_hint_tree.roots = {"opaque-parent"};
+  parent_hint_tree.leaves = {current_node.summary.session_id};
+  parent_hint_tree.current_path = {"opaque-parent", current_node.summary.session_id};
+  parent_hint_tree.sessions.push_back(ava::session::SessionTreeNode{.summary = ava::session::SessionSummary{.session_id = "opaque-parent",
+                                                                                                            .path = "/private/raw-parent.jsonl",
+                                                                                                            .last_updated = "2026-07-21T00:00:00Z",
+                                                                                                            .entry_count = 4,
+                                                                                                            .title = "Résumé parent"},
+                                                                    .metadata = {},
+                                                                    .children = {current_node.summary.session_id},
+                                                                    .current = false});
+  ava::app::ApplicationCatalogCoordinator parent_hint_catalog(std::move(parent_hint_cache));
+  auto const bound_parent_view = parent_hint_catalog.session_view(ava::app::SessionSelectorSort::Recent, {}, false, false, false, false, "F8");
+  auto const unbound_parent_view = parent_hint_catalog.session_view();
+  auto const bound_parent = std::ranges::find_if(bound_parent_view.items, [](auto const& item) { return item.value == "opaque-parent"; });
+  auto const unbound_parent = std::ranges::find_if(unbound_parent_view.items, [](auto const& item) { return item.value == "opaque-parent"; });
+  auto const source_summary = parent_hint_catalog.session_summary("opaque-parent");
+  auto const missing_summary = parent_hint_catalog.session_summary("not-present");
+  expect(bound_parent != bound_parent_view.items.end() && bound_parent->detail.find("F8 summarize abandoned parent") != std::string::npos &&
+             bound_parent->detail.find("/private/raw-parent.jsonl") == std::string::npos && unbound_parent != unbound_parent_view.items.end() &&
+             unbound_parent->detail.find("bind app.sessions.summarizeParent") != std::string::npos && source_summary && *source_summary &&
+             (**source_summary).path == "/private/raw-parent.jsonl" && missing_summary && !*missing_summary,
+         "application catalog marks only the current direct parent with bound/unbound summary hints while retaining source authority behind the app seam");
+
+  auto const mapped_branch_snapshot = ava::app::line_shell_internal::tui_branch_summary_snapshot(
+      ava::app::BranchSummarySnapshot{.generation = 42,
+                                      .phase = ava::app::BranchSummaryPhase::Failed,
+                                      .source_label = "Résumé parent",
+                                      .model_label = "Model β",
+                                      .eligibility_code = ava::app::BranchSummaryEligibilityCode::NotDirectSource,
+                                      .failure_code = ava::app::BranchSummaryFailureCode::AppendFailed,
+                                      .reason = "/private/raw-parent.jsonl provider-secret generated-summary",
+                                      .append_commit_state = "partial_or_unknown",
+                                      .refresh_required = true});
+  auto const mapped_branch_view = ava::tui::runtime_views::branch_summary_operation_view(mapped_branch_snapshot);
+  auto const mapped_branch_text = tui_test_support::join_visible_lines(ava::tui::detail::render_select_list_modal(mapped_branch_view, 72, 8));
+  expect(mapped_branch_snapshot.generation == 42 && mapped_branch_snapshot.phase == ava::tui::TuiBranchSummaryPhase::Failed &&
+             mapped_branch_snapshot.eligibility_code == ava::tui::TuiBranchSummaryEligibilityCode::NotDirectSource &&
+             mapped_branch_snapshot.failure_code == ava::tui::TuiBranchSummaryFailureCode::AppendFailed &&
+             mapped_branch_snapshot.append_commit_state == ava::tui::TuiBranchSummaryAppendCommitState::PartialOrUnknown &&
+             mapped_branch_snapshot.refresh_required && mapped_branch_text.find("/private/raw-parent.jsonl") == std::string::npos &&
+             mapped_branch_text.find("provider-secret") == std::string::npos && mapped_branch_text.find("generated-summary") == std::string::npos,
+         "application branch-summary mapping forwards exact fixed enums and labels but drops backend reason, path, provider, and generated payload text");
 }
 
 void test_application_catalog_coordinator_serializes_refresh_and_snapshot()

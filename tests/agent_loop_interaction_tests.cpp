@@ -656,7 +656,7 @@ void test_agent_loop_replays_steering_after_mid_turn_auto_compaction()
   expect(append_lease.has_value(), "steering compaction fixture acquires its append lease");
   if (!append_lease)
     return;
-  auto append_target = ava::session::SessionAppendTarget::create_persistent(store, *append_lease);
+  auto append_target = ava::session::SessionAppendTarget::create_persistent(store, *append_lease, ava::session::SessionReadLimits{});
   expect(append_target.has_value(), "steering compaction fixture creates its append target");
   if (!append_target)
     return;
@@ -723,7 +723,7 @@ void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction()
   expect(append_lease.has_value(), "overflow compaction fixture acquires its append lease");
   if (!append_lease)
     return;
-  auto append_target = ava::session::SessionAppendTarget::create_persistent(store, *append_lease);
+  auto append_target = ava::session::SessionAppendTarget::create_persistent(store, *append_lease, ava::session::SessionReadLimits{});
   expect(append_target.has_value(), "overflow compaction fixture creates its append target");
   if (!append_target)
     return;

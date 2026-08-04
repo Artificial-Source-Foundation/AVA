@@ -196,6 +196,30 @@ struct SettingsNavigationState
 [[nodiscard]] SelectListView setup_wizard_select_list_view(SetupWizardStep step, ComposerSnapshot const& snapshot, SetupReadinessSnapshot const& readiness);
 [[nodiscard]] SetupWizardStep setup_wizard_next_step(SetupWizardStep step) noexcept;
 [[nodiscard]] bool setup_wizard_action_is_theme(std::string_view value) noexcept;
+enum class BranchSummaryInputIntent
+{
+  Block,
+  Confirm,
+  Cancel,
+  Exit,
+};
+
+enum class BranchSummaryCallbackFailure
+{
+  Prepare,
+  Snapshot,
+  Confirm,
+  Cancel,
+  Refresh,
+};
+
+[[nodiscard]] bool branch_summary_terminal(TuiBranchSummarySnapshot const& snapshot) noexcept;
+[[nodiscard]] SelectListView branch_summary_operation_view(TuiBranchSummarySnapshot const& snapshot);
+[[nodiscard]] std::string branch_summary_terminal_status(TuiBranchSummarySnapshot const& snapshot);
+[[nodiscard]] BranchSummaryInputIntent branch_summary_input_intent(TuiBranchSummaryPhase phase, InputEvent const& event, TuiKeyBindings const& bindings);
+[[nodiscard]] SelectListView restore_branch_summary_session_view(SelectListView refreshed, SelectListView const& prior, std::string_view selected_value,
+                                                                 std::size_t prior_selected_index);
+[[nodiscard]] std::string_view branch_summary_callback_failure_status(BranchSummaryCallbackFailure failure) noexcept;
 [[nodiscard]] std::string permission_prompt_status(bool allow_session_available, bool allow_remember_available, bool deny_remember_available);
 [[nodiscard]] ActiveRunHint active_run_hint_for(TuiKeyBindings const& bindings);
 [[nodiscard]] std::string compact_path_leaf(std::string path);

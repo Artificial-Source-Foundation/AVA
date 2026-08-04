@@ -11,6 +11,7 @@
 #include "ava/core/error.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -679,6 +680,7 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                         .provider = "openai",
                                                                                         .model = "gpt-test",
                                                                                         .reason = "test",
+                                                                                        .read_limits = ava::session::SessionReadLimits{},
                                                                                         .actor = "test"});
   expect(summary.has_value(), summary ? "branch summary appends to source session" : "branch summary appends to source session: " + summary.error().format());
   if (!summary)
@@ -713,6 +715,7 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                                .provider = "openai",
                                                                                                .model = "gpt-test",
                                                                                                .reason = "test",
+                                                                                               .read_limits = ava::session::SessionReadLimits{},
                                                                                                .actor = "test"});
   expect(!root_after_tip && root_after_tip.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "branch summary rejects root entries after tip entries");
@@ -726,6 +729,7 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                             .provider = "openai",
                                                                                             .model = "gpt-test",
                                                                                             .reason = "test",
+                                                                                            .read_limits = ava::session::SessionReadLimits{},
                                                                                             .actor = "test"});
   expect(!missing_tip && missing_tip.error().category() == ava::core::ErrorCategory::NotFound, "branch summary rejects missing tip entries");
 
@@ -738,6 +742,7 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                              .provider = "open\nai",
                                                                                              .model = "gpt-test",
                                                                                              .reason = "test",
+                                                                                             .read_limits = ava::session::SessionReadLimits{},
                                                                                              .actor = "test"});
   expect(!bad_provider && bad_provider.error().category() == ava::core::ErrorCategory::InvalidArgument,
          "branch summary rejects control bytes in provider metadata while allowing summary newlines");
@@ -759,6 +764,7 @@ void test_session_branch_summary_appends_to_source_session()
                                                                                                   .provider = "openai",
                                                                                                   .model = "gpt-test",
                                                                                                   .reason = "test",
+                                                                                                  .read_limits = ava::session::SessionReadLimits{},
                                                                                                   .actor = "test"});
   auto after_incomplete = source_store.load();
   auto incomplete_summary_message =
@@ -774,6 +780,156 @@ void test_session_branch_summary_appends_to_source_session()
   expect(staged && !incomplete_source && incomplete_source.error().category() == ava::core::ErrorCategory::Session && after_incomplete &&
              after_incomplete->size() == source_entries_after->size() + 1 && after_incomplete->back().id == "entry_staged",
          incomplete_summary_message);
+}
+
+void test_session_branch_summary_coverage_bounds_and_duplicates()
+{
+  auto const root = create_empty_root("session-branch-summary-coverage");
+  auto const workspace = root / "workspace";
+  auto const sessions_dir = root / "sessions";
+  std::filesystem::create_directories(workspace);
+  auto store =
+      ava::session::SessionStore(ava::session::SessionStoreOptions{.root_dir = sessions_dir, .workspace_dir = workspace, .session_id = "session_coverage"});
+
+  auto ordinary = [](std::string id, std::string parent, ava::session::EntryType type, std::string text) {
+    return ava::session::SessionEntry{.id = std::move(id),
+                                      .parent_id = std::move(parent),
+                                      .type = type,
+                                      .timestamp = "2026-08-04T00:00:00Z",
+                                      .data_json = "{\"text\":\"" + std::move(text) + "\"}"};
+  };
+  auto start = ordinary("fork", "", ava::session::EntryType::SessionStart, "start");
+  start.data_json =
+      "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"context_sources\":0,"
+      "\"context_window_tokens\":128000,\"max_output_tokens\":4096,\"prompt_override\":false,\"supports_tools\":true,"
+      "\"supports_streaming\":true,\"supports_reasoning\":true,\"reports_usage\":true}";
+  expect(append_session_entry_for_test(store, start) &&
+             append_session_entry_for_test(store, ordinary("root", "fork", ava::session::EntryType::UserMessage, "question")) &&
+             append_session_entry_for_test(store, ordinary("tip", "root", ava::session::EntryType::AssistantMessage, "answer")),
+         "branch summary coverage fixture creates a substantive suffix");
+
+  auto options = [&](std::string tip, std::string summary) {
+    return ava::session::BranchSummaryOptions{.workspace_dir = workspace,
+                                              .root_dir = sessions_dir,
+                                              .source_session_id = "session_coverage",
+                                              .branch_root_entry_id = "root",
+                                              .branch_tip_entry_id = std::move(tip),
+                                              .summary = std::move(summary),
+                                              .provider = "openai",
+                                              .model = "gpt-test",
+                                              .reason = "test",
+                                              .read_limits = ava::session::SessionReadLimits{},
+                                              .actor = "test"};
+  };
+  auto read_bytes = [&] {
+    std::ifstream input(store.session_path(), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+  };
+
+  auto missing_options = options("tip", "missing limits");
+  missing_options.read_limits.reset();
+  auto missing_prepare = ava::session::prepare_branch_summary(missing_options);
+  auto missing_append = ava::session::append_branch_summary(std::move(missing_options));
+  auto tiny_options = options("tip", "tiny bounds");
+  tiny_options.read_limits = ava::session::SessionReadLimits{.max_file_bytes = 1, .max_line_bytes = 1, .max_entries = 1};
+  auto tiny_prepare = ava::session::prepare_branch_summary(std::move(tiny_options));
+  auto canceled_options = options("tip", "canceled");
+  canceled_options.cancel_requested = [] { return true; };
+  auto canceled = ava::session::prepare_branch_summary(std::move(canceled_options));
+  expect(!missing_prepare && !missing_append && missing_prepare.error().message() == "branch summary requires explicit session read limits" && !tiny_prepare &&
+             !canceled,
+         "branch summary preparation and append require explicit bounded limits and honor bounded-read cancellation");
+
+  auto lease = ava::session::SessionLease::acquire(store.session_path());
+  auto tiny_target = lease ? ava::session::SessionAppendTarget::create_persistent(
+                                 store, *lease, ava::session::SessionReadLimits{.max_file_bytes = 1, .max_line_bytes = 1, .max_entries = 1})
+                           : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(lease.error()));
+  expect(!tiny_target, "persistent append-target initialization uses its explicit bounded read policy");
+  lease = ava::session::SessionLease{};
+
+  auto initial = store.load();
+  if (!initial)
+  {
+    expect(false, "branch summary coverage fixture loads");
+    return;
+  }
+  auto coverage = ava::session::inspect_branch_summary_coverage(*initial, "session_coverage", "fork");
+  auto prompt = ava::session::extract_branch_summary_prompt_range(*initial, coverage);
+  auto missing_fork = ava::session::inspect_branch_summary_coverage(*initial, "session_coverage", "missing");
+  expect(coverage.eligible() && coverage.branch_root_entry_id == "root" && coverage.branch_tip_entry_id == "tip" && prompt && prompt->size() == 2 &&
+             prompt->front().id == "root" && prompt->back().id == "tip" &&
+             missing_fork.reason == ava::session::BranchSummaryEligibilityReason::ForkEntryNotFound,
+         "coverage is fork-exclusive, substantive-tip-inclusive, and reports a typed missing-fork reason");
+
+  auto first = ava::session::append_branch_summary(options("tip", "first summary"));
+  auto const bytes_after_first = read_bytes();
+  auto duplicate = ava::session::append_branch_summary(options("tip", "replacement must be ignored"));
+  auto after_duplicate = store.load();
+  auto trailing =
+      after_duplicate ? ava::session::inspect_branch_summary_coverage(*after_duplicate, "session_coverage", "fork") : ava::session::BranchSummaryCoverage{};
+  auto trailing_prompt = after_duplicate ? ava::session::extract_branch_summary_prompt_range(*after_duplicate, trailing)
+                                         : ava::core::Result<std::vector<ava::session::SessionEntry>>(
+                                               std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "fixture load failed")));
+  expect(first && first->disposition == ava::session::BranchSummaryDisposition::Appended && duplicate &&
+             duplicate->disposition == ava::session::BranchSummaryDisposition::Existing && duplicate->entry.id == first->entry.id &&
+             read_bytes() == bytes_after_first && trailing.reason == ava::session::BranchSummaryEligibilityReason::ExistingSummary &&
+             trailing.branch_tip_entry_id == "tip" && trailing.existing_summary && trailing_prompt && trailing_prompt->size() == 2,
+         "exact duplicates are byte-identical and trailing summary markers preserve the same Existing coverage");
+
+  if (!first)
+    return;
+  expect(append_session_entry_for_test(store, ordinary("advanced_tip", first->entry.id, ava::session::EntryType::UserMessage, "later work")).has_value(),
+         "branch summary coverage fixture appends later substantive work");
+  auto advanced_entries = store.load();
+  auto advanced =
+      advanced_entries ? ava::session::inspect_branch_summary_coverage(*advanced_entries, "session_coverage", "fork") : ava::session::BranchSummaryCoverage{};
+  auto advanced_prompt = advanced_entries ? ava::session::extract_branch_summary_prompt_range(*advanced_entries, advanced)
+                                          : ava::core::Result<std::vector<ava::session::SessionEntry>>(
+                                                std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "fixture load failed")));
+  expect(advanced.eligible() && advanced.branch_root_entry_id == "root" && advanced.branch_tip_entry_id == "advanced_tip" && advanced_prompt &&
+             advanced_prompt->size() == 3 &&
+             std::ranges::none_of(*advanced_prompt, [](auto const& entry) { return entry.type == ava::session::EntryType::BranchSummary; }),
+         "interspersed summaries never enter the prompt range and later substantive work advances the candidate tip");
+
+  auto prepared = ava::session::prepare_branch_summary(options("advanced_tip", "advanced summary"));
+  auto const bytes_before_failure = read_bytes();
+  int write_attempts = 0;
+  store.set_append_write_for_test([&](int, std::string_view) {
+    ++write_attempts;
+    errno = EIO;
+    return static_cast<ssize_t>(-1);
+  });
+  auto failure_lease = ava::session::SessionLease::acquire(store.session_path());
+  auto failure_target = failure_lease ? ava::session::SessionAppendTarget::create_persistent(store, *failure_lease, ava::session::SessionReadLimits{})
+                                      : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(failure_lease.error()));
+  auto failed_append = prepared && failure_target ? (*failure_target)->append_branch_summary_if_absent(prepared->entry)
+                                                  : ava::core::Result<ava::session::SessionConditionalAppendResult>(
+                                                        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "fixture setup failed")));
+  store.set_append_write_for_test({});
+  if (failure_target)
+    failure_target->reset();
+  failure_lease = ava::session::SessionLease{};
+  expect(!failed_append && failed_append.error().format().find("append_commit_state: not_started") != std::string::npos && write_attempts == 1 &&
+             read_bytes() == bytes_before_failure,
+         "conditional branch summary append preserves commit state, leaves bytes unchanged, and never retries a failed write");
+
+  auto appended = ava::session::append_branch_summary(options("advanced_tip", "advanced summary"));
+  auto const bytes_after_advanced = read_bytes();
+  auto append_lease = ava::session::SessionLease::acquire(store.session_path());
+  auto target = append_lease ? ava::session::SessionAppendTarget::create_persistent(store, *append_lease, ava::session::SessionReadLimits{})
+                             : ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>>(std::unexpected(append_lease.error()));
+  auto rechecked = prepared && target ? (*target)->append_branch_summary_if_absent(prepared->entry)
+                                      : ava::core::Result<ava::session::SessionConditionalAppendResult>(
+                                            std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "fixture setup failed")));
+  auto final_entries = store.load();
+  auto no_suffix =
+      final_entries ? ava::session::inspect_branch_summary_coverage(*final_entries, "session_coverage", "advanced_tip") : ava::session::BranchSummaryCoverage{};
+  expect(prepared && prepared->disposition == ava::session::BranchSummaryDisposition::Appended && appended &&
+             appended->disposition == ava::session::BranchSummaryDisposition::Appended && rechecked &&
+             rechecked->disposition == ava::session::SessionAppendDisposition::Existing && rechecked->entry.id == appended->entry.id &&
+             read_bytes() == bytes_after_advanced && no_suffix.reason == ava::session::BranchSummaryEligibilityReason::NoSubstantiveEntriesAfterFork &&
+             ava::session::branch_summary_eligibility_reason_text(no_suffix.reason).find('/') == std::string_view::npos,
+         "append-time revalidation suppresses a cross-caller duplicate and summary-only suffixes have a typed path-free reason");
 }
 
 }  // namespace session_tests

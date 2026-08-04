@@ -65,6 +65,15 @@ def main() -> int:
     require_text(source, "src/ava/session/session_store_authority.cpp", "struct SessionReadAuthority::State", failures)
     require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(*state_->lease, state_->limits)", failures)
     require_text(source, "src/ava/session/session_store_authority.cpp", "state_->store.load_bounded(state_->limits)", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "store.load_bounded(lease, read_limits", failures)
+    require_text(source, "src/ava/session/session_store_authority.cpp", "store_.load_bounded(*lease_, read_limits_", failures)
+    require_text(source, "src/ava/session/session_branch.cpp", "source->load_bounded(*source_lease, *options.read_limits", failures)
+    branch_source = (source / "src/ava/session/session_branch.cpp").read_text(encoding="utf-8")
+    authority_source = (source / "src/ava/session/session_store_authority.cpp").read_text(encoding="utf-8")
+    if "source->load(*source_lease)" in branch_source:
+        failures.append("branch-summary preparation still contains an unbounded exact-lease source load")
+    if "store.load(lease)" in authority_source or "store_.load(*lease_)" in authority_source:
+        failures.append("persistent append-target preflight/revalidation still contains an unbounded exact-lease load")
 
     # Keep the small observational pathname inventory visible and intentional.
     require_text(source, "src/ava/session/session_tree.cpp", "load_session_metadata(*store)", failures)

@@ -5,6 +5,8 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
+#include "ava/app/project_trust.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/subagent_job.h"
@@ -664,6 +666,44 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
          "RPC branching temporarily leases and recovers a different source before holding it through clone creation");
 }
 
+void test_app_rpc_maintenance_reservation_blocks_generic_mutation()
+{
+  auto const root = create_empty_root("app-rpc-maintenance-reservation");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto opened = ava::app::runtime::Session::open(open_context);
+  expect(opened.has_value(), "RPC maintenance fixture opens a runtime session");
+  if (!opened)
+    return;
+  ava::app::runtime::session_ts session(std::move(*opened));
+  std::string session_id;
+  std::optional<ava::app::SessionMaintenanceReservation> reservation;
+  {
+    ava::app::runtime::session_ts::rat session_r(session);
+    session_id = session_r->store.session_id();
+    auto acquired = session_r->run_controller()->reserve_maintenance();
+    expect(acquired.has_value(), acquired ? "RPC fixture acquires exclusive maintenance" : acquired.error().format());
+    if (!acquired)
+      return;
+    reservation.emplace(std::move(*acquired));
+  }
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in("{\"id\":\"new\",\"type\":\"new_session\"}\n");
+  std::ostringstream out;
+  auto result = ava::app::run_rpc_loop(session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
+  ava::app::runtime::session_ts::rat session_r(session);
+  expect(result && session_r->store.session_id() == session_id && out.str().find("\"code\":\"invalid_request\"") != std::string::npos &&
+             out.str().find("exclusive session maintenance") != std::string::npos,
+         "central RPC mutation gate observes maintenance without classifying it as a normal active run");
+}
+
 void test_app_rpc_summarize_branch_appends_to_source_session()
 {
   auto const root = create_empty_root("app-rpc-branch-summary");
@@ -695,16 +735,40 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
 
   CRITICAL_AREA_END_R(session);
 
+  auto noncurrent_store = ava::session::SessionStore(
+      ava::session::SessionStoreOptions{.root_dir = paths.sessions_dir, .workspace_dir = workspace, .session_id = "session_rpc_noncurrent_summary"});
+  auto noncurrent_start = ava::session::SessionEntry{.id = "entry_noncurrent_root",
+                                                     .parent_id = "",
+                                                     .type = ava::session::EntryType::SessionStart,
+                                                     .timestamp = "2026-08-04T00:00:00Z",
+                                                     .data_json =
+                                                         "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-test\","
+                                                         "\"context_sources\":0,\"context_window_tokens\":128000,\"max_output_tokens\":4096,"
+                                                         "\"prompt_override\":false,\"supports_tools\":true,\"supports_streaming\":true,"
+                                                         "\"supports_reasoning\":true,\"reports_usage\":true}"};
+  auto noncurrent_tip = ava::session::SessionEntry{.id = "entry_noncurrent_tip",
+                                                   .parent_id = "entry_noncurrent_root",
+                                                   .type = ava::session::EntryType::UserMessage,
+                                                   .timestamp = "2026-08-04T00:00:01Z",
+                                                   .data_json = "{\"text\":\"noncurrent source\"}"};
+  auto noncurrent_seeded = append_session_entry_for_test(noncurrent_store, noncurrent_start) && append_session_entry_for_test(noncurrent_store, noncurrent_tip);
+  expect(noncurrent_seeded, "RPC summarize_branch test creates a noncurrent source session");
+  if (!noncurrent_seeded)
+    return;
+
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
-  auto const requests = std::string("{\"id\":\"summary\",\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id +
-                        "\","
-                        "\"branch_tip_entry_id\":\"" +
-                        tip_entry_id +
-                        "\","
-                        "\"summary\":\"Abandoned path was not needed.\","
-                        "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n"
-                        "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n";
+  auto const summary_request = std::string("\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id + "\",\"branch_tip_entry_id\":\"" +
+                               tip_entry_id +
+                               "\",\"summary\":\"Abandoned path was not needed.\","
+                               "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}";
+  auto const noncurrent_request =
+      "\"type\":\"summarize_branch\",\"session_id\":\"session_rpc_noncurrent_summary\","
+      "\"branch_root_entry_id\":\"entry_noncurrent_root\",\"branch_tip_entry_id\":\"entry_noncurrent_tip\","
+      "\"summary\":\"Noncurrent abandoned path.\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}";
+  auto const requests = std::string("{\"id\":\"summary\",") + summary_request + "\n{\"id\":\"summary-duplicate\"," + summary_request +
+                        "\n{\"id\":\"noncurrent-summary\"," + noncurrent_request + "\n{\"id\":\"noncurrent-summary-duplicate\"," + noncurrent_request +
+                        "\n{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
   auto result =
@@ -715,19 +779,57 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_has_summary = false;
+  std::string persisted_summary_id;
+  std::optional<ava::session::SessionEntry> persisted_summary_entry;
   if (source_store)
   {
     auto source_after = source_store->load();
     source_has_summary = source_after && source_after->size() == source_count + 1 && source_after->back().type == ava::session::EntryType::BranchSummary &&
                          source_after->back().parent_id == tip_entry_id;
+    if (source_has_summary)
+    {
+      persisted_summary_id = source_after->back().id;
+      persisted_summary_entry = source_after->back();
+    }
   }
+  auto noncurrent_after = noncurrent_store.load();
+  bool const noncurrent_has_one = noncurrent_after && noncurrent_after->size() == 3 &&
+                                  noncurrent_after->back().type == ava::session::EntryType::BranchSummary &&
+                                  noncurrent_after->back().parent_id == "entry_noncurrent_tip";
+  auto response_repeats_entry = [&](std::string const& entry_id) {
+    auto const first = jsonl.find("\"entry_id\":\"" + entry_id + "\"");
+    return first != std::string::npos && jsonl.find("\"entry_id\":\"" + entry_id + "\"", first + 1) != std::string::npos;
+  };
+  bool const duplicate_results_match =
+      source_has_summary && noncurrent_has_one && response_repeats_entry(persisted_summary_id) && response_repeats_entry(noncurrent_after->back().id);
   expect(result.has_value(), "RPC summarize_branch loop completes successfully");
-  expect(source_has_summary && session_r->store.session_id() == source_id, "RPC summarize_branch appends to the source session without switching sessions");
-  expect(jsonl.find("\"id\":\"summary\"") != std::string::npos && jsonl.find("\"source_session_id\":\"" + source_id + "\"") != std::string::npos &&
-             jsonl.find("\"type\":\"branch_summary\"") != std::string::npos && jsonl.find("Abandoned path was not needed.") != std::string::npos &&
-             jsonl.find("\"branch_summary\":1") != std::string::npos,
-         "RPC summarize_branch returns the persisted branch summary entry and updated stats expose the count");
+  expect(source_has_summary && noncurrent_has_one && session_r->store.session_id() == source_id,
+         "RPC summarize_branch appends once to current and noncurrent source sessions without switching sessions");
+  expect(jsonl.find("\"id\":\"summary\"") != std::string::npos && jsonl.find("\"id\":\"summary-duplicate\"") != std::string::npos &&
+             jsonl.find("\"id\":\"noncurrent-summary\"") != std::string::npos && jsonl.find("\"id\":\"noncurrent-summary-duplicate\"") != std::string::npos &&
+             jsonl.find("\"source_session_id\":\"" + source_id + "\"") != std::string::npos && jsonl.find("\"type\":\"branch_summary\"") != std::string::npos &&
+             jsonl.find("Abandoned path was not needed.") != std::string::npos && jsonl.find("\"branch_summary\":1") != std::string::npos &&
+             duplicate_results_match && transport.requests().empty(),
+         "RPC summarize_branch returns the existing result for an exact duplicate without a second append or provider request");
 
+  auto const bytes_before_owner_duplicate = app_read_binary_file(session_r->store.session_path());
+  auto owner_duplicate = persisted_summary_entry && session_r->run_controller()
+                             ? session_r->run_controller()->append_branch_summary_if_absent(*persisted_summary_entry)
+                             : ava::core::Result<ava::session::SessionConditionalAppendResult>(
+                                   std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "owner duplicate fixture setup failed")));
+  expect(owner_duplicate && owner_duplicate->disposition == ava::session::SessionAppendDisposition::Existing &&
+             app_read_binary_file(session_r->store.session_path()) == bytes_before_owner_duplicate,
+         "current owner route performs the same final duplicate recheck without appending bytes");
+
+  auto growth = ava::session::SessionEntry{.id = "summary-latch-growth",
+                                           .parent_id = persisted_summary_id,
+                                           .type = ava::session::EntryType::UserMessage,
+                                           .timestamp = ava::session::now_timestamp(),
+                                           .data_json = "{\"text\":\"new range before append latch\"}"};
+  auto latch_growth =
+      session_r->run_controller()
+          ? session_r->run_controller()->append(std::move(growth))
+          : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
   auto invalid = ava::session::SessionEntry{
       .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
   auto latched = session_r->run_controller()
@@ -737,16 +839,32 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   CRITICAL_AREA_END_R(session);
 
   std::istringstream blocked_in(std::string("{\"id\":\"blocked-summary\",\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id +
-                                "\",\"branch_tip_entry_id\":\"" + tip_entry_id +
-                                "\",\"summary\":\"must not bypass latch\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n");
+                                "\",\"branch_tip_entry_id\":\"summary-latch-growth\","
+                                "\"summary\":\"must not bypass latch\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n");
   std::ostringstream blocked_out;
   auto blocked_loop = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, blocked_in, blocked_out,
                                              ava::app::rpc::RpcInputWake{});
   CRITICAL_AREA_CONTINUE_R(session);
   auto blocked_entries = session_r->store.load();
-  expect(!latched && blocked_loop && blocked_entries && blocked_entries->size() == source_count + 1 &&
+  CRITICAL_AREA_END_R(session);
+
+  auto latch_message = std::string(
+      "current-session RPC summaries perform lease-bound reads but append only through the owner route and cannot bypass its "
+      "persistence latch");
+  if (latched)
+    latch_message += ": invalid append unexpectedly succeeded";
+  if (!latch_growth)
+    latch_message += ": growth append failed: " + latch_growth.error().format();
+  if (!blocked_loop)
+    latch_message += ": blocked loop failed: " + blocked_loop.error().format();
+  if (!blocked_entries)
+    latch_message += ": load failed: " + blocked_entries.error().format();
+  else if (blocked_entries->size() != source_count + 2)
+    latch_message += ": unexpected entry count " + std::to_string(blocked_entries->size());
+  latch_message += ": output=" + blocked_out.str();
+  expect(!latched && latch_growth && blocked_loop && blocked_entries && blocked_entries->size() == source_count + 2 &&
              blocked_out.str().find("blocked-summary") != std::string::npos && blocked_out.str().find("append_commit_state") != std::string::npos,
-         "current-session RPC summaries perform lease-bound reads but append only through the owner route and cannot bypass its persistence latch");
+         latch_message);
 }
 
 }  // namespace ava::tests::app_rpc_test

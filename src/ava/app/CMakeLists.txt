@@ -16,6 +16,7 @@ target_sources(ava_app
     "acp_mode.cpp"
     "app.cpp"
     "browser_open.cpp"
+    "branch_summary_coordinator.cpp"
     "clipboard_image.cpp"
     "command_catalog.cpp"
     "command_connect.cpp"

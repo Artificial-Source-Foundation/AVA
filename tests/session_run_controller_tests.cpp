@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -50,7 +51,7 @@ std::shared_ptr<ava::session::SessionAppendTarget> ephemeral_controller_target()
 ava::core::Result<std::shared_ptr<ava::session::SessionAppendTarget>> persistent_controller_target(ava::session::SessionStore const& store,
                                                                                                    ava::session::SessionLease const& lease)
 {
-  return ava::session::SessionAppendTarget::create_persistent(store, lease);
+  return ava::session::SessionAppendTarget::create_persistent(store, lease, ava::session::SessionReadLimits{});
 }
 
 void test_session_run_controller_transitions_and_guard_release()
@@ -142,6 +143,30 @@ ava::session::SessionEntry append_entry(std::string id)
 {
   return ava::session::SessionEntry{
       .id = std::move(id), .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = "{\"test\":true}"};
+}
+
+ava::session::SessionEntry branch_summary_entry(ava::session::SessionStore const& store, std::string id, std::string parent_id, std::string root_id,
+                                                std::string tip_id)
+{
+  return ava::session::SessionEntry{.id = std::move(id),
+                                    .parent_id = std::move(parent_id),
+                                    .type = ava::session::EntryType::BranchSummary,
+                                    .timestamp = ava::session::now_timestamp(),
+                                    .data_json = "{\"schema_version\":1,\"summary\":\"summary\",\"source_session_id\":\"" + store.session_id() +
+                                                 "\",\"branch_root_entry_id\":\"" + root_id + "\",\"branch_tip_entry_id\":\"" + tip_id +
+                                                 "\",\"provider\":\"test\",\"model\":\"test\",\"reason\":\"test\"}"};
+}
+
+std::optional<std::string> append_error_context(ava::core::Error const& error, std::string_view key)
+{
+  auto const found = std::ranges::find_if(error.context(), [&](auto const& item) { return item.key == key; });
+  return found == error.context().end() ? std::nullopt : std::optional<std::string>(found->value);
+}
+
+std::string read_binary_file(std::filesystem::path const& path)
+{
+  std::ifstream input(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
 void test_session_run_controller_owner_and_generation_routes()
@@ -1010,6 +1035,394 @@ void test_session_run_controller_unrelated_observer_shutdown_without_active_appe
          "an unrelated observer finalizes an idle controller immediately and copied routes retain no target lease");
 }
 
+void test_session_run_controller_conditional_rejections_do_not_latch()
+{
+  {
+    auto const root = create_empty_root("session-run-controller-conditional-final-read-cancel");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+
+    std::string parent;
+    for (int index = 0; index < 64; ++index)
+    {
+      auto entry = append_entry("cancel-read-" + std::to_string(index));
+      entry.parent_id = parent;
+      entry.data_json = "{\"padding\":\"" + std::string(192, 'x') + "\"}";
+      if (!store->append(*lease, entry))
+        return;
+      parent = entry.id;
+    }
+    int read_hook_calls = 0;
+    std::atomic<bool> cancel = false;
+    store->set_after_lease_bound_read_for_test([&] {
+      if (++read_hook_calls == 2)
+        cancel.store(true, std::memory_order_release);
+    });
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto admitted = controller.admit({.request_id = "conditional-final-read-cancel"});
+    if (!admitted)
+      return;
+    auto guard = std::move(*admitted);
+    int cancel_calls = 0;
+    auto const before = read_binary_file(store->session_path());
+    auto summary = branch_summary_entry(*store, "cancel-read-summary", parent, "cancel-read-0", parent);
+    auto canceled = controller.append_branch_summary_if_absent(std::move(summary), [&] {
+      ++cancel_calls;
+      return cancel.load(std::memory_order_acquire);
+    });
+    auto const after_canceled = read_binary_file(store->session_path());
+    auto later = controller.append(append_entry("cancel-read-later"));
+    auto entries = store->load();
+    expect(!canceled && !append_error_context(canceled.error(), "append_commit_state") && read_hook_calls == 2 && cancel_calls >= 2 &&
+               after_canceled == before && read_binary_file(store->session_path()).starts_with(before) && later && entries && entries->size() == 65 &&
+               !guard.stop_requested() && controller.inspect_admission({.request_id = "other"}) != ava::app::AdmissionDisposition::RejectPersistenceFailure,
+           "conditional cancellation during the final bounded read is nonmutating, does not latch, and permits a later ordinary append");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-conditional-linearization-cancel");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+    auto root_entry = append_entry("linearization-root");
+    auto tip_entry = append_entry("linearization-tip");
+    tip_entry.parent_id = root_entry.id;
+    if (!store->append(*lease, root_entry) || !store->append(*lease, tip_entry))
+      return;
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    int cancel_calls = 0;
+    bool at_linearization = false;
+    bool release = false;
+    bool ordinary_at_write = false;
+    bool release_ordinary = false;
+    store->set_before_append_identity_check_for_test([&] {
+      std::unique_lock lock(gate_mutex);
+      ordinary_at_write = true;
+      gate_changed.notify_all();
+      static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_ordinary; }));
+    });
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto admitted = controller.admit({.request_id = "conditional-linearization-cancel"});
+    if (!admitted)
+      return;
+    auto guard = std::move(*admitted);
+    expect(controller.wake({.kind = ava::app::RunCommand::Kind::Wake, .correlation_id = {}, .message = "unrelated wake"}).has_value(),
+           "conditional rejection fixture queues an unrelated wake");
+
+    std::optional<ava::core::Result<ava::session::SessionConditionalAppendResult>> conditional_result;
+    std::optional<ava::core::VoidResult> ordinary_result;
+    auto summary = branch_summary_entry(*store, "linearization-summary", tip_entry.id, root_entry.id, tip_entry.id);
+    std::jthread conditional_writer([&] {
+      conditional_result.emplace(controller.append_branch_summary_if_absent(std::move(summary), [&] {
+        std::unique_lock lock(gate_mutex);
+        ++cancel_calls;
+        if (cancel_calls != 2)
+          return false;
+        at_linearization = true;
+        gate_changed.notify_all();
+        static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release; }));
+        return true;
+      }));
+    });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return at_linearization; }),
+             "conditional append reaches its post-read cancellation linearization point");
+    }
+    auto const before = read_binary_file(store->session_path());
+    std::jthread ordinary_writer([&] { ordinary_result.emplace(controller.append(append_entry("linearization-later"))); });
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    auto queued = controller.snapshot();
+    while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::yield();
+      queued = controller.snapshot();
+    }
+    {
+      std::lock_guard lock(gate_mutex);
+      release = true;
+    }
+    gate_changed.notify_all();
+    bool reached_ordinary_write = false;
+    {
+      std::unique_lock lock(gate_mutex);
+      reached_ordinary_write = gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return ordinary_at_write; });
+    }
+    auto const after_rejection = read_binary_file(store->session_path());
+    {
+      std::lock_guard lock(gate_mutex);
+      release_ordinary = true;
+    }
+    gate_changed.notify_all();
+    conditional_writer.join();
+    ordinary_writer.join();
+
+    auto entries = store->load();
+    auto wake = controller.take_commands("conditional-linearization-cancel", ava::app::RunCommand::Kind::Wake);
+    auto drained = controller.snapshot();
+    expect(queued.queued_appends == 2 && conditional_result && !*conditional_result &&
+               !append_error_context(conditional_result->error(), "append_commit_state") && reached_ordinary_write && after_rejection == before &&
+               ordinary_result && *ordinary_result && entries && entries->size() == 3 && entries->back().id == "linearization-later" &&
+               read_binary_file(store->session_path()).starts_with(before) && cancel_calls == 2 && wake && wake->size() == 1 && drained.queued_appends == 0 &&
+               drained.queued_append_bytes == 0 && !guard.stop_requested() &&
+               controller.inspect_admission({.request_id = "other"}) != ava::app::AdmissionDisposition::RejectPersistenceFailure,
+           "post-read cancellation rejects only its ticket, preserves wake and queue accounting, and permits a queued ordinary append");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-conditional-stale-parent");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+    auto root_entry = append_entry("stale-root");
+    auto tip_entry = append_entry("stale-tip");
+    tip_entry.parent_id = root_entry.id;
+    if (!store->append(*lease, root_entry) || !store->append(*lease, tip_entry))
+      return;
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool external_at_write = false;
+    bool release_external = false;
+    store->set_before_append_identity_check_for_test([&] {
+      std::unique_lock lock(gate_mutex);
+      if (external_at_write)
+        return;
+      external_at_write = true;
+      gate_changed.notify_all();
+      static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_external; }));
+    });
+    auto controller_target = persistent_controller_target(*store, *lease);
+    auto external_target = persistent_controller_target(*store, *lease);
+    if (!controller_target || !external_target)
+      return;
+    ava::app::SessionRunController controller(std::move(*controller_target));
+    auto admitted = controller.admit({.request_id = "conditional-stale-parent"});
+    if (!admitted)
+      return;
+    auto guard = std::move(*admitted);
+
+    auto growth = append_entry("stale-growth");
+    growth.parent_id = tip_entry.id;
+    std::optional<ava::core::VoidResult> growth_result;
+    std::jthread external_writer([&] { growth_result.emplace((*external_target)->append(growth)); });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return external_at_write; }),
+             "stale-parent fixture holds a concurrent valid append at its write boundary");
+    }
+    auto summary = branch_summary_entry(*store, "stale-summary", tip_entry.id, root_entry.id, tip_entry.id);
+    std::optional<ava::core::Result<ava::session::SessionConditionalAppendResult>> stale_result;
+    std::jthread conditional_writer([&] { stale_result.emplace(controller.append_branch_summary_if_absent(std::move(summary))); });
+    {
+      std::lock_guard lock(gate_mutex);
+      release_external = true;
+    }
+    gate_changed.notify_all();
+    external_writer.join();
+    conditional_writer.join();
+
+    auto later = controller.append(append_entry("stale-later"));
+    auto entries = store->load();
+    bool const has_summary = entries && std::ranges::any_of(*entries, [](auto const& entry) { return entry.type == ava::session::EntryType::BranchSummary; });
+    expect(growth_result && *growth_result && stale_result && !*stale_result && !append_error_context(stale_result->error(), "append_commit_state") && later &&
+               entries && entries->size() == 4 && !has_summary && !guard.stop_requested() &&
+               controller.inspect_admission({.request_id = "other"}) != ava::app::AdmissionDisposition::RejectPersistenceFailure,
+           "a concurrent valid append makes the prepared parent stale without latching, appending a summary, or blocking later persistence");
+  }
+}
+
+void test_session_run_controller_conditional_append_failures_latch_by_commit_state()
+{
+  auto run_case = [](std::string const& name, std::string_view expected_state) {
+    auto const root = create_empty_root("session-run-controller-conditional-" + name);
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return false;
+    auto root_entry = append_entry(name + "-root");
+    auto tip_entry = append_entry(name + "-tip");
+    tip_entry.parent_id = root_entry.id;
+    if (!store->append(*lease, root_entry) || !store->append(*lease, tip_entry))
+      return false;
+    auto const before = read_binary_file(store->session_path());
+
+    int write_calls = 0;
+    if (expected_state == "not_started")
+    {
+      store->set_append_write_for_test([&](int, std::string_view) -> ssize_t {
+        ++write_calls;
+        errno = EIO;
+        return -1;
+      });
+    }
+    else if (expected_state == "partial_or_unknown")
+    {
+      store->set_append_write_for_test([&](int fd, std::string_view bytes) -> ssize_t {
+        ++write_calls;
+        if (write_calls == 1)
+          return ::write(fd, bytes.data(), std::max<std::size_t>(1, bytes.size() / 2));
+        errno = EIO;
+        return -1;
+      });
+    }
+    else
+    {
+      store->set_append_write_for_test([&](int fd, std::string_view bytes) -> ssize_t {
+        ++write_calls;
+        return ::write(fd, bytes.data(), bytes.size());
+      });
+      store->set_after_append_write_for_test([] { throw 1; });
+    }
+
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return false;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto admitted = controller.admit({.request_id = "conditional-" + name});
+    if (!admitted)
+      return false;
+    auto guard = std::move(*admitted);
+    auto summary = branch_summary_entry(*store, name + "-summary", tip_entry.id, root_entry.id, tip_entry.id);
+    auto failed = controller.append_branch_summary_if_absent(std::move(summary));
+    auto blocked = controller.append(append_entry(name + "-blocked"));
+    bool const stop_requested = guard.stop_requested();
+    auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+    auto const after = read_binary_file(store->session_path());
+    bool const bytes_match_state = expected_state == "not_started" ? after == before : after != before;
+    int const expected_write_calls = expected_state == "partial_or_unknown" ? 2 : 1;
+    return !failed && append_error_context(failed.error(), "append_commit_state") == std::optional<std::string>(expected_state) && !blocked &&
+           append_error_context(blocked.error(), "append_commit_state") == std::optional<std::string>(expected_state) && write_calls == expected_write_calls &&
+           stop_requested && outcome && outcome->reason == ava::app::StopReason::PersistenceError && bytes_match_state &&
+           controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure;
+  };
+
+  expect(run_case("not-started", "not_started"), "conditional append_impl not-started failures latch once and are never retried");
+  expect(run_case("partial", "partial_or_unknown"), "conditional append_impl partial failures latch once and are never retried");
+  expect(run_case("committed", "committed_to_leased_inode"), "conditional append_impl committed failures latch once and are never retried");
+
+  {
+    auto const root = create_empty_root("session-run-controller-conditional-throwing-cancel-public");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+    auto root_entry = append_entry("throwing-public-root");
+    auto tip_entry = append_entry("throwing-public-tip");
+    tip_entry.parent_id = root_entry.id;
+    if (!store->append(*lease, root_entry) || !store->append(*lease, tip_entry))
+      return;
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    auto summary = branch_summary_entry(*store, "throwing-public-summary", tip_entry.id, root_entry.id, tip_entry.id);
+    bool threw = false;
+    std::optional<ava::core::Result<ava::session::SessionConditionalAppendResult>> result;
+    try
+    {
+      result.emplace((*target)->append_branch_summary_if_absent(summary, []() -> bool { throw std::runtime_error("cancel callback failure"); }));
+    }
+    catch (...)
+    {
+      threw = true;
+    }
+    expect(!threw && result && !*result && append_error_context(result->error(), "append_commit_state") == std::optional<std::string>("partial_or_unknown") &&
+               append_error_context(result->error(), "recovery").has_value(),
+           "the public conditional append API returns a stable unknown-state error when cancellation throws before append");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-conditional-throwing-cancel");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+    auto root_entry = append_entry("throwing-cancel-root");
+    auto tip_entry = append_entry("throwing-cancel-tip");
+    tip_entry.parent_id = root_entry.id;
+    if (!store->append(*lease, root_entry) || !store->append(*lease, tip_entry))
+      return;
+    auto const before = read_binary_file(store->session_path());
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto admitted = controller.admit({.request_id = "conditional-throwing-cancel"});
+    if (!admitted)
+      return;
+    auto guard = std::move(*admitted);
+    auto route = guard.append_route();
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool callback_entered = false;
+    bool release_callback = false;
+    std::optional<ava::core::Result<ava::session::SessionConditionalAppendResult>> conditional_result;
+    std::optional<ava::core::VoidResult> queued_result;
+    auto summary = branch_summary_entry(*store, "throwing-cancel-summary", tip_entry.id, root_entry.id, tip_entry.id);
+    std::jthread conditional_writer([&] {
+      conditional_result.emplace(controller.append_branch_summary_if_absent(std::move(summary), [&]() -> bool {
+        std::unique_lock lock(gate_mutex);
+        callback_entered = true;
+        gate_changed.notify_all();
+        static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_callback; }));
+        throw std::runtime_error("cancel callback failure");
+      }));
+    });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return callback_entered; }),
+             "throwing cancellation callback reaches the pre-append read boundary");
+    }
+    std::jthread queued_writer([&] { queued_result.emplace(route(append_entry("throwing-cancel-queued"))); });
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    auto queued = controller.snapshot();
+    while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::yield();
+      queued = controller.snapshot();
+    }
+    {
+      std::lock_guard lock(gate_mutex);
+      release_callback = true;
+    }
+    gate_changed.notify_all();
+    conditional_writer.join();
+    queued_writer.join();
+
+    auto blocked = controller.append(append_entry("throwing-cancel-blocked"));
+    bool const stop_requested = guard.stop_requested();
+    auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+    auto drained = controller.snapshot();
+    auto const expected_state = std::optional<std::string>("partial_or_unknown");
+    expect(queued.queued_appends == 2 && conditional_result && !*conditional_result &&
+               append_error_context(conditional_result->error(), "append_commit_state") == expected_state && queued_result && !*queued_result &&
+               append_error_context(queued_result->error(), "append_commit_state") == expected_state && !blocked &&
+               append_error_context(blocked.error(), "append_commit_state") == expected_state && stop_requested && outcome &&
+               outcome->reason == ava::app::StopReason::PersistenceError && drained.queued_appends == 0 && drained.queued_append_bytes == 0 &&
+               read_binary_file(store->session_path()) == before &&
+               controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure,
+           "a throwing pre-append cancellation callback latches, stops, drains queued appends, and blocks subsequent persistence");
+  }
+}
+
 void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
 {
   auto const root = create_empty_root("session-run-controller-failure-tickets");
@@ -1273,6 +1686,145 @@ void test_session_run_controller_routes_release_target_on_shutdown()
   expect(entries && entries->size() >= 2 && entries->size() <= 3, "teardown either drains or fails the one concurrent accepted append without data loss");
 }
 
+void test_session_run_controller_exclusive_maintenance_reservation()
+{
+  {
+    ava::app::SessionRunController controller(ephemeral_controller_target());
+    auto reserved = controller.reserve_maintenance();
+    expect(reserved.has_value() && reserved->active() && controller.snapshot().maintenance_reserved && !controller.snapshot().active,
+           "move-only maintenance reservation is visible without impersonating an active run");
+    auto const inspected = controller.inspect_admission({.request_id = "maintenance-inspection"});
+    auto second = controller.reserve_maintenance();
+    auto admitted = controller.admit({.request_id = "maintenance-conflict"});
+    auto owner_append = controller.append(append_entry("maintenance-owner-append"));
+    auto reset = controller.reset_persistence_failure();
+    expect(inspected == ava::app::AdmissionDisposition::RejectMaintenanceReservation && ava::app::to_string(inspected) == "rejected_maintenance_reservation" &&
+               !second && !admitted && !owner_append && !reset,
+           "reservation is serialized distinctly and atomically rejects duplicate reservations, admissions, owner appends, and persistence reset");
+
+    auto moved = std::move(*reserved);
+    expect(moved.active(), "maintenance reservation preserves ownership across move");
+    moved = {};
+    expect(!controller.snapshot().maintenance_reserved && controller.admit({.request_id = "after-maintenance"}).has_value(),
+           "explicit release reopens ordinary admission");
+  }
+  {
+    ava::app::SessionRunController controller(ephemeral_controller_target());
+    auto active = controller.admit({.request_id = "active-blocks-maintenance"});
+    expect(active.has_value() && !controller.reserve_maintenance().has_value(), "an active normal run prevents maintenance reservation acquisition");
+  }
+  {
+    ava::app::SessionRunController controller(ephemeral_controller_target());
+    controller.shutdown();
+    expect(!controller.reserve_maintenance().has_value(), "shutdown controller rejects maintenance reservation acquisition");
+  }
+
+  for (int iteration = 0; iteration < 32; ++iteration)
+  {
+    ava::app::SessionRunController controller(ephemeral_controller_target());
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    int ready = 0;
+    bool release = false;
+    std::optional<ava::core::Result<ava::app::SessionMaintenanceReservation>> reservation_result;
+    std::optional<ava::core::Result<ava::app::ActiveRunGuard>> admission_result;
+    auto wait_for_start = [&] {
+      std::unique_lock lock(gate_mutex);
+      ++ready;
+      gate_changed.notify_all();
+      gate_changed.wait(lock, [&] { return release; });
+    };
+    std::jthread reserver([&] {
+      wait_for_start();
+      reservation_result.emplace(controller.reserve_maintenance());
+    });
+    std::jthread admitter([&] {
+      wait_for_start();
+      admission_result.emplace(controller.admit({.request_id = "reservation-race"}));
+    });
+    {
+      std::unique_lock lock(gate_mutex);
+      bool const both_ready = gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return ready == 2; });
+      expect(both_ready, "reservation/admission race reaches its deterministic start barrier");
+      release = true;
+    }
+    gate_changed.notify_all();
+    reserver.join();
+    admitter.join();
+    bool const reservation_won = reservation_result && reservation_result->has_value();
+    bool const admission_won = admission_result && admission_result->has_value();
+    expect(reservation_won != admission_won, "reservation and normal admission have one final linearization winner");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-maintenance-inflight");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      std::mutex gate_mutex;
+      std::condition_variable gate_changed;
+      bool entered = false;
+      bool release = false;
+      store->set_before_append_identity_check_for_test([&] {
+        std::unique_lock lock(gate_mutex);
+        entered = true;
+        gate_changed.notify_all();
+        gate_changed.wait(lock, [&] { return release; });
+      });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        auto owner = controller.owner_append_route();
+        std::optional<ava::core::VoidResult> append_result;
+        std::optional<ava::core::VoidResult> queued_result;
+        std::jthread writer([&] { append_result.emplace(owner(append_entry("maintenance-inflight"))); });
+        {
+          std::unique_lock lock(gate_mutex);
+          expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "owner append reaches in-flight persistence gate");
+        }
+        std::jthread queued_writer([&] { queued_result.emplace(owner(append_entry("maintenance-queued"))); });
+        auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
+        expect(controller.snapshot().queued_appends == 2 && !controller.reserve_maintenance().has_value(),
+               "queued and in-flight owner appends jointly prevent maintenance reservation acquisition");
+        {
+          std::lock_guard lock(gate_mutex);
+          release = true;
+        }
+        gate_changed.notify_all();
+        writer.join();
+        queued_writer.join();
+        expect(append_result && append_result->has_value() && queued_result && queued_result->has_value() && controller.reserve_maintenance().has_value(),
+               "maintenance can reserve only after every accepted append fully linearizes");
+      }
+    }
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-maintenance-failed");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (store && lease)
+    {
+      store->set_append_write_for_test([](int, std::string_view) -> ssize_t {
+        errno = EIO;
+        return -1;
+      });
+      auto target = persistent_controller_target(*store, *lease);
+      if (target)
+      {
+        ava::app::SessionRunController controller(std::move(*target));
+        expect(!controller.append(append_entry("maintenance-failure")).has_value() && !controller.reserve_maintenance().has_value(),
+               "latched persistence failure prevents maintenance reservation acquisition");
+      }
+    }
+  }
+}
+
 void test_session_run_controller_bounds_and_reentrant_snapshot()
 {
   ava::app::SessionRunController controller(ephemeral_controller_target());
@@ -1310,9 +1862,12 @@ void run_session_run_controller_tests()
   test_session_run_controller_observer_reset_is_immediate_for_unrelated_observer();
   test_session_run_controller_nested_controller_membership_is_stack_aware();
   test_session_run_controller_unrelated_observer_shutdown_without_active_append();
+  test_session_run_controller_conditional_rejections_do_not_latch();
+  test_session_run_controller_conditional_append_failures_latch_by_commit_state();
   test_session_run_controller_failure_drains_tickets_with_exact_accounting();
   test_session_run_controller_batch_is_one_ticket_and_latches_failure();
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
+  test_session_run_controller_exclusive_maintenance_reservation();
   test_session_run_controller_bounds_and_reentrant_snapshot();
 }

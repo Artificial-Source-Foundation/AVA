@@ -377,6 +377,118 @@ std::string session_selector_footer_hint(ava::app::SessionSelectorSort sort, boo
   return "↑↓ navigate · Enter open · type filter · Esc close · Ctrl+D archive";
 }
 
+ava::tui::TuiBranchSummarySnapshot tui_branch_summary_snapshot(BranchSummarySnapshot const& snapshot)
+{
+  auto map_phase = [](BranchSummaryPhase phase) {
+    switch (phase)
+    {
+      case BranchSummaryPhase::Idle:
+        return ava::tui::TuiBranchSummaryPhase::Idle;
+      case BranchSummaryPhase::Preparing:
+        return ava::tui::TuiBranchSummaryPhase::Preparing;
+      case BranchSummaryPhase::AwaitingConfirmation:
+        return ava::tui::TuiBranchSummaryPhase::AwaitingConfirmation;
+      case BranchSummaryPhase::Generating:
+        return ava::tui::TuiBranchSummaryPhase::Generating;
+      case BranchSummaryPhase::Revalidating:
+        return ava::tui::TuiBranchSummaryPhase::Revalidating;
+      case BranchSummaryPhase::Appending:
+        return ava::tui::TuiBranchSummaryPhase::Appending;
+      case BranchSummaryPhase::Succeeded:
+        return ava::tui::TuiBranchSummaryPhase::Succeeded;
+      case BranchSummaryPhase::Existing:
+        return ava::tui::TuiBranchSummaryPhase::Existing;
+      case BranchSummaryPhase::Ineligible:
+        return ava::tui::TuiBranchSummaryPhase::Ineligible;
+      case BranchSummaryPhase::Canceled:
+        return ava::tui::TuiBranchSummaryPhase::Canceled;
+      case BranchSummaryPhase::Failed:
+        return ava::tui::TuiBranchSummaryPhase::Failed;
+    }
+    return ava::tui::TuiBranchSummaryPhase::Failed;
+  };
+  auto map_eligibility = [](BranchSummaryEligibilityCode code) {
+    switch (code)
+    {
+      case BranchSummaryEligibilityCode::CurrentSessionEphemeral:
+        return ava::tui::TuiBranchSummaryEligibilityCode::CurrentSessionEphemeral;
+      case BranchSummaryEligibilityCode::CurrentSessionUnavailable:
+        return ava::tui::TuiBranchSummaryEligibilityCode::CurrentSessionUnavailable;
+      case BranchSummaryEligibilityCode::ActiveRun:
+        return ava::tui::TuiBranchSummaryEligibilityCode::ActiveRun;
+      case BranchSummaryEligibilityCode::InvalidSourceSelection:
+        return ava::tui::TuiBranchSummaryEligibilityCode::InvalidSourceSelection;
+      case BranchSummaryEligibilityCode::NotDirectSource:
+        return ava::tui::TuiBranchSummaryEligibilityCode::NotDirectSource;
+      case BranchSummaryEligibilityCode::InvalidFork:
+        return ava::tui::TuiBranchSummaryEligibilityCode::InvalidFork;
+      case BranchSummaryEligibilityCode::SourceUnavailable:
+        return ava::tui::TuiBranchSummaryEligibilityCode::SourceUnavailable;
+      case BranchSummaryEligibilityCode::SourceLeaseBusy:
+        return ava::tui::TuiBranchSummaryEligibilityCode::SourceLeaseBusy;
+      case BranchSummaryEligibilityCode::SourceCorrupt:
+        return ava::tui::TuiBranchSummaryEligibilityCode::SourceCorrupt;
+      case BranchSummaryEligibilityCode::ForkEntryNotFound:
+        return ava::tui::TuiBranchSummaryEligibilityCode::ForkEntryNotFound;
+      case BranchSummaryEligibilityCode::EmptySuffix:
+        return ava::tui::TuiBranchSummaryEligibilityCode::EmptySuffix;
+    }
+    return ava::tui::TuiBranchSummaryEligibilityCode::InvalidSourceSelection;
+  };
+  auto map_failure = [](BranchSummaryFailureCode code) {
+    switch (code)
+    {
+      case BranchSummaryFailureCode::Deadline:
+        return ava::tui::TuiBranchSummaryFailureCode::Deadline;
+      case BranchSummaryFailureCode::RecoveryFailed:
+        return ava::tui::TuiBranchSummaryFailureCode::RecoveryFailed;
+      case BranchSummaryFailureCode::ProjectionRecordLimit:
+        return ava::tui::TuiBranchSummaryFailureCode::ProjectionRecordLimit;
+      case BranchSummaryFailureCode::ProjectionTextLimit:
+        return ava::tui::TuiBranchSummaryFailureCode::ProjectionTextLimit;
+      case BranchSummaryFailureCode::ProjectionByteLimit:
+        return ava::tui::TuiBranchSummaryFailureCode::ProjectionByteLimit;
+      case BranchSummaryFailureCode::ProjectionInvalidText:
+        return ava::tui::TuiBranchSummaryFailureCode::ProjectionInvalidText;
+      case BranchSummaryFailureCode::ProjectionEmpty:
+        return ava::tui::TuiBranchSummaryFailureCode::ProjectionEmpty;
+      case BranchSummaryFailureCode::ModelUnavailable:
+        return ava::tui::TuiBranchSummaryFailureCode::ModelUnavailable;
+      case BranchSummaryFailureCode::AuthenticationUnavailable:
+        return ava::tui::TuiBranchSummaryFailureCode::AuthenticationUnavailable;
+      case BranchSummaryFailureCode::ProviderFailed:
+        return ava::tui::TuiBranchSummaryFailureCode::ProviderFailed;
+      case BranchSummaryFailureCode::InvalidGeneratedSummary:
+        return ava::tui::TuiBranchSummaryFailureCode::InvalidGeneratedSummary;
+      case BranchSummaryFailureCode::StaleSource:
+        return ava::tui::TuiBranchSummaryFailureCode::StaleSource;
+      case BranchSummaryFailureCode::AppendFailed:
+        return ava::tui::TuiBranchSummaryFailureCode::AppendFailed;
+      case BranchSummaryFailureCode::Internal:
+        return ava::tui::TuiBranchSummaryFailureCode::Internal;
+    }
+    return ava::tui::TuiBranchSummaryFailureCode::Internal;
+  };
+
+  std::optional<ava::tui::TuiBranchSummaryAppendCommitState> append_commit_state;
+  if (snapshot.append_commit_state == "not_started")
+    append_commit_state = ava::tui::TuiBranchSummaryAppendCommitState::NotStarted;
+  else if (snapshot.append_commit_state == "partial_or_unknown")
+    append_commit_state = ava::tui::TuiBranchSummaryAppendCommitState::PartialOrUnknown;
+  else if (snapshot.append_commit_state == "committed_to_leased_inode")
+    append_commit_state = ava::tui::TuiBranchSummaryAppendCommitState::CommittedToLeasedInode;
+
+  return ava::tui::TuiBranchSummarySnapshot{
+      .generation = snapshot.generation,
+      .phase = map_phase(snapshot.phase),
+      .source_label = snapshot.source_label,
+      .model_label = snapshot.model_label,
+      .eligibility_code = snapshot.eligibility_code ? std::optional(map_eligibility(*snapshot.eligibility_code)) : std::nullopt,
+      .failure_code = snapshot.failure_code ? std::optional(map_failure(*snapshot.failure_code)) : std::nullopt,
+      .append_commit_state = append_commit_state,
+      .refresh_required = snapshot.refresh_required};
+}
+
 std::string scoped_model_selector_footer_hint()
 {
   return "Enter toggle · Ctrl+A enable visible · Ctrl+X clear visible · Ctrl+P provider · Alt+Up/Down reorder · Ctrl+S save · type to filter · Esc cancel";

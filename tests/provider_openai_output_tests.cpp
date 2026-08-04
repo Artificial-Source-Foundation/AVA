@@ -165,7 +165,7 @@ void test_v4_ordered_turn_persistence_replay_and_openai_serialization()
   expect(lease.has_value(), "v4 ordered replay fixture acquires its persistent session lease");
   if (!lease)
     return;
-  auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+  auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease, ava::session::SessionReadLimits{});
   expect(target.has_value(), "v4 ordered replay fixture creates one guarded append target");
   if (!target)
     return;

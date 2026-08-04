@@ -48,6 +48,13 @@ using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::push_history;
 using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
+using runtime_views::branch_summary_callback_failure_status;
+using runtime_views::branch_summary_input_intent;
+using runtime_views::branch_summary_operation_view;
+using runtime_views::branch_summary_terminal;
+using runtime_views::branch_summary_terminal_status;
+using runtime_views::BranchSummaryCallbackFailure;
+using runtime_views::BranchSummaryInputIntent;
 using runtime_views::DisplayPresentationBaseline;
 using runtime_views::kSettingsDraftDetails;
 using runtime_views::kSettingsDraftJobs;
@@ -197,6 +204,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto refresh_token_status = [&]() { presentation_state.refresh_token_status(options); };
   auto refresh_active_context_status = [&]() { presentation_state.refresh_active_context_status(options); };
   auto refresh_reasoning_status = [&]() { presentation_state.refresh_reasoning_status(options); };
+  struct BranchSummaryUiState
+  {
+    bool active = false;
+    bool exit_requested = false;
+    std::uint64_t generation = 0;
+    TuiBranchSummaryPhase phase = TuiBranchSummaryPhase::Idle;
+    SelectListView prior_session_view;
+    std::size_t prior_selected_index = 0;
+    std::string selected_source_value;
+  } branch_summary_ui;
+  bool branch_summary_exit_ready = false;
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot state) { presentation_state.apply_runtime_state_snapshot(options, std::move(state)); };
   refresh_token_status();
   refresh_active_context_status();
@@ -364,6 +382,166 @@ int run_interactive_composer(TuiRuntimeOptions options)
   [[maybe_unused]] auto question_resolver = prompt_coordinator.question_resolver();
   auto render = [&]() -> bool { return renderer.render(); };
 
+  auto restore_branch_summary_selector = [&](SelectListView view) {
+    snapshot.select_list = runtime_views::restore_branch_summary_session_view(std::move(view), branch_summary_ui.prior_session_view,
+                                                                              branch_summary_ui.selected_source_value, branch_summary_ui.prior_selected_index);
+    active_select_list = ActiveSelectList::Session;
+  };
+  auto present_branch_summary_status = [&](std::string status) {
+    snapshot.status = status;
+    if (snapshot.select_list)
+      snapshot.select_list->subtitle = std::move(status);
+  };
+  auto settle_branch_summary = [&](TuiBranchSummarySnapshot const& operation) -> bool {
+    auto restored = branch_summary_ui.prior_session_view;
+    bool refresh_failed = false;
+    if (operation.refresh_required)
+    {
+      if (!options.on_branch_summary_refresh_catalog)
+      {
+        refresh_failed = true;
+      }
+      else
+      {
+        try
+        {
+          auto refreshed = options.on_branch_summary_refresh_catalog();
+          if (refreshed)
+            restored = std::move(*refreshed);
+          else
+            refresh_failed = true;
+        }
+        catch (...)
+        {
+          refresh_failed = true;
+        }
+      }
+    }
+    auto const exit_requested = branch_summary_ui.exit_requested;
+    restore_branch_summary_selector(std::move(restored));
+    present_branch_summary_status(refresh_failed ? std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Refresh))
+                                                 : branch_summary_terminal_status(operation));
+    branch_summary_ui.active = false;
+    branch_summary_ui.phase = operation.phase;
+    if (exit_requested)
+    {
+      snapshot.select_list.reset();
+      active_select_list = ActiveSelectList::None;
+      branch_summary_exit_ready = true;
+      return true;
+    }
+    return renderer.request_render();
+  };
+  auto apply_branch_summary_snapshot = [&](TuiBranchSummarySnapshot const& operation) -> bool {
+    if (!branch_summary_ui.active || operation.generation != branch_summary_ui.generation)
+      return true;
+    branch_summary_ui.phase = operation.phase;
+    if (branch_summary_terminal(operation))
+      return settle_branch_summary(operation);
+    snapshot.select_list = branch_summary_operation_view(operation);
+    active_select_list = ActiveSelectList::BranchSummary;
+    return renderer.request_render();
+  };
+  auto poll_branch_summary = [&]() -> bool {
+    if (!branch_summary_ui.active)
+      return true;
+    if (!options.branch_summary_snapshot)
+    {
+      TuiBranchSummarySnapshot failed;
+      failed.generation = branch_summary_ui.generation;
+      failed.phase = TuiBranchSummaryPhase::Failed;
+      failed.failure_code = TuiBranchSummaryFailureCode::Internal;
+      auto settled = settle_branch_summary(failed);
+      present_branch_summary_status(std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Snapshot)));
+      return settled;
+    }
+    try
+    {
+      return apply_branch_summary_snapshot(options.branch_summary_snapshot());
+    }
+    catch (...)
+    {
+      TuiBranchSummarySnapshot failed;
+      failed.generation = branch_summary_ui.generation;
+      failed.phase = TuiBranchSummaryPhase::Failed;
+      failed.failure_code = TuiBranchSummaryFailureCode::Internal;
+      auto settled = settle_branch_summary(failed);
+      present_branch_summary_status(std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Snapshot)));
+      return settled;
+    }
+  };
+  auto begin_branch_summary = [&](SelectListView const& session_view, std::size_t selected_index, std::string selected_value) -> bool {
+    if (!options.on_branch_summary_prepare || !options.branch_summary_snapshot || !options.on_branch_summary_confirm || !options.on_branch_summary_cancel ||
+        !options.on_branch_summary_refresh_catalog)
+    {
+      present_branch_summary_status("parent summary is unavailable");
+      return renderer.request_render();
+    }
+    ava::core::Result<TuiBranchSummarySnapshot> prepared =
+        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "parent summary prepare callback failed"));
+    try
+    {
+      prepared = options.on_branch_summary_prepare(selected_value);
+    }
+    catch (...)
+    {
+    }
+    if (!prepared)
+    {
+      present_branch_summary_status(std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Prepare)));
+      return renderer.request_render();
+    }
+    branch_summary_ui.active = true;
+    branch_summary_ui.exit_requested = false;
+    branch_summary_ui.generation = prepared->generation;
+    branch_summary_ui.phase = prepared->phase;
+    branch_summary_ui.prior_session_view = session_view;
+    branch_summary_ui.prior_selected_index = selected_index;
+    branch_summary_ui.selected_source_value = std::move(selected_value);
+    return apply_branch_summary_snapshot(*prepared);
+  };
+  auto cancel_branch_summary = [&](bool exit_requested) -> bool {
+    if (!branch_summary_ui.active)
+      return true;
+    branch_summary_ui.exit_requested = branch_summary_ui.exit_requested || exit_requested;
+    ava::core::Result<bool> canceled = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "cancel callback unavailable"));
+    try
+    {
+      if (options.on_branch_summary_cancel)
+        canceled = options.on_branch_summary_cancel(branch_summary_ui.generation);
+    }
+    catch (...)
+    {
+    }
+    if (!canceled || !*canceled)
+    {
+      present_branch_summary_status(std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Cancel)));
+      return renderer.request_render();
+    }
+    snapshot.status = "canceling parent summary";
+    return poll_branch_summary();
+  };
+  auto confirm_branch_summary = [&]() -> bool {
+    if (!branch_summary_ui.active || branch_summary_ui.phase != TuiBranchSummaryPhase::AwaitingConfirmation)
+      return true;
+    ava::core::Result<bool> confirmed = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "confirm callback unavailable"));
+    try
+    {
+      if (options.on_branch_summary_confirm)
+        confirmed = options.on_branch_summary_confirm(branch_summary_ui.generation);
+    }
+    catch (...)
+    {
+    }
+    if (!confirmed || !*confirmed)
+    {
+      present_branch_summary_status(std::string(branch_summary_callback_failure_status(BranchSummaryCallbackFailure::Confirm)));
+      return renderer.request_render();
+    }
+    snapshot.status = "parent summary generation started";
+    return poll_branch_summary();
+  };
+
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
   RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
   RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
@@ -504,6 +682,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   while (true)
   {
+    if (!poll_branch_summary())
+    {
+      terminal_write_failed = true;
+      break;
+    }
+    if (branch_summary_exit_ready)
+      break;
     if (setup_wizard.open && active_select_list != ActiveSelectList::Setup)
       close_setup_wizard();
     if (!renderer.flush_pending_render_if_due())
@@ -542,6 +727,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
     auto const input = *maybe_input;
     if (terminal_signal_received())
     {
+      if (branch_summary_ui.active)
+      {
+        auto const exit_requested = terminal_signal_number() != SIGINT;
+        clear_terminal_signal();
+        if (!cancel_branch_summary(exit_requested))
+        {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
       if (terminal_signal_number() == SIGINT && !draft.text.empty())
       {
         clear_terminal_signal();
@@ -575,6 +771,31 @@ int run_interactive_composer(TuiRuntimeOptions options)
       if (handled.beep)
         static_cast<void>(beep());
       if (handled.changed && !renderer.request_render())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
+    if (branch_summary_ui.active)
+    {
+      bool success = true;
+      switch (branch_summary_input_intent(branch_summary_ui.phase, input.event, options.key_bindings))
+      {
+        case BranchSummaryInputIntent::Exit:
+          success = cancel_branch_summary(true);
+          break;
+        case BranchSummaryInputIntent::Cancel:
+          success = cancel_branch_summary(false);
+          break;
+        case BranchSummaryInputIntent::Confirm:
+          success = confirm_branch_summary();
+          break;
+        case BranchSummaryInputIntent::Block:
+          static_cast<void>(beep());
+          break;
+      }
+      if (!success)
       {
         terminal_write_failed = true;
         break;
@@ -1214,6 +1435,137 @@ int run_interactive_composer(TuiRuntimeOptions options)
           {
             snapshot.status = saved.error().format();
             static_cast<void>(beep());
+          }
+        }
+      }
+      else if (input_result.action == SelectListInputAction::CycleSort && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+               options.on_session_selector_sort_cycle)
+      {
+        preserve_session_selector_state(options.on_session_selector_sort_cycle(), "session selector sort cycled");
+      }
+      else if (input_result.action == SelectListInputAction::ToggleNamedFilter && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+               options.on_session_selector_named_filter_toggle)
+      {
+        preserve_session_selector_state(options.on_session_selector_named_filter_toggle(), "session selector filter toggled");
+      }
+      else if (input_result.action == SelectListInputAction::TogglePathDisplay && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+               options.on_session_selector_path_display_toggle)
+      {
+        preserve_session_selector_state(options.on_session_selector_path_display_toggle(), "session selector path display toggled");
+      }
+      else if (input_result.action == SelectListInputAction::ToggleArchivedFilter && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+               options.on_session_selector_archived_filter_toggle)
+      {
+        preserve_session_selector_state(options.on_session_selector_archived_filter_toggle(), "session selector archived filter toggled");
+      }
+      else if (input_result.action == SelectListInputAction::ToggleLabelTimestamp && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
+               options.on_session_selector_label_timestamp_toggle)
+      {
+        preserve_session_selector_state(options.on_session_selector_label_timestamp_toggle(), "session selector label timestamps toggled");
+      }
+      else if (input_result.action == SelectListInputAction::Rename && active_select_list == ActiveSelectList::Session && snapshot.select_list)
+      {
+        if (input_result.selected_item_index < snapshot.select_list->items.size() && snapshot.select_list->items[input_result.selected_item_index].enabled &&
+            !snapshot.select_list->items[input_result.selected_item_index].value.empty())
+        {
+          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
+          snapshot.select_list.reset();
+          active_select_list = ActiveSelectList::None;
+          auto draft_text = "/sessions rename " + selected_value + " ";
+          draft_state.clear_selection();
+          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
+          draft_input.clear();
+          history_index.reset();
+          draft_scroll_offset = 0;
+          snapshot.status = "session rename draft ready";
+        }
+        else
+        {
+          snapshot.status = "session cannot be renamed from this row";
+          static_cast<void>(beep());
+        }
+      }
+      else if (input_result.action == SelectListInputAction::Label && active_select_list == ActiveSelectList::Session && snapshot.select_list)
+      {
+        if (input_result.selected_item_index < snapshot.select_list->items.size() && snapshot.select_list->items[input_result.selected_item_index].enabled &&
+            !snapshot.select_list->items[input_result.selected_item_index].value.empty())
+        {
+          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
+          snapshot.select_list.reset();
+          active_select_list = ActiveSelectList::None;
+          auto draft_text = "/sessions labels " + selected_value + " ";
+          draft_state.clear_selection();
+          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
+          draft_input.clear();
+          history_index.reset();
+          draft_scroll_offset = 0;
+          snapshot.status = "session labels draft ready";
+        }
+        else
+        {
+          snapshot.status = "session cannot be labeled from this row";
+          static_cast<void>(beep());
+        }
+      }
+      else if ((input_result.action == SelectListInputAction::BranchParent || input_result.action == SelectListInputAction::BranchChild) &&
+               active_select_list == ActiveSelectList::Session && snapshot.select_list)
+      {
+        session_archive_confirmation.reset();
+        auto const* selected_item = selected_select_list_item();
+        if (!selected_item || !selected_item->enabled || selected_item->value.empty())
+        {
+          snapshot.status = "session branch navigation unavailable from this row";
+          static_cast<void>(beep());
+        }
+        else if (input_result.action == SelectListInputAction::BranchParent && !options.on_session_selector_branch_parent)
+        {
+          snapshot.status = "session parent navigation unavailable";
+          static_cast<void>(beep());
+        }
+        else if (input_result.action == SelectListInputAction::BranchChild && !options.on_session_selector_branch_child)
+        {
+          snapshot.status = "session child navigation unavailable";
+          static_cast<void>(beep());
+        }
+        else
+        {
+          auto const selected_value = selected_item->value;
+          auto opened = dispatch_tui_selector_authority(snapshot, "opening session…", render, [&]() {
+            return input_result.action == SelectListInputAction::BranchParent ? options.on_session_selector_branch_parent(selected_value)
+                                                                              : options.on_session_selector_branch_child(selected_value);
+          });
+          if (opened)
+          {
+            snapshot.select_list.reset();
+            active_select_list = ActiveSelectList::None;
+            apply_opened_session_snapshot(std::move(*opened), true);
+          }
+          else
+          {
+            snapshot.status = opened.error().format();
+            static_cast<void>(beep());
+          }
+        }
+      }
+      else if (input_result.action == SelectListInputAction::SummarizeParent && active_select_list == ActiveSelectList::Session && snapshot.select_list)
+      {
+        session_archive_confirmation.reset();
+        if (input_result.selected_item_index >= snapshot.select_list->items.size() || !snapshot.select_list->items[input_result.selected_item_index].enabled ||
+            snapshot.select_list->items[input_result.selected_item_index].value.empty())
+        {
+          snapshot.status = "parent summary is unavailable from this row";
+          static_cast<void>(beep());
+        }
+        else
+        {
+          auto prior_view = *snapshot.select_list;
+          prior_view.query = input_result.query;
+          prior_view.selected_item_index = input_result.selected_item_index;
+          auto const selected_value = prior_view.items[input_result.selected_item_index].value;
+          if (!begin_branch_summary(prior_view, input_result.selected_item_index, selected_value))
+          {
+            terminal_write_failed = true;
+            break;
           }
         }
       }
@@ -2470,6 +2822,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
   }
 
+  if (options.on_before_tui_shutdown)
+  {
+    try
+    {
+      options.on_before_tui_shutdown();
+    }
+    catch (...)
+    {
+      terminal_write_failed = true;
+    }
+  }
   return terminal_signal_received() ? 130 : (terminal_write_failed ? 1 : 0);
 }
 

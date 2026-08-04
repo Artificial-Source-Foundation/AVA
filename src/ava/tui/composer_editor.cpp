@@ -957,6 +957,7 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::SessionRename:
     case TuiAction::SessionArchive:
     case TuiAction::SessionArchiveNoninvasive:
+    case TuiAction::SessionSummarizeParent:
     case TuiAction::TreeFoldOrUp:
     case TuiAction::TreeUnfoldOrDown:
     case TuiAction::TreeEditLabel:

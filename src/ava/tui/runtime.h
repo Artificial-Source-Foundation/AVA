@@ -154,6 +154,77 @@ enum class SubagentWorkspacePromoteOutcome
   PromotionUnavailable,
 };
 
+enum class TuiBranchSummaryPhase
+{
+  Idle,
+  Preparing,
+  AwaitingConfirmation,
+  Generating,
+  Revalidating,
+  Appending,
+  Succeeded,
+  Existing,
+  Ineligible,
+  Canceled,
+  Failed,
+};
+
+enum class TuiBranchSummaryEligibilityCode
+{
+  CurrentSessionEphemeral,
+  CurrentSessionUnavailable,
+  ActiveRun,
+  InvalidSourceSelection,
+  NotDirectSource,
+  InvalidFork,
+  SourceUnavailable,
+  SourceLeaseBusy,
+  SourceCorrupt,
+  ForkEntryNotFound,
+  EmptySuffix,
+};
+
+enum class TuiBranchSummaryFailureCode
+{
+  Deadline,
+  RecoveryFailed,
+  ProjectionRecordLimit,
+  ProjectionTextLimit,
+  ProjectionByteLimit,
+  ProjectionInvalidText,
+  ProjectionEmpty,
+  ModelUnavailable,
+  AuthenticationUnavailable,
+  ProviderFailed,
+  InvalidGeneratedSummary,
+  StaleSource,
+  AppendFailed,
+  Internal,
+};
+
+enum class TuiBranchSummaryAppendCommitState
+{
+  NotStarted,
+  PartialOrUnknown,
+  CommittedToLeasedInode,
+};
+
+// Path-free, payload-free operation state delivered from the application. The
+// application bounds both labels before crossing this callback boundary.
+struct TuiBranchSummarySnapshot
+{
+  std::uint64_t generation = 0;
+  TuiBranchSummaryPhase phase = TuiBranchSummaryPhase::Idle;
+  std::string source_label;
+  std::string model_label;
+  std::optional<TuiBranchSummaryEligibilityCode> eligibility_code = std::nullopt;
+  std::optional<TuiBranchSummaryFailureCode> failure_code = std::nullopt;
+  std::optional<TuiBranchSummaryAppendCommitState> append_commit_state = std::nullopt;
+  bool refresh_required = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TuiRuntimeOptions
 {
   std::string mode;
@@ -225,6 +296,11 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(std::string_view)> on_session_selector_unarchive;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_parent;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_child;
+  std::function<ava::core::Result<TuiBranchSummarySnapshot>(std::string_view)> on_branch_summary_prepare;
+  std::function<TuiBranchSummarySnapshot()> branch_summary_snapshot;
+  std::function<ava::core::Result<bool>(std::uint64_t)> on_branch_summary_confirm;
+  std::function<ava::core::Result<bool>(std::uint64_t)> on_branch_summary_cancel;
+  std::function<ava::core::Result<SelectListView>()> on_branch_summary_refresh_catalog;
   std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
@@ -243,6 +319,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view, bool)> on_scoped_model_reorder;
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
+
+  std::function<void()> on_before_tui_shutdown;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

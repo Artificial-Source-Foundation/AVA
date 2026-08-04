@@ -10,6 +10,7 @@ void test_session_tree_index_derives_branches();
 void test_session_tree_index_handles_parent_cycles();
 void test_session_branch_fork_and_clone_copy_source_safely();
 void test_session_branch_summary_appends_to_source_session();
+void test_session_branch_summary_coverage_bounds_and_duplicates();
 void test_session_stats_helper();
 void test_session_stats_saturates_large_usage_and_costs();
 void test_session_stats_omits_incomplete_cost_total();

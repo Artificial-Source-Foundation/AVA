@@ -12,6 +12,7 @@ void run_session_tests()
   session_tests::test_session_tree_index_handles_parent_cycles();
   session_tests::test_session_branch_fork_and_clone_copy_source_safely();
   session_tests::test_session_branch_summary_appends_to_source_session();
+  session_tests::test_session_branch_summary_coverage_bounds_and_duplicates();
   session_tests::test_session_stats_helper();
   session_tests::test_session_stats_saturates_large_usage_and_costs();
   session_tests::test_session_stats_omits_incomplete_cost_total();

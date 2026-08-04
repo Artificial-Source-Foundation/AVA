@@ -7,6 +7,7 @@ from .theme_persisted import scenario_theme_persisted
 from .nested_settings_preview import scenario_nested_settings_preview
 from .startup_overview import scenario_startup_overview
 from .setup_wizard import scenario_setup_wizard
+from .branch_summary import scenario_branch_summary
 from .active_run import scenario_active_run
 from .restore_followup import scenario_restore_followup
 from .streaming_scroll import scenario_streaming_scroll
@@ -31,6 +32,7 @@ SCENARIOS = (
     "nested_settings_preview",
     "startup_overview",
     "setup_wizard",
+    "branch_summary",
     "active_run",
     "restore_followup",
     "streaming_scroll",
@@ -55,6 +57,7 @@ SCENARIO_HANDLERS = {
     "nested_settings_preview": scenario_nested_settings_preview,
     "startup_overview": scenario_startup_overview,
     "setup_wizard": scenario_setup_wizard,
+    "branch_summary": scenario_branch_summary,
     "active_run": scenario_active_run,
     "restore_followup": scenario_restore_followup,
     "streaming_scroll": scenario_streaming_scroll,

@@ -173,7 +173,7 @@ std::string select_footer_line(SelectListView const& view, std::size_t width)
   auto const session_selector = view.title.find("session") != std::string::npos || view.title.find("Session") != std::string::npos;
   auto const scoped_models = view.title.find("Scoped model") != std::string::npos;
   std::string hint;
-  if (view.title == "Select thinking mode" && !view.footer_hint.empty())
+  if ((view.title == "Select thinking mode" || view.placeholder.empty()) && !view.footer_hint.empty())
     hint = sanitize_terminal_text(view.footer_hint);
   else if (session_selector && content_width >= 67)
     hint = "↑↓ navigate · Enter open · type filter · Esc close · Ctrl+D archive";
@@ -272,6 +272,9 @@ bool event_matches_action(InputEvent const& event, TuiKeyBindings const& binding
 {
   if (key_matches_action(bindings, action, event.key))
     return true;
+  // Some terminals report Shift+L/T as an uppercase character rather than Key::ShiftL/T.
+  // Keep lowercase l/t as ordinary filter text. Prefer lowercase filter queries in smokes
+  // when these session-tree actions remain bound.
   if (event.key == Key::Character && character_text(event) == "L")
     return key_matches_action(bindings, action, Key::ShiftL);
   if (event.key == Key::Character && character_text(event) == "T")
@@ -650,6 +653,12 @@ SelectListInputResult handle_select_list_input(SelectListView const& view, Input
 
 SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event, TuiKeyBindings const& bindings)
 {
+  if (event_matches_action(event, bindings, TuiAction::SessionSummarizeParent))
+  {
+    return SelectListInputResult{.selected_item_index = clamp_select_list_selection(view, view.selected_item_index),
+                                 .query = view.query,
+                                 .action = SelectListInputAction::SummarizeParent};
+  }
   return handle_select_list_input(view, select_list_bound_event(event, bindings));
 }
 

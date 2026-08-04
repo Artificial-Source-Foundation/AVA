@@ -77,6 +77,7 @@ set(AVA_TESTS_SOURCES
   "agent_todo_tests.cpp"
   "app_compaction_tests.cpp"
   "app_command_registry_tests.cpp"
+  "branch_summary_coordinator_tests.cpp"
   "app_print_tests.cpp"
   "app_rpc_queue_tests.cpp"
   "app_rpc_resolver_tests.cpp"
@@ -200,6 +201,7 @@ set(AVA_TEST_SUITES
   core_json_permission
   app_command_classification
   app_command_registry
+  branch_summary_coordinator
   tools
   config_context_auth_oauth
   provider_config
@@ -742,6 +744,7 @@ if(Python3_Interpreter_FOUND)
     nested_settings_preview
     startup_overview
     setup_wizard
+    branch_summary
     active_run
     restore_followup
     streaming_scroll

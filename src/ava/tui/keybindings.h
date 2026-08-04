@@ -88,6 +88,7 @@ enum class TuiAction
   SessionRename,
   SessionArchive,
   SessionArchiveNoninvasive,
+  SessionSummarizeParent,
   TreeFoldOrUp,
   TreeUnfoldOrDown,
   TreeEditLabel,

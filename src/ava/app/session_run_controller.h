@@ -51,6 +51,7 @@ enum class AdmissionDisposition
   Admit,
   JoinExistingOutcome,
   RejectDifferentRequest,
+  RejectMaintenanceReservation,
   RejectClosing,
   RejectPersistenceFailure,
 };
@@ -80,6 +81,7 @@ struct RunOutcome
 struct RunSnapshot
 {
   bool active = false;
+  bool maintenance_reserved = false;
   std::string run_id;
   RunPhase phase = RunPhase::Admitted;
   bool stop_requested = false;
@@ -97,6 +99,7 @@ inline constexpr std::size_t kMaxSessionAppendQueueBytes = 4 * 1024 * 1024;
 inline constexpr std::size_t kMaxRetainedRunOutcomes = 64;
 
 class SessionRunController;
+class SessionMaintenanceReservation;
 
 class ActiveRunGuard
 {
@@ -128,7 +131,34 @@ class ActiveRunGuard
   std::shared_ptr<State> state_;
   std::uint64_t generation_ = 0;
   friend class SessionRunController;
+  friend class SessionMaintenanceReservation;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// Move-only exclusive authority for short current-session maintenance. It
+// excludes normal run admission and every owner append admission without
+// directly owning or exposing the underlying SessionAppendTarget.
+class SessionMaintenanceReservation
+{
+ public:
+  SessionMaintenanceReservation() = default;
+  ~SessionMaintenanceReservation();
+  SessionMaintenanceReservation(SessionMaintenanceReservation&& other) noexcept;
+  SessionMaintenanceReservation& operator=(SessionMaintenanceReservation&& other) noexcept;
+  SessionMaintenanceReservation(SessionMaintenanceReservation const&) = delete;
+  SessionMaintenanceReservation& operator=(SessionMaintenanceReservation const&) = delete;
+
+  [[nodiscard]] bool active() const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  explicit SessionMaintenanceReservation(std::shared_ptr<ActiveRunGuard::State> state, std::uint64_t generation);
+  void release() noexcept;
+
+  std::shared_ptr<ActiveRunGuard::State> state_;
+  std::uint64_t generation_ = 0;
+  friend class SessionRunController;
 };
 
 class SessionRunController
@@ -143,6 +173,10 @@ class SessionRunController
 
   [[nodiscard]] AdmissionDisposition inspect_admission(RunRequest const& request) const;
   [[nodiscard]] ava::core::Result<ActiveRunGuard> admit(RunRequest request);
+  // Nonblocking exclusive acquisition. The append driver lock is sampled
+  // before controller state, so an already queued or in-flight append rejects
+  // atomically rather than being waited out and missed.
+  [[nodiscard]] ava::core::Result<SessionMaintenanceReservation> reserve_maintenance();
   // Wait only joins the currently active request (or returns its most recent
   // terminal result). It never admits work or waits for a different request.
   [[nodiscard]] ava::core::Result<RunOutcome> wait_outcome(std::string_view correlation_id);
@@ -158,6 +192,8 @@ class SessionRunController
   // Compatibility owner route for notifications that are not tied to a run.
   // It is still session-bound, serialized, and rejects once terminal/closed.
   [[nodiscard]] ava::core::VoidResult append(ava::session::SessionEntry entry);
+  [[nodiscard]] ava::core::Result<ava::session::SessionConditionalAppendResult> append_branch_summary_if_absent(
+      ava::session::SessionEntry entry, ava::session::SessionCancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult append_batch(std::vector<ava::session::SessionEntry> entries);
   [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const;
   [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route() const;
@@ -170,7 +206,9 @@ class SessionRunController
 
  private:
   [[nodiscard]] static ava::core::VoidResult append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
-                                                                   std::vector<ava::session::SessionEntry> entries, bool owner_route);
+                                                                   std::vector<ava::session::SessionEntry> entries, bool owner_route,
+                                                                   ava::session::SessionConditionalAppendResult* conditional_result = nullptr,
+                                                                   ava::session::SessionCancelCallback cancel_requested = nullptr);
   std::shared_ptr<ActiveRunGuard::State> state_;
   friend class ActiveRunGuard;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

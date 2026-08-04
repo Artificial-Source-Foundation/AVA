@@ -658,6 +658,19 @@ void run_tui_keybinding_tests()
   expect(session_delete_noninvasive_keybinds &&
              ava::tui::key_matches_action(*session_delete_noninvasive_keybinds, ava::tui::TuiAction::SessionArchiveNoninvasive, ava::tui::Key::CtrlBackspace),
          "tui keybind parser accepts Pi session non-invasive delete action id");
+  auto const branch_summary_keybinds = ava::tui::parse_key_bindings_json("{\"app.sessions.summarizeParent\":\"F8\"}");
+  auto const branch_summary_alias_keybinds = ava::tui::parse_key_bindings_json("{\"sessionSummarizeParent\":\"F9\"}");
+  auto const branch_summary_help =
+      branch_summary_keybinds ? ava::tui::key_binding_help_items(*branch_summary_keybinds) : std::vector<ava::tui::TuiKeyBindingHelpItem>{};
+  auto const branch_summary_help_item = std::ranges::find_if(branch_summary_help, [](auto const& item) { return item.action == "session_summarize_parent"; });
+  expect(branch_summary_keybinds && branch_summary_alias_keybinds &&
+             ava::tui::key_matches_action(*branch_summary_keybinds, ava::tui::TuiAction::SessionSummarizeParent, ava::tui::Key::F8) &&
+             ava::tui::key_matches_action(*branch_summary_alias_keybinds, ava::tui::TuiAction::SessionSummarizeParent, ava::tui::Key::F9) &&
+             ava::tui::key_binding_action_from_name("app.session.summarizeParent") == ava::tui::TuiAction::SessionSummarizeParent &&
+             ava::tui::key_binding_config_action_id(ava::tui::TuiAction::SessionSummarizeParent) == "app.sessions.summarizeParent" &&
+             branch_summary_help_item != branch_summary_help.end() && branch_summary_help_item->label == "Summarize abandoned parent" &&
+             branch_summary_help_item->keys == "F8" && branch_summary_help_item->description.find("session selector") != std::string::npos,
+         "parent-summary keybinding supports its canonical id, narrow aliases, semantic help, and configured dispatch");
   auto const session_action_keybinds = ava::tui::parse_key_bindings_json(
       "{\"app.session.new\":\"Alt+H\",\"app.session.tree\":\"Alt+J\","
       "\"app.session.fork\":\"Alt+K\",\"app.session.resume\":\"Alt+L\","
@@ -709,6 +722,9 @@ void run_tui_keybinding_tests()
 
   auto const default_config_json = ava::tui::default_key_bindings_config_json();
   auto const default_config_keybinds = ava::tui::parse_key_bindings_json(default_config_json);
+  expect(ava::tui::keys_display(ava::tui::default_key_bindings(), ava::tui::TuiAction::SessionSummarizeParent).empty() &&
+             default_config_json.find("app.sessions.summarizeParent") == std::string::npos,
+         "parent-summary action is default-unbound and generated default config does not invent a binding");
   expect(
       default_config_json.find("\"tui.editor.cursorLeft\"") != std::string::npos && default_config_json.find("\"app.clear\"") != std::string::npos &&
           default_config_json.find("\"tui.input.copy\"") != std::string::npos && default_config_json.find("\"app.editor.external\"") != std::string::npos &&

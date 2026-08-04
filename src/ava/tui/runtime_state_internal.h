@@ -74,7 +74,8 @@ enum class ActiveSelectList
   ForkUserTurn,
   CopyUserTurn,
   Overview,
-  Setup
+  Setup,
+  BranchSummary
 };
 
 enum class ComposerJumpMode

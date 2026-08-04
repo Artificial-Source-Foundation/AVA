@@ -88,6 +88,7 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::SessionRename,
                                  TuiAction::SessionArchive,
                                  TuiAction::SessionArchiveNoninvasive,
+                                 TuiAction::SessionSummarizeParent,
                                  TuiAction::TreeFoldOrUp,
                                  TuiAction::TreeUnfoldOrDown,
                                  TuiAction::TreeEditLabel,
@@ -236,6 +237,9 @@ constexpr std::array kActionAliases = {
     ActionAlias{"sessionDelete", TuiAction::SessionArchive, 1},
     ActionAlias{"app.session.deleteNoninvasive", TuiAction::SessionArchiveNoninvasive, 2},
     ActionAlias{"sessionDeleteNoninvasive", TuiAction::SessionArchiveNoninvasive, 1},
+    ActionAlias{"app.sessions.summarizeParent", TuiAction::SessionSummarizeParent, 2},
+    ActionAlias{"app.session.summarizeParent", TuiAction::SessionSummarizeParent, 1},
+    ActionAlias{"sessionSummarizeParent", TuiAction::SessionSummarizeParent, 1},
     ActionAlias{"app.tree.foldOrUp", TuiAction::TreeFoldOrUp, 2},
     ActionAlias{"treeFoldOrUp", TuiAction::TreeFoldOrUp, 1},
     ActionAlias{"app.tree.unfoldOrDown", TuiAction::TreeUnfoldOrDown, 2},
@@ -652,6 +656,7 @@ bool is_select_action(TuiAction action)
     case TuiAction::SessionRename:
     case TuiAction::SessionArchive:
     case TuiAction::SessionArchiveNoninvasive:
+    case TuiAction::SessionSummarizeParent:
     case TuiAction::TreeFoldOrUp:
     case TuiAction::TreeUnfoldOrDown:
     case TuiAction::TreeEditLabel:
@@ -928,6 +933,8 @@ std::string_view config_action_id(TuiAction action)
       return "app.session.delete";
     case TuiAction::SessionArchiveNoninvasive:
       return "app.session.deleteNoninvasive";
+    case TuiAction::SessionSummarizeParent:
+      return "app.sessions.summarizeParent";
     case TuiAction::TreeFoldOrUp:
       return "app.tree.foldOrUp";
     case TuiAction::TreeUnfoldOrDown:
@@ -1068,6 +1075,7 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::SessionRename, {Key::CtrlR}},
                                      {TuiAction::SessionArchive, {Key::CtrlD}},
                                      {TuiAction::SessionArchiveNoninvasive, {Key::CtrlBackspace}},
+                                     {TuiAction::SessionSummarizeParent, {}},
                                      {TuiAction::TreeFoldOrUp, {Key::CtrlArrowLeft, Key::AltArrowLeft}},
                                      {TuiAction::TreeUnfoldOrDown, {Key::CtrlArrowRight, Key::AltArrowRight}},
                                      {TuiAction::TreeEditLabel, {Key::ShiftL}},
@@ -1758,6 +1766,8 @@ std::string action_name(TuiAction action)
       return "session_archive";
     case TuiAction::SessionArchiveNoninvasive:
       return "session_archive_noninvasive";
+    case TuiAction::SessionSummarizeParent:
+      return "session_summarize_parent";
     case TuiAction::TreeFoldOrUp:
       return "tree_fold_or_up";
     case TuiAction::TreeUnfoldOrDown:
@@ -1928,6 +1938,8 @@ std::string action_label(TuiAction action)
       return "Archive session";
     case TuiAction::SessionArchiveNoninvasive:
       return "Archive/restore (empty search)";
+    case TuiAction::SessionSummarizeParent:
+      return "Summarize abandoned parent";
     case TuiAction::TreeFoldOrUp:
       return "Go to parent session";
     case TuiAction::TreeUnfoldOrDown:
@@ -2111,6 +2123,8 @@ std::string action_description(TuiAction action)
       return "Archive or restore the highlighted session after confirmation";
     case TuiAction::SessionArchiveNoninvasive:
       return "Archive or restore the highlighted session when the selector search is empty";
+    case TuiAction::SessionSummarizeParent:
+      return "Prepare a summary for abandoned work in the current session's direct parent from the session selector";
     case TuiAction::TreeFoldOrUp:
       return "Navigate to the highlighted session's parent branch in the selector";
     case TuiAction::TreeUnfoldOrDown:

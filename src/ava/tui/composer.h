@@ -513,6 +513,7 @@ enum class SelectListInputAction
   Label,
   Archive,
   ArchiveNoninvasive,
+  SummarizeParent,
   BranchParent,
   BranchChild,
   ModelsSave,

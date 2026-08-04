@@ -108,7 +108,11 @@ class ApplicationCatalogCoordinator final
   [[nodiscard]] std::size_t title_catalog_cursor() const;
 
   [[nodiscard]] tui::SelectListView session_view(SessionSelectorSort sort = SessionSelectorSort::Recent, std::string footer_hint = {}, bool named_only = false,
-                                                 bool show_paths = false, bool show_archived = false, bool show_label_time = false) const;
+                                                 bool show_paths = false, bool show_archived = false, bool show_label_time = false,
+                                                 std::string summarize_parent_keys = {}) const;
+  // Application-only value lookup. SessionSummary may contain backend authority data
+  // and must never be returned through a TUI DTO.
+  [[nodiscard]] ava::core::Result<std::optional<ava::session::SessionSummary>> session_summary(std::string_view session_id) const;
   [[nodiscard]] ava::core::Result<std::optional<std::string>> parent_target(std::string_view session_id) const;
   [[nodiscard]] ava::core::Result<std::optional<std::string>> child_target(std::string_view session_id, SessionSelectorSort sort = SessionSelectorSort::Recent,
                                                                            bool include_archived = false) const;

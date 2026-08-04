@@ -338,7 +338,7 @@ ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& 
     auto lease = acquire_test_session_lease(store);
     if (!lease)
       return std::unexpected(std::move(lease.error()));
-    auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease);
+    auto target = ava::session::SessionAppendTarget::create_persistent(store, *lease, ava::session::legacy_unbounded_session_read_limits());
     return target ? (*target)->append(entry) : ava::core::VoidResult(std::unexpected(std::move(target.error())));
   }
   if (store.is_ephemeral())
@@ -357,7 +357,7 @@ std::function<ava::core::VoidResult(ava::session::SessionEntry const&)> append_r
                                auto lease = acquire_test_session_lease(store);
                                if (!lease)
                                  return std::unexpected(std::move(lease.error()));
-                               return ava::session::SessionAppendTarget::create_persistent(store, *lease);
+                               return ava::session::SessionAppendTarget::create_persistent(store, *lease, ava::session::legacy_unbounded_session_read_limits());
                              }();
   if (target)
   {

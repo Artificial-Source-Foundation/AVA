@@ -2,12 +2,16 @@
 #include "ava/session/assistant_output.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store_internal.h"
+#include "ava/core/json.h"
 #include "ava/core/path.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -72,6 +76,42 @@ ava::core::Error batch_partial_failure(ava::core::Error const& failure, std::fil
       "a batch prefix may be durable; retain the append authority and call SessionAppendTarget::recover to repair torn bytes plus any valid incomplete "
       "assistant-output suffix before accepting another mutation");
   return normalized;
+}
+
+using BranchSummaryIdentity = std::array<std::string, 3>;
+
+ava::core::Result<BranchSummaryIdentity> branch_summary_identity(SessionEntry const& entry)
+{
+  if (entry.type != EntryType::BranchSummary)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "conditional branch summary append requires a BranchSummary entry"));
+  auto source = ava::core::json::string_field(entry.data_json, "source_session_id");
+  auto root = ava::core::json::string_field(entry.data_json, "branch_root_entry_id");
+  auto tip = ava::core::json::string_field(entry.data_json, "branch_tip_entry_id");
+  if (!source || source->empty() || !root || root->empty() || !tip || tip->empty())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "conditional branch summary append requires a complete final identity"));
+  }
+  return BranchSummaryIdentity{std::move(*source), std::move(*root), std::move(*tip)};
+}
+
+bool matches_branch_summary_identity(SessionEntry const& entry, BranchSummaryIdentity const& identity)
+{
+  if (entry.type != EntryType::BranchSummary)
+    return false;
+  return ava::core::json::string_field(entry.data_json, "source_session_id") == std::optional<std::string>(identity[0]) &&
+         ava::core::json::string_field(entry.data_json, "branch_root_entry_id") == std::optional<std::string>(identity[1]) &&
+         ava::core::json::string_field(entry.data_json, "branch_tip_entry_id") == std::optional<std::string>(identity[2]);
+}
+
+ava::core::VoidResult validate_branch_summary_range(std::vector<SessionEntry> const& history, BranchSummaryIdentity const& identity)
+{
+  auto const root = std::ranges::find_if(history, [&](SessionEntry const& item) { return item.id == identity[1]; });
+  auto const tip = std::ranges::find_if(history, [&](SessionEntry const& item) { return item.id == identity[2]; });
+  if (root == history.end() || tip == history.end())
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "branch summary source range changed before append"));
+  if (std::distance(history.begin(), root) > std::distance(history.begin(), tip))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "branch summary root must not be after tip"));
+  return {};
 }
 
 }  // namespace
@@ -329,7 +369,7 @@ ava::core::VoidResult SessionAppendTarget::refresh_state_if_stale()
   auto const current = append_epoch_ref().load(std::memory_order_acquire);
   if (current == last_seen_append_epoch_)
     return {};
-  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  auto history = lease_ ? store_.load_bounded(*lease_, read_limits_) : store_.load_bounded(read_limits_);
   if (!history)
     return std::unexpected(std::move(history.error()));
   auto refreshed = AssistantOutputAppendState::from_validated_history(*history);
@@ -353,7 +393,8 @@ void SessionAppendTarget::bump_append_epoch()
 }
 
 ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::create_persistent(SessionStore const& store, SessionLease const& lease,
-                                                                                               SessionReadLimits read_limits)
+                                                                                               SessionReadLimits read_limits,
+                                                                                               SessionCancelCallback cancel_requested)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "persistent append target requires a persistent store"));
@@ -401,7 +442,7 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
-  auto history = store.load(lease);
+  auto history = store.load_bounded(lease, read_limits, std::move(cancel_requested));
   if (!history)
     return std::unexpected(std::move(history.error()));
   auto assistant_output_state = AssistantOutputAppendState::from_validated_history(*history);
@@ -443,7 +484,7 @@ ava::core::Result<std::shared_ptr<SessionAppendTarget>> SessionAppendTarget::cre
 {
   if (!store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "ephemeral append target requires an ephemeral store"));
-  auto history = store.load();
+  auto history = store.load_bounded(read_limits);
   if (!history)
     return std::unexpected(std::move(history.error()));
   auto assistant_output_state = AssistantOutputAppendState::from_validated_history(*history);
@@ -530,6 +571,143 @@ ava::core::VoidResult SessionAppendTarget::append(SessionEntry const& entry)
   assistant_output_state_ = std::move(next_state);
   advance_append_epoch();
   return {};
+}
+
+SessionAppendTarget::ConditionalAppendOutcome SessionAppendTarget::append_branch_summary_if_absent_classified(SessionEntry const& entry,
+                                                                                                              SessionCancelCallback const& cancel_requested)
+{
+  auto rejected = [](ava::core::Error error) {
+    return ConditionalAppendOutcome{.completion = ConditionalAppendCompletion::RejectedBeforeAppend, .result = std::nullopt, .error = std::move(error)};
+  };
+  auto append_failed = [](ava::core::Error error) {
+    return ConditionalAppendOutcome{.completion = ConditionalAppendCompletion::AppendFailed, .result = std::nullopt, .error = std::move(error)};
+  };
+  try
+  {
+    std::lock_guard lock(mutex_);
+    if (recovery_required_)
+      return rejected(append_target_recovery_required_error(store_.session_path()));
+    if (!lease_)
+    {
+      return rejected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "conditional branch summary append requires a persistent append target"));
+    }
+    auto identity = branch_summary_identity(entry);
+    if (!identity)
+      return rejected(std::move(identity.error()));
+    if ((*identity)[0] != store_.session_id())
+    {
+      return rejected(
+          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "conditional branch summary source identity does not match the append target"));
+    }
+
+    std::unique_lock serialization_lock(append_mutex_for_path(lease_->canonical_path()));
+    // Keep the callback alive through the read. It is checked once more below
+    // while this per-path lock is still held.
+    auto history = store_.load_bounded(*lease_, read_limits_, cancel_requested);
+    if (!history)
+      return rejected(std::move(history.error()));
+    if (history->empty())
+      return rejected(ava::core::Error(ava::core::ErrorCategory::Session, "source session has no entries before branch summary append"));
+    auto rebuilt_state = AssistantOutputAppendState::from_validated_history(*history);
+    if (!rebuilt_state)
+      return rejected(std::move(rebuilt_state.error()));
+    assistant_output_state_ = std::move(*rebuilt_state);
+    last_seen_append_epoch_ = append_epoch_ref().load(std::memory_order_acquire);
+
+    if (auto valid_range = validate_branch_summary_range(*history, *identity); !valid_range)
+      return rejected(std::move(valid_range.error()));
+    if (auto const existing = std::ranges::find_if(*history, [&](SessionEntry const& item) { return matches_branch_summary_identity(item, *identity); });
+        existing != history->end())
+    {
+      auto const parent = std::ranges::find_if(*history, [&](SessionEntry const& item) { return item.id == entry.parent_id; });
+      bool const exact_final_coverage =
+          parent != history->end() && existing > parent &&
+          std::ranges::all_of(std::next(parent), history->end(), [](SessionEntry const& item) { return item.type == EntryType::BranchSummary; });
+      if (exact_final_coverage)
+      {
+        return ConditionalAppendOutcome{.completion = ConditionalAppendCompletion::Succeeded,
+                                        .result = SessionConditionalAppendResult{.entry = *existing, .disposition = SessionAppendDisposition::Existing},
+                                        .error = std::nullopt};
+      }
+    }
+    if (entry.parent_id != history->back().id)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Session, "source session changed before branch summary append");
+      error.with_context("expected_parent_id", entry.parent_id).with_context("actual_parent_id", history->back().id);
+      return rejected(std::move(error));
+    }
+
+    // Cancellation linearizes here: the exact source snapshot, range, duplicate,
+    // and parent checks are complete under per-path serialization, but append
+    // preflight and append_impl have not started. Cancellation after this check
+    // may race with a committed append and is reported by the append result.
+    if (cancel_requested && cancel_requested())
+      return rejected(ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append canceled"));
+
+    AssistantOutputAppendState next_state = assistant_output_state_;
+    if (auto preflight = next_state.apply_candidate(entry); !preflight)
+      return rejected(std::move(preflight.error()));
+
+    auto appended = store_.append_impl(&*lease_, entry, true);
+    if (!appended && !has_append_commit_state(appended.error()))
+      appended = std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, store_.session_path()));
+    if (!appended)
+    {
+      auto error = std::move(appended.error());
+      if (append_partial_or_unknown(error))
+      {
+        recovery_required_ = true;
+        bump_append_epoch();
+      }
+      else if (append_committed_to_leased_inode(error))
+      {
+        assistant_output_state_ = std::move(next_state);
+        advance_append_epoch();
+      }
+      return append_failed(std::move(error));
+    }
+    assistant_output_state_ = std::move(next_state);
+    advance_append_epoch();
+    return ConditionalAppendOutcome{.completion = ConditionalAppendCompletion::Succeeded,
+                                    .result = SessionConditionalAppendResult{.entry = entry, .disposition = SessionAppendDisposition::Appended},
+                                    .error = std::nullopt};
+  }
+  catch (std::exception const& exception)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append failed unexpectedly");
+    error.with_context("cause", exception.what());
+    return append_failed(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
+  catch (...)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append failed unexpectedly");
+    return append_failed(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
+}
+
+ava::core::Result<SessionConditionalAppendResult> SessionAppendTarget::append_branch_summary_if_absent(SessionEntry const& entry,
+                                                                                                       SessionCancelCallback cancel_requested)
+{
+  try
+  {
+    auto outcome = append_branch_summary_if_absent_classified(entry, cancel_requested);
+    if (outcome.completion == ConditionalAppendCompletion::Succeeded && outcome.result)
+      return std::move(*outcome.result);
+    if (outcome.error)
+      return std::unexpected(std::move(*outcome.error));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append produced no outcome"));
+  }
+  catch (std::exception const& exception)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append failed unexpectedly");
+    error.with_context("cause", exception.what());
+    return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
+  catch (...)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append failed unexpectedly");
+    return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
 }
 
 ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry> entries)
@@ -673,7 +851,7 @@ ava::core::VoidResult SessionAppendTarget::recover()
     if (!staged_recovery)
       return std::unexpected(std::move(staged_recovery.error()));
   }
-  auto history = lease_ ? store_.load(*lease_) : store_.load();
+  auto history = lease_ ? store_.load_bounded(*lease_, read_limits_) : store_.load_bounded(read_limits_);
   if (!history)
     return std::unexpected(std::move(history.error()));
   auto rebuilt_state = AssistantOutputAppendState::from_validated_history(*history);

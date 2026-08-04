@@ -221,6 +221,25 @@ ava::core::Result<std::pair<std::size_t, std::size_t>> resolve_branch_summary_ra
   return std::pair<std::size_t, std::size_t>{root_index, tip_index};
 }
 
+SessionEntry const* find_matching_branch_summary(std::vector<SessionEntry> const& entries, std::string_view source_session_id, std::string_view root_entry_id,
+                                                 std::string_view tip_entry_id)
+{
+  auto const matching = std::ranges::find_if(entries, [&](SessionEntry const& entry) {
+    return entry.type == EntryType::BranchSummary && ava::core::json::string_field(entry.data_json, "source_session_id") == source_session_id &&
+           ava::core::json::string_field(entry.data_json, "branch_root_entry_id") == root_entry_id &&
+           ava::core::json::string_field(entry.data_json, "branch_tip_entry_id") == tip_entry_id;
+  });
+  return matching == entries.end() ? nullptr : &*matching;
+}
+
+bool same_entries(std::vector<SessionEntry> const& lhs, std::vector<SessionEntry> const& rhs)
+{
+  return lhs.size() == rhs.size() && std::ranges::equal(lhs, rhs, [](SessionEntry const& left, SessionEntry const& right) {
+           return left.id == right.id && left.parent_id == right.parent_id && left.type == right.type && left.timestamp == right.timestamp &&
+                  left.data_json == right.data_json && left.version == right.version;
+         });
+}
+
 ava::core::Result<std::size_t> copy_count_for_branch(std::vector<SessionEntry> const& entries, std::string_view branch_from_entry_id, SessionBranchMode mode,
                                                      std::string& resolved_branch_from_entry_id)
 {
@@ -277,6 +296,90 @@ void rollback_created_session_with_context(SessionStore const& store, SessionLea
     error.with_context("rollback_attachment_path", attachment_path.string());
     error.with_context("rollback_attachment_disposition", "preserved");
   }
+}
+
+std::string_view branch_summary_eligibility_reason_text(BranchSummaryEligibilityReason reason) noexcept
+{
+  switch (reason)
+  {
+    case BranchSummaryEligibilityReason::Eligible:
+      return "eligible";
+    case BranchSummaryEligibilityReason::ForkEntryNotFound:
+      return "fork entry is not present in the source session";
+    case BranchSummaryEligibilityReason::NoSubstantiveEntriesAfterFork:
+      return "source session has no substantive entries after the fork";
+    case BranchSummaryEligibilityReason::ExistingSummary:
+      return "this exact source range already has a branch summary";
+  }
+  return "branch summary is unavailable";
+}
+
+BranchSummaryCoverage inspect_branch_summary_coverage(std::vector<SessionEntry> const& entries, std::string_view source_session_id,
+                                                      std::string_view fork_entry_id)
+{
+  BranchSummaryCoverage coverage{.source_session_id = std::string(source_session_id),
+                                 .fork_entry_id = std::string(fork_entry_id),
+                                 .branch_root_entry_id = {},
+                                 .branch_tip_entry_id = {},
+                                 .prompt_entry_indices = {},
+                                 .existing_summary = std::nullopt,
+                                 .reason = BranchSummaryEligibilityReason::Eligible};
+  auto const fork = std::ranges::find_if(entries, [&](SessionEntry const& entry) { return entry.id == fork_entry_id; });
+  if (fork == entries.end())
+  {
+    coverage.reason = BranchSummaryEligibilityReason::ForkEntryNotFound;
+    return coverage;
+  }
+
+  auto const fork_index = static_cast<std::size_t>(std::distance(entries.begin(), fork));
+  for (std::size_t index = fork_index + 1; index < entries.size(); ++index)
+  {
+    if (entries[index].type == EntryType::BranchSummary)
+      continue;
+    if (coverage.prompt_entry_indices.empty())
+      coverage.branch_root_entry_id = entries[index].id;
+    coverage.branch_tip_entry_id = entries[index].id;
+    coverage.prompt_entry_indices.push_back(index);
+  }
+  if (coverage.prompt_entry_indices.empty())
+  {
+    coverage.reason = BranchSummaryEligibilityReason::NoSubstantiveEntriesAfterFork;
+    return coverage;
+  }
+
+  if (auto const* existing = find_matching_branch_summary(entries, source_session_id, coverage.branch_root_entry_id, coverage.branch_tip_entry_id))
+  {
+    coverage.existing_summary = *existing;
+    coverage.reason = BranchSummaryEligibilityReason::ExistingSummary;
+  }
+  return coverage;
+}
+
+ava::core::Result<std::vector<SessionEntry>> extract_branch_summary_prompt_range(std::vector<SessionEntry> const& entries,
+                                                                                 BranchSummaryCoverage const& coverage)
+{
+  if (coverage.reason != BranchSummaryEligibilityReason::Eligible && coverage.reason != BranchSummaryEligibilityReason::ExistingSummary)
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary coverage has no substantive prompt range"));
+  if (coverage.prompt_entry_indices.empty())
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary prompt range is empty"));
+  auto const expected = inspect_branch_summary_coverage(entries, coverage.source_session_id, coverage.fork_entry_id);
+  if (expected.branch_root_entry_id != coverage.branch_root_entry_id || expected.branch_tip_entry_id != coverage.branch_tip_entry_id ||
+      expected.prompt_entry_indices != coverage.prompt_entry_indices || expected.reason != coverage.reason)
+  {
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary coverage no longer matches loaded entries"));
+  }
+
+  std::vector<SessionEntry> selected;
+  selected.reserve(coverage.prompt_entry_indices.size());
+  for (std::size_t const index : coverage.prompt_entry_indices)
+  {
+    if (index >= entries.size() || entries[index].type == EntryType::BranchSummary)
+      return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary prompt range no longer matches loaded entries"));
+    selected.push_back(entries[index]);
+  }
+  if (selected.front().id != coverage.branch_root_entry_id || selected.back().id != coverage.branch_tip_entry_id)
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary prompt range identity no longer matches loaded entries"));
+  return selected;
 }
 
 ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOptions options)
@@ -401,22 +504,16 @@ ava::core::Result<SessionBranchResult> create_session_branch(SessionBranchOption
 
 ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptions options)
 {
+  if (!options.read_limits)
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary requires explicit session read limits"));
   if (options.source_session_id.empty())
-  {
     return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session id is required"));
-  }
   if (auto valid_source = validate_session_id(options.source_session_id); !valid_source)
-  {
     return std::unexpected(std::move(valid_source.error()));
-  }
   if (auto valid_root = validate_parent_id(options.branch_root_entry_id, "branch_summary"); !valid_root)
-  {
     return std::unexpected(std::move(valid_root.error()));
-  }
   if (auto valid_tip = validate_parent_id(options.branch_tip_entry_id, "branch_summary"); !valid_tip)
-  {
     return std::unexpected(std::move(valid_tip.error()));
-  }
   if (auto valid = validate_required_text(options.summary, "summary", 8192, true); !valid)
     return std::unexpected(std::move(valid.error()));
   if (auto valid = validate_required_text(options.provider, "provider", 256, false); !valid)
@@ -450,46 +547,52 @@ ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptio
     error.with_context("source_session_id", options.source_session_id);
     return std::unexpected(std::move(error));
   }
-  auto entries = source->load(*source_lease);
+
+  auto validate_snapshot = [&](std::vector<SessionEntry> const& snapshot) -> ava::core::VoidResult {
+    if (snapshot.empty())
+      return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
+    auto const assistant_output = classify_assistant_output(snapshot);
+    if (!assistant_output.diagnostics.empty())
+    {
+      auto error = branch_error(ava::core::ErrorCategory::Session,
+                                "branch summary source contains an assistant-output diagnostic; recover or commit the staged turn before appending");
+      error.with_context("source_session_id", options.source_session_id)
+          .with_context("diagnostic_kind", std::string(to_string(assistant_output.diagnostics.front().kind)))
+          .with_context("diagnostic_entry_id", assistant_output.diagnostics.front().entry_id);
+      return std::unexpected(std::move(error));
+    }
+    auto range = resolve_branch_summary_range(snapshot, options.branch_root_entry_id, options.branch_tip_entry_id);
+    if (!range)
+      return std::unexpected(std::move(range.error()));
+    return {};
+  };
+
+  auto entries = source->load_bounded(*source_lease, *options.read_limits, options.cancel_requested);
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  if (entries->empty())
-  {
-    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
-  }
-  auto const assistant_output = classify_assistant_output(*entries);
-  if (!assistant_output.diagnostics.empty())
-  {
-    auto error = branch_error(ava::core::ErrorCategory::Session,
-                              "branch summary source contains an assistant-output diagnostic; recover or commit the staged turn before appending");
-    error.with_context("source_session_id", options.source_session_id)
-        .with_context("diagnostic_kind", std::string(to_string(assistant_output.diagnostics.front().kind)))
-        .with_context("diagnostic_entry_id", assistant_output.diagnostics.front().entry_id);
-    return std::unexpected(std::move(error));
-  }
-  auto range = resolve_branch_summary_range(*entries, options.branch_root_entry_id, options.branch_tip_entry_id);
-  if (!range)
-    return std::unexpected(std::move(range.error()));
+  if (auto valid = validate_snapshot(*entries); !valid)
+    return std::unexpected(std::move(valid.error()));
 
-  // Validate a second complete snapshot before constructing the owner-routed
-  // append. Concurrent valid growth is visible here without weakening inode or
-  // namespace authority checks.
-  auto latest_entries = source->load(*source_lease);
+  // Revalidate the exact bounded content immediately before constructing an
+  // owner-routed append. The retained lease keeps both reads on one inode.
+  auto latest_entries = source->load_bounded(*source_lease, *options.read_limits, options.cancel_requested);
   if (!latest_entries)
     return std::unexpected(std::move(latest_entries.error()));
-  if (latest_entries->empty())
-  {
-    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "source session has no entries"));
-  }
-  if (latest_entries->size() != entries->size() || latest_entries->back().id != entries->back().id)
+  if (auto valid = validate_snapshot(*latest_entries); !valid)
+    return std::unexpected(std::move(valid.error()));
+  if (!same_entries(*entries, *latest_entries))
   {
     auto error = branch_error(ava::core::ErrorCategory::Session, "source session changed while appending branch summary");
     error.with_context("source_session_id", options.source_session_id);
     return std::unexpected(std::move(error));
   }
-  auto latest_range = resolve_branch_summary_range(*latest_entries, options.branch_root_entry_id, options.branch_tip_entry_id);
-  if (!latest_range)
-    return std::unexpected(std::move(latest_range.error()));
+
+  if (auto const* existing =
+          find_matching_branch_summary(*latest_entries, options.source_session_id, options.branch_root_entry_id, options.branch_tip_entry_id))
+  {
+    return BranchSummaryResult{
+        .source_session_id = std::move(options.source_session_id), .entry = *existing, .disposition = BranchSummaryDisposition::Existing};
+  }
 
   std::string data = "{\"schema_version\":1";
   append_json_string_field(data, "summary", options.summary);
@@ -508,11 +611,14 @@ ava::core::Result<BranchSummaryResult> prepare_branch_summary(BranchSummaryOptio
                             .type = EntryType::BranchSummary,
                             .timestamp = now_timestamp(),
                             .data_json = std::move(data)};
-  return BranchSummaryResult{.source_session_id = std::move(options.source_session_id), .entry = std::move(entry)};
+  return BranchSummaryResult{
+      .source_session_id = std::move(options.source_session_id), .entry = std::move(entry), .disposition = BranchSummaryDisposition::Appended};
 }
 
 ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOptions options)
 {
+  if (!options.read_limits)
+    return std::unexpected(branch_error(ava::core::ErrorCategory::InvalidArgument, "branch summary requires explicit session read limits"));
   auto source = SessionStore::open(options.workspace_dir, options.source_session_id, options.root_dir);
   if (!source)
     return std::unexpected(std::move(source.error()));
@@ -528,12 +634,23 @@ ava::core::Result<BranchSummaryResult> append_branch_summary(BranchSummaryOption
     source_lease = &*owned_source_lease;
     options.source_lease = source_lease;
   }
+  auto const read_limits = *options.read_limits;
+  auto const cancel_requested = options.cancel_requested;
 
   auto prepared = prepare_branch_summary(std::move(options));
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
-  if (auto appended = source->append(*source_lease, prepared->entry); !appended)
+  if (prepared->disposition == BranchSummaryDisposition::Existing)
+    return prepared;
+
+  auto target = SessionAppendTarget::create_persistent(*source, *source_lease, read_limits, cancel_requested);
+  if (!target)
+    return std::unexpected(std::move(target.error()));
+  auto appended = (*target)->append_branch_summary_if_absent(prepared->entry, cancel_requested);
+  if (!appended)
     return std::unexpected(std::move(appended.error()));
+  prepared->entry = std::move(appended->entry);
+  prepared->disposition = appended->disposition == SessionAppendDisposition::Existing ? BranchSummaryDisposition::Existing : BranchSummaryDisposition::Appended;
   return prepared;
 }
 

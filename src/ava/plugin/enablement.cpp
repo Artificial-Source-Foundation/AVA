@@ -5,18 +5,24 @@
 #include "ava/core/path.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <optional>
-#include <sstream>
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace ava::plugin {
 namespace {
+
+constexpr std::size_t kPluginEnablementMaxBytes = 1024 * 1024;
 
 std::optional<bool> bool_field(std::string_view object, std::string_view key)
 {
@@ -160,20 +166,57 @@ std::vector<std::pair<std::string, std::string>> object_entries_with_object_valu
   return entries;
 }
 
-ava::core::Result<std::string> read_file_text(std::filesystem::path const& path)
+ava::core::Result<std::optional<std::string>> read_file_text(std::filesystem::path const& path)
 {
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
+  int const fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (fd < 0)
+  {
+    if (errno == ENOENT)
+      return std::optional<std::string>{};
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin enablement file").with_context("path", path.string()));
+  }
+  struct ScopedFd final
+  {
+    int value;
+    ~ScopedFd() { ::close(value); }
+  } const scoped_fd{fd};
+
+  struct stat status{};
+  if (::fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0 || static_cast<std::uintmax_t>(status.st_size) > kPluginEnablementMaxBytes)
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin enablement file").with_context("path", path.string()));
   }
-  std::ostringstream out;
-  out << file.rdbuf();
-  return out.str();
+
+  std::string text;
+  text.reserve(static_cast<std::size_t>(status.st_size));
+  std::array<char, 8192> buffer{};
+  while (true)
+  {
+    auto const bytes = ::read(fd, buffer.data(), buffer.size());
+    if (bytes > 0)
+    {
+      auto const count = static_cast<std::size_t>(bytes);
+      if (count > kPluginEnablementMaxBytes - text.size())
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin enablement file").with_context("path", path.string()));
+      }
+      text.append(buffer.data(), count);
+      continue;
+    }
+    if (bytes == 0)
+      return std::optional<std::string>(std::move(text));
+    if (errno == EINTR)
+      continue;
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to read plugin enablement file").with_context("path", path.string()));
+  }
 }
 
 ava::core::VoidResult write_file_atomic(std::filesystem::path const& path, std::string_view content)
 {
+  if (content.size() > kPluginEnablementMaxBytes)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin enablement state exceeds size cap"));
+  }
   std::error_code create_error;
   std::filesystem::create_directories(path.parent_path(), create_error);
   if (create_error)
@@ -273,17 +316,19 @@ std::filesystem::path canonical_workspace_key(std::filesystem::path const& works
 ava::core::Result<std::vector<PluginEnablementRecord>> load_plugin_enablement(std::filesystem::path const& state_file)
 {
   std::vector<PluginEnablementRecord> records;
-  if (state_file.empty() || !std::filesystem::exists(state_file))
+  if (state_file.empty())
     return records;
   auto json = read_file_text(state_file);
   if (!json)
     return std::unexpected(json.error());
-  if (!ava::core::json::is_valid_object(*json))
+  if (!*json)
+    return records;
+  if (!ava::core::json::is_valid_object(**json))
   {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "plugin enablement state must be valid JSON").with_context("path", state_file.string()));
   }
-  auto const workspaces = ava::core::json::object_field(*json, "workspaces");
+  auto const workspaces = ava::core::json::object_field(**json, "workspaces");
   if (!workspaces)
     return records;
 

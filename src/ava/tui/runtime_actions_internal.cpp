@@ -96,7 +96,8 @@ RuntimeActionController::RuntimeActionController(TuiRuntimeOptions& options, Run
       renderer_(renderer),
       active_select_list_(active_select_list),
       session_archive_confirmation_(session_archive_confirmation),
-      next_display_reload_check_(std::chrono::steady_clock::now() + kDisplayReloadPollInterval)
+      // First poll is eligible immediately; later polls stay rate-limited.
+      next_display_reload_check_(std::chrono::steady_clock::time_point{})
 {
 }
 

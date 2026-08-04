@@ -299,7 +299,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     else
     {
-      choice_input = read_curses_input();
+      choice_input = stop_requested ? read_curses_input_with_timeout(std::chrono::milliseconds(100)) : read_curses_input();
     }
     if (stop_requested && stop_requested())
     {
@@ -463,7 +463,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
   WheelBurstGovernor wheel_governor;
   std::optional<std::chrono::steady_clock::time_point> wheel_suppression_deadline;
   auto read_question_input = [&]() -> std::optional<RuntimeInput> {
-    if (!prompt.auto_resolve && !wheel_suppression_deadline)
+    if (!prompt.auto_resolve && !wheel_suppression_deadline && !stop_requested)
       return read_curses_input();
 
     auto timeout = std::chrono::milliseconds{100};

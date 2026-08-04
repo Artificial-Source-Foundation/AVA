@@ -58,8 +58,8 @@ inline constexpr std::string_view kSettingsDraftSessions = "settings:draft.sessi
 inline constexpr std::string_view kSettingsDraftThinking = "settings:draft.thinking";
 inline constexpr std::string_view kSettingsDraftDetails = "settings:draft.details";
 inline constexpr std::string_view kSettingsDraftSetup = "settings:draft.setup";
-inline constexpr std::string_view kSettingsOpenSetup = "settings:open.setup";
 // Privacy section opens the local first-run setup wizard (not a composer draft).
+inline constexpr std::string_view kSettingsOpenSetup = "settings:open.setup";
 inline constexpr std::string_view kSettingsSectionDisplay = "settings:section.display";
 inline constexpr std::string_view kSettingsSectionModels = "settings:section.models";
 inline constexpr std::string_view kSettingsSectionInput = "settings:section.input";
@@ -162,7 +162,13 @@ struct SetupWizardState
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// After an applied external display reload: always rebase the authoritative baseline from
+// the hydrated snapshot, refresh a staged candidate when the action token still resolves
+// against app-delivered options, otherwise keep last-known-good overlay bytes, then apply
+// the image overlay onto snapshot. Never infers applied state from value equality.
 void reapply_settings_preview_after_display_reload(DisplayPreviewTransaction& preview, ComposerSnapshot& snapshot);
+// Reapply only a staged setup theme after authoritative display hydration. Image values
+// remain exactly those supplied by the hydrated snapshot.
 void reapply_setup_theme_preview_after_display_reload(ThemePreviewTransaction& preview, ComposerSnapshot const& snapshot);
 
 // After Display rows are rebuilt (for example on applied reload), restore selection by exact

@@ -263,22 +263,21 @@ std::string dynamic_resource_manifest_json(std::string id, std::string script_na
 ava::app::runtime::session_ts plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
 {
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
-  expect(trusted.has_value(), trusted ? "plugin command test workspace is trusted"
-                                     : "plugin command test workspace is trusted: " + trusted.error().format());
+  expect(trusted.has_value(), trusted ? "plugin command test workspace is trusted" : "plugin command test workspace is trusted: " + trusted.error().format());
 
   ava::app::runtime::OpenContext context;
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;
   auto unlocked_session_result = ava::app::runtime::Session::open(context, {.sessionless = true,
-                                                                           .requested_session_id = std::nullopt,
-                                                                           .fork_session_id = std::nullopt,
-                                                                           .initial_session_name = std::nullopt,
-                                                                           .continue_last_session = false,
-                                                                           .initial_reasoning_level = std::nullopt,
-                                                                           .expected_original_cwd = std::nullopt});
-  expect(unlocked_session_result.has_value(), unlocked_session_result ? "plugin command test session opens"
-                                                                      : "plugin command test session opens: " + unlocked_session_result.error().format());
+                                                                            .requested_session_id = std::nullopt,
+                                                                            .fork_session_id = std::nullopt,
+                                                                            .initial_session_name = std::nullopt,
+                                                                            .continue_last_session = false,
+                                                                            .initial_reasoning_level = std::nullopt,
+                                                                            .expected_original_cwd = std::nullopt});
+  expect(unlocked_session_result.has_value(),
+         unlocked_session_result ? "plugin command test session opens" : "plugin command test session opens: " + unlocked_session_result.error().format());
   return std::move(*unlocked_session_result);
 }
 
@@ -820,6 +819,19 @@ void test_plugin_enablement()
   auto escaped = ava::plugin::load_plugin_enablement(escaped_state);
   expect(escaped && escaped->size() == 1 && escaped->front().workspace == std::filesystem::path("/tmp/work{\"q\"}") && escaped->front().enabled,
          "plugin enablement parses escaped keys and braces inside strings");
+
+  auto const fifo_state = root / "state" / "ava" / "fifo-plugin-enablement.json";
+  auto const fifo_created = ::mkfifo(fifo_state.c_str(), 0600) == 0;
+  auto const fifo_started = std::chrono::steady_clock::now();
+  auto fifo_enabled = ava::plugin::plugin_enabled(fifo_state, workspace, "com.example.todo");
+  auto const fifo_elapsed = std::chrono::steady_clock::now() - fifo_started;
+  expect(fifo_created && !fifo_enabled && fifo_elapsed < std::chrono::milliseconds(500),
+         "plugin enablement rejects a FIFO without blocking an active revocation predicate");
+
+  auto const oversized_state = root / "state" / "ava" / "oversized-plugin-enablement.json";
+  write_text(oversized_state, std::string(1024 * 1024 + 1, ' '));
+  auto oversized_enabled = ava::plugin::plugin_enabled(oversized_state, workspace, "com.example.todo");
+  expect(!oversized_enabled, "plugin enablement reads are size-bounded and fail closed");
 }
 
 void test_plugin_runner_initializes_and_shuts_down()
@@ -1206,8 +1218,10 @@ void test_enabled_plugin_dynamic_resources_list_and_read()
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  auto prompt_list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
-  auto skill_list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-skills", .permission_resolver = allow});
+  auto prompt_list =
+      ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto skill_list =
+      ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-skills", .permission_resolver = allow});
   auto prompt_read = ava::app::run_plugins_command(
       unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamic dyn-review", .permission_resolver = allow});
   auto skill_read = ava::app::run_plugins_command(
@@ -1461,9 +1475,10 @@ void test_dynamic_resource_commands_respect_prelaunch_cancellation()
   auto canceled = [] { return true; };
   auto list = ava::app::run_plugins_command(
       unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow, .cancel_requested = canceled});
-  auto read = ava::app::run_plugins_command(
-      unlocked_session, ava::app::CommandRequest{
-                   .command = "/plugins dynamic-prompt com.example.dynamiccancel dyn-cancel", .permission_resolver = allow, .cancel_requested = canceled});
+  auto read =
+      ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamiccancel dyn-cancel",
+                                                                               .permission_resolver = allow,
+                                                                               .cancel_requested = canceled});
   auto const list_output = command_output_text(list);
   auto const read_output = command_output_text(read);
   expect(list && list->handled && list_output.find("canceled") != std::string::npos,
@@ -1523,7 +1538,8 @@ void test_static_plugin_resources_remain_manifest_only()
   write_text(plugin_dir / "plugin.sh", "printf '%s\\n' executed > executed.txt\n");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  auto prompt = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
+  auto prompt =
+      ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
   auto const output = command_output_text(prompt);
   expect(prompt && prompt->handled && output.find("Static prompt body") != std::string::npos && output.find("path:") != std::string::npos,
          "static /plugins prompt still reads manifest-declared files: " + output);

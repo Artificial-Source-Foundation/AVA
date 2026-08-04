@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/provider/catalog.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
@@ -11,21 +10,24 @@
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/onboarding_state.h"
-#include "ava/app/startup_overview.h"
+#include "ava/app/plugin_ui_capability.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
 #include "ava/app/runtime.h"
 #include "ava/app/session_title_coordinator.h"
 #include "ava/app/session_user_turns.h"
+#include "ava/app/startup_overview.h"
 #include "ava/app/subagent_workspace.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/theme.h"
 #include "ava/config/model_profiles.h"
 #include "ava/session/attachments.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/ids.h"
 #include "ava/core/version.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -34,10 +36,82 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace ava::app::line_shell_internal {
+namespace {
+
+ava::tui::TuiPluginUiBinding tui_plugin_ui_binding(ava::app::PluginUiInvocationBinding const& binding)
+{
+  return {.plugin_id = binding.plugin_id, .command = binding.command_name, .invocation_id = binding.invocation_id};
+}
+
+ava::tui::TuiPluginUiRequest tui_plugin_ui_request(ava::app::PluginUiPresentationRequest const& request)
+{
+  ava::tui::TuiPluginUiRequest converted{.binding = tui_plugin_ui_binding(request.binding),
+                                         .request_id = std::string(ava::plugin::plugin_ui_request_id(request.request)),
+                                         .kind = ava::tui::TuiPluginUiKind::Status,
+                                         .text = {},
+                                         .title = {},
+                                         .description = {},
+                                         .lines = {},
+                                         .options = {}};
+  std::visit(
+      [&](auto const& value) {
+        using Request = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<Request, ava::plugin::PluginUiStatusRequest>)
+        {
+          converted.kind = ava::tui::TuiPluginUiKind::Status;
+          converted.text = value.text;
+        }
+        else if constexpr (std::is_same_v<Request, ava::plugin::PluginUiWidgetRequest>)
+        {
+          converted.kind = ava::tui::TuiPluginUiKind::Widget;
+          converted.title = value.title;
+          converted.lines = value.lines;
+        }
+        else if constexpr (std::is_same_v<Request, ava::plugin::PluginUiSelectRequest>)
+        {
+          converted.kind = ava::tui::TuiPluginUiKind::Select;
+          converted.title = value.title;
+          converted.description = value.description;
+          converted.options.reserve(value.choices.size());
+          for (auto const& choice : value.choices)
+          {
+            converted.options.push_back(ava::tui::TuiPluginUiOption{.id = choice.id, .label = choice.label, .description = choice.description});
+          }
+        }
+        else
+        {
+          converted.kind = ava::tui::TuiPluginUiKind::Confirm;
+          converted.title = value.title;
+          converted.description = value.description;
+        }
+      },
+      request.request);
+  return converted;
+}
+
+ava::plugin::PluginUiAction plugin_ui_action(ava::tui::TuiPluginUiReply reply)
+{
+  switch (reply.action)
+  {
+    case ava::tui::TuiPluginUiReplyKind::Ack:
+      return {.action = ava::plugin::PluginUiActionKind::Ack, .option_id = {}};
+    case ava::tui::TuiPluginUiReplyKind::Select:
+      return {.action = ava::plugin::PluginUiActionKind::Select, .option_id = std::move(reply.option_id)};
+    case ava::tui::TuiPluginUiReplyKind::Confirm:
+      return {.action = ava::plugin::PluginUiActionKind::Confirm, .option_id = {}};
+    case ava::tui::TuiPluginUiReplyKind::Cancel:
+      return {.action = ava::plugin::PluginUiActionKind::Cancel, .option_id = {}};
+  }
+  return {.action = ava::plugin::PluginUiActionKind::Cancel, .option_id = {}};
+}
+
+}  // namespace
 
 namespace version = ava::core::version;
 
@@ -57,6 +131,10 @@ int run_tui(ShellState state)
   }
   auto display_watch_state = std::make_shared<std::optional<ava::app::TuiDisplaySettingsWatchState>>();
   auto display_watch_mutex = std::make_shared<std::mutex>();
+  // Last successfully applied effective display settings. Reload failures retain this presentation.
+  // on_submit (async worker) and TUI-thread auto-reload both publish here; snapshot readers copy under
+  // the same mutex. Never hold this mutex across filesystem I/O, catalog work, callbacks, or rendering,
+  // and never acquire display_watch_mutex while it is held (lock order is display_watch -> effective).
   auto refresh_display_watch_state = [&invocation_paths, display_watch_state, display_watch_mutex]() -> ava::core::VoidResult {
     auto watched = ava::app::load_tui_display_settings_watch_state(invocation_paths);
     if (!watched)
@@ -115,6 +193,7 @@ int run_tui(ShellState state)
     std::vector<ava::tui::ThemeOptionItem> themes;
     for (auto const& theme : ava::app::available_tui_custom_themes(invocation_paths))
     {
+      // Deliver already-validated palette data so the TUI never opens theme paths.
       themes.push_back(ava::tui::ThemeOptionItem{.name = theme.name, .detail = theme.path.string(), .palette = theme.palette, .revision = theme.revision});
     }
     return themes;
@@ -170,9 +249,12 @@ int run_tui(ShellState state)
   auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog, &session_presentation, &key_bindings,
                          copy_effective_display_presentation](std::string status) {
     static_cast<void>(refresh_title_catalog());
+    auto delivery = application_catalog.delivery_snapshot();
+    // Overview uses already-open session context/freshness only; do not snapshot or scan the
+    // application catalog / session tree (titles and ids are intentionally omitted).
+    // Copy presentation fields under the effective-settings lock, then release before assembling the snapshot.
     auto const [show_images, image_width_cells] = copy_effective_display_presentation();
     auto startup_overview = build_startup_overview_snapshot(unlocked_session, key_bindings, ava::tui::active_tui_theme());
-    auto delivery = application_catalog.delivery_snapshot();
     auto presentation = session_presentation();
     return ava::tui::TuiRuntimeStateSnapshot{
         .mode = std::move(presentation.mode),
@@ -255,7 +337,7 @@ int run_tui(ShellState state)
     }
     return open_session_selector_target(std::move(**target), parent ? std::string("opened parent branch ") : std::string("opened child branch "));
   };
-  auto branch_summary_prepare = [&state, &application_catalog,
+  auto branch_summary_prepare = [&application_catalog,
                                  branch_summary_coordinator](std::string_view selected_session_id) -> ava::core::Result<ava::tui::TuiBranchSummarySnapshot> {
     auto source = application_catalog.session_summary(selected_session_id);
     if (!source)
@@ -284,11 +366,14 @@ int run_tui(ShellState state)
     initial_transcript.push_back(ava::tui::TranscriptItem{.label = "setup", .text = std::move(*onboarding)});
   }
   // Local-only first-run wizard eligibility is computed only on this interactive TTY TUI path.
+  // Print/headless/RPC/ACP/non-TTY never load/show/block/store the wizard.
   auto const onboarding_state = load_onboarding_state(invocation_paths);
   bool const auto_open_setup_wizard = setup_wizard_auto_eligible(onboarding_state);
   std::optional<std::string> setup_state_diagnostic;
   if (onboarding_state.kind == OnboardingLoadKind::UnsupportedOrMalformed && !onboarding_state.diagnostic.empty())
     setup_state_diagnostic = onboarding_state.diagnostic;
+  // Credential readiness is intentionally lazy: completed/skipped/malformed
+  // onboarding state does not trigger any auth-file parsing at startup.
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto initial_presentation = session_presentation();
   auto const [initial_show_images, initial_image_width_cells] = copy_effective_display_presentation();
@@ -379,13 +464,41 @@ int run_tui(ShellState state)
                 ava::permissions::build_persistent_permission_rule_resolver(permission_rule_store, context.permission_resolver);
             auto const session_id_before = ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id();
             bool workspace_catalog_reload = workspace_catalog_reload_requested(submitted);
-            auto line_result =
-                handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
-                            context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch);
+            std::shared_ptr<ava::app::PluginUiInvocationCapability> plugin_ui_capability;
+            bool plugin_ui_capability_unavailable = submitted.starts_with("/plugin run ");
+            if (context.plugin_ui && *context.plugin_ui)
+            {
+              auto endpoint = *context.plugin_ui;
+              auto minted = ava::app::make_tui_plugin_ui_invocation_capability(
+                  submitted, context.request_id, endpoint.deadline, endpoint.runtime_token,
+                  [endpoint](ava::app::PluginUiPresentationRequest const& request, std::chrono::steady_clock::time_point deadline,
+                             ava::plugin::CancelCallback cancel_requested) -> ava::core::Result<ava::plugin::PluginUiAction> {
+                    return plugin_ui_action(endpoint.present(tui_plugin_ui_request(request), deadline, std::move(cancel_requested)));
+                  },
+                  [endpoint](ava::app::PluginUiInvocationBinding const& binding) { endpoint.close(tui_plugin_ui_binding(binding)); });
+              if (minted)
+              {
+                plugin_ui_capability = std::move(*minted);
+                plugin_ui_capability_unavailable = false;
+              }
+            }
+            auto line_result = [&] {
+              if (plugin_ui_capability_unavailable)
+              {
+                LineResult failed;
+                add_output(failed, "plugin UI capability is unavailable");
+                return failed;
+              }
+              return handle_line(state, submitted, permission_resolver, context.question_resolver, hotkeys, context.event_sink, context.cancel_requested,
+                                 context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch,
+                                 std::move(plugin_ui_capability));
+            }();
             if (is_display_settings_command(submitted))
             {
               if (auto loaded = ava::app::load_tui_display_settings(invocation_paths); loaded)
                 remember_effective_display_settings(*loaded);
+              else
+                add_output(line_result, loaded.error().format());
               if (auto watched = refresh_display_watch_state(); !watched)
                 add_output(line_result, watched.error().format());
             }
@@ -394,7 +507,7 @@ int run_tui(ShellState state)
                 [&unlocked_session]() { return ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id(); },
                 [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
                   return handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                     context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch);
+                                     context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch, nullptr);
                 });
             bool const workspace_changed = workspace_catalog_reload || workspace_catalog_changed(line_result);
             if (workspace_changed)
@@ -504,19 +617,25 @@ int run_tui(ShellState state)
       .on_maybe_reload_display_settings = [&unlocked_session, &invocation_paths, &state_snapshot, &application_catalog, &hotkeys, display_watch_state,
                                            display_watch_mutex,
                                            remember_effective_display_settings]() -> ava::core::Result<std::optional<ava::tui::TuiRuntimeStateSnapshot>> {
+        // Filesystem watch I/O stays outside locks. Optional snapshot is the explicit applied/unchanged signal.
         auto watched = ava::app::load_tui_display_settings_watch_state(invocation_paths);
         if (!watched)
           return std::unexpected(std::move(watched.error()));
-        std::lock_guard lock(*display_watch_mutex);
-        if (*display_watch_state && !ava::app::tui_display_settings_watch_state_changed(**display_watch_state, *watched))
         {
-          return std::optional<ava::tui::TuiRuntimeStateSnapshot>{};
+          std::lock_guard lock(*display_watch_mutex);
+          if (*display_watch_state && !ava::app::tui_display_settings_watch_state_changed(**display_watch_state, *watched))
+            return std::optional<ava::tui::TuiRuntimeStateSnapshot>{};
         }
+        // Invalid external edits (including configured-invalid custom themes) fail closed and leave
+        // last-known-good effective presentation unchanged. Watch state is not advanced on failure.
         auto loaded = ava::app::apply_tui_display_settings(invocation_paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
         remember_effective_display_settings(*loaded);
-        *display_watch_state = std::move(*watched);
+        {
+          std::lock_guard lock(*display_watch_mutex);
+          *display_watch_state = std::move(*watched);
+        }
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot(display_theme_status("display theme auto-reloaded"));
       },
@@ -686,6 +805,7 @@ int run_tui(ShellState state)
           auto status = trusted->output.empty() ? std::string("trust action complete") : trusted->output.front();
           return state_snapshot(std::move(status));
         }
+
         auto apply_display_command = [&](std::string command) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
           auto ran = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = std::move(command)});
           if (!ran)
@@ -702,6 +822,7 @@ int run_tui(ShellState state)
             status.erase(newline);
           return state_snapshot(std::move(status));
         };
+
         if (value == "settings:images.on")
           return apply_display_command("/images on");
         if (value == "settings:images.off")
@@ -712,7 +833,11 @@ int run_tui(ShellState state)
           return apply_display_command("/image-width reset");
         constexpr std::string_view image_width_prefix = "settings:image-width.";
         if (value.starts_with(image_width_prefix))
-          return apply_display_command(std::string("/image-width ") + std::string(value.substr(image_width_prefix.size())));
+        {
+          auto const width = value.substr(image_width_prefix.size());
+          return apply_display_command(std::string("/image-width ") + std::string(width));
+        }
+
         constexpr std::string_view theme_prefix = "theme:";
         if (!value.starts_with(theme_prefix))
           return state_snapshot("view closed");
@@ -863,8 +988,8 @@ int run_tui(ShellState state)
         return state_snapshot("session opened");
       },
       .on_before_tui_shutdown = [branch_summary_coordinator]() { branch_summary_coordinator->shutdown(); }});
-  std::cout << std::flush;
   branch_summary_coordinator->shutdown();
+  std::cout << std::flush;
   return result;
 }
 

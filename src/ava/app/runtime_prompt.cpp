@@ -116,6 +116,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::session_ts& u
     error.with_context("request_id", request_id);
     return std::unexpected(std::move(error));
   }
+  if (admission == AdmissionDisposition::RejectMaintenanceReservation)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session is reserved for exclusive maintenance");
+    error.with_context("request_id", request_id);
+    return std::unexpected(std::move(error));
+  }
   auto admitted = session_r->run_controller()->admit(RunRequest{.request_id = request_id});
   if (!admitted)
     return std::unexpected(std::move(admitted.error()));
@@ -182,7 +188,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
       }
     } refresh{options.synthetic_subagent_delivery ? nullptr : session_r->subagent_delivery_manager(), session_r->store.session_id()};
 
-  CRITICAL_AREA_END_R(session);
+    CRITICAL_AREA_END_R(session);
 
     if (refresh.manager)
     {
@@ -327,9 +333,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
     }
   }
 
-  auto const resource_policy = [&] {
-    return make_extension_resource_policy_1(unlocked_session);
-  }();
+  auto const resource_policy = [&] { return make_extension_resource_policy_1(unlocked_session); }();
   bool const include_ambient = !runtime_options.isolate_ambient_extensions;
   bool const include_project_resources = include_ambient && resource_policy.include_project_resources;
 
@@ -397,6 +401,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                 .pricing = session_r->model().pricing,
                 .api_family = session_r->model().api_family,
                 .reasoning_format = session_r->model().reasoning_format,
+                .compatibility_quirks = session_r->model().compatibility_quirks,
             },
         .access_token = options.access_token,
         .credential_type = options.openai_oauth && options.credential_type == "bearer" ? "oauth" : options.credential_type,
@@ -474,9 +479,10 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
         .cancel_requested = [&runtime_options,
                              &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
         .take_steering_messages = runtime_options.take_steering_messages,
-        .compact_context = (runtime_options.access_token.empty() && runtime_options.credential_type != "none") ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
-                                                                : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                                      std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
+        .compact_context = (runtime_options.access_token.empty() && runtime_options.credential_type != "none")
+                               ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
+                               : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
+                                     std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
           return runtime::compact_runtime_context(unlocked_session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
                                                   replayed_user_messages);
         },

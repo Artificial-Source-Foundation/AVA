@@ -2,6 +2,7 @@
 #include "ava/app/command_format.h"
 #include "ava/app/command_plugins.h"
 #include "ava/app/command_tools.h"
+#include "ava/app/plugin_ui_capability.h"
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/plugin/diagnostics.h"
@@ -16,8 +17,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -58,6 +61,65 @@ std::string plugin_capabilities_text(ava::plugin::PluginManifest const& manifest
   return joined_strings(capabilities, ", ");
 }
 
+bool plugin_declares_ui_capability(ava::plugin::PluginManifest const& manifest)
+{
+  return ava::plugin::plugin_has_capability(manifest, ava::plugin::kPluginUiStatusCapability) ||
+         ava::plugin::plugin_has_capability(manifest, ava::plugin::kPluginUiWidgetCapability) ||
+         ava::plugin::plugin_has_capability(manifest, ava::plugin::kPluginUiSelectCapability) ||
+         ava::plugin::plugin_has_capability(manifest, ava::plugin::kPluginUiConfirmCapability);
+}
+
+bool plugin_callback_canceled(ava::plugin::CancelCallback const& cancel_requested) noexcept
+{
+  try
+  {
+    return cancel_requested && cancel_requested();
+  }
+  catch (...)
+  {
+    return true;
+  }
+}
+
+class ExactPluginEnablementRevocation final
+{
+ public:
+  ExactPluginEnablementRevocation(std::filesystem::path state_file, std::filesystem::path workspace, std::string plugin_id, ava::plugin::PluginScope scope)
+      : state_file_(std::move(state_file)), workspace_(std::move(workspace)), plugin_id_(std::move(plugin_id)), scope_(scope)
+  {
+  }
+
+  [[nodiscard]] bool revoked(bool force = false) noexcept
+  {
+    std::lock_guard lock(mutex_);
+    if (revoked_)
+      return true;
+    auto const now = std::chrono::steady_clock::now();
+    if (!force && now < next_check_)
+      return false;
+    next_check_ = now + std::chrono::milliseconds(25);
+    try
+    {
+      auto const enabled = ava::plugin::plugin_enabled(state_file_, workspace_, plugin_id_, scope_);
+      revoked_ = !enabled || !*enabled;
+    }
+    catch (...)
+    {
+      revoked_ = true;
+    }
+    return revoked_;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::filesystem::path state_file_;
+  std::filesystem::path workspace_;
+  std::string plugin_id_;
+  ava::plugin::PluginScope scope_ = ava::plugin::PluginScope::Project;
+  std::chrono::steady_clock::time_point next_check_{};
+  bool revoked_ = false;
+};
+
 std::string plugin_entrypoint_text(ava::plugin::PluginEntrypoint const& entrypoint)
 {
   std::string text = sanitize_inline_text(entrypoint.command);
@@ -94,8 +156,7 @@ ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest 
   return std::move(loaded->content);
 }
 
-std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::session_ts const& unlocked_session,
-                                             std::string_view label,
+std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::session_ts const& unlocked_session, std::string_view label,
                                              std::vector<ava::plugin::PluginResourceContribution> const& resources)
 {
   std::ostringstream output;
@@ -219,9 +280,8 @@ std::string format_dynamic_resource_text(ava::plugin::PluginManifest const& mani
 }
 
 ava::core::VoidResult record_dynamic_resource_result(runtime::session_ts const& unlocked_session, ava::event::RuntimeEventSink const& sink,
-                                                     CommandResult& result,
-                                                     std::string const& call_id, ava::agent::ToolTimelineStatus status, std::string result_summary,
-                                                     std::string result_content, ava::tools::ToolContext const& context)
+                                                     CommandResult& result, std::string const& call_id, ava::agent::ToolTimelineStatus status,
+                                                     std::string result_summary, std::string result_content, ava::tools::ToolContext const& context)
 {
   auto const permission_ids = context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
   return record_tool_result(unlocked_session, sink, result, call_id, "plugin_resource", status, std::move(result_summary), std::move(result_content),
@@ -434,8 +494,7 @@ std::string plugin_validate_argument(std::string_view plugins_argument)
   return trim_ascii_whitespace(plugins_argument.substr(index));
 }
 
-ava::core::Result<std::string> install_plugin_from_path(runtime::session_ts const& unlocked_session,
-                                                        runtime::ExtensionResourcePolicy const& policy,
+ava::core::Result<std::string> install_plugin_from_path(runtime::session_ts const& unlocked_session, runtime::ExtensionResourcePolicy const& policy,
                                                         std::string_view path_text)
 {
   auto source = ava::plugin::inspect_plugin_install_source(plugin_validate_path(unlocked_session, path_text));
@@ -886,6 +945,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 
 ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
+  PluginUiInvocationGuard const ui_capability_guard(request.plugin_ui_capability);
   CommandResult result;
   result.handled = true;
   auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
@@ -928,8 +988,8 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
 
   auto fail = [&](ava::core::Error const& error) -> ava::core::Result<CommandResult> {
     auto const text = error.format();
-    if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "plugin_command", ava::agent::ToolTimelineStatus::Error,
-                                           text);
+    if (auto recorded =
+            record_tool_result(unlocked_session, request.event_sink, result, call_id, "plugin_command", ava::agent::ToolTimelineStatus::Error, text);
         !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
@@ -938,31 +998,104 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
     return result;
   };
 
+  auto const command_canceled = [&] { return plugin_callback_canceled(request.cancel_requested); };
+  auto const canceled_error = [] { return ava::core::Error(ava::core::ErrorCategory::Unknown, "plugin command canceled"); };
+  auto const unavailable_error = [] { return ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "plugin UI capability is unavailable"); };
+  if (command_canceled())
+    return fail(canceled_error());
   if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::PluginExecute, status->plugin.manifest.path,
                                                       status->plugin.manifest.id, "plugin_command", "plugin command requires permission");
       !permission)
   {
     return fail(permission.error());
   }
+  if (command_canceled())
+    return fail(canceled_error());
   if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::PluginCommandRun, status->plugin.manifest.path, command_label,
                                                       "plugin_command", "plugin command requires permission");
       !permission)
   {
     return fail(permission.error());
   }
+  if (command_canceled())
+    return fail(canceled_error());
 
   ava::plugin::PluginRunnerOptions options;
   options.workspace_dir = workspace_dir;
-  auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
+
+  std::optional<PluginUiInvocationClaim> ui_claim;
+  std::shared_ptr<ExactPluginEnablementRevocation> ui_enablement;
+  ava::plugin::CancelCallback active_cancel = request.cancel_requested;
+  if (request.plugin_ui_capability && plugin_declares_ui_capability(status->plugin.manifest))
+  {
+    auto claimed = claim_plugin_ui_invocation_capability(request.plugin_ui_capability, request.command, status->plugin.manifest.id, command->name);
+    if (!claimed)
+      return fail(claimed.error());
+    ui_claim.emplace(std::move(*claimed));
+
+    auto const capability_deadline = ui_claim->deadline();
+    auto permission_cancel = [cancel_requested = request.cancel_requested, capability_deadline] {
+      return plugin_callback_canceled(cancel_requested) || std::chrono::steady_clock::now() >= capability_deadline;
+    };
+    context.cancel_requested = permission_cancel;
+    if (permission_cancel())
+      return fail(unavailable_error());
+    if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::PluginUiPresent, status->plugin.manifest.path, command_label,
+                                                        "plugin_ui", "plugin UI invocation authority requires approval");
+        !permission)
+    {
+      return fail(unavailable_error());
+    }
+    if (permission_cancel())
+      return fail(unavailable_error());
+
+    ui_enablement =
+        std::make_shared<ExactPluginEnablementRevocation>(diagnostics.enablement_file, workspace_dir, status->plugin.manifest.id, status->plugin.scope);
+    if (ui_enablement->revoked(true))
+      return fail(unavailable_error());
+
+    active_cancel = [cancel_requested = request.cancel_requested, capability_deadline, ui_enablement] {
+      return plugin_callback_canceled(cancel_requested) || std::chrono::steady_clock::now() >= capability_deadline || ui_enablement->revoked();
+    };
+    context.cancel_requested = active_cancel;
+    auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(capability_deadline - std::chrono::steady_clock::now());
+    if (remaining < std::chrono::milliseconds(50) || plugin_callback_canceled(active_cancel))
+      return fail(unavailable_error());
+    options.startup_timeout = std::min(options.startup_timeout, remaining);
+  }
+
+  if (ui_enablement && ui_enablement->revoked(true))
+    return fail(unavailable_error());
+  auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, active_cancel);
   if (!process)
-    return fail(process.error());
+    return ui_claim ? fail(unavailable_error()) : fail(process.error());
   auto proxy_handler = ava::plugin::make_core_service_proxy_handler(context, status->plugin.manifest, "command", command->name, command_label, call_id);
-  auto command_result = (*process)->call_command(command->name, run_args->arguments_json, call_id, request.cancel_requested, std::move(proxy_handler));
+  auto ui_handler = ui_claim ? ui_claim->handler() : ava::plugin::PluginUiHandler{};
+  if (ui_handler)
+  {
+    auto presenter = std::move(ui_handler.callback);
+    ui_handler.callback = [presenter = std::move(presenter), active_cancel](
+                              ava::plugin::PluginUiRequest const& ui_request, std::chrono::steady_clock::time_point deadline,
+                              ava::plugin::CancelCallback cancel_requested) mutable -> ava::core::Result<ava::plugin::PluginUiAction> {
+      auto presentation_cancel = [cancel_requested = std::move(cancel_requested), active_cancel, deadline] {
+        return plugin_callback_canceled(cancel_requested) || plugin_callback_canceled(active_cancel) || std::chrono::steady_clock::now() >= deadline;
+      };
+      if (presentation_cancel())
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "plugin UI presentation canceled"));
+      return presenter(ui_request, deadline, std::move(presentation_cancel));
+    };
+  }
+  auto command_result =
+      (*process)->call_command(command->name, run_args->arguments_json, call_id, active_cancel, std::move(proxy_handler), std::move(ui_handler));
   auto shutdown = (*process)->shutdown();
   if (!command_result)
+  {
+    if (ui_claim || command_result.error().message().starts_with("plugin UI"))
+      return fail(unavailable_error());
     return fail(command_result.error());
+  }
   if (!shutdown)
-    return fail(shutdown.error());
+    return ui_claim ? fail(unavailable_error()) : fail(shutdown.error());
 
   if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "plugin_command",
                                          command_result->ok ? ava::agent::ToolTimelineStatus::Success : ava::agent::ToolTimelineStatus::Error,

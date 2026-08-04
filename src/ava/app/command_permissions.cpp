@@ -65,7 +65,7 @@ std::string permissions_usage()
          "  /permissions remove <rule_id>\n"
          "    Remove requires the full rule id from explain/completion; list ordinals are display-only.\n"
          "operations: read, search, edit, bash, network.fetch, network.search, lsp.server.launch, lsp.query, "
-         "skill, task, plugin.execute, plugin.tool.call, plugin.command.run, plugin.event.observe, mcp.server.launch, "
+         "skill, task, plugin.execute, plugin.tool.call, plugin.command.run, plugin.ui.present, plugin.event.observe, mcp.server.launch, "
          "mcp.server.connect, mcp.tool.call, mcp.resource.read";
 }
 
@@ -244,6 +244,8 @@ std::string permission_rule_operation_subject(ava::permissions::Operation operat
       return "plugin tool calls";
     case ava::permissions::Operation::PluginCommandRun:
       return "plugin commands";
+    case ava::permissions::Operation::PluginUiPresent:
+      return "plugin UI presentation";
     case ava::permissions::Operation::PluginEventObserve:
       return "plugin event observation";
     case ava::permissions::Operation::McpServerLaunch:

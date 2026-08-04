@@ -18,6 +18,7 @@ void run_app_rpc_tests()
   ava::tests::app_rpc_test::test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
   ava::tests::app_rpc_test::test_app_rpc_prompt_uses_pinned_catalog_credential_policy();
   ava::tests::app_rpc_test::test_app_rpc_malformed_line_recovery_and_unknown_command();
+  ava::tests::app_rpc_test::test_app_rpc_plugin_command_has_no_tui_authority();
   ava::tests::app_rpc_test::test_app_rpc_state_list_sessions_and_open_session();
   ava::tests::app_rpc_test::test_app_rpc_job_controls_are_active_safe_and_redacted();
   ava::tests::app_rpc_test::test_app_rpc_current_session_reads_reject_path_replacement();
@@ -26,6 +27,7 @@ void run_app_rpc_tests()
   ava::tests::app_rpc_test::test_app_rpc_session_fork_and_clone_commands();
   ava::tests::app_rpc_test::test_app_rpc_branch_construction_failure_rolls_back_created_file();
   ava::tests::app_rpc_test::test_app_rpc_noncurrent_branch_source_recovers_torn_tail();
+  ava::tests::app_rpc_test::test_app_rpc_maintenance_reservation_blocks_generic_mutation();
   ava::tests::app_rpc_test::test_app_rpc_summarize_branch_appends_to_source_session();
   ava::tests::app_rpc_test::test_app_rpc_model_commands();
   ava::tests::app_rpc_test::test_app_rpc_reasoning_commands();

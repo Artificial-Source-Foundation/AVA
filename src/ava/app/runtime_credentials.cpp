@@ -13,6 +13,37 @@
 namespace ava::app {
 namespace {
 
+void clear_sensitive_string(std::string& value) noexcept
+{
+  auto* cursor = static_cast<unsigned char volatile*>(static_cast<void*>(value.data()));
+  auto size = value.size();
+  while (size-- > 0) *cursor++ = 0;
+  value.clear();
+}
+
+void clear_runtime_credential_fields(runtime::RunOptions& options) noexcept
+{
+  clear_sensitive_string(options.access_token);
+  clear_sensitive_string(options.credential_type);
+  clear_sensitive_string(options.openai_account_id);
+}
+
+template <typename Cleanup>
+class ScopeCleanup final
+{
+ public:
+  explicit ScopeCleanup(Cleanup cleanup) : cleanup_(std::move(cleanup)) { }
+  ~ScopeCleanup() noexcept { cleanup_(); }
+  ScopeCleanup(ScopeCleanup const&) = delete;
+  ScopeCleanup& operator=(ScopeCleanup const&) = delete;
+
+ private:
+  Cleanup cleanup_;
+};
+
+template <typename Cleanup>
+ScopeCleanup(Cleanup) -> ScopeCleanup<Cleanup>;
+
 ava::config::ProviderCredentialPolicy credential_policy_for(std::shared_ptr<ava::provider::ProviderCatalog const> const& catalog, std::string_view provider_id)
 {
   ava::config::ProviderCredentialPolicy policy;
@@ -30,13 +61,14 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
                                                                    runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose,
                                                                    std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
+  ScopeCleanup wipe_options([&]() noexcept { clear_runtime_credential_fields(options); });
   if (options.offline)
     return std::unexpected(offline_provider_error(purpose));
   if (options.credential_type == "none")
   {
-    options.access_token.clear();
+    clear_sensitive_string(options.access_token);
     options.openai_oauth = false;
-    options.openai_account_id.clear();
+    clear_sensitive_string(options.openai_account_id);
     return options;
   }
   if (!options.access_token.empty())
@@ -44,6 +76,18 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
 
   auto policy = credential_policy_for(catalog, provider_id);
   auto credential = ava::config::provider_credential_for_request(paths, provider_id, auth_transport, policy);
+  ScopeCleanup wipe_credential([&]() noexcept {
+    if (credential && *credential)
+    {
+      clear_sensitive_string((*credential)->provider_id);
+      clear_sensitive_string((*credential)->access_token);
+      clear_sensitive_string((*credential)->credential_type);
+      clear_sensitive_string((*credential)->account_id);
+      clear_sensitive_string((*credential)->source);
+      clear_sensitive_string((*credential)->refresh_token);
+      clear_sensitive_string((*credential)->source_metadata);
+    }
+  });
   if (!credential)
     return std::unexpected(std::move(credential.error()));
   if (!*credential)
@@ -64,9 +108,9 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
   options.openai_account_id = (*credential)->account_id;
   if (options.credential_type == "none")
   {
-    options.access_token.clear();
+    clear_sensitive_string(options.access_token);
     options.openai_oauth = false;
-    options.openai_account_id.clear();
+    clear_sensitive_string(options.openai_account_id);
   }
   if (options.openai_oauth && options.openai_account_id.empty())
     options.openai_account_id = ava::config::openai_oauth_account_id_from_token((*credential)->access_token).value_or("");
@@ -76,12 +120,14 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
 ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                    runtime::RunOptions options, ava::http::Transport& auth_transport, std::string_view purpose)
 {
+  ScopeCleanup wipe_options([&]() noexcept { clear_runtime_credential_fields(options); });
   return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, purpose, nullptr);
 }
 
 ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::session_ts const& unlocked_session, runtime::RunOptions options,
                                                                                std::string_view purpose)
 {
+  ScopeCleanup wipe_options([&]() noexcept { clear_runtime_credential_fields(options); });
   auto auth_transport = std::make_unique<ava::http::CurlCliTransport>();
   CRITICAL_AREA_BEGIN_CR(session);
   auto catalog = session_r->provider_catalog();
@@ -93,6 +139,10 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
     catalog = std::move(*built);
   }
   auto prepared = prepare_runtime_credentials(session_r->paths(), session_r->model().provider_id, std::move(options), *auth_transport, purpose, catalog);
+  ScopeCleanup wipe_prepared([&]() noexcept {
+    if (prepared)
+      clear_runtime_credential_fields(*prepared);
+  });
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
 

@@ -15,11 +15,16 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 #include "debug.h"
+
+namespace ava::app {
+class PluginUiInvocationCapability;
+}
 
 namespace ava::app::line_shell_internal {
 
@@ -93,7 +98,8 @@ void add_output(LineResult& result, std::string text);
                                      ava::event::RuntimeEventSink event_sink = nullptr, std::function<bool()> cancel_requested = nullptr,
                                      std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr,
                                      std::vector<ava::session::ImageAttachmentRef> image_attachments = {}, std::string request_id = {},
-                                     ava::agent::SubagentLaunchSink on_subagent_launch = nullptr);
+                                     ava::agent::SubagentLaunchSink on_subagent_launch = nullptr,
+                                     std::shared_ptr<PluginUiInvocationCapability> plugin_ui_capability = nullptr);
 
 [[nodiscard]] int run_tui(ShellState state);
 

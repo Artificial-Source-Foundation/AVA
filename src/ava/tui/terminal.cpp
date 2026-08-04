@@ -1699,7 +1699,16 @@ void refresh_terminal_geometry_from_kernel() noexcept
     return;
   if (size.ws_row <= 0 || size.ws_col <= 0)
     return;
-  static_cast<void>(resizeterm(size.ws_row, size.ws_col));
+  // Fail-soft when curses is not initialized (unit tests without a TTY, partial enter).
+  if (stdscr == nullptr)
+    return;
+  // Same-size resizeterm injects KEY_RESIZE on some hosts. Plugin surface fit checks
+  // refresh geometry repeatedly; flooding the input queue starves real Down/Enter.
+  auto const rows = static_cast<int>(size.ws_row);
+  auto const cols = static_cast<int>(size.ws_col);
+  if (is_term_resized(rows, cols) == FALSE)
+    return;
+  static_cast<void>(resizeterm(rows, cols));
 }
 
 void discard_pending_terminal_input() noexcept

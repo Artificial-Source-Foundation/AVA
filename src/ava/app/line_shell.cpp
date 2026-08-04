@@ -5,13 +5,13 @@
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime_credentials.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/terminal.h"
 #include "ava/config/auth.h"
 #include "ava/session/compaction.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/provider/catalog.h"
-#include "ava/app/runtime_credentials.h"
 #include "ava/provider/registry.h"
 #include "ava/core/version.h"
 
@@ -107,7 +107,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                        ava::event::RuntimeEventSink event_sink, std::function<bool()> cancel_requested,
                        std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages,
                        std::vector<ava::session::ImageAttachmentRef> image_attachments, std::string request_id,
-                       ava::agent::SubagentLaunchSink on_subagent_launch)
+                       ava::agent::SubagentLaunchSink on_subagent_launch, std::shared_ptr<PluginUiInvocationCapability> plugin_ui_capability)
 {
   runtime::session_ts& unlocked_session = state.unlocked_session;
 
@@ -171,6 +171,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                                                                            .permission_resolver = permission_resolver,
                                                                                            .question_resolver = question_resolver,
                                                                                            .cancel_requested = cancel_requested,
+                                                                                           .plugin_ui_capability = std::move(plugin_ui_capability),
                                                                                            .hotkeys = hotkeys});
     if (!command_result)
     {

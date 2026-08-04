@@ -1,19 +1,21 @@
 #pragma once
 
+#include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/runtime.h"
-#include "ava/event/RuntimeEvent.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ava::app {
+
+class PluginUiInvocationCapability;
 
 struct CommandRequest
 {
@@ -23,6 +25,7 @@ struct CommandRequest
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;
   std::function<bool()> cancel_requested = nullptr;
+  std::shared_ptr<PluginUiInvocationCapability> plugin_ui_capability = nullptr;
   bool propagate_compaction_errors = false;
   std::vector<CommandHotkey> hotkeys = {};
 

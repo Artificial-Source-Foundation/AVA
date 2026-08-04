@@ -122,6 +122,8 @@ std::optional<Operation> parse_operation(std::string_view value)
     return Operation::PluginToolCall;
   if (value == "plugin.command.run")
     return Operation::PluginCommandRun;
+  if (value == "plugin.ui.present")
+    return Operation::PluginUiPresent;
   if (value == "plugin.event.observe")
     return Operation::PluginEventObserve;
   if (value == "mcp.server.launch")
@@ -739,6 +741,7 @@ PermissionRisk default_allow_risk(Operation operation)
     case Operation::PluginExecute:
     case Operation::PluginToolCall:
     case Operation::PluginCommandRun:
+    case Operation::PluginUiPresent:
     case Operation::PluginEventObserve:
     case Operation::McpServerLaunch:
     case Operation::McpServerConnect:
@@ -825,6 +828,11 @@ PermissionDecision decide(PermissionRequest const& request)
   if (request.operation == Operation::PluginCommandRun)
   {
     return decision(PermissionAction::Ask, "plugin commands require explicit approval", PermissionRisk::High);
+  }
+
+  if (request.operation == Operation::PluginUiPresent)
+  {
+    return decision(PermissionAction::Ask, "plugin UI presentation requires explicit approval", PermissionRisk::High);
   }
 
   if (request.operation == Operation::PluginEventObserve)
@@ -1188,6 +1196,8 @@ std::string to_string(Operation operation)
       return "plugin.tool.call";
     case Operation::PluginCommandRun:
       return "plugin.command.run";
+    case Operation::PluginUiPresent:
+      return "plugin.ui.present";
     case Operation::PluginEventObserve:
       return "plugin.event.observe";
     case Operation::McpServerLaunch:

@@ -236,7 +236,9 @@ void release_owned_terminal_protocols() noexcept;
 void rearm_owned_terminal_protocols() noexcept;
 // Final session teardown of owned protocols: release plus clear negotiation memory.
 void restore_owned_terminal_protocols() noexcept;
-// Apply TIOCGWINSZ via resizeterm before clear/refresh after handoff or stop/resume.
+// Apply TIOCGWINSZ via resizeterm only when the kernel size differs from current
+// ncurses geometry. Same-size calls are no-ops so repeated W6 fit refreshes cannot
+// flood KEY_RESIZE. Fail-soft without a TTY or before curses init.
 void refresh_terminal_geometry_from_kernel() noexcept;
 // Nonblocking discard of pending curses then kernel input. No sleep, read loop,
 // output drain, or throw. Safe on partial enter / repeated calls.

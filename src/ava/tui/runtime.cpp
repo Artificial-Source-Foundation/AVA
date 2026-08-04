@@ -10,6 +10,7 @@
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
+#include "ava/tui/runtime_plugin_ui_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -66,34 +67,32 @@ using runtime_views::kSettingsDraftSetup;
 using runtime_views::kSettingsDraftThinking;
 using runtime_views::kSettingsDraftTools;
 using runtime_views::kSettingsEditKeybindings;
+using runtime_views::kSettingsImageWidthPrefix;
 using runtime_views::kSettingsOpenKeybindings;
 using runtime_views::kSettingsOpenModels;
 using runtime_views::kSettingsOpenReasoning;
 using runtime_views::kSettingsOpenScopedModels;
-using runtime_views::kSettingsReloadKeybindings;
-using runtime_views::reapply_settings_preview_after_display_reload;
-using runtime_views::reselect_settings_display_row_after_rebuild;
-using runtime_views::settings_preview_overlay_for_action;
-using runtime_views::settings_section_for_action;
 using runtime_views::kSettingsOpenSetup;
+using runtime_views::kSettingsReloadKeybindings;
 using runtime_views::kSetupContinue;
 using runtime_views::kSetupFinish;
 using runtime_views::kSetupProviderConnectOpenai;
 using runtime_views::kSetupProviderContinue;
 using runtime_views::kSetupSkip;
 using runtime_views::kSetupThemeKeep;
+using runtime_views::reapply_settings_preview_after_display_reload;
 using runtime_views::reapply_setup_theme_preview_after_display_reload;
+using runtime_views::reselect_settings_display_row_after_rebuild;
+using runtime_views::settings_action_is_previewable;
+using runtime_views::settings_action_is_section;
+using runtime_views::settings_preview_overlay_for_action;
+using runtime_views::settings_section_for_action;
+using runtime_views::SettingsNavigationState;
 using runtime_views::setup_wizard_action_is_theme;
 using runtime_views::setup_wizard_next_step;
 using runtime_views::setup_wizard_select_list_view;
 using runtime_views::SetupWizardState;
 using runtime_views::SetupWizardStep;
-using runtime_views::SettingsNavigationState;
-using runtime_views::kSettingsEditKeybindings;
-using runtime_views::kSettingsOpenKeybindings;
-using runtime_views::kSettingsOpenModels;
-using runtime_views::kSettingsOpenScopedModels;
-using runtime_views::kSettingsReloadKeybindings;
 
 namespace {
 
@@ -200,22 +199,21 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& snapshot = presentation_state.snapshot;
   auto& sidebar = presentation_state.sidebar;
   auto& command_session_grants = presentation_state.command_session_grants;
+  RuntimePluginUiCoordinator plugin_ui;
+  struct PluginUiShutdownGuard
+  {
+    RuntimePluginUiCoordinator* coordinator = nullptr;
+    ComposerSnapshot* snapshot = nullptr;
+    ~PluginUiShutdownGuard()
+    {
+      if (coordinator && snapshot)
+        coordinator->shutdown(*snapshot);
+    }
+  } plugin_ui_shutdown{&plugin_ui, &snapshot};
 
   auto refresh_token_status = [&]() { presentation_state.refresh_token_status(options); };
   auto refresh_active_context_status = [&]() { presentation_state.refresh_active_context_status(options); };
   auto refresh_reasoning_status = [&]() { presentation_state.refresh_reasoning_status(options); };
-  struct BranchSummaryUiState
-  {
-    bool active = false;
-    bool exit_requested = false;
-    std::uint64_t generation = 0;
-    TuiBranchSummaryPhase phase = TuiBranchSummaryPhase::Idle;
-    SelectListView prior_session_view;
-    std::size_t prior_selected_index = 0;
-    std::string selected_source_value;
-  } branch_summary_ui;
-  bool branch_summary_exit_ready = false;
-  auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot state) { presentation_state.apply_runtime_state_snapshot(options, std::move(state)); };
   refresh_token_status();
   refresh_active_context_status();
   refresh_reasoning_status();
@@ -239,6 +237,21 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& completion_cache = renderer.completion_cache;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  struct BranchSummaryUiState
+  {
+    bool active = false;
+    bool exit_requested = false;
+    std::uint64_t generation = 0;
+    TuiBranchSummaryPhase phase = TuiBranchSummaryPhase::Idle;
+    SelectListView prior_session_view;
+    std::size_t prior_selected_index = 0;
+    std::string selected_source_value;
+  } branch_summary_ui;
+  bool branch_summary_exit_ready = false;
+  auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot state) {
+    // Shared path with active-run: apply DTO then rebuild any open overview in place.
+    apply_runtime_state_snapshot_with_overview_sync(options, presentation_state, active_select_list, std::move(state));
+  };
   SettingsNavigationState settings_nav;
   bool settings_session_open = false;
   SetupWizardState setup_wizard;
@@ -377,7 +390,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
   TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
-  RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
+  RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer, &active_select_list);
   [[maybe_unused]] auto permission_resolver = prompt_coordinator.permission_resolver();
   [[maybe_unused]] auto question_resolver = prompt_coordinator.question_resolver();
   auto render = [&]() -> bool { return renderer.render(); };
@@ -543,9 +556,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
 
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
+  // open_setup_wizard is defined above; wire after both exist.
+  action_controller.set_open_setup_wizard([&]() -> bool { return open_setup_wizard(); });
   RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
-  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, navigation, action_controller,
-                                                   transcript_search, subagent_workspace);
+  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, plugin_ui, navigation,
+                                                   action_controller, transcript_search, subagent_workspace);
   auto maybe_reload_display_settings = [&]() -> bool {
     auto const outcome = action_controller.maybe_reload_display_settings();
     if (outcome == DisplaySettingsReloadPollOutcome::TerminalFailure)
@@ -590,16 +605,13 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
     }
     if (setup_wizard.open && active_select_list == ActiveSelectList::Setup)
+    {
+      // Authoritative hydration owns images and width. Restore only the staged
+      // setup theme overlay on top of the newly hydrated authoritative theme.
       reapply_setup_theme_preview_after_display_reload(setup_wizard.preview, snapshot);
+    }
     // Paint exactly once after overlay staging so the first frame is the final staged state.
     return render();
-  };
-  auto toggle_startup_overview = [&]() -> bool {
-    if (settings_session_open)
-      close_settings();
-    if (setup_wizard.open)
-      close_setup_wizard();
-    return action_controller.toggle_startup_overview();
   };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
   auto open_external_editor = [&]() -> bool { return action_controller.open_external_editor(); };
@@ -611,6 +623,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto open_reasoning_selector = [&](bool chained = false) -> bool { return action_controller.open_reasoning_selector(chained); };
   auto open_scoped_model_selector = [&]() -> bool { return action_controller.open_scoped_model_selector(); };
   auto open_session_selector = [&]() -> bool { return action_controller.open_session_selector(); };
+  auto toggle_startup_overview = [&]() -> bool {
+    // Close nested settings/setup preview state before replacing the modal with overview.
+    if (settings_session_open)
+      close_settings();
+    if (setup_wizard.open)
+      close_setup_wizard();
+    return action_controller.toggle_startup_overview();
+  };
   auto cycle_model = [&](bool forward) { action_controller.cycle_model(forward); };
 
   auto slash_palette_active = [&]() { return navigation.slash_palette_active(); };
@@ -627,8 +647,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_down = [&](std::size_t amount) { navigation.scroll_down(amount); };
   auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
   auto toggle_thinking_at = [&](std::size_t item_index) { return navigation.toggle_thinking_at(item_index); };
-
-  action_controller.set_open_setup_wizard(open_setup_wizard);
 
   auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
@@ -689,6 +707,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (branch_summary_exit_ready)
       break;
+    // Prompt/session/modal replacement may clear ActiveSelectList::Setup without the host
+    // close helper. Drop unconfirmed theme preview and process-local wizard flags here.
     if (setup_wizard.open && active_select_list != ActiveSelectList::Setup)
       close_setup_wizard();
     if (!renderer.flush_pending_render_if_due())
@@ -824,16 +844,23 @@ int run_interactive_composer(TuiRuntimeOptions options)
         settings_session_open = false;
       }
       if (active_select_list != ActiveSelectList::Setup && setup_wizard.open)
+      {
+        // Another selector replaced setup: drop unconfirmed theme preview without writing state.
         close_setup_wizard();
+      }
       auto input_result = [&]() {
         if (input.event.key == Key::MouseLeftPress || input.event.key == Key::MouseLeftClick)
         {
           if (auto const clicked = select_list_selection_for_screen_position(snapshot, input.event.mouse_row, input.event.mouse_column))
           {
-            // Settings mouse clicks change selection/highlight only; Enter confirms.
-            auto action = (active_select_list == ActiveSelectList::Settings || active_select_list == ActiveSelectList::Setup) ? SelectListInputAction::Redraw : SelectListInputAction::Resolve;
+            // Settings/Setup mouse clicks change selection/highlight only; Enter confirms.
+            // Other selectors keep existing mouse-confirm behavior.
+            auto action = (active_select_list == ActiveSelectList::Settings || active_select_list == ActiveSelectList::Setup) ? SelectListInputAction::Redraw
+                                                                                                                              : SelectListInputAction::Resolve;
             if (*clicked >= snapshot.select_list->items.size() || !snapshot.select_list->items[*clicked].enabled)
+            {
               action = SelectListInputAction::Redraw;
+            }
             return SelectListInputResult{.selected_item_index = *clicked, .query = snapshot.select_list->query, .action = action};
           }
         }
@@ -1210,7 +1237,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (selected_value == kSettingsDraftPermissions || selected_value == kSettingsDraftTools || selected_value == kSettingsDraftPlugins ||
                  selected_value == kSettingsDraftMcp || selected_value == kSettingsDraftJobs || selected_value == kSettingsDraftSessions ||
-                 selected_value == kSettingsDraftThinking || selected_value == kSettingsDraftDetails || selected_value == kSettingsDraftSetup)
+                 selected_value == kSettingsDraftThinking || selected_value == kSettingsDraftDetails)
         {
           std::string draft_command = "/help";
           if (selected_value == kSettingsDraftPermissions)
@@ -1434,115 +1461,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
           else
           {
             snapshot.status = saved.error().format();
-            static_cast<void>(beep());
-          }
-        }
-      }
-      else if (input_result.action == SelectListInputAction::CycleSort && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
-               options.on_session_selector_sort_cycle)
-      {
-        preserve_session_selector_state(options.on_session_selector_sort_cycle(), "session selector sort cycled");
-      }
-      else if (input_result.action == SelectListInputAction::ToggleNamedFilter && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
-               options.on_session_selector_named_filter_toggle)
-      {
-        preserve_session_selector_state(options.on_session_selector_named_filter_toggle(), "session selector filter toggled");
-      }
-      else if (input_result.action == SelectListInputAction::TogglePathDisplay && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
-               options.on_session_selector_path_display_toggle)
-      {
-        preserve_session_selector_state(options.on_session_selector_path_display_toggle(), "session selector path display toggled");
-      }
-      else if (input_result.action == SelectListInputAction::ToggleArchivedFilter && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
-               options.on_session_selector_archived_filter_toggle)
-      {
-        preserve_session_selector_state(options.on_session_selector_archived_filter_toggle(), "session selector archived filter toggled");
-      }
-      else if (input_result.action == SelectListInputAction::ToggleLabelTimestamp && active_select_list == ActiveSelectList::Session && snapshot.select_list &&
-               options.on_session_selector_label_timestamp_toggle)
-      {
-        preserve_session_selector_state(options.on_session_selector_label_timestamp_toggle(), "session selector label timestamps toggled");
-      }
-      else if (input_result.action == SelectListInputAction::Rename && active_select_list == ActiveSelectList::Session && snapshot.select_list)
-      {
-        if (input_result.selected_item_index < snapshot.select_list->items.size() && snapshot.select_list->items[input_result.selected_item_index].enabled &&
-            !snapshot.select_list->items[input_result.selected_item_index].value.empty())
-        {
-          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
-          snapshot.select_list.reset();
-          active_select_list = ActiveSelectList::None;
-          auto draft_text = "/sessions rename " + selected_value + " ";
-          draft_state.clear_selection();
-          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
-          draft_input.clear();
-          history_index.reset();
-          draft_scroll_offset = 0;
-          snapshot.status = "session rename draft ready";
-        }
-        else
-        {
-          snapshot.status = "session cannot be renamed from this row";
-          static_cast<void>(beep());
-        }
-      }
-      else if (input_result.action == SelectListInputAction::Label && active_select_list == ActiveSelectList::Session && snapshot.select_list)
-      {
-        if (input_result.selected_item_index < snapshot.select_list->items.size() && snapshot.select_list->items[input_result.selected_item_index].enabled &&
-            !snapshot.select_list->items[input_result.selected_item_index].value.empty())
-        {
-          auto const selected_value = snapshot.select_list->items[input_result.selected_item_index].value;
-          snapshot.select_list.reset();
-          active_select_list = ActiveSelectList::None;
-          auto draft_text = "/sessions labels " + selected_value + " ";
-          draft_state.clear_selection();
-          static_cast<void>(replace_composer_draft(draft, std::move(draft_text)));
-          draft_input.clear();
-          history_index.reset();
-          draft_scroll_offset = 0;
-          snapshot.status = "session labels draft ready";
-        }
-        else
-        {
-          snapshot.status = "session cannot be labeled from this row";
-          static_cast<void>(beep());
-        }
-      }
-      else if ((input_result.action == SelectListInputAction::BranchParent || input_result.action == SelectListInputAction::BranchChild) &&
-               active_select_list == ActiveSelectList::Session && snapshot.select_list)
-      {
-        session_archive_confirmation.reset();
-        auto const* selected_item = selected_select_list_item();
-        if (!selected_item || !selected_item->enabled || selected_item->value.empty())
-        {
-          snapshot.status = "session branch navigation unavailable from this row";
-          static_cast<void>(beep());
-        }
-        else if (input_result.action == SelectListInputAction::BranchParent && !options.on_session_selector_branch_parent)
-        {
-          snapshot.status = "session parent navigation unavailable";
-          static_cast<void>(beep());
-        }
-        else if (input_result.action == SelectListInputAction::BranchChild && !options.on_session_selector_branch_child)
-        {
-          snapshot.status = "session child navigation unavailable";
-          static_cast<void>(beep());
-        }
-        else
-        {
-          auto const selected_value = selected_item->value;
-          auto opened = dispatch_tui_selector_authority(snapshot, "opening session…", render, [&]() {
-            return input_result.action == SelectListInputAction::BranchParent ? options.on_session_selector_branch_parent(selected_value)
-                                                                              : options.on_session_selector_branch_child(selected_value);
-          });
-          if (opened)
-          {
-            snapshot.select_list.reset();
-            active_select_list = ActiveSelectList::None;
-            apply_opened_session_snapshot(std::move(*opened), true);
-          }
-          else
-          {
-            snapshot.status = opened.error().format();
             static_cast<void>(beep());
           }
         }
@@ -2332,6 +2250,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       toggle_thinking_visibility();
     }
+    else if (is_action(TuiAction::OverviewToggle))
+    {
+      pending_escape_clear = false;
+      if (!toggle_startup_overview())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+    }
     else if (is_action(TuiAction::ModelSelect))
     {
       if (!open_model_selector())
@@ -2349,15 +2276,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       pending_escape_clear = false;
       cycle_model(false);
-    }
-    else if (is_action(TuiAction::OverviewToggle))
-    {
-      pending_escape_clear = false;
-      if (!toggle_startup_overview())
-      {
-        terminal_write_failed = true;
-        break;
-      }
     }
     else if (is_action(TuiAction::SessionResume) || is_action(TuiAction::SessionTree))
     {
@@ -2429,7 +2347,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
           }
           palette_claimed = true;
         }
-        else         if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        else if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
         {
           renderer.clear_transcript_selection();
           draft_state.clear_selection();
@@ -2822,6 +2740,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
   }
 
+  plugin_ui.shutdown(snapshot);
   if (options.on_before_tui_shutdown)
   {
     try

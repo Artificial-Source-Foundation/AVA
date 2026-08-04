@@ -355,6 +355,10 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] std::vector<std::string> render_select_list_modal(SelectListView const& view, std::size_t width, std::size_t max_lines);
 [[nodiscard]] std::optional<std::size_t> select_list_item_for_modal_row(SelectListView const& view, std::size_t modal_row, std::size_t width,
                                                                         std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_plugin_ui_dock(TuiPluginUiDockView const& view, std::size_t width, std::size_t max_lines);
+[[nodiscard]] std::vector<std::string> render_plugin_ui_modal(TuiPluginUiModalView const& view, std::size_t width, std::size_t max_lines);
+[[nodiscard]] std::optional<std::size_t> plugin_ui_option_for_modal_row(TuiPluginUiModalView const& view, std::size_t modal_row, std::size_t width,
+                                                                        std::size_t max_lines);
 [[nodiscard]] std::vector<std::string> render_unified_diff_body(std::string_view diff, bool diff_truncated, std::size_t width, std::string_view line_prefix,
                                                                 std::size_t max_lines);
 

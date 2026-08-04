@@ -2,12 +2,14 @@
 
 #include "ava/agent/subagent_inspector.h"
 #include "ava/agent/subagent_launch.h"
+#include "ava/tui/runtime_plugin_ui.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text.h"
 #include "ava/tui/theme.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -274,7 +276,8 @@ struct ThemeOptionItem
 {
   std::string name;
   std::string detail;
-  // Already-parsed/validated custom palette delivered by the application.
+  // Already-parsed/validated custom palette delivered by the application. Empty
+  // for built-in rows. The renderer never opens theme paths or parses JSON.
   std::optional<TuiThemePalette> palette = std::nullopt;
   std::string revision = {};
 
@@ -513,9 +516,9 @@ enum class SelectListInputAction
   Label,
   Archive,
   ArchiveNoninvasive,
-  SummarizeParent,
   BranchParent,
   BranchChild,
+  SummarizeParent,
   ModelsSave,
   ModelsEnableAll,
   ModelsClearAll,
@@ -616,6 +619,8 @@ struct ComposerSnapshot
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<PermissionPromptView> permission_prompt = std::nullopt;
   std::optional<QuestionPromptView> question_prompt = std::nullopt;
+  std::optional<TuiPluginUiDockView> plugin_ui_dock = std::nullopt;
+  std::optional<TuiPluginUiModalView> plugin_ui_modal = std::nullopt;
   std::optional<SelectListView> select_list = std::nullopt;
   std::optional<SubagentWorkspaceView> subagent_workspace = std::nullopt;
   std::size_t selected_slash_command_index = 0;
@@ -756,10 +761,23 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] std::vector<std::string> render_subagent_workspace(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t subagent_workspace_max_scroll_offset(SubagentWorkspaceView const& view, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t composer_main_width(ComposerSnapshot const& snapshot);
+
+struct PluginUiSurfaceGeometry
+{
+  std::size_t width = 0;
+  std::size_t max_lines = 0;
+};
+
+// Exact dimensions passed to the plugin UI renderer for a candidate request.
+// The coordinator uses this before authorizing a surface.
+[[nodiscard]] PluginUiSurfaceGeometry plugin_ui_surface_geometry(ComposerSnapshot const& snapshot, TuiPluginUiKind kind);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
+// Process-local collapsed startup overview chrome. Height policy: 2 rows at >=12,
+// 1 row at 8-11, hidden below 8. Shared by render and mouse hit-testing. Footer unchanged.
 [[nodiscard]] std::size_t startup_overview_collapsed_row_count(ComposerSnapshot const& snapshot) noexcept;
 [[nodiscard]] std::vector<std::string> render_startup_overview_collapsed_lines(ComposerSnapshot const& snapshot, std::size_t width);
+// True when (row,column) lands on the collapsed overview card in the main canvas.
 [[nodiscard]] bool startup_overview_card_contains_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
@@ -779,6 +797,7 @@ struct ComposerPaletteScreenLayout
 [[nodiscard]] std::size_t previous_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::size_t next_select_list_selection(SelectListView const& view, std::size_t selected_index);
 [[nodiscard]] std::optional<std::size_t> select_list_selection_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
+[[nodiscard]] std::optional<std::size_t> plugin_ui_modal_option_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::optional<std::size_t> question_option_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] std::optional<std::size_t> composer_input_cursor_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] SelectListInputResult handle_select_list_input(SelectListView const& view, InputEvent event);

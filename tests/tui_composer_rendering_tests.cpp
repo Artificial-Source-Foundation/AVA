@@ -5,11 +5,13 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
+#include "ava/tui/runtime_plugin_ui_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -407,9 +409,10 @@ bool test_active_run_session_transition_discards_prior_session_events()
   ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active_select_list);
   std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
   ava::tui::RuntimePromptCoordinator prompt_coordinator(options, presentation.snapshot, presentation.command_session_grants, renderer);
+  ava::tui::RuntimePluginUiCoordinator plugin_ui;
   ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
   ava::tui::RuntimeSubagentWorkspaceController subagent_workspace(options, presentation.snapshot);
-  ava::tui::RuntimeActiveRunController active_run(options, presentation, draft_state, renderer, prompt_coordinator, navigation, action_controller,
+  ava::tui::RuntimeActiveRunController active_run(options, presentation, draft_state, renderer, prompt_coordinator, plugin_ui, navigation, action_controller,
                                                   transcript_search, subagent_workspace);
 
   auto const outcome = active_run.run("OLD SUBMITTED PROMPT");

@@ -29,5 +29,9 @@ inline constexpr std::size_t kMaxNestingDepth = 64;
                                                                                     std::size_t max_items = std::numeric_limits<std::size_t>::max());
 [[nodiscard]] std::vector<std::string> strings_in_array_field(std::string_view object, std::string_view key);
 [[nodiscard]] bool is_valid_object(std::string_view value);
+// Protocols with an independently established recursive-depth contract may
+// request a bound up to 128 without changing the default 64-container limit
+// used by existing JSON surfaces. Larger values fail closed before recursion.
+[[nodiscard]] bool is_valid_object_with_max_depth(std::string_view value, std::size_t max_depth);
 
 }  // namespace ava::core::json

@@ -9,6 +9,7 @@ add_library(ava_plugin
   "runner_support.cpp"
   "static_resources.cpp"
   "tool_broker.cpp"
+  "ui_protocol.cpp"
 )
 
 target_include_directories(ava_plugin PUBLIC "${CMAKE_SOURCE_DIR}/src")

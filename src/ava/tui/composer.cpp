@@ -9,6 +9,7 @@
 #include <cctype>
 #include <climits>
 #include <cstdio>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -587,6 +588,9 @@ CursorPlacement input_cursor_placement(ComposerSnapshot const& snapshot, std::si
 }
 
 constexpr auto kCanvasMaxWidth = std::size_t{120};
+// Plugin attribution must be able to show a maximum 128-byte canonical id on
+// one host-owned line at sufficiently wide terminal dimensions.
+constexpr auto kPluginUiCanvasMaxWidth = std::size_t{160};
 constexpr auto kSidebarWidth = std::size_t{38};
 constexpr auto kSidebarActionableMinTerminalWidth = std::size_t{144};
 constexpr auto kSidebarIdleMinTerminalWidth = std::size_t{176};
@@ -594,14 +598,15 @@ constexpr auto kSidebarMinTerminalHeight = std::size_t{16};
 
 bool sidebar_drawer_active(ComposerSnapshot const& snapshot)
 {
-  return snapshot.sidebar_drawer_visible && snapshot.sidebar.has_value() && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list && !snapshot.subagent_workspace;
+  return snapshot.sidebar_drawer_visible && snapshot.sidebar.has_value() && !snapshot.permission_prompt && !snapshot.question_prompt &&
+         !snapshot.plugin_ui_modal && !snapshot.select_list && !snapshot.subagent_workspace;
 }
 
 // Collapsed startup overview is process-local chrome. Suppress when any modal/drawer
 // owns the frame so the select-list expanded view replaces it cleanly.
 bool startup_overview_collapsed_suppressed(ComposerSnapshot const& snapshot) noexcept
 {
-  return !snapshot.startup_overview || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list ||
+  return !snapshot.startup_overview || snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list ||
          snapshot.subagent_workspace || snapshot.sidebar_drawer_visible;
 }
 
@@ -702,8 +707,8 @@ std::string format_todo_rail_line(TodoItem const& item, std::size_t width)
 
 bool sidebar_visible(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height)
 {
-  if (!snapshot.sidebar || snapshot.sidebar_drawer_visible || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list ||
-      snapshot.subagent_workspace || height < kSidebarMinTerminalHeight)
+  if (!snapshot.sidebar || snapshot.sidebar_drawer_visible || snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal ||
+      snapshot.select_list || snapshot.subagent_workspace || height < kSidebarMinTerminalHeight)
   {
     return false;
   }
@@ -1134,6 +1139,14 @@ std::size_t modal_width_for(std::size_t width)
   return std::min<std::size_t>(72, std::max<std::size_t>(44, (width * 4) / 5));
 }
 
+std::size_t plugin_ui_modal_width_for(std::size_t width)
+{
+  // The host owns this cap. It is wide enough for the maximum canonical
+  // plugin id while preventing a plugin modal from claiming an entire wide
+  // terminal.
+  return std::min<std::size_t>(160, width);
+}
+
 std::size_t modal_height_for(std::size_t height)
 {
   if (height < 10)
@@ -1147,6 +1160,15 @@ std::size_t select_modal_height_for(std::size_t height)
   if (height < 10)
     return height;
   return height > 4 ? height - 4 : height;
+}
+
+std::size_t plugin_ui_modal_height_for(std::size_t height)
+{
+  // Short terminals need every row for nontruncating attribution, one visible
+  // choice, and host controls. Roomier terminals retain the normal inset.
+  if (height <= 12)
+    return height;
+  return std::min<std::size_t>(22, height > 4 ? height - 4 : height);
 }
 
 std::vector<std::string> overlay_question_modal(std::vector<std::string> lines, QuestionPromptView const& prompt, std::size_t width, std::size_t height)
@@ -1171,6 +1193,22 @@ std::vector<std::string> overlay_select_list_modal(std::vector<std::string> line
   auto const modal_width = std::min(modal_width_for(width), width);
   auto const modal_height = std::min(select_modal_height_for(height), height);
   auto const modal_lines = detail::render_select_list_modal(view, modal_width, modal_height);
+  auto const top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
+  auto const left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
+  auto const right = width > left + modal_width ? width - left - modal_width : std::size_t{0};
+  for (std::size_t index = 0; index < modal_lines.size() && top + index < lines.size(); ++index)
+  {
+    lines[top + index] = std::string(left, ' ') + modal_lines[index] + std::string(right, ' ');
+  }
+  return lines;
+}
+
+std::vector<std::string> overlay_plugin_ui_modal(std::vector<std::string> lines, TuiPluginUiModalView const& view, std::size_t width, std::size_t height)
+{
+  while (lines.size() < height) lines.emplace_back();
+  auto const modal_width = std::min(plugin_ui_modal_width_for(width), width);
+  auto const modal_height = std::min(plugin_ui_modal_height_for(height), height);
+  auto const modal_lines = detail::render_plugin_ui_modal(view, modal_width, modal_height);
   auto const top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
   auto const left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
   auto const right = width > left + modal_width ? width - left - modal_width : std::size_t{0};
@@ -1276,9 +1314,9 @@ std::vector<std::string> render_active_run_hint_lines(ComposerSnapshot const& sn
 {
   auto const completion_visible = completion_cache.model && completion_cache.model->palette_visible;
   auto const detached_hint = detached_new_output_hint(snapshot);
-  auto const suppress_chrome = snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace ||
-                               snapshot.sidebar_drawer_visible || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
-                               completion_visible;
+  auto const suppress_chrome = snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list ||
+                               snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+                               slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible;
   if (max_lines == 0 || suppress_chrome || (!snapshot.processing && detached_hint.empty()))
     return {};
 
@@ -1317,8 +1355,9 @@ std::vector<std::string> render_empty_transcript_discovery_lines(ComposerSnapsho
 {
   auto const completion_visible = completion_cache.model && completion_cache.model->palette_visible;
   if (transcript_height < 2 || snapshot.width < 80 || snapshot.height < 24 || snapshot.processing || !snapshot.transcript.empty() || !snapshot.input.empty() ||
-      snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
-      !snapshot.pending_attachments.empty() || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible)
+      snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list || snapshot.subagent_workspace ||
+      snapshot.sidebar_drawer_visible || !snapshot.pending_attachments.empty() ||
+      slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) || completion_visible)
   {
     return {};
   }
@@ -1626,7 +1665,8 @@ ComposerVerticalLayout calculate_composer_vertical_layout(ComposerSnapshot const
                                                           std::vector<std::string>& question_lines, std::vector<std::string>& status_alert_lines,
                                                           std::vector<std::string>& palette_lines, std::vector<std::string>& queued_lines,
                                                           PendingAttachmentRender& pending_attachment_lines, std::vector<std::string>& todo_dock_lines,
-                                                          bool emit_attachment_graphics, bool allow_transcript_gap = true)
+                                                          bool emit_attachment_graphics, bool allow_transcript_gap = true,
+                                                          std::size_t* plugin_line_budget = nullptr)
 {
   auto const overview_height = startup_overview_collapsed_row_budget(snapshot);
   auto const content_height = height > overview_height ? height - overview_height : std::size_t{0};
@@ -1679,8 +1719,18 @@ ComposerVerticalLayout calculate_composer_vertical_layout(ComposerSnapshot const
 
   auto const reserved_before_todo_dock = normal_composer_lines + permission_lines.size() + question_lines.size() + status_alert_lines.size() +
                                          palette_lines.size() + queued_lines.size() + pending_attachment_lines.lines.size();
-  auto const todo_budget = todo_dock_line_budget(snapshot, completion_cache, width, content_height, reserved_before_todo_dock);
-  todo_dock_lines = (todo_budget > 0 && snapshot.sidebar) ? render_todo_dock_lines(*snapshot.sidebar, width, todo_budget) : std::vector<std::string>{};
+  auto const plugin_available = content_height > reserved_before_todo_dock ? content_height - reserved_before_todo_dock : std::size_t{0};
+  auto const plugin_budget = snapshot.plugin_ui_dock ? std::min<std::size_t>(12, plugin_available > 1 ? plugin_available - 1 : plugin_available) : 0;
+  if (plugin_line_budget)
+    *plugin_line_budget = plugin_budget;
+  todo_dock_lines = snapshot.plugin_ui_dock ? detail::render_plugin_ui_dock(*snapshot.plugin_ui_dock, width, plugin_budget) : std::vector<std::string>{};
+  auto const reserved_after_plugin_dock = reserved_before_todo_dock + todo_dock_lines.size();
+  auto const todo_budget = todo_dock_line_budget(snapshot, completion_cache, width, content_height, reserved_after_plugin_dock);
+  if (todo_budget > 0 && snapshot.sidebar)
+  {
+    auto todo_lines = render_todo_dock_lines(*snapshot.sidebar, width, todo_budget);
+    todo_dock_lines.insert(todo_dock_lines.end(), std::make_move_iterator(todo_lines.begin()), std::make_move_iterator(todo_lines.end()));
+  }
 
   auto const non_transcript_lines = reserved_before_todo_dock + todo_dock_lines.size();
   auto const available_lines = content_height > non_transcript_lines ? content_height - non_transcript_lines : std::size_t{0};
@@ -1735,7 +1785,8 @@ std::size_t input_line_cursor_offset_for_columns(std::string_view line, std::siz
 
 detail::ComposerLayoutPolicy detail::composer_layout_policy(ComposerSnapshot const& snapshot, std::size_t height)
 {
-  auto const authoritative_layout = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value() || snapshot.select_list.has_value() || snapshot.subagent_workspace.has_value() || snapshot.sidebar_drawer_visible;
+  auto const authoritative_layout = snapshot.permission_prompt.has_value() || snapshot.question_prompt.has_value() || snapshot.plugin_ui_modal.has_value() ||
+                                    snapshot.select_list.has_value() || snapshot.subagent_workspace.has_value() || snapshot.sidebar_drawer_visible;
   auto const roomy_normal_layout = height > 12 && !authoritative_layout;
   return {.compact_transcript_spacing = height <= 12,
           .transcript_composer_gap_lines = roomy_normal_layout ? std::size_t{1} : std::size_t{0},
@@ -1795,6 +1846,12 @@ ComposerCanvasLayout composer_canvas_layout(ComposerSnapshot const& snapshot)
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
   if (sidebar_drawer_active(snapshot) || (snapshot.subagent_workspace && !snapshot.permission_prompt && !snapshot.question_prompt))
     return {.content_width = width, .left = 0, .rail_visible = false};
+  if ((snapshot.plugin_ui_dock || snapshot.plugin_ui_modal) && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list &&
+      !snapshot.subagent_workspace)
+  {
+    auto const content_width = std::min(width, kPluginUiCanvasMaxWidth);
+    return {.content_width = content_width, .left = (width - content_width) / 2, .rail_visible = false};
+  }
   if (sidebar_visible(snapshot, width, height))
     return {.content_width = main_width_for(snapshot, width), .left = 0, .rail_visible = true};
   auto const content_width = std::min(width, kCanvasMaxWidth);
@@ -1828,6 +1885,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     auto base = snapshot;
     auto const prompt = *base.question_prompt;
     base.question_prompt = std::nullopt;
+    base.plugin_ui_modal.reset();
     base.select_list.reset();
     base.subagent_workspace.reset();
     base.reasoning_feedback.reset();
@@ -1851,6 +1909,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     auto base = snapshot;
     auto const view = *base.select_list;
     base.select_list = std::nullopt;
+    base.plugin_ui_modal.reset();
     base.reasoning_feedback.reset();
     base.sidebar = std::nullopt;
     // Preserve the modal's authoritative vertical policy while rendering its quiet backdrop.
@@ -1858,6 +1917,20 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     auto frame = detail::render_composer_frame_cached(base, completion_cache, source_revision, transcript_cache, transcript_generation, false, false,
                                                       freeze_transcript_layout, allow_frozen_width_mismatch);
     frame.lines = overlay_select_list_modal(quiet_modal_backdrop(std::move(frame.lines)), view, width, height);
+    frame.graphics.clear();
+    return finish_frame(std::move(frame));
+  }
+  if (snapshot.plugin_ui_modal && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list && !snapshot.subagent_workspace)
+  {
+    auto base = snapshot;
+    auto const view = *base.plugin_ui_modal;
+    base.plugin_ui_modal.reset();
+    base.reasoning_feedback.reset();
+    base.sidebar = std::nullopt;
+    base.sidebar_drawer_visible = true;
+    auto frame = detail::render_composer_frame_cached(base, completion_cache, source_revision, transcript_cache, transcript_generation, false, false,
+                                                      freeze_transcript_layout, allow_frozen_width_mismatch);
+    frame.lines = overlay_plugin_ui_modal(quiet_modal_backdrop(std::move(frame.lines)), view, width, height);
     frame.graphics.clear();
     return finish_frame(std::move(frame));
   }
@@ -2028,6 +2101,44 @@ std::vector<std::string> render_composer(ComposerSnapshot const& snapshot)
 std::size_t composer_main_width(ComposerSnapshot const& snapshot)
 {
   return composer_canvas_layout(snapshot).content_width;
+}
+
+PluginUiSurfaceGeometry plugin_ui_surface_geometry(ComposerSnapshot const& snapshot, TuiPluginUiKind kind)
+{
+  auto candidate = snapshot;
+  auto const modal = kind == TuiPluginUiKind::Select || kind == TuiPluginUiKind::Confirm;
+  if (modal)
+  {
+    candidate.plugin_ui_modal =
+        TuiPluginUiModalView{.binding = {}, .request_id = {}, .kind = kind, .title = {}, .description = {}, .options = {}, .selected_option = 0};
+    auto const canvas = composer_canvas_layout(candidate);
+    auto const height = std::max<std::size_t>(detail::kMinHeight, candidate.height);
+    return {.width = std::min(plugin_ui_modal_width_for(canvas.content_width), canvas.content_width),
+            .max_lines = std::min(plugin_ui_modal_height_for(height), height)};
+  }
+
+  if (!candidate.plugin_ui_dock)
+  {
+    candidate.plugin_ui_dock = TuiPluginUiDockView{.binding = {.plugin_id = "a", .command = "a", .invocation_id = "a"}, .status = std::string{}, .widgets = {}};
+  }
+  auto const canvas = composer_canvas_layout(candidate);
+  auto const width = canvas.content_width;
+  auto const height = std::max<std::size_t>(detail::kMinHeight, candidate.height);
+  candidate.width = width;
+
+  detail::CompletionMatchCache completion_cache;
+  std::size_t composer_lines = 0;
+  std::vector<std::string> permission_lines;
+  std::vector<std::string> question_lines;
+  std::vector<std::string> status_lines;
+  std::vector<std::string> palette_lines;
+  std::vector<std::string> queued_lines;
+  PendingAttachmentRender attachments;
+  std::vector<std::string> dock_lines;
+  std::size_t plugin_line_budget = 0;
+  static_cast<void>(calculate_composer_vertical_layout(candidate, completion_cache, width, height, composer_lines, permission_lines, question_lines,
+                                                       status_lines, palette_lines, queued_lines, attachments, dock_lines, false, true, &plugin_line_budget));
+  return {.width = width, .max_lines = plugin_line_budget};
 }
 
 namespace {
@@ -2308,8 +2419,8 @@ std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot)
 
 std::optional<std::size_t> composer_input_cursor_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
 {
-  if (row == 0 || column == 0 || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace ||
-      sidebar_drawer_active(snapshot))
+  if (row == 0 || column == 0 || snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list ||
+      snapshot.subagent_workspace || sidebar_drawer_active(snapshot))
     return std::nullopt;
 
   auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
@@ -2414,6 +2525,29 @@ std::optional<std::size_t> select_list_selection_for_screen_position(ComposerSna
   return detail::select_list_item_for_modal_row(*snapshot.select_list, row - top - 1, modal_width, modal_height);
 }
 
+std::optional<std::size_t> plugin_ui_modal_option_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column)
+{
+  if (row == 0 || column == 0 || !snapshot.plugin_ui_modal || snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list ||
+      snapshot.subagent_workspace)
+  {
+    return std::nullopt;
+  }
+  auto const canvas = composer_canvas_layout(snapshot);
+  auto const width = canvas.content_width;
+  auto const height = std::max<std::size_t>(detail::kMinHeight, snapshot.height);
+  if (column <= canvas.left || column > canvas.left + width)
+    return std::nullopt;
+  column -= canvas.left;
+  auto const modal_width = std::min(plugin_ui_modal_width_for(width), width);
+  auto const modal_height = std::min(plugin_ui_modal_height_for(height), height);
+  auto const modal_lines = detail::render_plugin_ui_modal(*snapshot.plugin_ui_modal, modal_width, modal_height);
+  auto const top = height > modal_lines.size() ? (height - modal_lines.size()) / 2 : std::size_t{0};
+  auto const left = width > modal_width ? (width - modal_width) / 2 : std::size_t{0};
+  if (row <= top || row > top + modal_lines.size() || column <= left || column > left + modal_width)
+    return std::nullopt;
+  return detail::plugin_ui_option_for_modal_row(*snapshot.plugin_ui_modal, row - top - 1, modal_width, modal_height);
+}
+
 void detail::clear_composer_terminal_graphics() noexcept
 {
   auto image_ids = std::exchange(active_kitty_image_ids(), {});
@@ -2465,8 +2599,8 @@ bool detail::draw_screen_cached(ComposerSnapshot const& snapshot, CompletionMatc
   for (auto const& line : lines) surfaces.push_back(detail::screen_surface_line(line, width));
   auto const changed_rows = detail::changed_screen_rows(screen_cache.surfaces, surfaces, screen_cache.dirty_rows, invalidate);
 
-  auto const cursor_visible =
-      !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list && !snapshot.subagent_workspace && !sidebar_drawer_active(snapshot);
+  auto const cursor_visible = !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.plugin_ui_modal && !snapshot.select_list &&
+                              !snapshot.subagent_workspace && !sidebar_drawer_active(snapshot);
   if (!cursor_visible)
     static_cast<void>(curs_set(0));
   static_cast<void>(leaveok(stdscr, cursor_visible ? FALSE : TRUE));

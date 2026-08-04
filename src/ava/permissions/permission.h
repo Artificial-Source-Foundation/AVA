@@ -102,6 +102,7 @@ enum class Operation
   PluginExecute,
   PluginToolCall,
   PluginCommandRun,
+  PluginUiPresent,
   PluginEventObserve,
   McpServerLaunch,
   McpServerConnect,

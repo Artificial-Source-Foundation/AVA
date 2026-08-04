@@ -70,12 +70,12 @@ enum class ActiveSelectList
   Reasoning,
   ScopedModels,
   Session,
+  BranchSummary,
   TranscriptSearch,
   ForkUserTurn,
   CopyUserTurn,
   Overview,
-  Setup,
-  BranchSummary
+  Setup
 };
 
 enum class ComposerJumpMode
@@ -134,7 +134,7 @@ void apply_runtime_state_snapshot_with_overview_sync(TuiRuntimeOptions const& op
 [[nodiscard]] bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions const& options, RuntimePresentationState& presentation_state,
                                                                              RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                                                                              TranscriptSearchController& transcript_search,
-                                                                             RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list,
-                                                                             TuiRuntimeStateSnapshot state);
+                                                                             RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                                             ActiveSelectList& active_select_list, TuiRuntimeStateSnapshot state);
 
 }  // namespace ava::tui

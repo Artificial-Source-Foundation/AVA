@@ -1069,14 +1069,6 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   {
     return run_image_width_command(session, command_argument(request.command, "/image-width"));
   }
-  if (request.command == "/overview")
-  {
-    return handled_text("The startup resources overview is an interactive TUI view. Use /overview inside the TUI to toggle it.");
-  }
-  if (request.command == "/setup")
-  {
-    return handled_text("The local-only first-run setup wizard is available inside the interactive TUI. Use /setup there to open it.");
-  }
   if (request.command == "/settings")
   {
     return handled_text("Settings are shown as a TUI view. Use /theme, /images on|off|reset, and /image-width <8..160>|reset to persist display settings.");
@@ -1090,6 +1082,14 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   if (request.command == "/sidebar")
   {
     return handled_text("The current session overview is an interactive TUI view. Use /sidebar inside the TUI to open it.");
+  }
+  if (request.command == "/overview")
+  {
+    return handled_text("The startup resources overview is an interactive TUI view. Use /overview inside the TUI to toggle it.");
+  }
+  if (request.command == "/setup")
+  {
+    return handled_text("The local-only first-run setup wizard is available inside the interactive TUI. Use /setup there to open it.");
   }
   if (starts_with_command(request.command, "/search"))
   {

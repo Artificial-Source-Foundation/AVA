@@ -13,6 +13,10 @@ inline constexpr std::string_view kPluginApiVersion = "ava.plugin.v1";
 inline constexpr std::string_view kPluginProxyReadCapability = "proxy.read";
 inline constexpr std::string_view kPluginProxySearchCapability = "proxy.search";
 inline constexpr std::string_view kPluginProxySessionCapability = "proxy.session";
+inline constexpr std::string_view kPluginUiStatusCapability = "ui.status";
+inline constexpr std::string_view kPluginUiWidgetCapability = "ui.widget";
+inline constexpr std::string_view kPluginUiSelectCapability = "ui.select";
+inline constexpr std::string_view kPluginUiConfirmCapability = "ui.confirm";
 
 enum class PluginScope
 {

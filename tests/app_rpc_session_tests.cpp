@@ -3,13 +3,14 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
-#include "ava/app/project_trust.h"
-#include "ava/app/session_run_controller.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/subagent_job.h"
+#include "ava/plugin/enablement.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
@@ -21,6 +22,7 @@
 #include "ava/core/thread.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <expected>
@@ -32,6 +34,7 @@
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <ranges>
 #include <sstream>
 #include <stop_token>
 #include <string>
@@ -39,6 +42,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <signal.h>
+#include <sys/types.h>
 
 namespace ava::tests::app_rpc_test {
 
@@ -75,6 +80,89 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
              jsonl.find("\"session_id\":\"") != std::string::npos && jsonl.find("\"id\":\"u1\"") != std::string::npos &&
              jsonl.find("unknown RPC command type") != std::string::npos,
          "RPC loop writes error responses and recovers for subsequent JSONL records");
+}
+
+void test_app_rpc_plugin_command_has_no_tui_authority()
+{
+  auto const root = create_empty_root("app-rpc-plugin-ui-denial");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.rpc-ui";
+  std::filesystem::create_directories(plugin_dir);
+  write_app_test_file(plugin_dir / "plugin.json",
+                      "{\"schema_version\":1,\"id\":\"com.example.rpc-ui\",\"name\":\"RPC UI fixture\",\"version\":\"0.1.0\","
+                      "\"api_version\":\"ava.plugin.v1\",\"entrypoint\":{\"command\":\"/bin/sh\",\"args\":[\"plugin.sh\"]},"
+                      "\"capabilities\":[\"commands\",\"ui.status\"],\"contributes\":{\"tools\":[],\"commands\":[{\"name\":\"run\","
+                      "\"description\":\"emit UI\"}],\"prompts\":[],\"skills\":[],\"event_hooks\":[]}}\n");
+  write_app_test_file(plugin_dir / "plugin.sh",
+                      "printf '%s\\n' $$ > child.pid\n"
+                      "IFS= read -r initialize\n"
+                      "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\","
+                      "\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
+                      "IFS= read -r command\n"
+                      "printf '%s\\n' '{\"id\":\"RPC_UI_HIDDEN_REQUEST\",\"type\":\"ui.status\","
+                      "\"text\":\"RPC_UI_RAW_CANARY_2d91\"}'\n"
+                      "IFS= read -r action\n");
+  auto enabled =
+      ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.rpc-ui", true, ava::plugin::PluginScope::Project);
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(enabled && trusted, "RPC plugin UI fixture is trusted and enabled without credentials");
+
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  ava::app::runtime::SessionLifecycleRequest lifecycle;
+  lifecycle.sessionless = true;
+  auto opened = ava::app::runtime::Session::open(open_context, lifecycle);
+  expect(opened.has_value(), "RPC plugin UI fixture opens a sessionless runtime");
+  if (!opened)
+    return;
+  ava::app::runtime::session_ts session(std::move(*opened));
+
+  std::vector<ava::permissions::Operation> prompted_operations;
+  ava::app::runtime::RunOptions run_options;
+  run_options.permission_resolver =
+      [&prompted_operations](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompted_operations.push_back(prompt.operation);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  std::istringstream in(
+      "{\"id\":\"rpc-ui\",\"type\":\"run_plugin_command\",\"plugin_id\":\"com.example.rpc-ui\",\"name\":\"run\","
+      "\"arguments\":{}}\n"
+      "{\"id\":\"after-ui\",\"type\":\"get_state\"}\n");
+  std::ostringstream out;
+  auto loop = ava::app::run_rpc_loop(session, open_context, provider, transport, run_options, in, out, ava::app::rpc::RpcInputWake{});
+  auto const output = out.str();
+
+  bool child_gone = false;
+  auto const pid_text = app_read_binary_file(plugin_dir / "child.pid");
+  if (!pid_text.empty())
+  {
+    auto const child_pid = static_cast<pid_t>(std::stol(pid_text));
+    errno = 0;
+    child_gone = ::kill(child_pid, 0) < 0 && errno == ESRCH;
+  }
+  ava::core::Result<std::vector<ava::session::SessionEntry>> entries = [&]() {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    auto authority = session_r->read_authority_1();
+    if (!authority)
+      return ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
+    return authority->load();
+  }();
+  bool const session_has_ui =
+      entries && std::ranges::any_of(*entries, [](auto const& entry) {
+        return entry.data_json.find("RPC_UI_RAW_CANARY_2d91") != std::string::npos || entry.data_json.find("RPC_UI_HIDDEN_REQUEST") != std::string::npos;
+      });
+  auto const ui_permission_prompted = std::ranges::find(prompted_operations, ava::permissions::Operation::PluginUiPresent) != prompted_operations.end();
+  expect(loop && output.find("\"id\":\"rpc-ui\"") != std::string::npos && output.find("plugin UI capability is unavailable") != std::string::npos &&
+             output.find("\"id\":\"after-ui\"") != std::string::npos && output.find("RPC_UI_RAW_CANARY_2d91") == std::string::npos &&
+             output.find("RPC_UI_HIDDEN_REQUEST") == std::string::npos && output.find("\\\"type\\\":\\\"ui.status\\\"") == std::string::npos &&
+             !ui_permission_prompted && child_gone && !session_has_ui,
+         "RPC run_plugin_command executes with ordinary permissions but no TUI authority, contains the UI record as a generic failure, emits no UI "
+         "record/canary, reaps the process, and continues serving protocol commands");
 }
 
 void test_app_rpc_state_list_sessions_and_open_session()
@@ -684,7 +772,7 @@ void test_app_rpc_maintenance_reservation_blocks_generic_mutation()
   std::string session_id;
   std::optional<ava::app::SessionMaintenanceReservation> reservation;
   {
-    ava::app::runtime::session_ts::rat session_r(session);
+    SCOPED_CRITICAL_AREA_R(session_r, session);
     session_id = session_r->store.session_id();
     auto acquired = session_r->run_controller()->reserve_maintenance();
     expect(acquired.has_value(), acquired ? "RPC fixture acquires exclusive maintenance" : acquired.error().format());
@@ -698,7 +786,7 @@ void test_app_rpc_maintenance_reservation_blocks_generic_mutation()
   std::istringstream in("{\"id\":\"new\",\"type\":\"new_session\"}\n");
   std::ostringstream out;
   auto result = ava::app::run_rpc_loop(session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat session_r(session);
+  SCOPED_CRITICAL_AREA_R(session_r, session);
   expect(result && session_r->store.session_id() == session_id && out.str().find("\"code\":\"invalid_request\"") != std::string::npos &&
              out.str().find("exclusive session maintenance") != std::string::npos,
          "central RPC mutation gate observes maintenance without classifying it as a normal active run");

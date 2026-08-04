@@ -22,6 +22,7 @@ namespace ava::plugin {
 namespace {
 
 constexpr int kMaxDrainReadsPerPoll = 16;
+constexpr int kPluginCancellationPollMilliseconds = 25;
 
 std::string proxy_response_json(std::string_view request_id, PluginProxyResponse const& response)
 {
@@ -70,6 +71,19 @@ bool error_is_canceled(ava::core::Error const& error)
   return error.message() == "plugin startup canceled" || error.message() == "plugin tool call canceled" || error.message() == "plugin command call canceled" ||
          error.message() == "plugin event observation canceled" || error.message() == "plugin resource list canceled" ||
          error.message() == "plugin resource read canceled" || error.message() == "plugin request canceled" || error.message() == "tool canceled";
+}
+
+bool child_exit_observed_without_reaping(pid_t child_pid) noexcept
+{
+  if (child_pid <= 0)
+    return true;
+  siginfo_t info{};
+  int waited = 0;
+  do
+  {
+    waited = waitid(P_PID, static_cast<id_t>(child_pid), &info, WEXITED | WNOHANG | WNOWAIT);
+  } while (waited < 0 && errno == EINTR);
+  return waited < 0 || info.si_pid == child_pid;
 }
 
 std::string_view proxy_capability_for_operation(std::string_view operation)
@@ -349,7 +363,8 @@ ava::core::Result<PluginToolCallResult> PluginProcess::call_tool(std::string_vie
 }
 
 ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::string_view command_name, std::string_view arguments_json, std::string_view call_id,
-                                                                       CancelCallback cancel_requested, PluginProxyHandler proxy_handler)
+                                                                       CancelCallback cancel_requested, PluginProxyHandler proxy_handler,
+                                                                       PluginUiHandler ui_handler)
 {
   if (command_name.empty())
   {
@@ -368,26 +383,100 @@ ava::core::Result<PluginCommandCallResult> PluginProcess::call_command(std::stri
     return std::unexpected(std::move(error));
   }
 
-  auto const deadline = std::chrono::steady_clock::now() + options_.request_timeout;
+  auto const started_at = std::chrono::steady_clock::now();
+  auto deadline = started_at + options_.request_timeout;
+  auto timeout = options_.request_timeout;
+  if (ui_handler)
+  {
+    if (ui_handler.deadline <= started_at || ui_handler.deadline - started_at > kPluginUiCommandDeadlineMax)
+    {
+      terminate_child();
+      return std::unexpected(protocol_error("plugin UI command deadline is invalid or expired", manifest_));
+    }
+    deadline = ui_handler.deadline;
+    timeout = std::max(std::chrono::milliseconds(1), std::chrono::duration_cast<std::chrono::milliseconds>(ui_handler.deadline - started_at));
+  }
+
   std::string const request_id = call_id.empty() ? "ava_" + std::to_string(next_request_id_++) : "ava_command_" + std::string(call_id);
   std::string request = "{\"id\":" + json_string(request_id) + ",\"type\":\"command.call\",\"command\":" + json_string(command_name) +
                         ",\"arguments\":" + std::string(arguments_json) + ",\"context\":{\"call_id\":" + json_string(call_id) +
                         ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}}";
-  if (auto written = write_record(request, deadline, options_.request_timeout, "timed out writing plugin command request", cancel_requested); !written)
+  if (auto written = write_record(request, deadline, timeout, "timed out writing plugin command request", cancel_requested); !written)
   {
     return std::unexpected(std::move(written.error()));
   }
 
+  PluginUiProtocolState ui_state;
   while (true)
   {
-    auto record = read_record(deadline, options_.request_timeout, "timed out waiting for plugin command result",
-                              "plugin process closed stdout before plugin command result", cancel_requested);
+    auto record = read_record(deadline, timeout, "timed out waiting for plugin command result", "plugin process closed stdout before plugin command result",
+                              cancel_requested);
     if (!record)
       return std::unexpected(std::move(record.error()));
     auto result = parse_command_result_response(*record, request_id);
     if (result)
       return *result;
-    auto proxy_handled = handle_proxy_record(*record, deadline, options_.request_timeout, proxy_handler, cancel_requested);
+
+    auto const record_type = ava::core::json::string_field(*record, "type");
+    if (record_type && is_plugin_ui_record_type(*record_type))
+    {
+      auto ui_request = parse_plugin_ui_request(*record, ui_state);
+      if (!ui_request || !ui_handler || !plugin_has_capability(manifest_, ui_request ? plugin_ui_request_capability(*ui_request) : std::string_view{}))
+      {
+        terminate_child();
+        return std::unexpected(protocol_error("plugin UI request is invalid or unauthorized", manifest_));
+      }
+      auto const ui_child_pid = static_cast<pid_t>(pid_);
+      auto ui_cancel_requested = [cancel_requested, deadline, ui_child_pid] {
+        return is_canceled(cancel_requested) || std::chrono::steady_clock::now() >= deadline || child_exit_observed_without_reaping(ui_child_pid);
+      };
+      ava::core::Result<PluginUiAction> action = [&]() -> ava::core::Result<PluginUiAction> {
+        try
+        {
+          return ui_handler.callback(*ui_request, deadline, ui_cancel_requested);
+        }
+        catch (...)
+        {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "plugin UI handler failed"));
+        }
+      }();
+      if (is_canceled(cancel_requested))
+      {
+        terminate_child();
+        return std::unexpected(canceled_error("plugin command call canceled", manifest_));
+      }
+      if (std::chrono::steady_clock::now() >= deadline)
+      {
+        terminate_child();
+        return std::unexpected(protocol_error("timed out handling plugin UI request", manifest_));
+      }
+      if (!action)
+      {
+        terminate_child();
+        return std::unexpected(protocol_error("plugin UI handler failed", manifest_));
+      }
+      if (auto valid = validate_plugin_ui_action(*ui_request, *action); !valid)
+      {
+        terminate_child();
+        return std::unexpected(protocol_error("plugin UI handler returned an invalid action", manifest_));
+      }
+      auto response = serialize_plugin_ui_action(plugin_ui_request_id(*ui_request), *action);
+      if (!response)
+      {
+        terminate_child();
+        return std::unexpected(protocol_error("plugin UI action serialization failed", manifest_));
+      }
+      if (auto written = write_record(*response, deadline, timeout, "timed out writing plugin UI action", cancel_requested); !written)
+        return std::unexpected(std::move(written.error()));
+      continue;
+    }
+    if (record_type && record_type->starts_with("ui."))
+    {
+      terminate_child();
+      return std::unexpected(protocol_error("plugin UI request is invalid or unauthorized", manifest_));
+    }
+
+    auto proxy_handled = handle_proxy_record(*record, deadline, timeout, proxy_handler, cancel_requested);
     if (!proxy_handled)
       return std::unexpected(std::move(proxy_handled.error()));
     if (*proxy_handled)
@@ -656,7 +745,7 @@ ava::core::Result<std::string> PluginProcess::read_record(std::chrono::steady_cl
     }
 
     std::array<pollfd, 2> fds{pollfd{.fd = stdout_fd_, .events = POLLIN, .revents = 0}, pollfd{.fd = stderr_fd_, .events = POLLIN, .revents = 0}};
-    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
+    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), kPluginCancellationPollMilliseconds));
     int const polled = poll(fds.data(), fds.size(), timeout);
     if (polled < 0)
     {
@@ -699,7 +788,7 @@ ava::core::VoidResult PluginProcess::wait_for_writable(std::chrono::steady_clock
       return std::unexpected(std::move(error));
     }
     std::array<pollfd, 2> fds{pollfd{.fd = stdin_fd_, .events = POLLOUT, .revents = 0}, pollfd{.fd = stderr_fd_, .events = POLLIN, .revents = 0}};
-    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), 100));
+    int const timeout = static_cast<int>(std::min<std::size_t>(remaining_ms(deadline), kPluginCancellationPollMilliseconds));
     int const polled = poll(fds.data(), fds.size(), timeout);
     if (polled < 0)
     {

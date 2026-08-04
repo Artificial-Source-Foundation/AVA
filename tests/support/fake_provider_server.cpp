@@ -652,6 +652,7 @@ int main(int argc, char** argv)
   std::string const target_path = argc == 6 ? argv[5] : "";
   int const request_count =
       scenario == "http-error"            ? 3
+      : scenario == "branch-summary"      ? 12
       : scenario == "text-three"          ? 3
       : scenario == "streaming-scroll"    ? 2
       : scenario == "end-to-end-workflow" ? 6
@@ -732,6 +733,8 @@ int main(int argc, char** argv)
       std::this_thread::sleep_for(delay);
 
     auto provider_response = response_for(scenario, request_index, target_path);
+    if (scenario == "branch-summary" && request.find("Summarize only the supplied abandoned parent-session branch") != std::string::npos)
+      provider_response.body = text_body("BRANCH-SUMMARY-SECRET-PAYLOAD-91A useful abandoned parent context");
     if (scenario == "subagent-workspace" && request_index > 0)
     {
       if (request.find("You are AVA's general subagent") != std::string::npos)

@@ -401,9 +401,12 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     }
     if (exact_command(submitted, "/setup"))
     {
+      // Exact local slash command: never append/session/provider. Runtime opens the wizard.
       push_history(input_history, submitted);
       if (!action_controller_.open_setup_wizard())
+      {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
     if (auto attach_target = attach_command_argument(submitted))

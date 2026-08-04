@@ -5,6 +5,7 @@
 #include "ava/agent/subagent_launch.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/runtime_plugin_ui.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
@@ -84,6 +85,8 @@ struct TuiRuntimeStateSnapshot
   // Effective display presentation owned by the application display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  // Application-owned path-free startup/resources snapshot. Omitted rather than
+  // rebuilt by the TUI. Never contains paths, credentials, or prompt contents.
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -125,17 +128,10 @@ struct TuiSubmitContext
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
   ava::agent::SubagentLaunchSink on_subagent_launch;
+  std::optional<TuiPluginUiEndpoint> plugin_ui;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-// Narrow TUI outcome for application-owned display settings polls.
-enum class DisplaySettingsReloadPollOutcome
-{
-  TerminalFailure,
-  Unchanged,
-  Applied,
 };
 
 // Narrow TUI outcomes for live subagent workspace controls. Mappers and
@@ -152,6 +148,16 @@ enum class SubagentWorkspacePromoteOutcome
   CurrentlyBackground,
   AlreadyFinished,
   PromotionUnavailable,
+};
+
+// Narrow TUI outcome for application-owned display settings polls.
+// Applied means the app delivered a fresh authoritative snapshot; callers must not
+// infer applied/unchanged by comparing presentation values under an active overlay.
+enum class DisplaySettingsReloadPollOutcome
+{
+  TerminalFailure,
+  Unchanged,
+  Applied,
 };
 
 enum class TuiBranchSummaryPhase
@@ -244,14 +250,18 @@ struct TuiRuntimeOptions
   std::optional<std::size_t> workspace_catalog_generation = std::nullopt;
   std::vector<ThemeOptionItem> custom_themes = {};
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
+  std::vector<TodoItem> initial_todos = {};
   bool show_images = true;
   std::size_t image_width_cells = 60;
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
+  // Interactive TUI only. Automatic open requires absent current-version state and height ≥12.
   bool auto_open_setup_wizard = false;
+  // Path-free diagnostic when onboarding state is unsupported/malformed; presentation-only.
   std::optional<std::string> setup_state_diagnostic = std::nullopt;
   SetupReadinessSnapshot setup_readiness = {};
+  // Invoked only when setup actually opens. The application callback is presence-only
+  // and must never materialize or return credential values.
   std::function<SetupReadinessSnapshot()> on_setup_readiness;
-  std::vector<TodoItem> initial_todos = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
@@ -268,6 +278,9 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(bool)> on_cycle_model;
   std::function<ava::core::Result<TuiKeyBindingReloadResult>()> on_reload_key_bindings;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>()> on_reload_display_settings;
+  // Optional snapshot is the explicit applied/unchanged signal from the application:
+  // nullopt = unchanged, some(snapshot) = applied. unexpected = terminal apply/watch failure.
+  // The TUI action layer maps this to DisplaySettingsReloadPollOutcome and must not compare values.
   std::function<ava::core::Result<std::optional<TuiRuntimeStateSnapshot>>()> on_maybe_reload_display_settings;
   std::function<SelectListView()> model_selector_view;
   // The bool is true for the staged model-selection handoff, allowing an
@@ -296,6 +309,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(std::string_view)> on_session_selector_unarchive;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_parent;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selector_branch_child;
+  // Hidden selector values are the only session identities crossing this boundary.
+  // All returned operation state is path-free and fixed-code only.
   std::function<ava::core::Result<TuiBranchSummarySnapshot>(std::string_view)> on_branch_summary_prepare;
   std::function<TuiBranchSummarySnapshot()> branch_summary_snapshot;
   std::function<ava::core::Result<bool>(std::uint64_t)> on_branch_summary_confirm;
@@ -304,6 +319,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
+  // Persist only completed/skipped onboarding status. Theme confirmation reuses on_settings_selected.
+  // Never performs auth/session/provider writes.
   std::function<ava::core::VoidResult(SetupWizardPersistStatus)> on_setup_persist_status;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   // No value clears the explicit AVA level and restores model/provider default.
@@ -319,7 +336,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>(SelectListView const&, std::string_view, bool)> on_scoped_model_reorder;
   std::function<ava::core::Result<std::string>()> on_scoped_model_save;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_session_selected;
-
+  // Runs after the composer loop exits while curses is still active. Application-scoped
+  // workers that can notify this runtime must be canceled and joined here.
   std::function<void()> on_before_tui_shutdown;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -338,13 +356,14 @@ enum class SettingsSection
   About,
 };
 
-[[nodiscard]] SelectListView settings_select_list_view_for_section(SettingsSection section, ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings,
-                                                                   std::string footer_hint = {});
-
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);
 [[nodiscard]] SelectListView hotkeys_select_list_view(TuiKeyBindings const& bindings, std::string footer_hint = {});
+// Root settings selector with shallow section rows.
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings, std::string footer_hint = {});
 [[nodiscard]] SelectListView settings_select_list_view(ComposerSnapshot const& snapshot, std::string footer_hint = {});
+[[nodiscard]] SelectListView settings_select_list_view_for_section(SettingsSection section, ComposerSnapshot const& snapshot, TuiKeyBindings const& bindings,
+                                                                   std::string footer_hint = {});
+// Read-only host-owned startup overview list. Enter closes without backend mutation.
 [[nodiscard]] SelectListView overview_select_list_view(StartupOverviewSnapshot const& overview, std::string footer_hint = {});
 [[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt);
 

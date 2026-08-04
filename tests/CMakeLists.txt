@@ -76,8 +76,8 @@ set(AVA_TESTS_SOURCES
   "agent_tool_dispatcher_tests.cpp"
   "agent_todo_tests.cpp"
   "app_compaction_tests.cpp"
-  "app_command_registry_tests.cpp"
   "branch_summary_coordinator_tests.cpp"
+  "app_command_registry_tests.cpp"
   "app_print_tests.cpp"
   "app_rpc_queue_tests.cpp"
   "app_rpc_resolver_tests.cpp"
@@ -117,6 +117,7 @@ set(AVA_TESTS_SOURCES
   "mcp_tests.cpp"
   "permission_rules_tests.cpp"
   "plugin_tests.cpp"
+  "plugin_ui_tests.cpp"
   "provider_anthropic_tests.cpp"
   "provider_gemini_tests.cpp"
   "provider_live_smoke_tests.cpp"
@@ -196,12 +197,12 @@ set(AVA_TEST_SUITES
   session
   session_run_controller
   session_title_coordinator
+  branch_summary_coordinator
   subagent_coordinator
   subagent_delivery_manager
   core_json_permission
   app_command_classification
   app_command_registry
-  branch_summary_coordinator
   tools
   config_context_auth_oauth
   provider_config
@@ -227,6 +228,7 @@ set(AVA_TEST_SUITES
   tool_scheduler
   lsp
   plugin
+  plugin_ui
   mcp
   permission_rules
   tui_composer
@@ -624,6 +626,13 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.session_reference_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.plugin_ui_authority_inventory
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugin_ui_authority_inventory_test.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.plugin_ui_authority_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.acp_interop_manifest
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/acp_interop_manifest_test.py
@@ -744,13 +753,13 @@ if(Python3_Interpreter_FOUND)
     nested_settings_preview
     startup_overview
     setup_wizard
-    branch_summary
     active_run
     restore_followup
     streaming_scroll
     transcript_search
     transcript_selection
     subagent_workspace
+    branch_summary
     main_startup_trust_keybinds
     main_models_selectors
     main_editor_input
@@ -758,7 +767,8 @@ if(Python3_Interpreter_FOUND)
     main_permission_flow
     main_question_flow
     main_session_mgmt
-    main_paste_scrollback_attach)
+    main_paste_scrollback_attach
+    plugin_ui)
   foreach(AVA_TUI_TMUX_SMOKE_SCENARIO IN LISTS AVA_TUI_TMUX_SMOKE_SCENARIOS)
     add_test(
       NAME ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}

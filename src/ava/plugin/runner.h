@@ -2,6 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/plugin/manifest.h"
+#include "ava/plugin/ui_protocol.h"
 #include "ava/core/result.h"
 
 #include <chrono>
@@ -132,6 +133,20 @@ struct PluginProxyResponse
 
 using PluginProxyHandler = std::function<ava::core::Result<PluginProxyResponse>(PluginProxyRequest const&, CancelCallback)>;
 
+inline constexpr std::chrono::seconds kPluginUiCommandDeadlineMax{120};
+
+struct PluginUiHandler
+{
+  using Callback = std::function<ava::core::Result<PluginUiAction>(PluginUiRequest const&, std::chrono::steady_clock::time_point, CancelCallback)>;
+
+  std::chrono::steady_clock::time_point deadline{};
+  Callback callback = nullptr;
+
+  [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(callback); }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 class PluginProcess final
 {
  public:
@@ -155,7 +170,7 @@ class PluginProcess final
                                                                   CancelCallback cancel_requested = nullptr, PluginProxyHandler proxy_handler = nullptr);
   [[nodiscard]] ava::core::Result<PluginCommandCallResult> call_command(std::string_view command_name, std::string_view arguments_json,
                                                                         std::string_view call_id = {}, CancelCallback cancel_requested = nullptr,
-                                                                        PluginProxyHandler proxy_handler = nullptr);
+                                                                        PluginProxyHandler proxy_handler = nullptr, PluginUiHandler ui_handler = {});
   [[nodiscard]] ava::core::Result<PluginEventObserveResult> observe_event(std::string_view event_name, std::string_view payload_json,
                                                                           std::string_view call_id = {}, CancelCallback cancel_requested = nullptr,
                                                                           PluginProxyHandler proxy_handler = nullptr);

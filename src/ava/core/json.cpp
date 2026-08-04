@@ -79,7 +79,7 @@ bool is_json_whitespace(char ch)
   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
 }
 
-bool nesting_within_limit(std::string_view value) noexcept
+bool nesting_within_limit(std::string_view value, std::size_t max_depth) noexcept
 {
   std::size_t depth = 0;
   bool in_string = false;
@@ -103,7 +103,7 @@ bool nesting_within_limit(std::string_view value) noexcept
     }
     if (ch == '{' || ch == '[')
     {
-      if (depth == kMaxNestingDepth)
+      if (depth == max_depth)
         return false;
       ++depth;
     }
@@ -118,7 +118,7 @@ bool nesting_within_limit(std::string_view value) noexcept
 class JsonValidator
 {
  public:
-  explicit JsonValidator(std::string_view value) : value_(value) { }
+  explicit JsonValidator(std::string_view value, std::size_t max_depth = kMaxNestingDepth) : value_(value), max_depth_(max_depth) { }
 
   [[nodiscard]] bool valid_object()
   {
@@ -129,7 +129,7 @@ class JsonValidator
       return false;
     // Preflight iteratively so hostile over-depth input is rejected before the
     // recursive syntax validator can consume stack.
-    if (!nesting_within_limit(value_))
+    if (!nesting_within_limit(value_, max_depth_))
       return false;
     skip_ws();
     if (!parse_object())
@@ -140,7 +140,7 @@ class JsonValidator
 
   [[nodiscard]] bool valid_array()
   {
-    if (!is_valid_utf8(value_) || !nesting_within_limit(value_))
+    if (!is_valid_utf8(value_) || !nesting_within_limit(value_, max_depth_))
       return false;
     skip_ws();
     if (!parse_array())
@@ -304,6 +304,7 @@ class JsonValidator
   }
 
   std::string_view value_;
+  std::size_t max_depth_ = kMaxNestingDepth;
   std::size_t offset_ = 0;
 };
 
@@ -859,6 +860,12 @@ std::vector<std::string> strings_in_array_field(std::string_view object, std::st
 bool is_valid_object(std::string_view value)
 {
   return JsonValidator(value).valid_object();
+}
+
+bool is_valid_object_with_max_depth(std::string_view value, std::size_t max_depth)
+{
+  constexpr std::size_t kMaximumSupportedDepth = 128;
+  return max_depth > 0 && max_depth <= kMaximumSupportedDepth && JsonValidator(value, max_depth).valid_object();
 }
 
 }  // namespace ava::core::json

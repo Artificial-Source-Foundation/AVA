@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/agent/question.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime_actions_internal.h"
@@ -10,6 +9,7 @@
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
+#include "ava/tui/runtime_plugin_ui_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_subagent_workspace_internal.h"
@@ -18,6 +18,7 @@
 #include "ava/tui/terminal.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/ids.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -132,13 +133,15 @@ void RuntimeActiveRunState::discard_for_session_transition()
 
 RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                        RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator,
-                                                       RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                                                       TranscriptSearchController& transcript_search, RuntimeSubagentWorkspaceController& subagent_workspace)
+                                                       RuntimePluginUiCoordinator& plugin_ui, RuntimeNavigationController& navigation,
+                                                       RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
+                                                       RuntimeSubagentWorkspaceController& subagent_workspace)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
       renderer_(renderer),
       prompt_coordinator_(prompt_coordinator),
+      plugin_ui_(plugin_ui),
       navigation_(navigation),
       action_controller_(action_controller),
       transcript_search_(transcript_search),
@@ -187,6 +190,7 @@ void RuntimeActiveRunController::settle_turn_activity(RuntimeActiveRunState& sta
 bool RuntimeActiveRunController::request_stop(RuntimeActiveRunState& state)
 {
   bool const was_already_requested = state.run_cancel_requested.exchange(true);
+  plugin_ui_.cancel_active();
   prompt_coordinator_.fail_pending_requests();
   if (!was_already_requested)
     static_cast<void>(beep());
@@ -202,6 +206,7 @@ void RuntimeActiveRunController::request_close_after_submit(RuntimeActiveRunStat
 {
   state.run_cancel_requested.store(true);
   state.close_after_submit = true;
+  plugin_ui_.cancel_active();
   prompt_coordinator_.fail_pending_requests();
 }
 
@@ -317,13 +322,30 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   auto& selected_slash_command_index = draft_state_.selected_slash_command_index;
   auto& transcript_scroll_offset = renderer_.transcript_scroll_offset;
   auto& ui_mutex = renderer_.ui_mutex;
-  auto render = [&]() -> bool { return renderer_.render(); };
+  auto refresh_plugin_surface_fit = [&]() {
+    refresh_terminal_geometry_from_kernel();
+    auto const [width, height] = terminal_size();
+    snapshot.width = width;
+    snapshot.height = height;
+    return plugin_ui_.cancel_unfittable_surfaces(snapshot);
+  };
+  auto render = [&]() -> bool {
+    static_cast<void>(refresh_plugin_surface_fit());
+    return renderer_.render();
+  };
   auto maybe_reload_display_settings = [&]() -> bool {
-    return action_controller_.maybe_reload_display_settings() != DisplaySettingsReloadPollOutcome::TerminalFailure;
+    auto const outcome = action_controller_.maybe_reload_display_settings();
+    if (outcome == DisplaySettingsReloadPollOutcome::TerminalFailure)
+      return false;
+    // Active-run has no settings preview; still render an applied reload once.
+    if (outcome == DisplaySettingsReloadPollOutcome::Applied)
+      return render();
+    return true;
   };
   auto clear_draft_for_interrupt = [&]() { return action_controller_.clear_draft_for_interrupt(); };
   auto apply_runtime_state_snapshot = [&](TuiRuntimeStateSnapshot runtime_state) {
-    return apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer, transcript_search_,
+    // Same shared overview sync path as the idle runtime loop.
+    return apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state_, draft_state_, renderer_, transcript_search_,
                                                                      subagent_workspace_, action_controller_.active_select_list(), std::move(runtime_state));
   };
   auto refresh_token_status = [&]() { presentation_state_.refresh_token_status(options); };
@@ -353,7 +375,6 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   event_state.todos = sidebar.todos;
   auto& run_cancel_requested = state.run_cancel_requested;
   auto& close_after_submit = state.close_after_submit;
-  auto cancel_requested = [&run_cancel_requested]() { return run_cancel_requested.load(); };
   auto& active_queues = state.active_queues;
   auto& event_context_mutex = state.event_context_mutex;
   auto& current_event_context = state.current_event_context;
@@ -382,6 +403,8 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   if (submit_request_id.empty())
     submit_request_id = ava::core::make_id("request");
   set_current_request_id(submit_request_id);
+  auto plugin_ui_endpoint = plugin_ui_.begin_submission(submitted, submit_request_id);
+  auto cancel_requested = [&run_cancel_requested, this]() { return run_cancel_requested.load() || plugin_ui_.deadline_reached(); };
   auto runtime_event_queue_sink = [&]() -> ava::event::RuntimeEventSink {
     return [&](ava::event::RuntimeEvent const& event) {
       ava::event::EventEnvelopeContext context_snapshot;
@@ -414,6 +437,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   snapshot.processing = true;
   if (!render())
   {
+    plugin_ui_.finish_submission(snapshot);
     terminal_write_failed = true;
     return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};
   }
@@ -438,17 +462,21 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                                            .take_next_follow_up = take_next_follow_up,
                                                            .mark_follow_up_started = mark_follow_up_started,
                                                            .on_subagent_launch = event_queue.subagent_launch_sink(),
+                                                           .plugin_ui = plugin_ui_endpoint,
                                                            .image_attachments = submit_image_attachments});
     });
     bool render_failed = false;
     auto fail_active_run = [&]() {
       terminal_write_failed = true;
       render_failed = true;
+      run_cancel_requested.store(true);
+      plugin_ui_.cancel_active();
       prompt_coordinator.fail_pending_requests();
     };
     auto service_pending_prompt = [&]() {
       if (!prompt_coordinator.service_pending_request(cancel_requested, request_stop, [&]() {
             transcript_search_.close_before_prompt();
+            // Permission/question authority must explicitly close overview so it cannot hide and reappear.
             close_startup_overview_presentation(presentation_state_.snapshot, action_controller_.active_select_list());
           }))
         return detail::PendingPromptServiceResult::None;
@@ -456,12 +484,46 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         return detail::PendingPromptServiceResult::Failed;
       return detail::PendingPromptServiceResult::Serviced;
     };
+    auto plugin_host_modal_conflict = [&]() {
+      return snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
+             transcript_search_.is_open() || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
+             file_reference_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references) ||
+             path_completion_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references, snapshot.path_completion_force_active);
+    };
+    auto poll_plugin_ui = [&]() {
+      auto const geometry_changed = refresh_plugin_surface_fit();
+      auto const polled = plugin_ui_.poll(snapshot, plugin_host_modal_conflict());
+      if (polled.deadline_expired && !request_stop())
+        return false;
+      return (!geometry_changed && !polled.changed) || renderer.request_render();
+    };
     auto dispatch_retained_input = [&](runtime_input::RuntimeInput const& input) {
+      if (snapshot.plugin_ui_modal)
+      {
+        // Ctrl+C cannot authorize a plugin action and retains its stop semantics.
+        // Every other key uses freshly queried terminal geometry before the
+        // modal can navigate or resolve; KEY_RESIZE always repaints afterward.
+        auto const geometry_changed = input.event.key != Key::CtrlC && refresh_plugin_surface_fit();
+        if (input.resize)
+          return renderer.render();
+        if (geometry_changed)
+          return renderer.request_render();
+        auto const plugin_result = plugin_ui_.handle_input(snapshot, input.event);
+        if (plugin_result == TuiPluginUiInputResult::RequestStop)
+          return request_stop();
+        if (plugin_result == TuiPluginUiInputResult::Redraw)
+          return renderer.request_render();
+        if (plugin_result == TuiPluginUiInputResult::Handled)
+          return true;
+      }
       if (transcript_search_.is_open())
       {
         auto const result = prompt_coordinator.dispatch_search_input_with_prompt_precedence(
             [&]() { return handle_transcript_search_input(input).value_or(false); }, cancel_requested, request_stop,
-            [&]() { transcript_search_.close_before_prompt(); });
+            [&]() {
+              transcript_search_.close_before_prompt();
+              close_startup_overview_presentation(presentation_state_.snapshot, action_controller_.active_select_list());
+            });
         if (result == SearchInputPromptDispatchResult::PromptServiced)
         {
           if (drain_events(state) != RuntimeEventDrainResult::RenderFailed)
@@ -494,9 +556,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
           snapshot.selected_slash_command_index = selected_slash_command_index;
           if (!render())
           {
-            terminal_write_failed = true;
-            render_failed = true;
-            prompt_coordinator.fail_pending_requests();
+            fail_active_run();
             break;
           }
           continue;
@@ -512,6 +572,11 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       }
       if (prompt_result == detail::PendingPromptServiceResult::Serviced)
         continue;
+      if (!poll_plugin_ui())
+      {
+        fail_active_run();
+        break;
+      }
       auto active_input = poll_curses_input();
       auto const input_checked_at = std::chrono::steady_clock::now();
       auto const pending_frame_due = renderer.has_pending_render() && renderer.time_until_pending_render() <= std::chrono::steady_clock::duration::zero();
@@ -519,7 +584,10 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       if (input_decision == detail::ActiveRunInputReadDecision::DrainBufferedInput)
       {
         if (!dispatch_retained_input(*active_input))
+        {
+          fail_active_run();
           break;
+        }
         if (close_after_submit)
           break;
         continue;
@@ -555,43 +623,42 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       auto const drain_result = drain_events(state);
       if (drain_result == RuntimeEventDrainResult::RenderFailed)
       {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
+        fail_active_run();
         break;
       }
       if (!subagent_workspace_.active() && transcript_scroll_offset == 0 && !maybe_reload_display_settings())
       {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
+        fail_active_run();
         break;
       }
       if (spinner_advanced && !subagent_workspace_.active() && !renderer.request_render(FrameRenderKind::Footer))
       {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
+        fail_active_run();
         break;
       }
       if (active_input)
       {
         if (!dispatch_retained_input(*active_input))
+        {
+          fail_active_run();
           break;
+        }
         if (close_after_submit)
           break;
       }
       auto const frame_was_pending = renderer.has_pending_render();
+      static_cast<void>(refresh_plugin_surface_fit());
       if (!renderer.flush_pending_render_if_due())
       {
-        terminal_write_failed = true;
-        render_failed = true;
-        prompt_coordinator.fail_pending_requests();
+        fail_active_run();
         break;
       }
       if (frame_was_pending && !renderer.has_pending_render())
         cadence.frame_painted(std::chrono::steady_clock::now());
     }
+    // Clear and unblock the TUI-local presentation before joining the submit
+    // worker or applying an application/session transition.
+    plugin_ui_.finish_submission(snapshot);
     result = submit_future.get();
     if (result.state_snapshot)
     {
@@ -628,6 +695,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     if (render_failed)
       return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};
   }
+  plugin_ui_.finish_submission(snapshot);
   prompt_coordinator.set_audit_sink(nullptr);
   if (terminal_signal_received())
     return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};

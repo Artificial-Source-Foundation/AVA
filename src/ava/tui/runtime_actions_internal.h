@@ -27,7 +27,9 @@ class RuntimeActionController final
   RuntimeActionController(RuntimeActionController const&) = delete;
   RuntimeActionController& operator=(RuntimeActionController const&) = delete;
 
-  // Applied hydrates without a final render so the caller can reapply preview before one paint.
+  // Rate-limited poll. TerminalFailure only when a required render fails.
+  // Applied hydrates the authoritative snapshot without a final render so callers can
+  // rebase/reapply settings preview (if any) and paint exactly once afterward.
   [[nodiscard]] DisplaySettingsReloadPollOutcome maybe_reload_display_settings();
   bool clear_draft_for_interrupt();
   [[nodiscard]] bool open_external_editor();
@@ -41,10 +43,15 @@ class RuntimeActionController final
   [[nodiscard]] bool open_reasoning_selector(bool chained_from_model_selection = false);
   [[nodiscard]] bool open_scoped_model_selector();
   [[nodiscard]] bool open_session_selector();
+  // Toggle the read-only startup overview select-list. No-op when no snapshot is present.
   [[nodiscard]] bool toggle_startup_overview();
+  // Open or rebuild the local-only first-run setup wizard. Host-owned; no backend mutation here.
+  // Wired from runtime with a process-local open callback because preview state lives there.
   void set_open_setup_wizard(std::function<bool()> opener) { open_setup_wizard_ = std::move(opener); }
   [[nodiscard]] bool open_setup_wizard();
+  // Shared with snapshot-apply / prompt-preempt paths that must close or rebuild overview.
   [[nodiscard]] ActiveSelectList& active_select_list() noexcept { return active_select_list_; }
+  [[nodiscard]] ActiveSelectList const& active_select_list() const noexcept { return active_select_list_; }
   [[nodiscard]] bool open_fork_user_turn_selector(std::string_view initial_query = {});
   [[nodiscard]] bool open_copy_user_turn_selector(std::string_view initial_query = {});
   void cycle_model(bool forward);
@@ -58,9 +65,9 @@ class RuntimeActionController final
   RuntimeRenderer& renderer_;
   ActiveSelectList& active_select_list_;
   std::optional<PendingSessionArchiveAction>& session_archive_confirmation_;
-  std::function<bool()> open_setup_wizard_;
   std::chrono::steady_clock::time_point next_display_reload_check_;
   std::optional<std::string> last_display_reload_error_;
+  std::function<bool()> open_setup_wizard_;
 };
 
 }  // namespace ava::tui

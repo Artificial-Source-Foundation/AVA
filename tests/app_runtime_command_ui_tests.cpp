@@ -1,33 +1,33 @@
 #include "sys.h"
-#include <unistd.h>
-#include <sys/stat.h>
-#include "ava/config/auth.h"
-#include "ava/app/onboarding_state.h"
 #include "tests/app_runtime_test_declarations.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
+#include "ava/app/onboarding_state.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/startup_overview.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/theme.h"
+#include "ava/config/auth.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/fingerprint.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
 #include <filesystem>
-#include <ranges>
 #include <fstream>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
+#include <sys/stat.h>
+#include <unistd.h>
 #ifndef AVA_FAKE_MCP_SERVER_PATH
 #define AVA_FAKE_MCP_SERVER_PATH ""
 #endif
@@ -893,7 +893,7 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   expect(overview_cmd && overview_cmd->handled && !overview_cmd->output.empty() && overview_cmd->output[0].find("/overview") != std::string::npos &&
              overview_cmd->output[0].find("interactive TUI") != std::string::npos,
          "command dispatcher /overview is a TUI-owned view with a non-mutating headless notice");
-  auto setup_cmd = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/setup"});
+  auto setup_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/setup"});
   expect(setup_cmd && setup_cmd->handled && !setup_cmd->output.empty() && setup_cmd->output[0].find("interactive TUI") != std::string::npos &&
              setup_cmd->output[0].find("/setup") != std::string::npos,
          "command dispatcher /setup is local-only with a non-mutating headless notice");
@@ -919,6 +919,17 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   expect(plugins_after_enable && plugins_after_enable->handled && !plugins_after_enable->output.empty() &&
              plugins_after_enable->output[0].find("com.example.project  enabled") != std::string::npos,
          "command dispatcher /plugins list reflects enablement state");
+
+  auto overview_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/overview"});
+  expect(overview_cmd && overview_cmd->handled && !overview_cmd->output.empty() && overview_cmd->output[0].find("/overview") != std::string::npos &&
+             overview_cmd->output[0].find("interactive TUI") != std::string::npos,
+         "command dispatcher /overview is a TUI-owned view with a non-mutating headless notice");
+  auto setup_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/setup"});
+  expect(setup_cmd && setup_cmd->handled && !setup_cmd->output.empty() && setup_cmd->output[0].find("interactive TUI") != std::string::npos &&
+             setup_cmd->output[0].find("/setup") != std::string::npos,
+         "command dispatcher /setup is a TUI-owned wizard with a non-mutating headless notice");
+  auto const setup_marker = ava::app::onboarding_state_file(paths);
+  expect(!std::filesystem::exists(setup_marker), "non-TUI /setup must not create onboarding state");
 }
 
 void test_startup_overview_snapshot_bounds_order_redaction()
@@ -1208,7 +1219,6 @@ void test_startup_overview_bounded_lower_bound_counts()
                              [](auto const& item) { return item.group == "Plugins" && item.label == "Resource failures" && item.detail == "0+"; }),
          "expanded overview can show truthful 0+ plugin-failure lower bounds");
 }
-
 
 void test_onboarding_state_load_store_and_readiness()
 {

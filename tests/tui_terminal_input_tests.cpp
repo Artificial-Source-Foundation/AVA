@@ -2584,6 +2584,160 @@ void expect_no_residual_mouse_payload(std::string_view label)
   }
 }
 
+// Same-size geometry refresh must not inject KEY_RESIZE. Plugin surface fit checks
+// refresh repeatedly; unconditional resizeterm floods the input queue on some hosts.
+void test_same_size_geometry_refresh_does_not_inject_key_resize()
+{
+  char const* previous_locale_value = std::setlocale(LC_ALL, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? "C" : previous_locale_value;
+  static_cast<void>(std::setlocale(LC_ALL, ""));
+
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar tmux_guard("TMUX", "");
+
+  int master_fd = ::posix_openpt(O_RDWR | O_NOCTTY);
+  expect(master_fd >= 0, "same-size geometry PTY can open a master");
+  if (master_fd < 0)
+  {
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  if (::grantpt(master_fd) != 0 || ::unlockpt(master_fd) != 0)
+  {
+    expect(false, "same-size geometry PTY can grant/unlock the slave");
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  char* slave_name = ::ptsname(master_fd);
+  expect(slave_name != nullptr, "same-size geometry PTY exposes a slave name");
+  if (slave_name == nullptr)
+  {
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  int slave_fd = ::open(slave_name, O_RDWR | O_NOCTTY);
+  expect(slave_fd >= 0, "same-size geometry PTY can open the slave");
+  if (slave_fd < 0)
+  {
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  winsize size{};
+  size.ws_row = 24;
+  size.ws_col = 80;
+  static_cast<void>(::ioctl(slave_fd, TIOCSWINSZ, &size));
+
+  // Point STDOUT at the PTY so refresh_terminal_geometry_from_kernel's TIOCGWINSZ
+  // observes the controlled geometry rather than the test runner's terminal.
+  int saved_stdout = ::dup(STDOUT_FILENO);
+  expect(saved_stdout >= 0, "same-size geometry PTY can duplicate stdout");
+  if (saved_stdout < 0)
+  {
+    static_cast<void>(::close(slave_fd));
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+  if (::dup2(slave_fd, STDOUT_FILENO) < 0)
+  {
+    expect(false, "same-size geometry PTY can redirect stdout onto the slave");
+    static_cast<void>(::close(saved_stdout));
+    static_cast<void>(::close(slave_fd));
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  int output_fd = ::dup(slave_fd);
+  FILE* input = ::fdopen(slave_fd, "r+");
+  FILE* output = output_fd >= 0 ? ::fdopen(output_fd, "w") : nullptr;
+  expect(input != nullptr && output != nullptr, "same-size geometry PTY can fdopen slave streams");
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    else
+      static_cast<void>(::close(slave_fd));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    else if (output_fd >= 0)
+      static_cast<void>(::close(output_fd));
+    static_cast<void>(::dup2(saved_stdout, STDOUT_FILENO));
+    static_cast<void>(::close(saved_stdout));
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  expect(screen != nullptr, "same-size geometry PTY creates an ncurses screen");
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    static_cast<void>(::dup2(saved_stdout, STDOUT_FILENO));
+    static_cast<void>(::close(saved_stdout));
+    static_cast<void>(::close(master_fd));
+    static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+    return;
+  }
+
+  static_cast<void>(set_term(screen));
+  static_cast<void>(raw());
+  static_cast<void>(noecho());
+  static_cast<void>(keypad(stdscr, TRUE));
+  static_cast<void>(wtimeout(stdscr, 0));
+  // Align ncurses geometry with the controlled PTY size once (real resize path).
+  static_cast<void>(resizeterm(static_cast<int>(size.ws_row), static_cast<int>(size.ws_col)));
+  flushinp();
+
+  auto drain_resize_events = []() -> int {
+    int resize_count = 0;
+    for (int i = 0; i < 64; ++i)
+    {
+      auto input_event = ava::tui::runtime_input::poll_curses_input();
+      if (!input_event)
+        break;
+      if (input_event->resize)
+        ++resize_count;
+    }
+    return resize_count;
+  };
+  static_cast<void>(drain_resize_events());
+
+  expect(LINES == static_cast<int>(size.ws_row) && COLS == static_cast<int>(size.ws_col), "same-size geometry baseline matches the controlled PTY winsize");
+
+  for (int i = 0; i < 8; ++i) ava::tui::refresh_terminal_geometry_from_kernel();
+
+  auto const same_size_resizes = drain_resize_events();
+  expect(same_size_resizes == 0, "same-size repeated geometry refresh must not inject KEY_RESIZE (got " + std::to_string(same_size_resizes) + ")");
+  expect(LINES == static_cast<int>(size.ws_row) && COLS == static_cast<int>(size.ws_col), "same-size geometry refresh leaves LINES/COLS unchanged");
+
+  // Real resize still applies: kernel size change must update ncurses geometry.
+  winsize grown = size;
+  grown.ws_row = 30;
+  grown.ws_col = 100;
+  static_cast<void>(::ioctl(STDOUT_FILENO, TIOCSWINSZ, &grown));
+  ava::tui::refresh_terminal_geometry_from_kernel();
+  expect(LINES == static_cast<int>(grown.ws_row) && COLS == static_cast<int>(grown.ws_col), "real kernel resize still updates ncurses geometry via resizeterm");
+  // Consuming any KEY_RESIZE from the real path is fine; just drain so teardown is clean.
+  static_cast<void>(drain_resize_events());
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  static_cast<void>(::dup2(saved_stdout, STDOUT_FILENO));
+  static_cast<void>(::close(saved_stdout));
+  static_cast<void>(::close(master_fd));
+  ava::tui::runtime_input::clear_startup_input_queue();
+  static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
+}
+
 // Deterministic openpty/newterm regression for direct terminfo where kmous=ESC[<.
 // Virtual unget_wch tests cannot reproduce ncurses KEY_MOUSE matching + getmouse.
 void test_direct_terminal_ncurses_mouse_sgr_no_composer_leak()
@@ -2798,5 +2952,6 @@ void run_tui_terminal_lifecycle_protocol_tests()
   test_terminal_protocol_lifecycle_kitty_supported_path();
   test_terminal_input_flush_ordering_seam();
   test_external_editor_and_suspend_share_handoff_sequence();
+  test_same_size_geometry_refresh_does_not_inject_key_resize();
   test_direct_terminal_ncurses_mouse_sgr_no_composer_leak();
 }

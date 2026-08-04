@@ -57,6 +57,7 @@ void run_agent_todo_tests();
 void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
+void run_plugin_ui_tests();
 void run_mcp_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
@@ -114,6 +115,7 @@ constexpr std::array kTestSuites{
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
+    TestSuite{"plugin_ui", run_plugin_ui_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},

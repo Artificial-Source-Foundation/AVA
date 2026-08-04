@@ -400,11 +400,11 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   bool runtime_cancellation_does_not_create_a_last_failure_artifact = false;
   if (unlocked_canceled_session_result)
   {
-    ava::app::runtime::session_ts::wat canceled_session_w(*unlocked_canceled_session_result);
-    auto canceled = ava::app::run_prompt(*canceled_session_w, "cancel", provider, canceled_transport, canceled_options);
+    auto canceled = ava::app::run_prompt(*unlocked_canceled_session_result, "cancel", provider, canceled_transport, canceled_options);
+    ava::app::runtime::session_ts::rat canceled_session_r(*unlocked_canceled_session_result);
     runtime_cancellation_does_not_create_a_last_failure_artifact =
         !canceled &&
-        ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session_w->anchor_set()).state == ava::diagnostics::StoredRecordState::Absent;
+        ava::diagnostics::read_last_failure_record(canceled_paths, *canceled_session_r->anchor_set()).state == ava::diagnostics::StoredRecordState::Absent;
   }
   expect(runtime_cancellation_does_not_create_a_last_failure_artifact, "runtime cancellation does not create a last-failure artifact");
 
@@ -420,11 +420,11 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   bool central_runtime_provider_failure_persists_a_strict_message_free_record = false;
   if (unlocked_provider_session_result)
   {
-    ava::app::runtime::session_ts::wat provider_session_w(*unlocked_provider_session_result);
-    auto provider_result = ava::app::run_prompt(*provider_session_w, "fail", provider, provider_transport, provider_options);
+    auto provider_result = ava::app::run_prompt(*unlocked_provider_session_result, "fail", provider, provider_transport, provider_options);
     if (!provider_result)
     {
-      auto provider_failure = ava::diagnostics::read_last_failure_record(provider_paths, *provider_session_w->anchor_set());
+      ava::app::runtime::session_ts::rat provider_session_r(*unlocked_provider_session_result);
+      auto provider_failure = ava::diagnostics::read_last_failure_record(provider_paths, *provider_session_r->anchor_set());
       std::string const provider_body = read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json");
       central_runtime_provider_failure_persists_a_strict_message_free_record =
           provider_failure.record && provider_failure.record->failure.component == ava::diagnostics::ComponentClass::Provider &&
@@ -449,11 +449,11 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   bool central_runtime_tool_failure_persists_the_typed_tool_terminal_class = false;
   if (unlocked_tool_session_result)
   {
-    ava::app::runtime::session_ts::wat tool_session_w(*unlocked_tool_session_result);
-    auto tool_result = ava::app::run_prompt(*tool_session_w, "tool failure", provider, tool_transport, tool_options);
+    auto tool_result = ava::app::run_prompt(*unlocked_tool_session_result, "tool failure", provider, tool_transport, tool_options);
     if (!tool_result)
     {
-      auto tool_failure = ava::diagnostics::read_last_failure_record(tool_paths, *tool_session_w->anchor_set());
+      ava::app::runtime::session_ts::rat tool_session_r(*unlocked_tool_session_result);
+      auto tool_failure = ava::diagnostics::read_last_failure_record(tool_paths, *tool_session_r->anchor_set());
       central_runtime_tool_failure_persists_the_typed_tool_terminal_class =
           tool_failure.record && tool_failure.record->failure.component == ava::diagnostics::ComponentClass::Tool;
     }
@@ -475,11 +475,11 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   bool central_runtime_persistence_failure_persists_the_typed_session_terminal_class = false;
   if (unlocked_failed_session_result)
   {
-    ava::app::runtime::session_ts::wat failed_session_w(*unlocked_failed_session_result);
-    auto session_result = ava::app::run_prompt(*failed_session_w, "session failure", provider, session_transport, session_options);
+    auto session_result = ava::app::run_prompt(*unlocked_failed_session_result, "session failure", provider, session_transport, session_options);
     if (!session_result)
     {
-      auto session_failure = ava::diagnostics::read_last_failure_record(session_paths, *failed_session_w->anchor_set());
+      ava::app::runtime::session_ts::rat failed_session_r(*unlocked_failed_session_result);
+      auto session_failure = ava::diagnostics::read_last_failure_record(session_paths, *failed_session_r->anchor_set());
       central_runtime_persistence_failure_persists_the_typed_session_terminal_class =
           session_failure.record && session_failure.record->failure.component == ava::diagnostics::ComponentClass::Session;
     }
@@ -494,8 +494,7 @@ void test_runtime_failure_boundaries_and_observation_precedence()
   bool subsequent_successful_runtime_does_not_overwrite_the_latest_failure = false;
   if (unlocked_provider_session_result)
   {
-    ava::app::runtime::session_ts::wat provider_session_w(*unlocked_provider_session_result);
-    auto success = ava::app::run_prompt(*provider_session_w, "success", provider, success_transport, provider_options);
+    auto success = ava::app::run_prompt(*unlocked_provider_session_result, "success", provider, success_transport, provider_options);
     if (success)
       subsequent_successful_runtime_does_not_overwrite_the_latest_failure =
           read_all(provider_paths.ava_state_dir / "diagnostics" / "last-failure-v1.json") == preserved;

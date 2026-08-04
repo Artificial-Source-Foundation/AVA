@@ -316,12 +316,15 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto unlocked_session = ava::app::runtime::Session::open(open_context);
-  expect(unlocked_session.has_value(), "runtime private-launch source fixture opens a configured session");
-  if (!unlocked_session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "runtime private-launch source fixture opens a configured session");
+  if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session);
-  auto* session = &*session_w;
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+
+  CRITICAL_AREA_BEGIN_W(session);
+
+  auto const session_id = session_w->store.session_id();
 
   auto task_response = [](std::string_view call_id) {
     return ava::http::HttpResponse{.status_code = 200,
@@ -345,7 +348,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   std::vector<ava::agent::SubagentLaunchNotification> launches;
   std::vector<ava::event::RuntimeEvent> public_events;
   std::vector<ava::event::EventEnvelope> public_task_running_envelopes;
-  ava::app::InteractiveRunQueue tui_turns(session->store.session_id(), "tui-request-initial", nullptr);
+  ava::app::InteractiveRunQueue tui_turns(session_id, "tui-request-initial", nullptr);
   auto const initial_request_id = tui_turns.active_request_id();
   ava::event::EventEnvelopeContext tui_envelope_context;
   tui_envelope_context.request_id = initial_request_id;
@@ -360,8 +363,14 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
       public_task_running_envelopes.push_back(ava::event::to_event_envelope(event, tui_envelope_context));
     return ava::core::VoidResult{};
   };
-  auto default_result = ava::app::run_prompt(*session, "launch default", provider, default_transport, run_options);
-  auto selected = session->set_reasoning(ava::app::runtime::ReasoningSelection{.level = "high", .budget_tokens = std::nullopt, .display = {}});
+
+  CRITICAL_AREA_END_W(session);
+
+  auto default_result = ava::app::run_prompt(unlocked_session, "launch default", provider, default_transport, run_options);
+
+  CRITICAL_AREA_CONTINUE_W(session);
+
+  auto selected = session_w->set_reasoning(ava::app::runtime::ReasoningSelection{.level = "high", .budget_tokens = std::nullopt, .display = {}});
   auto queued = tui_turns.queue_follow_up("launch high");
   auto follow_up = tui_turns.take_next_follow_up();
   auto started = follow_up ? tui_turns.mark_follow_up_started(*follow_up) : ava::core::VoidResult{};
@@ -374,7 +383,10 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   }
   run_options.request_id = follow_up ? follow_up->request_id : std::string("missing-follow-up");
   ava::tests::FakeTransport high_transport({task_response("runtime_task_high"), text_response("parent high")});
-  auto high_result = selected ? ava::app::run_prompt(*session, "launch high", provider, high_transport, run_options)
+
+  CRITICAL_AREA_END_W(session);
+
+  auto high_result = selected ? ava::app::run_prompt(unlocked_session, "launch high", provider, high_transport, run_options)
                               : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(selected.error()));
 
   expect(default_result && high_result, "runtime private-launch source fixture completes both delegated turns: default=" +
@@ -413,7 +425,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
     context.event_id = "event_" + std::to_string(event_index++);
     public_event_bytes += ava::event::serialize_event_envelope_jsonl(ava::event::to_event_envelope(event, context));
   }
-  auto const session_bytes = app_read_binary_file(session->store.session_path());
+  auto const session_bytes = app_read_binary_file(ava::app::runtime::session_ts::rat(unlocked_session)->store.session_path());
   expect(public_event_bytes.find("Configured Launch Model") == std::string::npos,
          "private launch model display stays absent from public runtime event envelopes");
   expect(session_bytes.find("Configured Launch Model") == std::string::npos, "private launch model display stays absent from persisted session bytes");
@@ -436,17 +448,16 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   expect(unlocked_unnamed_session.has_value(), "runtime private-launch source fixture opens an unnamed custom model session");
   if (unlocked_unnamed_session)
   {
-    ava::app::runtime::session_ts::wat unnamed_session_w(*unlocked_unnamed_session);
-    auto& unnamed_session = *unnamed_session_w;
     std::vector<ava::agent::SubagentLaunchNotification> unnamed_launches;
     ava::app::runtime::RunOptions unnamed_options;
     unnamed_options.access_token = "token";
     unnamed_options.request_id = std::nullopt;
     unnamed_options.on_subagent_launch = [&unnamed_launches](auto const& launch) { unnamed_launches.push_back(launch); };
     ava::tests::FakeTransport unnamed_transport({task_response("runtime_task_unnamed"), text_response("parent unnamed")});
-    auto unnamed_result = ava::app::run_prompt(unnamed_session, "launch unnamed", provider, unnamed_transport, unnamed_options);
-    expect(unnamed_result && unnamed_launches.size() == 1 && unnamed_session.model().display_name == "unnamed-launch-model" &&
-               ava::config::proven_configured_model_display_name(unnamed_session.model()).empty() &&
+    auto unnamed_result = ava::app::run_prompt(*unlocked_unnamed_session, "launch unnamed", provider, unnamed_transport, unnamed_options);
+    ava::app::runtime::session_ts::rat unnamed_session_r(*unlocked_unnamed_session);
+    expect(unnamed_result && unnamed_launches.size() == 1 && unnamed_session_r->model().display_name == "unnamed-launch-model" &&
+               ava::config::proven_configured_model_display_name(unnamed_session_r->model()).empty() &&
                unnamed_launches.front().display.model_display_name().empty() && !unnamed_launches.front().request_id.empty() &&
                unnamed_launches.front().request_id == unnamed_launches.front().correlation_id,
            "direct run_prompt generates and consistently uses one admitted request identity while unnamed custom launch display never falls back to ids");
@@ -474,7 +485,6 @@ void test_app_run_prompt_emits_events()
   expect(unlocked_session_result.has_value(), "runtime run test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -490,7 +500,9 @@ void test_app_run_prompt_emits_events()
     events.push_back(event);
     return ava::core::VoidResult{};
   };
-  auto result = ava::app::run_prompt(*session_w, "hello runtime", provider, transport, run_options);
+
+  auto result = ava::app::run_prompt(*unlocked_session_result, "hello runtime", provider, transport, run_options);
+
   expect(result && result->final_text == "runtime answer", "runtime run_prompt returns agent loop result");
   auto const* assistant = events.size() == 4 ? ava::tests::runtime_event_as<ava::event::AssistantMessageEvent>(events[2]) : nullptr;
   auto const* completion = events.size() == 4 ? ava::tests::runtime_event_as<ava::event::CompletionEvent>(events[3]) : nullptr;
@@ -501,7 +513,7 @@ void test_app_run_prompt_emits_events()
          "runtime run_prompt events include final text and completion counters");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("runtime run context") != std::string::npos,
          "runtime run_prompt sends context-augmented system prompt to provider");
-  auto entries = session_w->store.load();
+  auto entries = ava::app::runtime::session_ts::rat(*unlocked_session_result)->store.load();
   expect(entries && entries->size() == 4 && (*entries)[1].type == ava::session::EntryType::UserMessage &&
              (*entries)[2].type == ava::session::EntryType::AssistantOutputItem && (*entries)[3].type == ava::session::EntryType::AssistantTurnCommit,
          "runtime run_prompt persists one committed v4 assistant turn in the runtime session");
@@ -533,7 +545,6 @@ void test_app_run_prompt_expands_file_references()
   expect(unlocked_session_result.has_value(), "runtime file reference test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -549,7 +560,10 @@ void test_app_run_prompt_expands_file_references()
     events.push_back(event);
     return ava::core::VoidResult{};
   };
-  auto result = ava::app::run_prompt(*session_w, "review @src/reference.cpp and @\"my folder/reference file.cpp\"", provider, transport, run_options);
+
+  auto result =
+      ava::app::run_prompt(*unlocked_session_result, "review @src/reference.cpp and @\"my folder/reference file.cpp\"", provider, transport, run_options);
+
   expect(result && result->final_text == "reference answer", "runtime file reference prompt succeeds");
   auto const* user_message = events.size() >= 2 ? ava::tests::runtime_event_as<ava::event::UserMessageEvent>(events[1]) : nullptr;
   expect(user_message && user_message->payload.text.find("Referenced files:") != std::string::npos &&
@@ -562,7 +576,7 @@ void test_app_run_prompt_expands_file_references()
              transport.requests()[0].body.find("--- my folder/reference file.cpp ---") != std::string::npos &&
              transport.requests()[0].body.find("int spaced_reference_symbol()") != std::string::npos,
          "runtime provider request receives bounded plain and quoted referenced file content");
-  auto entries = session_w->store.load();
+  auto entries = ava::app::runtime::session_ts::rat(*unlocked_session_result)->store.load();
   auto const expanded_user_entry = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
                                      return entry.type == ava::session::EntryType::UserMessage &&
                                             entry.data_json.find("int referenced_symbol()") != std::string::npos &&
@@ -590,7 +604,9 @@ void test_app_run_prompt_sends_imported_image_attachment()
   expect(unlocked_session_result.has_value(), "runtime image attachment test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto imported = ava::session::import_image_attachment(session_w->store, image_path);
   expect(imported.has_value(), "runtime image attachment test imports local image into session storage");
@@ -608,7 +624,12 @@ void test_app_run_prompt_sends_imported_image_attachment()
   run_options.access_token = "token";
   run_options.image_attachments = {*imported};
 
-  auto result = ava::app::run_prompt(*session_w, "describe this image", provider, transport, run_options);
+  CRITICAL_AREA_END_W(session);
+
+  auto result = ava::app::run_prompt(unlocked_session, "describe this image", provider, transport, run_options);
+
+  CRITICAL_AREA_CONTINUE_W(session);
+
   expect(result && result->final_text == "image answer", "runtime run_prompt accepts imported image attachments");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("\"type\":\"input_image\"") != std::string::npos &&
              transport.requests()[0].body.find("data:image/png;base64,") != std::string::npos,
@@ -641,6 +662,7 @@ void test_app_clipboard_image_file_override_imports_attachment()
   expect(unlocked_session_result.has_value(), "runtime clipboard image test opens session");
   if (!unlocked_session_result)
     return;
+
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ScopedEnvVar clipboard_file("AVA_CLIPBOARD_IMAGE_FILE", image_path.string());
@@ -671,7 +693,6 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   expect(unlocked_session_result.has_value(), "runtime provider retry test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
@@ -688,7 +709,10 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   bool runtime_retry_cancel = false;
   run_options.cancel_requested = [&runtime_retry_cancel] { return runtime_retry_cancel; };
 
-  auto result = ava::app::run_prompt(*session_w, "retry runtime", provider, transport, run_options);
+  auto result = ava::app::run_prompt(*unlocked_session_result, "retry runtime", provider, transport, run_options);
+
+  ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
          "runtime run_prompt retries transient provider transport failures when enabled");
   expect(std::ranges::any_of(events,
@@ -700,7 +724,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
                              }),
          "runtime run_prompt emits provider retry metadata through the shared event sink");
   events.clear();
-  auto retry_options = ava::app::runtime::runtime_retry_options(*session_w, run_options);
+  auto retry_options = ava::app::runtime::runtime_retry_options(*session_r, run_options);
   expect(retry_options.on_retry != nullptr, "runtime retry options expose provider retry event mapping");
   expect(retry_options.response_retry_decision != nullptr, "runtime retry options install provider response retry classification");
   if (retry_options.response_retry_decision)
@@ -754,7 +778,10 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   expect(unlocked_session_result.has_value(), "observed runtime compaction test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+
+  CRITICAL_AREA_BEGIN_W(session);
+
   session_w->model_selection().model.context_window_tokens = 100;
   auto seeded = session_w->append_owned({.id = "observed-old-context",
                                          .parent_id = "",
@@ -778,7 +805,12 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   run_options.enable_transport_retries = true;
   run_options.observation = observation;
 
-  auto result = ava::app::run_prompt(*session_w, "continue observed run", provider, transport, run_options);
+  CRITICAL_AREA_END_W(session);
+
+  auto result = ava::app::run_prompt(unlocked_session, "continue observed run", provider, transport, run_options);
+
+  CRITICAL_AREA_CONTINUE_W(session);
+
   expect(result && result->final_text == "observed answer" && transport.requests().size() == 3,
          "one scripted run_prompt performs a retried compaction summary then its agent request");
   if (!result)
@@ -846,7 +878,6 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
   expect(unlocked_session_result.has_value(), "runtime tool progress test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -877,8 +908,8 @@ void test_app_run_prompt_emits_tool_progress_and_session_spill()
     return ava::core::VoidResult{};
   };
 
-  auto result = ava::app::run_prompt(*session_w, "run pwd", provider, transport, run_options);
-  auto const spill_dir = session_w->store.session_path().parent_path() / "spill";
+  auto result = ava::app::run_prompt(*unlocked_session_result, "run pwd", provider, transport, run_options);
+  auto const spill_dir = ava::app::runtime::session_ts::rat(*unlocked_session_result)->store.session_path().parent_path() / "spill";
   bool has_spill_file = false;
   std::error_code iter_error;
   for (std::filesystem::directory_iterator it(spill_dir, iter_error), end; !iter_error && it != end; it.increment(iter_error))
@@ -939,6 +970,7 @@ void test_app_first_run_auth_onboarding()
   expect(unlocked_session_result.has_value(), "first-run onboarding test opens session");
   if (!unlocked_session_result)
     return;
+
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   unsetenv("OPENAI_API_KEY");
@@ -986,7 +1018,6 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
   expect(unlocked_session_result.has_value(), "runtime event sink failure test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -1017,7 +1048,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
     return ava::core::VoidResult{};
   };
 
-  auto result = ava::app::run_prompt(unlocked_session, "read with failing sink", provider, transport, run_options);
+  auto result = ava::app::run_prompt(*unlocked_session_result, "read with failing sink", provider, transport, run_options);
   expect(!result && result.error().category() == ava::core::ErrorCategory::Io && result.error().message() == "event sink failed",
          "runtime returns the event sink write failure");
   expect(transport.requests().size() == 1, "event sink failure cancels before the next provider request");

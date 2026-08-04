@@ -673,7 +673,6 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime title trigger session opens" : unlocked_session_result.error().format());
   if (!unlocked_session_result || !coordinator)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   bool title_absent_at_done = false;
   ava::app::runtime::RunOptions options;
@@ -681,6 +680,7 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   options.event_sink = [&](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
     if (event.type() == ava::event::RuntimeEventType::Done)
     {
+      ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
       auto authority = session_w->read_authority_1();
       auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
       auto metadata = entries ? ava::session::session_metadata_from_entries(session_w->store.session_id(), *entries)
@@ -691,15 +691,18 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   };
   ava::provider::OpenAIProvider provider;
   ava::tests::FakeTransport transport({ava::tests::sse_response(ava::tests::final_text_sse("completed answer"))});
-  auto result = ava::app::run_prompt(*session_w, "Implement the runtime title trigger", provider, transport, options);
+  auto result = ava::app::run_prompt(*unlocked_session_result, "Implement the runtime title trigger", provider, transport, options);
   expect(result && result->committed_turn_id && title_absent_at_done, "runtime does not trigger title work from the earlier Done event");
   expect(coordinator->wait_until_idle(3s), "runtime title trigger coordinator becomes idle");
-  auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
+  auto metadata = [&unlocked_session_result] {
+    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    return ava::session::load_session_metadata(session_r->store, session_r->lease());
+  }();
   expect(metadata && metadata->effective_title() == "Five Word Runtime Trigger Title" && state->calls == 1 && coordinator->catalog_generation() == 2,
          "runtime triggers asynchronous title generation only after admission completion succeeds and publishes fallback/refinement catalog generations");
   options.event_sink = nullptr;
   ava::tests::FakeTransport second_transport({ava::tests::sse_response(ava::tests::final_text_sse("second completed answer"))});
-  auto second = ava::app::run_prompt(*session_w, "A later ordinary prompt", provider, second_transport, options);
+  auto second = ava::app::run_prompt(*unlocked_session_result, "A later ordinary prompt", provider, second_transport, options);
   expect(second && coordinator->wait_until_idle(3s) && state->calls == 1 && coordinator->catalog_generation() == 2,
          "later prompts never regenerate an existing automatic title or its catalog generation");
 
@@ -709,12 +712,11 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   expect(unlocked_synthetic_result.has_value(), "synthetic exclusion session opens");
   if (unlocked_synthetic_result)
   {
-    ava::app::runtime::session_ts::wat synthetic_w(*unlocked_synthetic_result);
     ava::app::runtime::RunOptions synthetic_options;
     synthetic_options.access_token = "fake-token";
     synthetic_options.synthetic_subagent_delivery = true;
     ava::tests::FakeTransport synthetic_transport({ava::tests::sse_response(ava::tests::final_text_sse("delivery answer"))});
-    auto synthetic_result = ava::app::run_prompt(*synthetic_w, "synthetic delivery", provider, synthetic_transport, synthetic_options);
+    auto synthetic_result = ava::app::run_prompt(*unlocked_synthetic_result, "synthetic delivery", provider, synthetic_transport, synthetic_options);
     expect(synthetic_result && synthetic_coordinator->wait_until_idle(100ms) && synthetic_state->calls == 0,
            "synthetic subagent-delivery turns never trigger automatic titles");
   }

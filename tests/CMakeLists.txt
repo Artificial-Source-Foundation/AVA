@@ -883,3 +883,34 @@ endforeach()
 if(AVA_AVA_LAUNCHING_TESTS)
   set_property(TEST ${AVA_AVA_LAUNCHING_TESTS} APPEND PROPERTY ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endif()
+
+# --- Debug knob: disable CTest per-test timeouts -------------------------
+# Setting AVA_DEBUG_NO_TIMEOUT in the environment at *configure* time
+# (e.g. `AVA_DEBUG_NO_TIMEOUT=1 aap-configure`) raises every CTest per-test
+# TIMEOUT in this directory so ctest no longer SIGTERMs a hung or
+# step-debugged test while a debugger is attached. Optional
+# AVA_DEBUG_NO_TIMEOUT_SECONDS overrides the one-hour default, which is the
+# literal floor requested by the knob ("at least one hour, or effectively
+# never"); set it to a very large value to approximate "never time out".
+#
+# This is configure-time only because CTest bakes TIMEOUT into
+# CTestTestfile.cmake at generate time; toggle the variable and re-run
+# aap-configure (aap-test alone cannot change it).
+#
+# Only the ctest kill-timer is touched. In-test deadlines (condition_variable
+# waits, execute_process TIMEOUTs, futures) are intentionally left
+# as-authored: many of them encode negative assertions ("this must not happen")
+# and inflating them blindly would turn green tests into multi-hour hangs.
+if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT})
+  set(AVA_DEBUG_NO_TIMEOUT_SECONDS "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}")
+  if(AVA_DEBUG_NO_TIMEOUT_SECONDS STREQUAL "" OR NOT AVA_DEBUG_NO_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
+    set(AVA_DEBUG_NO_TIMEOUT_SECONDS 3600)
+  endif()
+  if(AVA_REGISTERED_TESTS)
+    list(LENGTH AVA_REGISTERED_TESTS AVA_DEBUG_NO_TIMEOUT_COUNT)
+    set_property(TEST ${AVA_REGISTERED_TESTS} PROPERTY TIMEOUT ${AVA_DEBUG_NO_TIMEOUT_SECONDS})
+    message(STATUS
+      "${Red}AVA_DEBUG_NO_TIMEOUT: raised CTest TIMEOUT to ${AVA_DEBUG_NO_TIMEOUT_SECONDS}s for "
+      "${AVA_DEBUG_NO_TIMEOUT_COUNT} test(s); rerun configure without it to restore normal timeouts.${ColourReset}")
+  endif()
+endif()

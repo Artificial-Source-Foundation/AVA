@@ -10,6 +10,26 @@ if(NOT DEFINED AVA_CLI_TEST_ROOT)
   message(FATAL_ERROR "AVA_CLI_TEST_ROOT is required")
 endif()
 
+# Timeouts for this driver. Honors AVA_DEBUG_NO_TIMEOUT at runtime (this
+# script runs via `cmake -P`, so $ENV{...} is live) so a hung driver is not
+# killed -- and does not kill its `ava` subprocess via the driver's EXIT
+# trap -- before a debugger can be attached. Each AVA_TIMEOUT_<n> /
+# AVA_POLL_<n> defaults to its authored value; setting AVA_DEBUG_NO_TIMEOUT
+# stretches all of them to one hour (or AVA_DEBUG_NO_TIMEOUT_SECONDS). Poll
+# caps are scaled at 20 iterations/second to match the sleep 0.05 loops.
+set(AVA_TIMEOUT_60 60)
+set(AVA_POLL_100 100)
+set(AVA_POLL_200 200)
+if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT})
+  set(AVA_DEBUG_SECONDS 3600)
+  if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS} AND "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}" MATCHES "^[1-9][0-9]*$")
+    set(AVA_DEBUG_SECONDS "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}")
+  endif()
+  set(AVA_TIMEOUT_60 "${AVA_DEBUG_SECONDS}")
+  math(EXPR AVA_POLL_100 "${AVA_DEBUG_SECONDS} * 20")
+  math(EXPR AVA_POLL_200 "${AVA_DEBUG_SECONDS} * 20")
+endif()
+
 get_filename_component(TEST_ROOT_NAME "${AVA_CLI_TEST_ROOT}" NAME)
 set(TEST_ROOT "/tmp/${TEST_ROOT_NAME}")
 set(WORKSPACE "${TEST_ROOT}/workspace")
@@ -64,7 +84,7 @@ file(WRITE "${DRIVER_FILE}"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 200 ]; then\n"
+"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then\n"
 "    echo \"timed out waiting for fake provider port\" >&2\n"
 "    exit 1\n"
 "  fi\n"
@@ -92,7 +112,7 @@ file(WRITE "${DRIVER_FILE}"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 200 ]; then\n"
+"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then\n"
 "    echo \"timed out waiting for bash permission request\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
@@ -115,7 +135,7 @@ file(WRITE "${DRIVER_FILE}"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 200 ]; then\n"
+"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then\n"
 "    echo \"timed out waiting for bash process-group fixture\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
@@ -135,7 +155,7 @@ file(WRITE "${DRIVER_FILE}"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 200 ]; then\n"
+"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then\n"
 "    echo \"timed out waiting for bash cleanup prompt completion\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
@@ -153,7 +173,7 @@ file(WRITE "${DRIVER_FILE}"
 "i=0\n"
 "while kill -0 \"-$shell_pgid\" 2>/dev/null; do\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 100 ]; then\n"
+"  if [ \"$i\" -gt ${AVA_POLL_100} ]; then\n"
 "    echo \"timed-out bash process group $shell_pgid still exists after cleanup\" >&2\n"
 "    cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "    cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
@@ -185,7 +205,7 @@ execute_process(
   OUTPUT_VARIABLE DRIVER_OUTPUT
   ERROR_VARIABLE DRIVER_ERROR
   RESULT_VARIABLE DRIVER_RESULT
-  TIMEOUT 60
+  TIMEOUT ${AVA_TIMEOUT_60}
 )
 
 if(NOT DRIVER_RESULT EQUAL 0)

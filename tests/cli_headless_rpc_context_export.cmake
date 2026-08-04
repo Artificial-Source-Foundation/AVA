@@ -6,6 +6,22 @@ if(NOT DEFINED AVA_CLI_TEST_ROOT)
   message(FATAL_ERROR "AVA_CLI_TEST_ROOT is required")
 endif()
 
+# Timeouts for this driver. Honors AVA_DEBUG_NO_TIMEOUT at runtime (this
+# script runs via `cmake -P`, so $ENV{...} is live) so a hung driver is not
+# killed -- and does not kill its `ava` subprocess via the driver's EXIT
+# trap -- before a debugger can be attached. Each AVA_TIMEOUT_<n> /
+# AVA_POLL_<n> defaults to its authored value; setting AVA_DEBUG_NO_TIMEOUT
+# stretches all of them to one hour (or AVA_DEBUG_NO_TIMEOUT_SECONDS). Poll
+# caps are scaled at 20 iterations/second to match the sleep 0.05 loops.
+set(AVA_TIMEOUT_15 15)
+if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT})
+  set(AVA_DEBUG_SECONDS 3600)
+  if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS} AND "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}" MATCHES "^[1-9][0-9]*$")
+    set(AVA_DEBUG_SECONDS "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}")
+  endif()
+  set(AVA_TIMEOUT_15 "${AVA_DEBUG_SECONDS}")
+endif()
+
 get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
 set(WORKSPACE "${TEST_ROOT}/workspace")
 set(INPUT_FILE "${TEST_ROOT}/rpc-input.jsonl")
@@ -32,7 +48,7 @@ execute_process(
   OUTPUT_VARIABLE AVA_OUTPUT
   ERROR_VARIABLE AVA_ERROR
   RESULT_VARIABLE AVA_RESULT
-  TIMEOUT 15
+  TIMEOUT ${AVA_TIMEOUT_15}
 )
 
 if(NOT AVA_RESULT EQUAL 0)

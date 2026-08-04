@@ -14,6 +14,24 @@ if(NOT DEFINED AVA_CLI_TEST_ROOT)
   message(FATAL_ERROR "AVA_CLI_TEST_ROOT is required")
 endif()
 
+# Timeouts for this driver. Honors AVA_DEBUG_NO_TIMEOUT at runtime (this
+# script runs via `cmake -P`, so $ENV{...} is live) so a hung driver is not
+# killed -- and does not kill its `ava` subprocess via the driver's EXIT
+# trap -- before a debugger can be attached. Each AVA_TIMEOUT_<n> /
+# AVA_POLL_<n> defaults to its authored value; setting AVA_DEBUG_NO_TIMEOUT
+# stretches all of them to one hour (or AVA_DEBUG_NO_TIMEOUT_SECONDS). Poll
+# caps are scaled at 20 iterations/second to match the sleep 0.05 loops.
+set(AVA_TIMEOUT_30 30)
+set(AVA_POLL_200 200)
+if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT})
+  set(AVA_DEBUG_SECONDS 3600)
+  if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS} AND "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}" MATCHES "^[1-9][0-9]*$")
+    set(AVA_DEBUG_SECONDS "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}")
+  endif()
+  set(AVA_TIMEOUT_30 "${AVA_DEBUG_SECONDS}")
+  math(EXPR AVA_POLL_200 "${AVA_DEBUG_SECONDS} * 20")
+endif()
+
 get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
 get_filename_component(FAKE_MCP_SERVER "${AVA_FAKE_MCP_SERVER_EXE}" ABSOLUTE)
 set(WORKSPACE "${TEST_ROOT}/workspace")
@@ -74,7 +92,7 @@ file(WRITE "${DRIVER_FILE}"
 "    exit 1\n"
 "  fi\n"
 "  i=$((i + 1))\n"
-"  if [ \"$i\" -gt 200 ]; then echo \"timed out waiting for fake provider port\" >&2; exit 1; fi\n"
+"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then echo \"timed out waiting for fake provider port\" >&2; exit 1; fi\n"
 "  sleep 0.05\n"
 "done\n"
 "port=$(cat \"${PORT_FILE}\")\n"
@@ -94,7 +112,7 @@ file(WRITE "${DRIVER_FILE}"
 "      exit 1\n"
 "    fi\n"
 "    i=$((i + 1))\n"
-"    if [ \"$i\" -gt 200 ]; then\n"
+"    if [ \"$i\" -gt ${AVA_POLL_200} ]; then\n"
 "      echo \"timed out waiting for \\\"$label\\\"\" >&2\n"
 "      cat \"${RPC_OUT}\" >&2 2>/dev/null || true\n"
 "      cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
@@ -136,7 +154,7 @@ execute_process(
   OUTPUT_VARIABLE DRIVER_OUTPUT
   ERROR_VARIABLE DRIVER_ERROR
   RESULT_VARIABLE DRIVER_RESULT
-  TIMEOUT 30
+  TIMEOUT ${AVA_TIMEOUT_30}
 )
 
 if(NOT DRIVER_RESULT EQUAL 0)

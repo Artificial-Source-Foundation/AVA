@@ -351,6 +351,24 @@ struct StartupOverviewSnapshot
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Path-free first-run setup readiness labels. Boolean presence only — never
+// credential values, auth paths, environment dumps, or provider payloads.
+struct SetupReadinessSnapshot
+{
+  bool active_provider_ready = false;
+  bool active_provider_readiness_known = false;
+  // Human provider label such as "OpenAI"; never a secret or path.
+  std::string active_provider_label = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+enum class SetupWizardPersistStatus : std::uint8_t
+{
+  Completed = 0,
+  Skipped,
+};
+
 enum class PermissionPromptChoice
 {
   Deny,

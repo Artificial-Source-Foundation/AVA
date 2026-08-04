@@ -1198,11 +1198,76 @@ bool test_display_settings_reload_rebuilds_open_startup_overview()
   return rebuilt && rendered;
 }
 
+bool test_setup_wizard_steps_preview_and_persist_semantics()
+{
+  using ava::tui::runtime_views::kSetupContinue;
+  using ava::tui::runtime_views::kSetupFinish;
+  using ava::tui::runtime_views::kSetupProviderConnectOpenai;
+  using ava::tui::runtime_views::kSetupSkip;
+  using ava::tui::runtime_views::kSetupThemeKeep;
+  using ava::tui::runtime_views::setup_wizard_next_step;
+  using ava::tui::runtime_views::setup_wizard_select_list_view;
+  using ava::tui::runtime_views::SetupWizardStep;
+
+  ava::tui::ComposerSnapshot snapshot;
+  snapshot.custom_themes = {};
+  ava::tui::SetupReadinessSnapshot readiness{.active_provider_ready = false, .active_provider_readiness_known = true, .active_provider_label = "OpenAI"};
+
+  auto welcome = setup_wizard_select_list_view(SetupWizardStep::Welcome, snapshot, readiness);
+  expect(welcome.title.find("setup") != std::string::npos || welcome.title.find("Setup") != std::string::npos, "welcome step titles the wizard");
+  expect(std::ranges::any_of(welcome.items, [](auto const& item) { return item.value == kSetupContinue; }), "welcome exposes Continue");
+  expect(std::ranges::any_of(welcome.items, [](auto const& item) { return item.value == kSetupSkip; }), "every step exposes Skip");
+
+  auto theme = setup_wizard_select_list_view(SetupWizardStep::Theme, snapshot, readiness);
+  expect(std::ranges::any_of(theme.items, [](auto const& item) { return item.value == kSetupThemeKeep; }), "theme step offers keep-current");
+  expect(std::ranges::any_of(theme.items, [](auto const& item) { return item.value == "theme:light"; }), "theme step lists built-in light");
+  expect(std::ranges::any_of(theme.items, [](auto const& item) { return item.value == kSetupSkip; }), "theme step exposes Skip");
+
+  auto provider = setup_wizard_select_list_view(SetupWizardStep::Provider, snapshot, readiness);
+  expect(std::ranges::any_of(provider.items, [](auto const& item) { return item.value == kSetupProviderConnectOpenai; }),
+         "provider step can stage allowlisted openai connect guidance");
+  expect(std::ranges::any_of(provider.items,
+                             [](auto const& item) {
+                               return item.detail.find("api_key") == std::string::npos && item.label.find("sk-") == std::string::npos &&
+                                      item.detail.find("/home/") == std::string::npos;
+                             }),
+         "provider step stays path-free and secret-free");
+
+  auto privacy = setup_wizard_select_list_view(SetupWizardStep::Privacy, snapshot, readiness);
+  expect(std::ranges::any_of(
+             privacy.items,
+             [](auto const& item) { return item.detail.find("no telemetry") != std::string::npos || item.label.find("Telemetry") != std::string::npos; }),
+         "privacy step states no telemetry");
+
+  auto finish = setup_wizard_select_list_view(SetupWizardStep::Finish, snapshot, readiness);
+  expect(std::ranges::any_of(finish.items, [](auto const& item) { return item.value == kSetupFinish; }), "finish step exposes Finish");
+  expect(std::ranges::any_of(finish.items, [](auto const& item) { return item.value == kSetupSkip; }), "finish step exposes Skip");
+
+  expect(setup_wizard_next_step(SetupWizardStep::Welcome) == SetupWizardStep::Theme &&
+             setup_wizard_next_step(SetupWizardStep::Theme) == SetupWizardStep::Provider &&
+             setup_wizard_next_step(SetupWizardStep::Provider) == SetupWizardStep::Privacy &&
+             setup_wizard_next_step(SetupWizardStep::Privacy) == SetupWizardStep::Finish,
+         "wizard steps advance Welcome→Theme→Provider→Privacy→Finish");
+
+  // Settings privacy row opens the real wizard rather than drafting /help.
+  auto settings = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::PrivacyAndSetup, snapshot, ava::tui::default_key_bindings());
+  expect(std::ranges::any_of(settings.items, [](auto const& item) { return item.value == ava::tui::runtime_views::kSettingsOpenSetup; }),
+         "privacy settings exposes open-setup action");
+  expect(std::ranges::none_of(settings.items, [](auto const& item) { return item.detail.find("planned") != std::string::npos; }),
+         "privacy settings no longer shows planned-placeholder setup guidance");
+  return true;
+}
+
 void run_tui_composer_rendering_tests_part_1()
 {
-  test_display_settings_reload_rebuilds_open_startup_overview();
+  expect(test_setup_wizard_steps_preview_and_persist_semantics(),
+         "setup wizard steps expose bounded host actions, skip everywhere, path-free provider labels, and privacy open-setup");
   expect(test_display_settings_reload_poll_outcome_and_preview_staging(),
-         "application-signaled display reload rebases and reapplies staged settings preview before one final paint");
+         "display reload poll uses optional snapshot as applied/unchanged signal, hydrates without final render, restages overlay before paint, and Esc "
+         "restores new authority even when overlay values equal the hydrated baseline");
+  expect(test_display_settings_reload_rebuilds_open_startup_overview(),
+         "applied periodic display reload rebuilds an open startup overview from the refreshed DTO while preserving query/selection and skipping the idle "
+         "transcript receipt");
   expect(
       test_transcript_message_boundary_navigation_and_live_tail_reset(),
       "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, applies the "

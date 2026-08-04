@@ -458,6 +458,18 @@ bool RuntimeActionController::toggle_startup_overview()
   return renderer_.request_render();
 }
 
+bool RuntimeActionController::open_setup_wizard()
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!open_setup_wizard_)
+  {
+    snapshot.status = "setup wizard unavailable";
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  return open_setup_wizard_();
+}
+
 bool RuntimeActionController::open_fork_user_turn_selector(std::string_view initial_query)
 {
   auto& snapshot = presentation_state_.snapshot;

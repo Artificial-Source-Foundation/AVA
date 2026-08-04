@@ -49,6 +49,7 @@ target_sources(ava_app
     "interactive_tui_support.cpp"
     "line_shell.cpp"
     "onboarding.cpp"
+    "onboarding_state.cpp"
     "plugin_event_hooks.cpp"
     "project_trust.cpp"
     "print_mode.cpp"

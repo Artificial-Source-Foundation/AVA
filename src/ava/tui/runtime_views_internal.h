@@ -58,6 +58,7 @@ inline constexpr std::string_view kSettingsDraftSessions = "settings:draft.sessi
 inline constexpr std::string_view kSettingsDraftThinking = "settings:draft.thinking";
 inline constexpr std::string_view kSettingsDraftDetails = "settings:draft.details";
 inline constexpr std::string_view kSettingsDraftSetup = "settings:draft.setup";
+inline constexpr std::string_view kSettingsOpenSetup = "settings:open.setup";
 // Privacy section opens the local first-run setup wizard (not a composer draft).
 inline constexpr std::string_view kSettingsSectionDisplay = "settings:section.display";
 inline constexpr std::string_view kSettingsSectionModels = "settings:section.models";
@@ -114,7 +115,55 @@ struct DisplayPreviewTransaction
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Setup wizard action tokens (host-owned SelectList values).
+inline constexpr std::string_view kSetupContinue = "setup:continue";
+inline constexpr std::string_view kSetupSkip = "setup:skip";
+inline constexpr std::string_view kSetupFinish = "setup:finish";
+inline constexpr std::string_view kSetupThemeKeep = "setup:theme.keep";
+inline constexpr std::string_view kSetupProviderConnectOpenai = "setup:provider.connect-openai";
+inline constexpr std::string_view kSetupProviderContinue = "setup:provider.continue";
+
+enum class SetupWizardStep : std::uint8_t
+{
+  Welcome = 0,
+  Theme,
+  Provider,
+  Privacy,
+  Finish,
+};
+
+// Setup preview owns theme overlay state only. It never captures, applies, or restores
+// image visibility/width values from the authoritative display snapshot.
+struct ThemePreviewTransaction
+{
+  std::optional<DisplayPreviewOverlay> overlay;
+
+  void update(DisplayPreviewOverlay next);
+  void cancel();
+  [[nodiscard]] bool active() const noexcept { return overlay.has_value(); }
+  void apply_theme_overlay() const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Process-local setup wizard presentation. Only Finish/Skip persist onboarding status
+// through the app callback; theme confirmation uses the ordinary display writer.
+struct SetupWizardState
+{
+  bool open = false;
+  SetupWizardStep step = SetupWizardStep::Welcome;
+  // Staged only by the explicit OpenAI connect guidance row. Finish may draft `/connect openai`.
+  bool pending_connect_openai = false;
+  ThemePreviewTransaction preview;
+
+  void reset();
+  [[nodiscard]] bool active() const noexcept { return open; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 void reapply_settings_preview_after_display_reload(DisplayPreviewTransaction& preview, ComposerSnapshot& snapshot);
+void reapply_setup_theme_preview_after_display_reload(ThemePreviewTransaction& preview, ComposerSnapshot const& snapshot);
 
 // After Display rows are rebuilt (for example on applied reload), restore selection by exact
 // hidden action value rather than a stale numeric index. Prefer the pre-rebuild selected
@@ -143,6 +192,10 @@ struct SettingsNavigationState
 [[nodiscard]] std::optional<TuiThemeInfo> settings_preview_theme_for_action(std::string_view value, ComposerSnapshot const& snapshot);
 [[nodiscard]] std::optional<DisplayPreviewOverlay> settings_preview_overlay_for_action(std::string_view value, ComposerSnapshot const& snapshot);
 
+// Build one host-owned select-list for the current wizard step. Theme rows reuse theme: tokens.
+[[nodiscard]] SelectListView setup_wizard_select_list_view(SetupWizardStep step, ComposerSnapshot const& snapshot, SetupReadinessSnapshot const& readiness);
+[[nodiscard]] SetupWizardStep setup_wizard_next_step(SetupWizardStep step) noexcept;
+[[nodiscard]] bool setup_wizard_action_is_theme(std::string_view value) noexcept;
 [[nodiscard]] std::string permission_prompt_status(bool allow_session_available, bool allow_remember_available, bool deny_remember_available);
 [[nodiscard]] ActiveRunHint active_run_hint_for(TuiKeyBindings const& bindings);
 [[nodiscard]] std::string compact_path_leaf(std::string path);

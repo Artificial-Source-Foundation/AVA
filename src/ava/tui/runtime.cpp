@@ -68,6 +68,19 @@ using runtime_views::reapply_settings_preview_after_display_reload;
 using runtime_views::reselect_settings_display_row_after_rebuild;
 using runtime_views::settings_preview_overlay_for_action;
 using runtime_views::settings_section_for_action;
+using runtime_views::kSettingsOpenSetup;
+using runtime_views::kSetupContinue;
+using runtime_views::kSetupFinish;
+using runtime_views::kSetupProviderConnectOpenai;
+using runtime_views::kSetupProviderContinue;
+using runtime_views::kSetupSkip;
+using runtime_views::kSetupThemeKeep;
+using runtime_views::reapply_setup_theme_preview_after_display_reload;
+using runtime_views::setup_wizard_action_is_theme;
+using runtime_views::setup_wizard_next_step;
+using runtime_views::setup_wizard_select_list_view;
+using runtime_views::SetupWizardState;
+using runtime_views::SetupWizardStep;
 using runtime_views::SettingsNavigationState;
 using runtime_views::kSettingsEditKeybindings;
 using runtime_views::kSettingsOpenKeybindings;
@@ -210,6 +223,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   ActiveSelectList active_select_list = ActiveSelectList::None;
   SettingsNavigationState settings_nav;
   bool settings_session_open = false;
+  SetupWizardState setup_wizard;
   struct ClearThemePreviewOnExit
   {
     ~ClearThemePreviewOnExit() { clear_tui_theme_preview(); }
@@ -218,6 +232,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     settings_nav.preview.cancel();
     settings_nav.preview.apply_image_overlay(snapshot);
   };
+  auto clear_setup_preview = [&]() { setup_wizard.preview.cancel(); };
   auto begin_settings_preview_baseline = [&]() {
     settings_nav.preview.begin(DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells});
   };
@@ -281,6 +296,67 @@ int run_interactive_composer(TuiRuntimeOptions options)
     settings_nav.reset();
     settings_session_open = false;
   };
+  auto rebuild_setup_view = [&]() {
+    auto view = setup_wizard_select_list_view(setup_wizard.step, snapshot, options.setup_readiness);
+    view.selected_item_index = clamp_select_list_selection(view, view.selected_item_index);
+    snapshot.select_list = std::move(view);
+    active_select_list = ActiveSelectList::Setup;
+    setup_wizard.open = true;
+  };
+  auto close_setup_wizard = [&]() {
+    if (!setup_wizard.open && active_select_list != ActiveSelectList::Setup)
+      return;
+    clear_setup_preview();
+    setup_wizard.reset();
+    if (active_select_list == ActiveSelectList::Setup)
+    {
+      snapshot.select_list.reset();
+      active_select_list = ActiveSelectList::None;
+    }
+  };
+  auto open_setup_wizard = [&]() -> bool {
+    if (settings_session_open)
+      close_settings();
+    if (active_select_list == ActiveSelectList::Overview)
+    {
+      snapshot.select_list.reset();
+      active_select_list = ActiveSelectList::None;
+    }
+    draft_state.pending_escape_clear = false;
+    setup_wizard.reset();
+    setup_wizard.open = true;
+    setup_wizard.step = SetupWizardStep::Welcome;
+    if (options.on_setup_readiness)
+      options.setup_readiness = options.on_setup_readiness();
+    rebuild_setup_view();
+    snapshot.status = "setup opened";
+    transcript_scroll_offset = 0;
+    return renderer.request_render();
+  };
+  auto apply_setup_theme_highlight_preview = [&]() {
+    if (active_select_list != ActiveSelectList::Setup || !snapshot.select_list || setup_wizard.step != SetupWizardStep::Theme)
+    {
+      if (setup_wizard.preview.active())
+        setup_wizard.preview.cancel();
+      return;
+    }
+    auto const index = snapshot.select_list->selected_item_index;
+    if (index >= snapshot.select_list->items.size())
+    {
+      setup_wizard.preview.cancel();
+      return;
+    }
+    auto const& item = snapshot.select_list->items[index];
+    if (auto overlay = settings_preview_overlay_for_action(item.value, snapshot))
+      setup_wizard.preview.update(std::move(*overlay));
+    else
+      setup_wizard.preview.cancel();
+  };
+  auto advance_setup_step = [&]() {
+    setup_wizard.step = setup_wizard_next_step(setup_wizard.step);
+    rebuild_setup_view();
+    snapshot.status = "setup";
+  };
   TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
   RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer);
@@ -335,12 +411,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
       }
     }
+    if (setup_wizard.open && active_select_list == ActiveSelectList::Setup)
+      reapply_setup_theme_preview_after_display_reload(setup_wizard.preview, snapshot);
     // Paint exactly once after overlay staging so the first frame is the final staged state.
     return render();
   };
   auto toggle_startup_overview = [&]() -> bool {
     if (settings_session_open)
       close_settings();
+    if (setup_wizard.open)
+      close_setup_wizard();
     return action_controller.toggle_startup_overview();
   };
   auto clear_draft_for_interrupt = [&]() { return action_controller.clear_draft_for_interrupt(); };
@@ -370,6 +450,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto toggle_tool_details_at = [&](std::size_t item_index) { return navigation.toggle_tool_details_at(item_index); };
   auto toggle_thinking_at = [&](std::size_t item_index) { return navigation.toggle_thinking_at(item_index); };
 
+  action_controller.set_open_setup_wizard(open_setup_wizard);
+
   auto handle_sidebar_drawer_input = [&](InputEvent const& event) -> std::optional<bool> { return navigation.handle_sidebar_drawer_input(event); };
 
   auto jump_to_bottom = [&](std::string status) { navigation.jump_to_bottom(std::move(status)); };
@@ -388,8 +470,42 @@ int run_interactive_composer(TuiRuntimeOptions options)
   if (!render())
     return 1;
 
+  // Automatic first-run setup runs only after curses dimensions exist. Short terminals
+  // get one path-free deferred hint; explicit /setup always opens regardless of height.
+  bool need_startup_setup_paint = false;
+  if (options.setup_state_diagnostic && !options.setup_state_diagnostic->empty())
+  {
+    push_transcript(snapshot, TranscriptItem{.label = "setup", .text = "! " + *options.setup_state_diagnostic});
+    need_startup_setup_paint = true;
+  }
+  {
+    int height = 0;
+    int width = 0;
+    getmaxyx(stdscr, height, width);
+    static_cast<void>(width);
+    if (options.auto_open_setup_wizard)
+    {
+      if (height >= 12)
+      {
+        if (!open_setup_wizard())
+          return 1;
+        need_startup_setup_paint = false;
+      }
+      else
+      {
+        push_transcript(snapshot, TranscriptItem{.label = "setup",
+                                                 .text = "! Terminal is shorter than 12 rows. Run /setup in a taller terminal to finish first-run setup."});
+        need_startup_setup_paint = true;
+      }
+    }
+  }
+  if (need_startup_setup_paint && !render())
+    return 1;
+
   while (true)
   {
+    if (setup_wizard.open && active_select_list != ActiveSelectList::Setup)
+      close_setup_wizard();
     if (!renderer.flush_pending_render_if_due())
     {
       terminal_write_failed = true;
@@ -486,13 +602,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
         settings_nav.reset();
         settings_session_open = false;
       }
+      if (active_select_list != ActiveSelectList::Setup && setup_wizard.open)
+        close_setup_wizard();
       auto input_result = [&]() {
         if (input.event.key == Key::MouseLeftPress || input.event.key == Key::MouseLeftClick)
         {
           if (auto const clicked = select_list_selection_for_screen_position(snapshot, input.event.mouse_row, input.event.mouse_column))
           {
             // Settings mouse clicks change selection/highlight only; Enter confirms.
-            auto action = active_select_list == ActiveSelectList::Settings ? SelectListInputAction::Redraw : SelectListInputAction::Resolve;
+            auto action = (active_select_list == ActiveSelectList::Settings || active_select_list == ActiveSelectList::Setup) ? SelectListInputAction::Redraw : SelectListInputAction::Resolve;
             if (*clicked >= snapshot.select_list->items.size() || !snapshot.select_list->items[*clicked].enabled)
               action = SelectListInputAction::Redraw;
             return SelectListInputResult{.selected_item_index = *clicked, .query = snapshot.select_list->query, .action = action};
@@ -601,6 +719,143 @@ int run_interactive_composer(TuiRuntimeOptions options)
         snapshot.select_list->query = std::move(input_result.query);
         if (active_select_list == ActiveSelectList::Settings)
           apply_settings_highlight_preview();
+        else if (active_select_list == ActiveSelectList::Setup)
+          apply_setup_theme_highlight_preview();
+      }
+      else if (input_result.action == SelectListInputAction::Cancel && active_select_list == ActiveSelectList::Setup && snapshot.select_list)
+      {
+        // Esc cancels without writing onboarding state; restores only unconfirmed theme preview.
+        close_setup_wizard();
+        snapshot.status = "setup canceled";
+      }
+      else if (input_result.action == SelectListInputAction::Resolve && active_select_list == ActiveSelectList::Setup && snapshot.select_list)
+      {
+        auto const* selected_item = selected_select_list_item();
+        std::string selected_value = selected_item ? selected_item->value : std::string{};
+        if (selected_value.empty() || (selected_item && !selected_item->enabled))
+        {
+          snapshot.status = "setup action unavailable from this row";
+          static_cast<void>(beep());
+        }
+        else if (selected_value == kSetupSkip)
+        {
+          if (!options.on_setup_persist_status)
+          {
+            snapshot.status = "setup persistence unavailable";
+            static_cast<void>(beep());
+          }
+          else
+          {
+            auto persisted = options.on_setup_persist_status(SetupWizardPersistStatus::Skipped);
+            if (!persisted)
+            {
+              // Persistence errors retain internal detail at the app boundary; the
+              // terminal receives one fixed path-free message only.
+              snapshot.status = "setup state could not be saved; setup remains open";
+              push_transcript(snapshot, TranscriptItem{.label = "setup", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+              static_cast<void>(beep());
+            }
+            else
+            {
+              close_setup_wizard();
+              snapshot.status = "setup skipped";
+              push_transcript(
+                  snapshot,
+                  TranscriptItem{.label = "ava", .text = "Setup skipped. Run /setup anytime to reopen.", .meta = assistant_meta_for_snapshot(snapshot)});
+              transcript_scroll_offset = 0;
+            }
+          }
+        }
+        else if (selected_value == kSetupFinish)
+        {
+          if (!options.on_setup_persist_status)
+          {
+            snapshot.status = "setup persistence unavailable";
+            static_cast<void>(beep());
+          }
+          else
+          {
+            bool const draft_connect = setup_wizard.pending_connect_openai;
+            auto persisted = options.on_setup_persist_status(SetupWizardPersistStatus::Completed);
+            if (!persisted)
+            {
+              // Leave wizard open; never claim completion or draft connect on failure.
+              snapshot.status = "setup state could not be saved; setup remains open";
+              push_transcript(snapshot, TranscriptItem{.label = "setup", .text = snapshot.status});
+              transcript_scroll_offset = 0;
+              static_cast<void>(beep());
+            }
+            else
+            {
+              close_setup_wizard();
+              snapshot.status = "setup completed";
+              push_transcript(
+                  snapshot,
+                  TranscriptItem{.label = "ava", .text = "Setup complete. Run /setup anytime to reopen.", .meta = assistant_meta_for_snapshot(snapshot)});
+              transcript_scroll_offset = 0;
+              if (draft_connect)
+              {
+                draft_state.clear_selection();
+                static_cast<void>(replace_composer_draft(draft, "/connect openai"));
+                selected_slash_command_index = 0;
+                path_completion_force_active = false;
+                draft_scroll_offset = 0;
+                history_index.reset();
+                draft_input.clear();
+                snapshot.status = "setup completed · /connect openai drafted";
+              }
+            }
+          }
+        }
+        else if (selected_value == kSetupContinue || selected_value == kSetupProviderContinue)
+        {
+          if (selected_value == kSetupProviderContinue)
+            setup_wizard.pending_connect_openai = false;
+          clear_setup_preview();
+          advance_setup_step();
+        }
+        else if (selected_value == kSetupProviderConnectOpenai)
+        {
+          setup_wizard.pending_connect_openai = true;
+          clear_setup_preview();
+          advance_setup_step();
+          snapshot.status = "openai connect guidance staged";
+        }
+        else if (selected_value == kSetupThemeKeep)
+        {
+          // Keep current: clear unconfirmed overlay only, no display write.
+          clear_setup_preview();
+          advance_setup_step();
+        }
+        else if (setup_wizard_action_is_theme(selected_value) && options.on_settings_selected)
+        {
+          // Confirm theme exactly once through the normal display writer, then advance.
+          auto const confirm_token = selected_value;
+          clear_setup_preview();
+          auto selected = options.on_settings_selected(confirm_token);
+          if (selected)
+          {
+            auto status = selected->status;
+            apply_runtime_state_snapshot(std::move(*selected));
+            advance_setup_step();
+            if (!status.empty())
+            {
+              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
+              transcript_scroll_offset = 0;
+            }
+          }
+          else
+          {
+            snapshot.status = selected.error().format();
+            static_cast<void>(beep());
+          }
+        }
+        else
+        {
+          snapshot.status = "setup action unavailable from this row";
+          static_cast<void>(beep());
+        }
       }
       else if (input_result.action == SelectListInputAction::Cancel && active_select_list == ActiveSelectList::Settings && snapshot.select_list)
       {
@@ -722,6 +977,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
             }
           }
         }
+        else if (selected_value == kSettingsOpenSetup || selected_value == kSettingsDraftSetup)
+        {
+          close_settings();
+          if (!open_setup_wizard())
+          {
+            terminal_write_failed = true;
+            break;
+          }
+          continue;
+        }
         else if (selected_value == kSettingsDraftPermissions || selected_value == kSettingsDraftTools || selected_value == kSettingsDraftPlugins ||
                  selected_value == kSettingsDraftMcp || selected_value == kSettingsDraftJobs || selected_value == kSettingsDraftSessions ||
                  selected_value == kSettingsDraftThinking || selected_value == kSettingsDraftDetails || selected_value == kSettingsDraftSetup)
@@ -743,8 +1008,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
             draft_command = "/thinking";
           else if (selected_value == kSettingsDraftDetails)
             draft_command = "/details";
-          else if (selected_value == kSettingsDraftSetup)
-            draft_command = "/setup";
           close_settings();
           draft_state.clear_selection();
           static_cast<void>(replace_composer_draft(draft, std::move(draft_command)));

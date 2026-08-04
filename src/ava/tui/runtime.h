@@ -176,6 +176,10 @@ struct TuiRuntimeOptions
   bool show_images = true;
   std::size_t image_width_cells = 60;
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
+  bool auto_open_setup_wizard = false;
+  std::optional<std::string> setup_state_diagnostic = std::nullopt;
+  SetupReadinessSnapshot setup_readiness = {};
+  std::function<SetupReadinessSnapshot()> on_setup_readiness;
   std::vector<TodoItem> initial_todos = {};
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
@@ -224,6 +228,7 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
+  std::function<ava::core::VoidResult(SetupWizardPersistStatus)> on_setup_persist_status;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   // No value clears the explicit AVA level and restores model/provider default.
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::optional<std::string>)> on_reasoning_selected;

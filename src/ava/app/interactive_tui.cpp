@@ -10,6 +10,7 @@
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
+#include "ava/app/onboarding_state.h"
 #include "ava/app/startup_overview.h"
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/rpc/runtime_navigation.h"
@@ -243,6 +244,12 @@ int run_tui(ShellState state)
   {
     initial_transcript.push_back(ava::tui::TranscriptItem{.label = "setup", .text = std::move(*onboarding)});
   }
+  // Local-only first-run wizard eligibility is computed only on this interactive TTY TUI path.
+  auto const onboarding_state = load_onboarding_state(invocation_paths);
+  bool const auto_open_setup_wizard = setup_wizard_auto_eligible(onboarding_state);
+  std::optional<std::string> setup_state_diagnostic;
+  if (onboarding_state.kind == OnboardingLoadKind::UnsupportedOrMalformed && !onboarding_state.diagnostic.empty())
+    setup_state_diagnostic = onboarding_state.diagnostic;
   auto initial_catalog_snapshot = application_catalog.snapshot();
   auto initial_presentation = session_presentation();
   auto const [initial_show_images, initial_image_width_cells] = copy_effective_display_presentation();
@@ -268,6 +275,10 @@ int run_tui(ShellState state)
       .show_images = initial_show_images,
       .image_width_cells = initial_image_width_cells,
       .startup_overview = std::move(initial_startup_overview),
+      .auto_open_setup_wizard = auto_open_setup_wizard,
+      .setup_state_diagnostic = std::move(setup_state_diagnostic),
+      .setup_readiness = {},
+      .on_setup_readiness = [&unlocked_session]() { return build_setup_readiness_snapshot(unlocked_session); },
       .initial_todos = todos_for_session(unlocked_session),
       .key_bindings = key_bindings,
       .token_status_provider = [&unlocked_session]() { return token_status_for_session(unlocked_session); },
@@ -662,6 +673,10 @@ int run_tui(ShellState state)
         if (!value.starts_with(theme_prefix))
           return state_snapshot("view closed");
         return apply_display_command(std::string("/theme ") + std::string(value.substr(theme_prefix.size())));
+      },
+      .on_setup_persist_status = [&invocation_paths](ava::tui::SetupWizardPersistStatus status) -> ava::core::VoidResult {
+        auto const mapped = status == ava::tui::SetupWizardPersistStatus::Completed ? OnboardingStatus::Completed : OnboardingStatus::Skipped;
+        return store_onboarding_status(invocation_paths, mapped);
       },
       .on_model_selected = [&unlocked_session, &invocation_paths, &state_snapshot](std::string_view value)
           -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {

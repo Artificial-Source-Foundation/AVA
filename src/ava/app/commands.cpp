@@ -1073,6 +1073,10 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   {
     return handled_text("The startup resources overview is an interactive TUI view. Use /overview inside the TUI to toggle it.");
   }
+  if (request.command == "/setup")
+  {
+    return handled_text("The local-only first-run setup wizard is available inside the interactive TUI. Use /setup there to open it.");
+  }
   if (request.command == "/settings")
   {
     return handled_text("Settings are shown as a TUI view. Use /theme, /images on|off|reset, and /image-width <8..160>|reset to persist display settings.");

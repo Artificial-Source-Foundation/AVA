@@ -121,6 +121,173 @@ bool field_present(std::string_view object, std::string_view key)
   return ava::core::json::field_value_start(object, key).has_value();
 }
 
+enum class CredentialPresenceParse : std::uint8_t
+{
+  Absent,
+  ApiKey,
+  OAuth,
+  Malformed,
+};
+
+std::optional<std::string_view> object_field_view(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '{')
+    return std::nullopt;
+  bool in_string = false;
+  bool escaped = false;
+  std::size_t depth = 0;
+  for (std::size_t index = *start; index < object.size(); ++index)
+  {
+    char const ch = object[index];
+    if (escaped)
+    {
+      escaped = false;
+      continue;
+    }
+    if (in_string && ch == '\\')
+    {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"')
+    {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string)
+      continue;
+    if (ch == '{')
+      ++depth;
+    else if (ch == '}')
+    {
+      if (depth == 0)
+        return std::nullopt;
+      --depth;
+      if (depth == 0)
+        return object.substr(*start, index - *start + 1);
+    }
+  }
+  return std::nullopt;
+}
+
+bool string_field_is_valid(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '"')
+    return false;
+  bool escaped = false;
+  for (std::size_t index = *start + 1; index < object.size(); ++index)
+  {
+    char const ch = object[index];
+    if (escaped)
+    {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\')
+    {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"')
+      return true;
+  }
+  return false;
+}
+
+bool nonempty_string_field(std::string_view object, std::string_view key)
+{
+  auto const start = ava::core::json::field_value_start(object, key);
+  if (!start || *start >= object.size() || object[*start] != '"')
+    return false;
+  // A valid JSON string is empty only when its opening quote is immediately
+  // followed by its closing quote. This inspects secret presence in place and
+  // never materializes the field value.
+  return *start + 1 < object.size() && object[*start + 1] != '"' && string_field_is_valid(object, key);
+}
+
+bool any_nonempty_string_field(std::string_view object, std::initializer_list<std::string_view> keys)
+{
+  return std::ranges::any_of(keys, [&](std::string_view key) { return nonempty_string_field(object, key); });
+}
+
+bool optional_string_field_is_valid(std::string_view object, std::string_view key)
+{
+  return !field_present(object, key) || string_field_is_valid(object, key);
+}
+
+CredentialPresenceParse parse_openai_credential_presence(std::string_view content)
+{
+  auto const nested = object_field_view(content, "openai");
+  std::string_view const scope = nested.value_or(content);
+  auto const type = ava::core::json::string_field(scope, "type");
+  if (!type && field_present(scope, "type"))
+    return CredentialPresenceParse::Malformed;
+  auto const oauth_present = any_nonempty_string_field(scope, {"access_token", "access", "token"});
+  auto const api_key_present = any_nonempty_string_field(scope, {"api_key", "key", "OPENAI_API_KEY", "openai_api_key"});
+  if (type)
+  {
+    if (*type == "oauth")
+      return oauth_present ? CredentialPresenceParse::OAuth : CredentialPresenceParse::Malformed;
+    if (*type == "api" || *type == "api_key")
+      return api_key_present ? CredentialPresenceParse::ApiKey : CredentialPresenceParse::Malformed;
+    return CredentialPresenceParse::Malformed;
+  }
+  if (oauth_present)
+    return CredentialPresenceParse::OAuth;
+  if (api_key_present)
+    return CredentialPresenceParse::ApiKey;
+  return CredentialPresenceParse::Absent;
+}
+
+CredentialPresenceParse parse_provider_credential_presence(std::string_view content, std::string_view provider_id)
+{
+  auto const provider = object_field_view(content, provider_id);
+  if (!provider)
+    return field_present(content, provider_id) ? CredentialPresenceParse::Malformed : CredentialPresenceParse::Absent;
+  std::string_view const scope = *provider;
+  auto const type = ava::core::json::string_field(scope, "type");
+  if (!type && field_present(scope, "type"))
+    return CredentialPresenceParse::Malformed;
+  if (!optional_string_field_is_valid(scope, "account_id") || !optional_string_field_is_valid(scope, "accountId") ||
+      !optional_string_field_is_valid(scope, "source"))
+    return CredentialPresenceParse::Malformed;
+
+  if (provider_id == kAnthropicProviderId && type && *type == "oauth")
+  {
+    if (!optional_string_field_is_valid(scope, "refresh_token") || !optional_string_field_is_valid(scope, "refresh") ||
+        (field_present(scope, "expires_at") && !ava::core::json::integer_field(scope, "expires_at")) ||
+        (field_present(scope, "expires") && !ava::core::json::integer_field(scope, "expires")))
+      return CredentialPresenceParse::Malformed;
+    return any_nonempty_string_field(scope, {"access_token", "access", "token"}) ? CredentialPresenceParse::OAuth : CredentialPresenceParse::Malformed;
+  }
+
+  if (type && *type != "api" && *type != "api_key")
+    return CredentialPresenceParse::Malformed;
+  return any_nonempty_string_field(scope, {"api_key", "key"}) ? CredentialPresenceParse::ApiKey : CredentialPresenceParse::Malformed;
+}
+
+bool environment_credential_present(std::string_view provider_id)
+{
+  if (provider_id == kAnthropicProviderId)
+  {
+    for (auto const key : {kAnthropicOAuthTokenEnv, kAnthropicAuthTokenEnv})
+    {
+      char const* value = std::getenv(std::string(key).c_str());
+      if (value != nullptr && value[0] != '\0')
+        return true;
+    }
+  }
+  for (auto const& key : provider_env_keys(provider_id))
+  {
+    char const* value = std::getenv(key.c_str());
+    if (value != nullptr && value[0] != '\0')
+      return true;
+  }
+  return false;
+}
+
 ava::core::Error malformed_provider_credential_error(std::string_view provider_id, std::filesystem::path const& source)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "stored provider credential is malformed or unsupported");
@@ -600,6 +767,11 @@ ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_sta
   return provider_credential_for_startup(paths, provider_id, ProviderCredentialPolicy{});
 }
 
+ava::core::Result<bool> provider_credential_presence_for_startup(XdgPaths const& paths, std::string_view provider_id)
+{
+  return provider_credential_presence_for_startup(paths, provider_id, ProviderCredentialPolicy{});
+}
+
 namespace {
 
 std::optional<ProviderCredential> provider_credential_from_exact_env(std::string_view provider_id, std::string_view env_name)
@@ -683,6 +855,73 @@ ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_sta
   if (auto env_credential = provider_credential_from_env(provider_id))
     return env_credential;
   return std::optional<ProviderCredential>{};
+}
+
+ava::core::Result<bool> provider_credential_presence_for_startup(XdgPaths const& paths, std::string_view provider_id, ProviderCredentialPolicy const& policy)
+{
+  if (policy.auth_none)
+    return true;
+
+  auto explicit_content = read_text_if_exists(paths.auth_file, true);
+  if (!explicit_content)
+    return std::unexpected(std::move(explicit_content.error()));
+
+  if (policy.user_defined)
+  {
+    if (explicit_content->content)
+    {
+      auto const parsed = parse_provider_credential_presence(*explicit_content->content, provider_id);
+      if (parsed == CredentialPresenceParse::ApiKey)
+        return true;
+      if (parsed == CredentialPresenceParse::Malformed && provider_id == kAnthropicProviderId && field_present(*explicit_content->content, provider_id))
+        return std::unexpected(malformed_provider_credential_error(provider_id, paths.auth_file));
+    }
+    if (!policy.api_key_env.empty())
+    {
+      char const* value = std::getenv(policy.api_key_env.c_str());
+      return value != nullptr && value[0] != '\0';
+    }
+    return false;
+  }
+
+  if (provider_id == "openai")
+  {
+    if (explicit_content->content)
+    {
+      auto const parsed = parse_openai_credential_presence(*explicit_content->content);
+      if (parsed == CredentialPresenceParse::ApiKey || parsed == CredentialPresenceParse::OAuth)
+        return true;
+    }
+
+    std::array const candidates{legacy_ava_credentials_path(), legacy_compatible_auth_path()};
+    bool saw_api_key = false;
+    for (auto const& path : candidates)
+    {
+      auto content = read_text_if_exists(path, false);
+      if (!content)
+        return std::unexpected(std::move(content.error()));
+      if (!content->content)
+        continue;
+      auto const parsed = parse_openai_credential_presence(*content->content);
+      if (parsed == CredentialPresenceParse::OAuth)
+        return true;
+      if (parsed == CredentialPresenceParse::ApiKey)
+        saw_api_key = true;
+    }
+    if (saw_api_key)
+      return true;
+    return environment_credential_present(provider_id);
+  }
+
+  if (explicit_content->content)
+  {
+    auto const parsed = parse_provider_credential_presence(*explicit_content->content, provider_id);
+    if (parsed == CredentialPresenceParse::ApiKey || parsed == CredentialPresenceParse::OAuth)
+      return true;
+    if (parsed == CredentialPresenceParse::Malformed && provider_id == kAnthropicProviderId && field_present(*explicit_content->content, provider_id))
+      return std::unexpected(malformed_provider_credential_error(provider_id, paths.auth_file));
+  }
+  return environment_credential_present(provider_id);
 }
 
 ava::core::VoidResult store_provider_credential(XdgPaths const& paths, ProviderCredential const& credential)

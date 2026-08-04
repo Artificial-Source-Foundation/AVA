@@ -4,6 +4,7 @@
 #include "ava/tui/runtime_state_internal.h"
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include "debug.h"
@@ -41,6 +42,8 @@ class RuntimeActionController final
   [[nodiscard]] bool open_scoped_model_selector();
   [[nodiscard]] bool open_session_selector();
   [[nodiscard]] bool toggle_startup_overview();
+  void set_open_setup_wizard(std::function<bool()> opener) { open_setup_wizard_ = std::move(opener); }
+  [[nodiscard]] bool open_setup_wizard();
   [[nodiscard]] ActiveSelectList& active_select_list() noexcept { return active_select_list_; }
   [[nodiscard]] bool open_fork_user_turn_selector(std::string_view initial_query = {});
   [[nodiscard]] bool open_copy_user_turn_selector(std::string_view initial_query = {});
@@ -55,6 +58,7 @@ class RuntimeActionController final
   RuntimeRenderer& renderer_;
   ActiveSelectList& active_select_list_;
   std::optional<PendingSessionArchiveAction>& session_archive_confirmation_;
+  std::function<bool()> open_setup_wizard_;
   std::chrono::steady_clock::time_point next_display_reload_check_;
   std::optional<std::string> last_display_reload_error_;
 };

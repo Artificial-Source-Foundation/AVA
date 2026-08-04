@@ -58,6 +58,10 @@ struct ProviderCredential
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_request(XdgPaths const& paths, std::string_view provider_id,
                                                                                                    ava::http::Transport& transport, long long now_seconds);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_startup(XdgPaths const& paths, std::string_view provider_id);
+// Presence-only startup probe. Secret-bearing credential values and metadata remain
+// inside auth ownership; only readiness crosses this boundary. This never refreshes,
+// writes, performs network I/O, or returns a credential object.
+[[nodiscard]] ava::core::Result<bool> provider_credential_presence_for_startup(XdgPaths const& paths, std::string_view provider_id);
 // Catalog-bound resolution for user-defined providers:
 // - auth_none => successful credential_type "none" with no secret material
 // - user api_key => stored provider-scoped key first, then only api_key_env
@@ -78,6 +82,8 @@ struct ProviderCredentialPolicy
                                                                                                    ProviderCredentialPolicy const& policy);
 [[nodiscard]] ava::core::Result<std::optional<ProviderCredential>> provider_credential_for_startup(XdgPaths const& paths, std::string_view provider_id,
                                                                                                    ProviderCredentialPolicy const& policy);
+[[nodiscard]] ava::core::Result<bool> provider_credential_presence_for_startup(XdgPaths const& paths, std::string_view provider_id,
+                                                                               ProviderCredentialPolicy const& policy);
 [[nodiscard]] ava::core::VoidResult store_provider_credential(XdgPaths const& paths, ProviderCredential const& credential);
 [[nodiscard]] std::string authorization_header_value(OpenAICredential const& credential);
 

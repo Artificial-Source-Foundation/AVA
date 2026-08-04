@@ -10,6 +10,7 @@
 #include "ava/event/events.h"
 #include "ava/app/runtime/Session.h"
 
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -19,6 +20,10 @@ namespace ava::app::rpc {
 std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 {
   return ava::core::make_jthread("rpc_prompt", [options = std::move(options)](std::stop_token stop_token) mutable {
+    runtime::session_ts& unlocked_session = options.unlocked_session;
+    // Legacy RPC resolver/output helpers still require a mutex argument. Session access remains protected by session_ts guards, not this adapter mutex.
+    std::mutex adapter_mutex;
+
     auto publish_terminal = [&](std::string const& request_id, ava::core::Result<std::string> result, bool allow_follow_up,
                                 std::string_view terminal_reason) -> ava::core::Result<RpcFollowUpTransition> {
       RpcFollowUpTransition transition;
@@ -52,13 +57,15 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       {
         auto started_event = *transition.follow_up;
         started_event.correlation_id = started_event.request_id;
-        if (auto started = write_queue_event(options.output, options.session, options.session_mutex, "follow_up_started", started_event); !started)
+        if (auto started = write_queue_event(options.output, *runtime::session_ts::rat(unlocked_session), adapter_mutex, "follow_up_started", started_event);
+            !started)
           return fail_publication(std::move(started.error()));
       }
       else
       {
         auto const reason = transition.kind == RpcFollowUpTransitionKind::Skipped ? std::string_view("canceled") : terminal_reason;
-        if (auto skipped = write_skipped_queue_events(options.output, options.session, options.session_mutex, transition.cleared, reason); !skipped)
+        if (auto skipped = write_skipped_queue_events(options.output, *runtime::session_ts::rat(unlocked_session), adapter_mutex, transition.cleared, reason);
+            !skipped)
           return fail_publication(std::move(skipped.error()));
         if (auto follow_up_errors = write_follow_up_errors(options.output, options.run_state, transition.cleared.follow_up_messages, reason); !follow_up_errors)
           return fail_publication(std::move(follow_up_errors.error()));
@@ -73,11 +80,7 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       static_cast<void>(deactivate_and_clear_queued_messages(options.run_state));
     };
 
-    std::string prompt_provider_id;
-    {
-      std::lock_guard lock(options.session_mutex);
-      prompt_provider_id = options.session.model().provider_id;
-    }
+    auto const prompt_provider_id = runtime::session_ts::rat(unlocked_session)->model().provider_id;
     auto prompt_options =
         ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt");
     if (!prompt_options)
@@ -95,18 +98,25 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       prompt_options->request_id = request_id;
       prompt_options->image_attachments = std::move(image_attachments);
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
-      prompt_options->session_mutex = &options.session_mutex;
-      prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, options.session,
-                                                                         options.session_mutex, policy_permission_resolver, request_id);
+      prompt_options->session_mutex = nullptr;
+
+      CRITICAL_AREA_BEGIN_R(session);
+
+      // These callbacks run synchronously inside run_prompt's write critical area and retain the Session reference only until run_prompt returns.
+      prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, *session_r, adapter_mutex,
+                                                                         policy_permission_resolver, request_id);
       prompt_options->question_resolver =
-          make_rpc_question_resolver(options.pending_state, options.output, options.run_state, options.session, options.session_mutex, request_id);
-      prompt_options->take_steering_messages = [&options, request_id]() -> ava::core::Result<std::vector<std::string>> {
+          make_rpc_question_resolver(options.pending_state, options.output, options.run_state, *session_r, adapter_mutex, request_id);
+      // This callback runs inside run_prompt's write critical area, so retain an owning snapshot instead of relocking or capturing Session storage.
+      auto const session_id = session_r->store.session_id();
+      prompt_options->take_steering_messages = [&options, session_id, request_id]() -> ava::core::Result<std::vector<std::string>> {
         auto queued = take_queued_steering_messages(options.run_state, request_id);
         std::vector<std::string> messages;
         messages.reserve(queued.size());
         for (auto const& item : queued)
         {
-          if (auto written = write_queue_event(options.output, options.session, options.session_mutex, "steer_applied", item); !written)
+          auto envelope = resolver_event_envelope("steer_applied", item.request_id, item.correlation_id, session_id, queued_message_payload_json(item.message));
+          if (auto written = Output::write_record(options.output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
             return std::unexpected(std::move(written.error()));
           messages.push_back(item.message);
         }
@@ -117,27 +127,26 @@ std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       subscribe_event_envelope_writer(event_bus, options.output);
       prompt_options->event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc_event_context(request_id));
 
-      ProviderHandle prompt_provider;
-      {
-        std::lock_guard lock(options.session_mutex);
-        auto selected_provider = provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
-        if (!selected_provider)
-          return std::unexpected(std::move(selected_provider.error()));
-        prompt_provider = std::move(*selected_provider);
-      }
+      auto selected_provider = provider_for_session_model(*session_r, options.injected_provider_id, options.injected_provider);
+      if (!selected_provider)
+        return std::unexpected(std::move(selected_provider.error()));
+      auto prompt_provider = std::move(*selected_provider);
 
-      auto result = run_prompt(options.session, message, prompt_provider.get(), options.transport, *prompt_options);
+      CRITICAL_AREA_END_R(session);
+
+      auto result = run_prompt(unlocked_session, message, prompt_provider.get(), options.transport, *prompt_options);
+
+      CRITICAL_AREA_CONTINUE_R(session);
+
       ClearedRpcQueues skipped_steering;
       skipped_steering.steering_messages = clear_queued_steering_messages(options.run_state);
-      if (auto written =
-              write_skipped_queue_events(options.output, options.session, options.session_mutex, skipped_steering, "run_completed_before_safe_point");
-          !written)
+      if (auto written = write_skipped_queue_events(options.output, *session_r, adapter_mutex, skipped_steering, "run_completed_before_safe_point"); !written)
       {
         return std::unexpected(std::move(written.error()));
       }
       if (!result)
         return std::unexpected(std::move(result.error()));
-      return prompt_result_json(session_id_snapshot(options.session, options.session_mutex), *result);
+      return prompt_result_json(session_id_snapshot(*session_r, adapter_mutex), *result);
     };
 
     std::string request_id = options.request_id;

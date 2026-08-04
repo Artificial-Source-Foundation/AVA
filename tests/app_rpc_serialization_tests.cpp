@@ -637,8 +637,7 @@ void test_app_rpc_utf8_recovery_and_framing()
   expect(unlocked_session_result.has_value(), "RPC invalid UTF-8 recovery test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
   std::string const replacement = "\xEF\xBF\xBD";
   std::string invalid_component = "bad";

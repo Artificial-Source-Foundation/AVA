@@ -227,14 +227,15 @@ void test_app_rpc_protocol_version_and_session_commands()
   expect(unlocked_session_result.has_value(), "RPC protocol/session test opens runtime session");
   if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
   ava::session::SessionMetadataUpdate metadata_update;
   metadata_update.name = "Stats audit";
   metadata_update.actor = "test";
-  std::string initial_id;
-  {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
-    initial_id = session_w->store.session_id();
+
+  CRITICAL_AREA_BEGIN_W(session);
+
+  auto initial_id = session_w->store.session_id();
   auto appended_metadata = session_w->append_metadata_1(std::move(metadata_update));
 
   auto appended_user = session_w->append_owned(ava::session::SessionEntry{.id = "entry_user",
@@ -374,7 +375,8 @@ void test_app_rpc_protocol_version_and_session_commands()
              appended_mode.has_value() && appended_compaction.has_value() && appended_cancel.has_value() && appended_branch_summary.has_value() &&
              appended_v4_text && appended_v4_reasoning && appended_v4_function && appended_v4_commit && appended_v4_result.has_value(),
          "RPC protocol/session test appends legacy and committed v4 message history");
-  }
+
+  CRITICAL_AREA_END_W(session);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -389,7 +391,6 @@ void test_app_rpc_protocol_version_and_session_commands()
   std::ostringstream out;
   ava::app::runtime::RunOptions runtime_options;
   runtime_options.access_token = "token";
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
   auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
   auto const jsonl = out.str();
   auto const current_entry_version = std::string("\"version\":") + std::to_string(ava::session::kCurrentSessionEntryVersion);

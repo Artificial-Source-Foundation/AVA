@@ -55,8 +55,7 @@ void test_app_rpc_malformed_line_recovery_and_unknown_command()
   expect(unlocked_session_result.has_value(), "RPC recovery test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -92,14 +91,18 @@ void test_app_rpc_state_list_sessions_and_open_session()
   expect(unlocked_first_result.has_value() && unlocked_second_result.has_value(), "RPC state test opens multiple sessions");
   if (!unlocked_first_result || !unlocked_second_result)
     return;
-  std::string first_id;
-  std::string second_id;
-  {
-    ava::app::runtime::session_ts::rat first_r(*unlocked_first_result);
-    ava::app::runtime::session_ts::rat second_r(*unlocked_second_result);
-    first_id = first_r->store.session_id();
-    second_id = second_r->store.session_id();
-  }
+  ava::app::runtime::session_ts& unlocked_first(*unlocked_first_result);
+  ava::app::runtime::session_ts& unlocked_second(*unlocked_second_result);
+
+  CRITICAL_AREA_BEGIN_R(first);
+  CRITICAL_AREA_BEGIN_R(second);
+
+  auto const first_id = first_r->store.session_id();
+  auto const second_id = second_r->store.session_id();
+
+  CRITICAL_AREA_END_R(second);
+  CRITICAL_AREA_END_R(first);
+
   unlocked_first_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release target runtime before RPC switch"));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -110,11 +113,11 @@ void test_app_rpc_state_list_sessions_and_open_session()
       "{\"id\":\"open\",\"type\":\"open_session\",\"session_id\":\"" +
       first_id + "\"}\n");
   std::ostringstream out;
-  ava::app::runtime::session_ts unlocked_second(std::move(*unlocked_second_result));
   auto result =
       ava::app::run_rpc_loop(unlocked_second, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat second_r(unlocked_second);
+  CRITICAL_AREA_CONTINUE_R(second);
+
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC state/list/open loop completes successfully");
   expect(jsonl.find("\"id\":\"state\"") != std::string::npos && jsonl.find(second_id) != std::string::npos &&
@@ -140,8 +143,8 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   expect(unlocked_session_result.has_value(), "RPC job fixture opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
+
   if (!ava::app::runtime::session_ts::rat(unlocked_session)->subagent_coordinator())
     return;
 
@@ -268,41 +271,40 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   expect(unlocked_session_result.has_value(), "replacement-safe current-session RPC test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
-  std::string replacement;
+  CRITICAL_AREA_BEGIN_W(session);
+
+  expect(session_w
+             ->append_owned(ava::session::SessionEntry{.id = "original_rpc_history",
+                                                       .parent_id = "",
+                                                       .type = ava::session::EntryType::UserMessage,
+                                                       .timestamp = "2026-05-02T00:00:00Z",
+                                                       .data_json = "{\"text\":\"ORIGINAL_RPC_HISTORY\"}"})
+             .has_value(),
+         "replacement-safe current-session RPC test seeds original history");
+
+  auto replacement_result = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_rpc_history",
+                                                                                                  .parent_id = "",
+                                                                                                  .type = ava::session::EntryType::UserMessage,
+                                                                                                  .timestamp = "2026-05-02T00:00:01Z",
+                                                                                                  .data_json = "{\"text\":\"RPC_REPLACEMENT_CANARY\"}"});
+  expect(replacement_result.has_value(), "replacement-safe current-session RPC test serializes replacement history");
+  if (!replacement_result)
+    return;
+  auto const replacement = std::move(*replacement_result);
   bool replaced = false;
-  {
-    ava::app::runtime::session_ts::wat session_w(unlocked_session);
-
-    expect(session_w->append_owned(ava::session::SessionEntry{.id = "original_rpc_history",
-                                                         .parent_id = "",
-                                                         .type = ava::session::EntryType::UserMessage,
-                                                         .timestamp = "2026-05-02T00:00:00Z",
-                                                         .data_json = "{\"text\":\"ORIGINAL_RPC_HISTORY\"}"})
-               .has_value(),
-           "replacement-safe current-session RPC test seeds original history");
-
-    auto replacement_result = ava::session::serialize_session_entry_line(ava::session::SessionEntry{.id = "replacement_rpc_history",
-                                                                                             .parent_id = "",
-                                                                                             .type = ava::session::EntryType::UserMessage,
-                                                                                             .timestamp = "2026-05-02T00:00:01Z",
-                                                                                             .data_json = "{\"text\":\"RPC_REPLACEMENT_CANARY\"}"});
-    expect(replacement_result.has_value(), "replacement-safe current-session RPC test serializes replacement history");
-    if (!replacement_result)
+  auto const session_path = session_w->store.session_path();
+  session_w->store.set_after_lease_bound_read_for_test([&replacement, &replaced, session_path] {
+    if (replaced)
       return;
-    replacement = *replacement_result;
-    auto const session_path = session_w->store.session_path();
-    session_w->store.set_after_lease_bound_read_for_test([&replacement, &replaced, session_path] {
-      if (replaced)
-        return;
-      replaced = true;
-      std::filesystem::rename(session_path, session_path.string() + ".parked");
-      std::ofstream file(session_path, std::ios::binary | std::ios::trunc);
-      file << replacement << '\n';
-    });
-  }
+    replaced = true;
+    std::filesystem::rename(session_path, session_path.string() + ".parked");
+    std::ofstream file(session_path, std::ios::binary | std::ios::trunc);
+    file << replacement << '\n';
+  });
+
+  CRITICAL_AREA_END_W(session);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -316,6 +318,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
   ava::app::runtime::session_ts::rat session_r(unlocked_session);
+
   auto const jsonl = out.str();
   auto pathname_entries = session_r->store.load();
   expect(result && replaced && jsonl.find("replaced") != std::string::npos && jsonl.find("RPC_REPLACEMENT_CANARY") == std::string::npos && pathname_entries &&
@@ -339,8 +342,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   expect(unlocked_session_result.has_value(), "RPC session metadata test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -387,37 +389,41 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   expect(unlocked_parent_result.has_value() && unlocked_child_result.has_value(), "RPC session_tree test opens parent and child sessions");
   if (!unlocked_parent_result || !unlocked_child_result)
     return;
-  std::string parent_id;
-  std::string child_id;
-  {
-    ava::app::runtime::session_ts::wat parent_w(*unlocked_parent_result);
-    ava::app::runtime::session_ts::wat child_w(*unlocked_child_result);
-    auto parent_entries = parent_w->store.load();
-    expect(parent_entries && !parent_entries->empty(), "RPC session_tree test loads parent start entry");
-    if (!parent_entries || parent_entries->empty())
-      return;
+  ava::app::runtime::session_ts& unlocked_parent(*unlocked_parent_result);
+  ava::app::runtime::session_ts& unlocked_child(*unlocked_child_result);
 
-    ava::session::SessionMetadataUpdate parent_metadata;
-    parent_metadata.name = "Parent";
-    parent_metadata.labels = std::vector<std::string>{"root"};
-    parent_metadata.branch_origin = "root";
-    parent_metadata.actor = "test";
-    parent_id = parent_w->store.session_id();
-    auto parent_meta = parent_w->append_metadata_1(std::move(parent_metadata));
+  CRITICAL_AREA_BEGIN_W(parent);
+  CRITICAL_AREA_BEGIN_W(child);
 
-    ava::session::SessionMetadataUpdate child_metadata;
-    child_metadata.name = "Child";
-    child_metadata.labels = std::vector<std::string>{"branch"};
-    child_metadata.archived = true;
-    child_metadata.parent_session_id = parent_id;
-    child_metadata.source_session_id = parent_id;
-    child_metadata.branch_from_entry_id = parent_entries->front().id;
-    child_metadata.branch_origin = "fork";
-    child_metadata.actor = "test";
-    child_id = child_w->store.session_id();
-    auto child_meta = child_w->append_metadata_1(std::move(child_metadata));
-    expect(parent_meta && child_meta, "RPC session_tree test persists branch metadata");
-  }
+  auto parent_entries = parent_w->store.load();
+  expect(parent_entries && !parent_entries->empty(), "RPC session_tree test loads parent start entry");
+  if (!parent_entries || parent_entries->empty())
+    return;
+
+  ava::session::SessionMetadataUpdate parent_metadata;
+  parent_metadata.name = "Parent";
+  parent_metadata.labels = std::vector<std::string>{"root"};
+  parent_metadata.branch_origin = "root";
+  parent_metadata.actor = "test";
+  auto const parent_id = parent_w->store.session_id();
+  auto parent_meta = parent_w->append_metadata_1(std::move(parent_metadata));
+
+  ava::session::SessionMetadataUpdate child_metadata;
+  child_metadata.name = "Child";
+  child_metadata.labels = std::vector<std::string>{"branch"};
+  child_metadata.archived = true;
+  child_metadata.parent_session_id = parent_id;
+  child_metadata.source_session_id = parent_id;
+  child_metadata.branch_from_entry_id = parent_entries->front().id;
+  child_metadata.branch_origin = "fork";
+  child_metadata.actor = "test";
+  auto const child_id = child_w->store.session_id();
+  auto child_meta = child_w->append_metadata_1(std::move(child_metadata));
+  expect(parent_meta && child_meta, "RPC session_tree test persists branch metadata");
+
+  CRITICAL_AREA_END_W(child);
+  CRITICAL_AREA_END_W(parent);
+
   unlocked_parent_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release parent runtime before RPC switch"));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -426,7 +432,6 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
                         parent_id + "\"}\n" + "{\"id\":\"tree2\",\"type\":\"session_tree\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  ava::app::runtime::session_ts unlocked_child(std::move(*unlocked_child_result));
   auto result =
       ava::app::run_rpc_loop(unlocked_child, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
@@ -461,29 +466,24 @@ void test_app_rpc_session_fork_and_clone_commands()
   expect(unlocked_session_result.has_value(), "RPC session branch test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
-  std::string source_id;
-  std::string branch_from_entry_id;
-  size_t source_count;
-  std::string valid_source_bytes;
+  CRITICAL_AREA_BEGIN_R(session);
+
+  auto const source_id = session_r->store.session_id();
+  auto source_entries = session_r->store.load();
+  expect(source_entries && !source_entries->empty(), "RPC session branch test loads source start entry");
+  if (!source_entries || source_entries->empty())
+    return;
+  auto const branch_from_entry_id = source_entries->front().id;
+  auto const source_count = source_entries->size();
+  auto const valid_source_bytes = app_read_binary_file(session_r->store.session_path());
   {
-    ava::app::runtime::session_ts::rat session_r(unlocked_session);
-
-    source_id = session_r->store.session_id();
-    auto source_entries = session_r->store.load();
-    expect(source_entries && !source_entries->empty(), "RPC session branch test loads source start entry");
-    if (!source_entries || source_entries->empty())
-      return;
-    branch_from_entry_id = source_entries->front().id;
-    source_count = source_entries->size();
-    valid_source_bytes = app_read_binary_file(session_r->store.session_path());
-    {
-      std::ofstream file(session_r->store.session_path(), std::ios::binary | std::ios::app);
-      file << "{\"version\":3,\"id\":\"rpc-current-torn";
-    }
+    std::ofstream file(session_r->store.session_path(), std::ios::binary | std::ios::app);
+    file << "{\"version\":3,\"id\":\"rpc-current-torn";
   }
+
+  CRITICAL_AREA_END_R(session);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -502,7 +502,8 @@ void test_app_rpc_session_fork_and_clone_commands()
   auto result =
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  CRITICAL_AREA_CONTINUE_R(session);
+
   auto const jsonl = out.str();
   auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
   bool source_unchanged = false;
@@ -543,39 +544,40 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   expect(unlocked_source_result.has_value(), "RPC rollback test opens an active source session");
   if (!unlocked_source_result)
     return;
-  std::string source_id;
-  std::filesystem::path source_path;
-  {
-    ava::app::runtime::session_ts::wat source_w(*unlocked_source_result);
-    auto entries = source_w->store.load();
-    expect(entries && !entries->empty(), "RPC rollback test loads the source start entry");
-    if (!entries || entries->empty())
-      return;
-    auto appended =
-        source_w->append_owned(ava::session::SessionEntry{.id = "entry_rpc_rollback_attachment",
-                                                      .parent_id = entries->back().id,
-                                                      .type = ava::session::EntryType::UserMessage,
-                                                      .timestamp = "2026-07-16T00:00:00Z",
-                                                      .data_json = "{\"text\":\"attachment\",\"attachments\":[{\"id\":\"rpc_rollback_img\","
-                                                                   "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
-                                                                   "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
-                                                                   "\"storage_path\":\"attachments/rollback.txt\"}]}",
-                                                      .version = 2});
-    auto const source_attachment = ava::session::attachment_storage_root(source_w->store) / "attachments" / "rollback.txt";
-    write_app_test_file(source_attachment, "hello");
-    expect(appended.has_value(), "RPC rollback test appends a copyable source attachment reference");
-    if (!appended)
-      return;
+  ava::app::runtime::session_ts& unlocked_source(*unlocked_source_result);
 
-    source_id = source_w->store.session_id();
-    source_path = source_w->store.session_path();
-  }
+  CRITICAL_AREA_BEGIN_W(source);
+
+  auto entries = source_w->store.load();
+  expect(entries && !entries->empty(), "RPC rollback test loads the source start entry");
+  if (!entries || entries->empty())
+    return;
+  auto appended =
+      source_w->append_owned(ava::session::SessionEntry{.id = "entry_rpc_rollback_attachment",
+                                                        .parent_id = entries->back().id,
+                                                        .type = ava::session::EntryType::UserMessage,
+                                                        .timestamp = "2026-07-16T00:00:00Z",
+                                                        .data_json = "{\"text\":\"attachment\",\"attachments\":[{\"id\":\"rpc_rollback_img\","
+                                                                     "\"type\":\"image\",\"mime_type\":\"image/png\",\"byte_size\":5,"
+                                                                     "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\","
+                                                                     "\"storage_path\":\"attachments/rollback.txt\"}]}",
+                                                        .version = 2});
+  auto const source_attachment = ava::session::attachment_storage_root(source_w->store) / "attachments" / "rollback.txt";
+  write_app_test_file(source_attachment, "hello");
+  expect(appended.has_value(), "RPC rollback test appends a copyable source attachment reference");
+  if (!appended)
+    return;
+
+  auto const source_id = source_w->store.session_id();
+  auto const source_path = source_w->store.session_path();
+
+  CRITICAL_AREA_END_W(source);
+
   std::filesystem::create_directories(paths.models_file);
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
   std::istringstream in("{\"id\":\"fork-rollback\",\"type\":\"fork_session\"}\n");
   std::ostringstream out;
-  ava::app::runtime::session_ts unlocked_source(std::move(*unlocked_source_result));
   auto result =
       ava::app::run_rpc_loop(unlocked_source, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
@@ -603,8 +605,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   auto source_contender = ava::session::SessionLease::acquire(source_path);
   expect(result && created_id && jsonl.find("\"id\":\"fork-rollback\"") != std::string::npos && jsonl.find("\"success\":false") != std::string::npos &&
              jsonl.find("rollback_attachment_disposition: preserved") != std::string::npos && destination_jsonl_removed && destination_attachment_retained &&
-             source_r->store.session_id() == source_id && !source_contender &&
-             source_contender.error().message().find("already owned") != std::string::npos,
+             source_r->store.session_id() == source_id && !source_contender && source_contender.error().message().find("already owned") != std::string::npos,
          "RPC branch runtime-construction failure preserves the primary error, removes only destination JSONL, retains copied attachments, and leaves the "
          "source active");
 }
@@ -625,13 +626,15 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   expect(unlocked_source_result.has_value(), "RPC noncurrent torn branch test opens source runtime");
   if (!unlocked_source_result)
     return;
-  std::string source_id;
-  std::filesystem::path source_path;
-  {
-    ava::app::runtime::session_ts::wat source_w(*unlocked_source_result);
-    source_id = source_w->store.session_id();
-    source_path = source_w->store.session_path();
-  }
+  ava::app::runtime::session_ts& unlocked_source(*unlocked_source_result);
+
+  CRITICAL_AREA_BEGIN_R(source);
+
+  auto const source_id = source_r->store.session_id();
+  auto const source_path = source_r->store.session_path();
+
+  CRITICAL_AREA_END_R(source);
+
   auto const valid_source_bytes = app_read_binary_file(source_path);
   unlocked_source_result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "release source runtime before RPC branch"));
 
@@ -639,6 +642,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   expect(unlocked_current_result.has_value(), "RPC noncurrent torn branch test opens a different current runtime");
   if (!unlocked_current_result)
     return;
+  ava::app::runtime::session_ts& unlocked_current(*unlocked_current_result);
   {
     std::ofstream file(source_path, std::ios::binary | std::ios::app);
     file << "{\"version\":3,\"id\":\"rpc-torn";
@@ -648,7 +652,6 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   ava::tests::FakeTransport transport({});
   std::istringstream in("{\"id\":\"clone\",\"type\":\"clone_session\",\"session_id\":\"" + source_id + "\"}\n");
   std::ostringstream out;
-  ava::app::runtime::session_ts unlocked_current(std::move(*unlocked_current_result));
   auto result =
       ava::app::run_rpc_loop(unlocked_current, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
   ava::app::runtime::session_ts::rat current_r(unlocked_current);
@@ -676,25 +679,20 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
   expect(unlocked_session_result.has_value(), "RPC summarize_branch test opens runtime session");
   if (!unlocked_session_result)
     return;
-  // Extract unlocked_session from unlocked_session_result.
-  ava::app::runtime::session_ts unlocked_session(std::move(*unlocked_session_result));
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
-  std::string source_id;
-  size_t source_count;
-  std::string root_entry_id;
-  std::string tip_entry_id;
-  {
-    ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  CRITICAL_AREA_BEGIN_R(session);
 
-    source_id = session_r->store.session_id();
-    auto source_entries = session_r->store.load();
-    expect(source_entries && !source_entries->empty(), "RPC summarize_branch test loads source start entry");
-    if (!source_entries || source_entries->empty())
-      return;
-    source_count = source_entries->size();
-    root_entry_id = source_entries->front().id;
-    tip_entry_id = source_entries->back().id;
-  }
+  auto const source_id = session_r->store.session_id();
+  auto source_entries = session_r->store.load();
+  expect(source_entries && !source_entries->empty(), "RPC summarize_branch test loads source start entry");
+  if (!source_entries || source_entries->empty())
+    return;
+  auto const source_count = source_entries->size();
+  auto const root_entry_id = source_entries->front().id;
+  auto const tip_entry_id = source_entries->back().id;
+
+  CRITICAL_AREA_END_R(session);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({});
@@ -708,40 +706,42 @@ void test_app_rpc_summarize_branch_appends_to_source_session()
                         "{\"id\":\"stats\",\"type\":\"get_session_stats\"}\n";
   std::istringstream in(requests);
   std::ostringstream out;
-  ava::core::VoidResult latched;
-  {
-    auto result =
-        ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-    ava::app::runtime::session_ts::rat session_r(unlocked_session);
-    auto const jsonl = out.str();
-    auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
-    bool source_has_summary = false;
-    if (source_store)
-    {
-      auto source_after = source_store->load();
-      source_has_summary = source_after && source_after->size() == source_count + 1 && source_after->back().type == ava::session::EntryType::BranchSummary &&
-                           source_after->back().parent_id == tip_entry_id;
-    }
-    expect(result.has_value(), "RPC summarize_branch loop completes successfully");
-    expect(source_has_summary && session_r->store.session_id() == source_id, "RPC summarize_branch appends to the source session without switching sessions");
-    expect(jsonl.find("\"id\":\"summary\"") != std::string::npos && jsonl.find("\"source_session_id\":\"" + source_id + "\"") != std::string::npos &&
-               jsonl.find("\"type\":\"branch_summary\"") != std::string::npos && jsonl.find("Abandoned path was not needed.") != std::string::npos &&
-               jsonl.find("\"branch_summary\":1") != std::string::npos,
-           "RPC summarize_branch returns the persisted branch summary entry and updated stats expose the count");
+  auto result =
+      ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-    auto invalid = ava::session::SessionEntry{
-        .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
-    latched = session_r->run_controller()
-                  ? session_r->run_controller()->append(std::move(invalid))
-                  : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
+  CRITICAL_AREA_CONTINUE_R(session);
+
+  auto const jsonl = out.str();
+  auto source_store = ava::session::SessionStore::open(workspace, source_id, paths.sessions_dir);
+  bool source_has_summary = false;
+  if (source_store)
+  {
+    auto source_after = source_store->load();
+    source_has_summary = source_after && source_after->size() == source_count + 1 && source_after->back().type == ava::session::EntryType::BranchSummary &&
+                         source_after->back().parent_id == tip_entry_id;
   }
+  expect(result.has_value(), "RPC summarize_branch loop completes successfully");
+  expect(source_has_summary && session_r->store.session_id() == source_id, "RPC summarize_branch appends to the source session without switching sessions");
+  expect(jsonl.find("\"id\":\"summary\"") != std::string::npos && jsonl.find("\"source_session_id\":\"" + source_id + "\"") != std::string::npos &&
+             jsonl.find("\"type\":\"branch_summary\"") != std::string::npos && jsonl.find("Abandoned path was not needed.") != std::string::npos &&
+             jsonl.find("\"branch_summary\":1") != std::string::npos,
+         "RPC summarize_branch returns the persisted branch summary entry and updated stats expose the count");
+
+  auto invalid = ava::session::SessionEntry{
+      .id = "summary-route-latch", .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = ""};
+  auto latched = session_r->run_controller()
+                     ? session_r->run_controller()->append(std::move(invalid))
+                     : ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "missing summary route controller")));
+
+  CRITICAL_AREA_END_R(session);
+
   std::istringstream blocked_in(std::string("{\"id\":\"blocked-summary\",\"type\":\"summarize_branch\",") + "\"branch_root_entry_id\":\"" + root_entry_id +
                                 "\",\"branch_tip_entry_id\":\"" + tip_entry_id +
                                 "\",\"summary\":\"must not bypass latch\",\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}\n");
   std::ostringstream blocked_out;
   auto blocked_loop = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, blocked_in, blocked_out,
                                              ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  CRITICAL_AREA_CONTINUE_R(session);
   auto blocked_entries = session_r->store.load();
   expect(!latched && blocked_loop && blocked_entries && blocked_entries->size() == source_count + 1 &&
              blocked_out.str().find("blocked-summary") != std::string::npos && blocked_out.str().find("append_commit_state") != std::string::npos,

@@ -196,7 +196,9 @@ void test_app_runtime_enabled_plugin_resources_autoload()
   expect(unlocked_session_result.has_value(), "runtime opens with enabled plugin static resources");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto has_context_source = [&](std::string_view needle, ava::context::ContextSourceType source_type) {
     return std::ranges::any_of(session_w->context_sources(),
@@ -235,6 +237,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
              skill_command->prompt_message->find("<skill_content name=\"plugin-triage\">") != std::string::npos &&
              skill_command->prompt_message->find("Enabled plugin skill body autoload marker") != std::string::npos,
          "enabled plugin static skill is loadable through slash skill commands");
+  CRITICAL_AREA_END_W(session);
 
   ava::tools::ToolContext tool_context;
   tool_context.workspace_dir = workspace;
@@ -276,7 +279,7 @@ void test_app_runtime_enabled_plugin_resources_autoload()
     events.push_back(event);
     return ava::core::VoidResult{};
   };
-  auto run = ava::app::run_prompt(*session_w, "load the plugin skill", provider, transport, run_options);
+  auto run = ava::app::run_prompt(unlocked_session, "load the plugin skill", provider, transport, run_options);
   expect(run && run->final_text == "plugin skill done" &&
              std::ranges::any_of(events,
                                  [](ava::event::RuntimeEvent const& event) {

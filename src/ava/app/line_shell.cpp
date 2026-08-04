@@ -60,20 +60,18 @@ void add_output(LineResult& result, std::string text)
 template <typename Callback>
 LineResult with_provider_runtime(ShellState& state, std::string_view offline_suffix, Callback callback, std::string_view provider_override = {})
 {
-  // MT: is this really single-threaded? `state_session.is_offline()` requires a lock,
-  // but obiously could be offline immediately after returning from that accessor if this isn't single threaded.
-  // For now just keep the lock for the whole duration of the function, but it smell badly.
-  runtime::Session const& state_session = *runtime::session_ts::rat(state.unlocked_session);
+  runtime::session_ts& unlocked_session = state.unlocked_session;
+  CRITICAL_AREA_BEGIN_R(session);
 
   LineResult line_result;
-  if (state_session.is_offline())
+  if (session_r->is_offline())
   {
     add_output(line_result, ava::app::offline_provider_error("prompt").format() + std::string(offline_suffix));
     return line_result;
   }
-  auto const provider_id = provider_override.empty() ? std::string_view(state_session.model().provider_id) : provider_override;
+  auto const provider_id = provider_override.empty() ? std::string_view(session_r->model().provider_id) : provider_override;
   ava::http::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(state_session.paths(), provider_id, transport);
+  auto credential = ava::config::provider_credential_for_request(session_r->paths(), provider_id, transport);
   if (!credential)
   {
     add_output(line_result, credential.error().format() + std::string(offline_suffix));
@@ -83,7 +81,7 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   {
     if (provider_override.empty())
     {
-      add_output(line_result, ava::app::provider_auth_required_message(state_session, offline_suffix));
+      add_output(line_result, ava::app::provider_auth_required_message(*session_r, offline_suffix));
     }
     else
     {
@@ -105,6 +103,9 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
   run_options.openai_account_id = (*credential)->account_id;
   run_options.enable_transport_retries = true;
+
+  CRITICAL_AREA_END_R(session);
+
   return callback(**provider, transport, run_options);
 }
 
@@ -115,29 +116,30 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                        std::vector<ava::session::ImageAttachmentRef> image_attachments, std::string request_id,
                        ava::agent::SubagentLaunchSink on_subagent_launch)
 {
-  // MT: is this really single-threaded?
-  runtime::Session& state_session = *runtime::session_ts::wat(state.unlocked_session);
+  runtime::session_ts& unlocked_session = state.unlocked_session;
+  CRITICAL_AREA_BEGIN_W(session);
 
   LineResult line_result;
   if (line.empty())
     return line_result;
-  if (ava::app::is_backend_command_1(line, state_session))
+  if (ava::app::is_backend_command_1(line, *session_w))
   {
     if (is_compact_command(line))
     {
-      auto loaded_config = ava::session::load_compaction_config(state_session.paths());
+      auto loaded_config = ava::session::load_compaction_config(session_w->paths());
       if (!loaded_config)
       {
         add_output(line_result, loaded_config.error().format());
         return line_result;
       }
-      auto config = ava::app::resolve_compaction_config(state_session, std::move(*loaded_config));
+      auto config = ava::app::resolve_compaction_config(*session_w, std::move(*loaded_config));
       if (!config)
       {
         add_output(line_result, config.error().format());
         return line_result;
       }
       auto const summary_provider_id = config->provider_id;
+      CRITICAL_AREA_END_W(session);
       return with_provider_runtime(
           state, "\nother slash tool commands still work offline.",
           [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
@@ -146,8 +148,9 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
             if (!request_id.empty())
               run_options.request_id = request_id;
             run_options.on_subagent_launch = on_subagent_launch;
+            runtime::session_ts::wat command_session_w(state.unlocked_session);
             auto command_result = ava::app::run_command(
-                state_session,
+                *command_session_w,
                 ava::app::CommandRequest{.command = line,
                                          .event_sink = event_sink,
                                          .permission_resolver = permission_resolver,
@@ -155,7 +158,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                          .compaction_summary_generator =
                                              [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                                  std::string_view instructions, std::size_t estimated_tokens) {
-                                               return ava::app::generate_compaction_summary(state_session, entries, config, instructions, estimated_tokens,
+                                               return ava::app::generate_compaction_summary(*command_session_w, entries, config, instructions, estimated_tokens,
                                                                                             provider, transport, run_options);
                                              },
                                          .cancel_requested = cancel_requested,
@@ -173,11 +176,11 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
           },
           summary_provider_id);
     }
-    auto command_result = ava::app::run_command(state_session, ava::app::CommandRequest{.command = line,
-                                                                                        .permission_resolver = permission_resolver,
-                                                                                        .question_resolver = question_resolver,
-                                                                                        .cancel_requested = cancel_requested,
-                                                                                        .hotkeys = hotkeys});
+    auto command_result = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = line,
+                                                                                     .permission_resolver = permission_resolver,
+                                                                                     .question_resolver = question_resolver,
+                                                                                     .cancel_requested = cancel_requested,
+                                                                                     .hotkeys = hotkeys});
     if (!command_result)
     {
       add_output(line_result, command_result.error().format());
@@ -189,6 +192,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     line_result.tool_timeline = std::move(command_result->tool_timeline);
     if (command_result->prompt_message)
     {
+      CRITICAL_AREA_END_W(session);
       return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
                                    [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                      run_options.permission_resolver = permission_resolver;
@@ -199,7 +203,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                      if (!request_id.empty())
                                        run_options.request_id = request_id;
                                      run_options.on_subagent_launch = on_subagent_launch;
-                                     auto result = ava::app::run_prompt(state_session, *command_result->prompt_message, provider, transport, run_options);
+                                     auto result = ava::app::run_prompt(unlocked_session, *command_result->prompt_message, provider, transport, run_options);
                                      LineResult prompt_result;
                                      if (!result)
                                      {
@@ -229,6 +233,8 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
     return line_result;
   }
 
+  CRITICAL_AREA_END_W(session);
+
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
                                [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
@@ -240,7 +246,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                  if (!request_id.empty())
                                    run_options.request_id = std::move(request_id);
                                  run_options.on_subagent_launch = std::move(on_subagent_launch);
-                                 auto result = ava::app::run_prompt(state_session, line, provider, transport, run_options);
+                                 auto result = ava::app::run_prompt(unlocked_session, line, provider, transport, run_options);
                                  LineResult prompt_result;
                                  if (!result)
                                  {

@@ -16,8 +16,7 @@ namespace ava::app::rpc {
 
 struct RpcPromptWorkerOptions
 {
-  runtime::Session& session;
-  std::mutex& session_mutex;
+  runtime::session_ts& unlocked_session;
   output_ts& output;                                    // Reference to threadsafe output stream.
   RpcRunState& run_state;
   PendingResolverState& pending_state;

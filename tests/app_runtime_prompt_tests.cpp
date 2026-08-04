@@ -161,8 +161,9 @@ void test_app_run_prompt_isolates_ambient_extensions()
   expect(unlocked_session_result.has_value(), "runtime opens the ambient extension isolation fixture");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
 
+  CRITICAL_AREA_BEGIN_W(session);
   auto const ordinary_prompt = session_w->system_prompt();
   expect(ordinary_prompt.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos &&
              ordinary_prompt.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos &&
@@ -175,6 +176,8 @@ void test_app_run_prompt_isolates_ambient_extensions()
          "ordinary runtime prompt retains base, context, plugin, skill, and subagent extension canaries");
 
   session_w->resources().mcp_config = std::make_shared<ava::mcp::McpConfig const>();
+  CRITICAL_AREA_END_W(session);
+
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
       .status_code = 200,
@@ -186,7 +189,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
   run_options.access_token = "fake";
   run_options.isolate_ambient_extensions = true;
   run_options.exact_builtin_tool_names = std::vector<std::string>{"read_file", "list_directory"};
-  auto result = ava::app::run_prompt(*session_w, "isolated prompt", provider, transport, run_options);
+  auto result = ava::app::run_prompt(unlocked_session, "isolated prompt", provider, transport, run_options);
   expect(result && result->final_text == "isolated answer", "ambient-extension-free runtime prompt completes through the fake transport");
   if (!result || transport.requests().size() != 1)
     return;
@@ -211,7 +214,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
              request.find("\"name\":\"write_file\"") == std::string::npos,
          "isolated runtime exact composition preserves requested builtins and omits non-exact builtins");
 
-  session_w->resources().mcp_config.reset();
+  ava::app::runtime::session_ts::wat(unlocked_session)->resources().mcp_config.reset();
   ava::tests::FakeTransport generic_transport({
       ava::http::HttpResponse{
           .status_code = 200,
@@ -242,7 +245,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
   generic_options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
-  auto generic_result = ava::app::run_prompt(*session_w, "generic isolated prompt", provider, generic_transport, generic_options);
+  auto generic_result = ava::app::run_prompt(unlocked_session, "generic isolated prompt", provider, generic_transport, generic_options);
   expect(generic_result && generic_result->final_text == "generic isolated answer" && generic_transport.requests().size() == 3,
          "generic ambient isolation with null session MCP completes successive unavailable global and plugin skill calls");
   for (auto const& isolated_request : generic_transport.requests())
@@ -274,10 +277,10 @@ void test_app_run_prompt_isolates_ambient_extensions()
   exact_null_options.access_token = "fake";
   exact_null_options.isolate_ambient_extensions = true;
   exact_null_options.exact_builtin_tool_names = std::vector<std::string>{"read_file"};
-  auto exact_null_result = ava::app::run_prompt(*session_w, "exact null MCP prompt", provider, exact_null_transport, exact_null_options);
+  auto exact_null_result = ava::app::run_prompt(unlocked_session, "exact null MCP prompt", provider, exact_null_transport, exact_null_options);
   expect(exact_null_result && exact_null_result->final_text == "exact null answer" && exact_null_transport.requests().size() == 1,
          "exact isolated composition allocates an empty immutable MCP config when the session config is null");
-  expect(session_w->system_prompt() == ordinary_prompt, "isolated runtime requests leave the ordinary session system prompt unchanged");
+  expect(ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt() == ordinary_prompt, "isolated runtime requests leave the ordinary session system prompt unchanged");
 }
 
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation()
@@ -987,7 +990,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
   expect(unlocked_session_result.has_value(), "runtime event sink failure test opens session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -1018,7 +1021,7 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call()
     return ava::core::VoidResult{};
   };
 
-  auto result = ava::app::run_prompt(*session_w, "read with failing sink", provider, transport, run_options);
+  auto result = ava::app::run_prompt(unlocked_session, "read with failing sink", provider, transport, run_options);
   expect(!result && result.error().category() == ava::core::ErrorCategory::Io && result.error().message() == "event sink failed",
          "runtime returns the event sink write failure");
   expect(transport.requests().size() == 1, "event sink failure cancels before the next provider request");

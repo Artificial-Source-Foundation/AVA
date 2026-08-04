@@ -436,7 +436,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   }
   if (unlocked_reopened_result)
   {
-    ava::app::runtime::session_ts unlocked_reopened(std::move(*unlocked_reopened_result));
+    ava::app::runtime::session_ts& unlocked_reopened(*unlocked_reopened_result);
     ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport({});
     std::istringstream in("{\"id\":\"list\",\"type\":\"list_models\"}\n");
@@ -754,9 +754,11 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
   expect(unlocked_session_result.has_value(), "runtime reasoning test opens runtime session");
   if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts& unlocked_session(*unlocked_session_result);
+
   std::string session_id;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    CRITICAL_AREA_BEGIN_W(session);
     session_id = session_w->store.session_id();
 
     auto selected = session_w->set_reasoning(ava::app::runtime::ReasoningSelection{.level = " low ", .budget_tokens = std::nullopt, .display = ""});
@@ -768,6 +770,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
 
     auto invalid = session_w->set_reasoning(ava::app::runtime::ReasoningSelection{.level = "ultra", .budget_tokens = std::nullopt, .display = ""});
     expect(!invalid.has_value(), "runtime reasoning selection rejects unsupported model levels");
+    CRITICAL_AREA_END_W(session);
 
     ava::provider::OpenAIProvider const provider("https://api.example.test");
     ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -778,7 +781,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     }});
     ava::app::runtime::RunOptions run_options;
     run_options.access_token = "token";
-    auto result = ava::app::run_prompt(*session_w, "use reasoning", provider, transport, run_options);
+    auto result = ava::app::run_prompt(unlocked_session, "use reasoning", provider, transport, run_options);
     expect(result && result->final_text == "reasoned answer", "runtime reasoning prompt completes");
     expect(transport.requests().size() == 1, "runtime reasoning test sends one provider request");
     if (!transport.requests().empty())
@@ -789,6 +792,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
              "runtime reasoning selection is sent to the provider request with visible summary request");
     }
 
+    CRITICAL_AREA_CONTINUE_W(session);
     auto entries = session_w->store.load();
     expect(entries.has_value(), "runtime reasoning test reloads session entries");
     if (entries)

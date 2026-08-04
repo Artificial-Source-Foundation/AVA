@@ -72,13 +72,13 @@ struct AcpSessionOptions
 class AcpSessionHost
 {
  public:
-  AcpSessionHost(runtime::Session&& session, AcpSessionOptions options);
+  AcpSessionHost(runtime::session_ts&& unlocked_session, AcpSessionOptions options);
   AcpSessionHost(AcpSessionHost const&) = delete;
   AcpSessionHost& operator=(AcpSessionHost const&) = delete;
   ~AcpSessionHost();
 
   [[nodiscard]] std::string const& session_id() const noexcept;
-  [[nodiscard]] std::filesystem::path const& current_dir() const noexcept;
+  [[nodiscard]] std::filesystem::path const& current_dir(runtime::session_ts::crat const& session_r) const noexcept;
   [[nodiscard]] bool accepts_images() const noexcept;
   [[nodiscard]] ava::core::Result<std::uint64_t> reserve_prompt();
   void rollback_prompt_reservation(std::uint64_t reservation) noexcept;
@@ -86,6 +86,9 @@ class AcpSessionHost
                                      std::function<bool()> request_terminal_commit = {});
   void cancel() noexcept;
   [[nodiscard]] ava::core::VoidResult close();
+
+  // Return a temporary Read Access Type instance for unlocked_session_.
+  [[nodiscard]] runtime::session_ts::crat session_r() const { return unlocked_session_; }
 
  private:
   struct PermissionGrantKey
@@ -117,7 +120,7 @@ class AcpSessionHost
                                                                                                      std::uint64_t reservation, std::stop_token stop_token);
   [[nodiscard]] PermissionGrantKey permission_grant_key(ava::permissions::PermissionPrompt const& prompt) const;
 
-  runtime::Session session_;
+  runtime::session_ts unlocked_session_;
   AcpSessionOptions options_;
   std::string session_id_;
   mutable std::mutex mutex_;

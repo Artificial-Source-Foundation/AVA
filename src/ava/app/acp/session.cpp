@@ -171,8 +171,8 @@ ava::core::Result<std::string_view> acp_stop_reason(ava::core::RuntimeTerminalOu
   return std::unexpected(std::move(error));
 }
 
-AcpSessionHost::AcpSessionHost(runtime::Session&& session, AcpSessionOptions options)
-    : session_(std::move(session)), options_(std::move(options)), session_id_(session_.store.session_id())
+AcpSessionHost::AcpSessionHost(runtime::session_ts&& unlocked_session, AcpSessionOptions options)
+    : unlocked_session_(std::move(unlocked_session)), options_(std::move(options)), session_id_(session_r()->store.session_id())
 {
   options_.run_options.exact_file_access.reset();
   options_.run_options.command_executor.reset();
@@ -195,14 +195,15 @@ std::string const& AcpSessionHost::session_id() const noexcept
   return session_id_;
 }
 
-std::filesystem::path const& AcpSessionHost::current_dir() const noexcept
+std::filesystem::path const& AcpSessionHost::current_dir(runtime::session_ts::crat const& session_r) const noexcept
 {
-  return session_.current_dir();
+  return session_r->current_dir();
 }
 
 bool AcpSessionHost::accepts_images() const noexcept
 {
-  return std::ranges::find(session_.model().input_modalities, "image") != session_.model().input_modalities.end();
+  runtime::session_ts::crat session_r(unlocked_session_);
+  return std::ranges::find(session_r->model().input_modalities, "image") != session_r->model().input_modalities.end();
 }
 
 ava::core::VoidResult AcpSessionHost::send_text_update(std::string_view kind, std::string_view text, std::string_view message_id) const
@@ -223,13 +224,16 @@ ava::core::Result<std::uint64_t> AcpSessionHost::reserve_prompt()
     return std::unexpected(session_error("session is closing", session_id_));
   if (active_prompt_)
     return std::unexpected(session_error("session already has an active prompt", session_id_));
-  if (!session_.run_controller())
+
+  CRITICAL_AREA_BEGIN_R(session_);
+
+  if (!session__r->run_controller())
     return std::unexpected(session_error("session run controller is unavailable", session_id_));
   ++next_prompt_reservation_;
   if (next_prompt_reservation_ == 0)
     ++next_prompt_reservation_;
   auto const request_id = ava::core::make_id("acp-run");
-  auto admitted = session_.run_controller()->admit(RunRequest{.request_id = request_id});
+  auto admitted = session__r->run_controller()->admit(RunRequest{.request_id = request_id});
   if (!admitted)
     return std::unexpected(std::move(admitted.error()));
   active_prompt_ = true;
@@ -308,7 +312,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     }
   }
 
-  auto const rule_store = session_.permission_rule_store();
+  auto const rule_store = session_r()->permission_rule_store();
   auto persistent = ava::permissions::match_persistent_permission_rule(rule_store, prompt);
   if (!persistent)
   {
@@ -325,7 +329,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
     // repository-controlled build/test text). The MCP/session restriction
     // below is the only ACP-local gate that remains.
     bool const session_mcp_allow_requires_exact_command =
-        session_.mcp_config() && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
+        session_r()->mcp_config() && acp_mcp_operation(prompt.operation) && (*persistent)->action == PermissionAction::Allow;
     bool const exact_session_mcp_allow =
         !session_mcp_allow_requires_exact_command || (!(*persistent)->command.empty() && (*persistent)->command == prompt.command);
     if ((*persistent)->action == PermissionAction::Deny || exact_session_mcp_allow)
@@ -342,7 +346,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> AcpSessionHost
   // Session MCP configuration originates from the same untrusted ACP client.
   // Only an exact protected persistent operator rule may authorize it; client
   // permission responses and in-memory session grants must never do so.
-  if (acp_mcp_operation(prompt.operation) && session_.mcp_config())
+  if (acp_mcp_operation(prompt.operation) && session_r()->mcp_config())
   {
     PermissionResolutionDecision decision(
         PermissionResolution::Deny, "persistent operator authorization is required: add an exact protected persistent Allow for this session MCP operation");
@@ -543,7 +547,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   provider_options.announce_execution_after_permission = true;
   provider_options.redact_permission_audit_arguments = true;
   provider_options.require_explicit_file_permissions = true;
-  auto bundle = factory(session_, std::move(provider_options), "ACP prompt");
+  auto bundle = factory(*session_r(), std::move(provider_options), "ACP prompt");
   if (!bundle)
   {
     auto error = bundle.error();
@@ -563,7 +567,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   image_attachments.reserve(content.images.size());
   for (auto const& image : content.images)
   {
-    auto imported = ava::session::import_image_attachment_bytes(session_.store, image.bytes, image.mime_type);
+    auto imported = ava::session::import_image_attachment_bytes(session_r()->store, image.bytes, image.mime_type);
     if (!imported)
     {
       auto error = imported.error();
@@ -621,7 +625,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
     return canceled || stop_token.stop_requested() || (caller_cancel && caller_cancel());
   };
 
-  auto result = run_admitted_prompt(session_, content.text, *bundle->provider, *bundle->transport, run_options, std::move(run_guard));
+  auto result = run_admitted_prompt(unlocked_session_, content.text, *bundle->provider, *bundle->transport, run_options, std::move(run_guard));
   if (!result)
     return finish(std::unexpected(wire_error(result.error())));
   auto stop_reason = acp_stop_reason(result->outcome);
@@ -636,9 +640,10 @@ void AcpSessionHost::cancel() noexcept
   // stop callbacks never acquire the host mutex; no host-owned I/O or wait is
   // performed while arbitration is locked.
   std::lock_guard lock(mutex_);
-  if (!active_prompt_ || !session_.run_controller())
+  runtime::session_ts::crat session_r(unlocked_session_);
+  if (!active_prompt_ || !session_r->run_controller())
     return;
-  auto accepted = session_.run_controller()->request_stop(StopReason::UserCanceled);
+  auto accepted = session_r->run_controller()->request_stop(StopReason::UserCanceled);
   if (accepted && *accepted)
   {
     ++cancel_generation_;
@@ -651,11 +656,12 @@ ava::core::VoidResult AcpSessionHost::close()
 {
   {
     std::lock_guard lock(mutex_);
+    runtime::session_ts::crat session_r(unlocked_session_);
     closing_ = true;
     permission_grants_.clear();
-    if (active_prompt_ && session_.run_controller())
+    if (active_prompt_ && session_r->run_controller())
     {
-      auto accepted = session_.run_controller()->request_stop(StopReason::UserCanceled);
+      auto accepted = session_r->run_controller()->request_stop(StopReason::UserCanceled);
       if (accepted && *accepted)
       {
         ++cancel_generation_;

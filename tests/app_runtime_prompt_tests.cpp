@@ -3,16 +3,16 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/runtime_event_test_support.h"
 #include "tests/support/test_harness.h"
-#include "ava/http/transport.h"
 #include "ava/event/events.h"
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
-#include "ava/app/onboarding.h"
 #include "ava/app/interactive_run_queue.h"
+#include "ava/app/onboarding.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/OpenContext.h"
+#include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/mode.h"
@@ -280,7 +280,8 @@ void test_app_run_prompt_isolates_ambient_extensions()
   auto exact_null_result = ava::app::run_prompt(unlocked_session, "exact null MCP prompt", provider, exact_null_transport, exact_null_options);
   expect(exact_null_result && exact_null_result->final_text == "exact null answer" && exact_null_transport.requests().size() == 1,
          "exact isolated composition allocates an empty immutable MCP config when the session config is null");
-  expect(ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt() == ordinary_prompt, "isolated runtime requests leave the ordinary session system prompt unchanged");
+  expect(ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt() == ordinary_prompt,
+         "isolated runtime requests leave the ordinary session system prompt unchanged");
 }
 
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation()
@@ -327,17 +328,17 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
                                    .headers = {},
                                    .body = "data: {\"type\":\"response.function_call.added\",\"call_id\":\"" + std::string(call_id) +
                                            "\",\"name\":\"task\"}\n\n"
-                                           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" + std::string(call_id) +
+                                           "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"" +
+                                           std::string(call_id) +
                                            "\",\"delta\":\"{\\\"description\\\":\\\"runtime launch\\\",\\\"prompt\\\":\\\"return child\\\","
                                            "\\\"subagent_type\\\":\\\"general\\\"}\"}\n\n"
-                                           "data: {\"type\":\"response.function_call.done\",\"call_id\":\"" + std::string(call_id) +
-                                           "\"}\n\ndata: [DONE]\n\n"};
+                                           "data: {\"type\":\"response.function_call.done\",\"call_id\":\"" +
+                                           std::string(call_id) + "\"}\n\ndata: [DONE]\n\n"};
   };
   auto text_response = [](std::string_view text) {
     return ava::http::HttpResponse{.status_code = 200,
                                    .headers = {},
-                                   .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + std::string(text) +
-                                           "\"}\n\ndata: [DONE]\n\n"};
+                                   .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + std::string(text) + "\"}\n\ndata: [DONE]\n\n"};
   };
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport default_transport({task_response("runtime_task_default"), text_response("parent default")});
@@ -360,8 +361,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
     return ava::core::VoidResult{};
   };
   auto default_result = ava::app::run_prompt(*session, "launch default", provider, default_transport, run_options);
-  auto selected = session->set_reasoning(
-      ava::app::runtime::ReasoningSelection{.level = "high", .budget_tokens = std::nullopt, .display = {}});
+  auto selected = session->set_reasoning(ava::app::runtime::ReasoningSelection{.level = "high", .budget_tokens = std::nullopt, .display = {}});
   auto queued = tui_turns.queue_follow_up("launch high");
   auto follow_up = tui_turns.take_next_follow_up();
   auto started = follow_up ? tui_turns.mark_follow_up_started(*follow_up) : ava::core::VoidResult{};
@@ -377,16 +377,14 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   auto high_result = selected ? ava::app::run_prompt(*session, "launch high", provider, high_transport, run_options)
                               : ava::core::Result<ava::agent::AgentLoopResult>(std::unexpected(selected.error()));
 
-  expect(default_result && high_result,
-         "runtime private-launch source fixture completes both delegated turns: default=" +
-             (default_result ? std::string("ok") : default_result.error().format()) + ", high=" +
-             (high_result ? std::string("ok") : high_result.error().format()));
-  expect(launches.size() == 2,
-         "runtime private-launch source fixture emits exactly two callbacks; actual=" + std::to_string(launches.size()) + ", requests=" +
-             std::to_string(default_transport.requests().size() + high_transport.requests().size()) +
-             ", default_text=" + (default_result ? default_result->final_text : std::string("error")) +
-             ", high_text=" + (high_result ? high_result->final_text : std::string("error")) +
-             (launches.empty() ? std::string{} : ", first_id=" + launches.front().tool_call_id));
+  expect(default_result && high_result, "runtime private-launch source fixture completes both delegated turns: default=" +
+                                            (default_result ? std::string("ok") : default_result.error().format()) +
+                                            ", high=" + (high_result ? std::string("ok") : high_result.error().format()));
+  expect(launches.size() == 2, "runtime private-launch source fixture emits exactly two callbacks; actual=" + std::to_string(launches.size()) +
+                                   ", requests=" + std::to_string(default_transport.requests().size() + high_transport.requests().size()) +
+                                   ", default_text=" + (default_result ? default_result->final_text : std::string("error")) +
+                                   ", high_text=" + (high_result ? high_result->final_text : std::string("error")) +
+                                   (launches.empty() ? std::string{} : ", first_id=" + launches.front().tool_call_id));
   if (launches.size() == 2)
   {
     expect(launches[0].tool_call_id == "runtime_task_default" && launches[1].tool_call_id == "runtime_task_high",
@@ -400,8 +398,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
                public_task_running_envelopes[1].request_id == launches[1].request_id &&
                public_task_running_envelopes[1].correlation_id == launches[1].correlation_id,
            "initial and queued TUI turns give public task Running envelopes and private launch notifications exactly matching identities");
-    expect(launches[0].display.model_display_name() == "Configured Launch Model" &&
-               launches[1].display.model_display_name() == "Configured Launch Model",
+    expect(launches[0].display.model_display_name() == "Configured Launch Model" && launches[1].display.model_display_name() == "Configured Launch Model",
            "runtime private launch display uses configured ModelInfo display name; actual=" + launches[0].display.model_display_name());
     expect(launches[0].display.reasoning_label() == "default" && launches[1].display.reasoning_label() == "high",
            "runtime private launch display uses literal default then explicit AVA level; actual=" + launches[0].display.reasoning_label() + "/" +
@@ -419,8 +416,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
   auto const session_bytes = app_read_binary_file(session->store.session_path());
   expect(public_event_bytes.find("Configured Launch Model") == std::string::npos,
          "private launch model display stays absent from public runtime event envelopes");
-  expect(session_bytes.find("Configured Launch Model") == std::string::npos,
-         "private launch model display stays absent from persisted session bytes");
+  expect(session_bytes.find("Configured Launch Model") == std::string::npos, "private launch model display stays absent from persisted session bytes");
 
   write_app_test_file(paths.models_file, R"JSON({
     "default_provider":"openai",
@@ -761,10 +757,10 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   session_w->model_selection().model.context_window_tokens = 100;
   auto seeded = session_w->append_owned({.id = "observed-old-context",
-                                       .parent_id = "",
-                                       .type = ava::session::EntryType::UserMessage,
-                                       .timestamp = ava::session::now_timestamp(),
-                                       .data_json = "{\"text\":\"" + std::string(420, 'x') + "\"}"});
+                                         .parent_id = "",
+                                         .type = ava::session::EntryType::UserMessage,
+                                         .timestamp = ava::session::now_timestamp(),
+                                         .data_json = "{\"text\":\"" + std::string(420, 'x') + "\"}"});
   expect(seeded.has_value(), "observed runtime compaction test seeds enough context to require a summary request");
   if (!seeded)
     return;

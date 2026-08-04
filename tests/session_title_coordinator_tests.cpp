@@ -165,7 +165,7 @@ ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::S
 }
 
 ava::core::Result<ava::app::runtime::session_ts> open_title_session(std::filesystem::path const& root,
-                                                                 std::shared_ptr<ava::app::SessionTitleCoordinator> coordinator, bool sessionless = false)
+                                                                    std::shared_ptr<ava::app::SessionTitleCoordinator> coordinator, bool sessionless = false)
 {
   auto const workspace = root / "workspace";
   auto paths = ava::tests::app_test_paths(root);
@@ -176,12 +176,12 @@ ava::core::Result<ava::app::runtime::session_ts> open_title_session(std::filesys
   options.paths = std::move(paths);
   options.session_title_coordinator = std::move(coordinator);
   return ava::app::runtime::Session::open(options, {.sessionless = sessionless,
-                                                  .requested_session_id = std::nullopt,
-                                                  .fork_session_id = std::nullopt,
-                                                  .initial_session_name = std::nullopt,
-                                                  .continue_last_session = false,
-                                                  .initial_reasoning_level = std::nullopt,
-                                                  .expected_original_cwd = std::nullopt});
+                                                    .requested_session_id = std::nullopt,
+                                                    .fork_session_id = std::nullopt,
+                                                    .initial_session_name = std::nullopt,
+                                                    .continue_last_session = false,
+                                                    .initial_reasoning_level = std::nullopt,
+                                                    .expected_original_cwd = std::nullopt});
 }
 
 void test_session_title_config_is_strict()
@@ -225,10 +225,9 @@ void test_title_config_uses_logical_runtime_anchors()
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   auto config_anchor = session_w->anchor_set()->find_anchor(paths.ava_config_dir);
   auto state_anchor = session_w->anchor_set()->find_anchor(paths.ava_state_dir);
-  expect(session_w->session_title_coordinator() && config_anchor && config_anchor->relative().empty() &&
-              config_anchor->anchor().root == paths.ava_config_dir && state_anchor && state_anchor->relative().empty() &&
-              state_anchor->anchor().root == paths.ava_state_dir,
-          "session title config and state preserve trusted logical roots through shared descriptor anchors");
+  expect(session_w->session_title_coordinator() && config_anchor && config_anchor->relative().empty() && config_anchor->anchor().root == paths.ava_config_dir &&
+             state_anchor && state_anchor->relative().empty() && state_anchor->anchor().root == paths.ava_state_dir,
+         "session title config and state preserve trusted logical roots through shared descriptor anchors");
   std::filesystem::remove_all(root, ignored);
 }
 
@@ -383,8 +382,7 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   coordinator->schedule(*session_w, "First ordinary prompt", *seeded, options);
   coordinator->schedule(*session_w, "Second prompt must not replace first", *seeded, options);
   expect(state->wait_started(), "title race fake generator starts");
-  auto renamed =
-      session_w->append_metadata_1(ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
+  auto renamed = session_w->append_metadata_1(ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
   expect(renamed.has_value(), renamed ? "manual rename wins title race" : renamed.error().format());
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "title race coordinator becomes idle");
@@ -445,8 +443,12 @@ void test_session_specific_catalog_notifications_survive_navigation()
   state->output = "Refined Old Session Catalog Title";
   auto coordinator = make_coordinator(state);
   auto unlocked_old_session_result = open_title_session(root, coordinator);
-  auto unlocked_new_session_result = unlocked_old_session_result ? open_title_session(root, coordinator) : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(unlocked_old_session_result.error()));
-  auto unlocked_late_session_result = unlocked_new_session_result ? open_title_session(root, coordinator) : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(unlocked_new_session_result.error()));
+  auto unlocked_new_session_result = unlocked_old_session_result
+                                         ? open_title_session(root, coordinator)
+                                         : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(unlocked_old_session_result.error()));
+  auto unlocked_late_session_result = unlocked_new_session_result
+                                          ? open_title_session(root, coordinator)
+                                          : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(unlocked_new_session_result.error()));
   expect(unlocked_old_session_result && unlocked_new_session_result && unlocked_late_session_result && coordinator,
          "session-specific title catalog test opens old, new-current, and late-dirty runtime sessions");
   if (!unlocked_old_session_result || !unlocked_new_session_result || !unlocked_late_session_result || !coordinator)
@@ -461,10 +463,10 @@ void test_session_specific_catalog_notifications_survive_navigation()
   auto new_authority = new_session_w->append_target()->read_authority();
   auto new_entries = new_authority ? new_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(new_authority.error()));
   auto marked = new_entries ? new_session_w->append_target()->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                                                              .parent_id = new_entries->back().id,
-                                                                                              .type = ava::session::EntryType::UserMessage,
-                                                                                              .timestamp = "2099-01-01T00:00:00Z",
-                                                                                              .data_json = R"({"text":"deterministic recent current"})"})
+                                                                                                .parent_id = new_entries->back().id,
+                                                                                                .type = ava::session::EntryType::UserMessage,
+                                                                                                .timestamp = "2099-01-01T00:00:00Z",
+                                                                                                .data_json = R"({"text":"deterministic recent current"})"})
                             : ava::core::VoidResult(std::unexpected(new_entries.error()));
   expect(named && committed && late_committed && marked,
          "session-specific title catalog fixture persists names, old and late committed turns, and deterministic new-current activity");
@@ -491,10 +493,10 @@ void test_session_specific_catalog_notifications_survive_navigation()
   auto fallback_refresh = catalog.refresh_title_changes(*old_session_w, fallback_changes, {}, tree_builder);
   catalog.retarget_session(new_session_w->store.session_id());
   auto after_fallback = catalog.snapshot();
-  auto old_after_fallback =
-      std::ranges::find_if(after_fallback.session_tree->sessions, [&](auto const& node) { return node.summary.session_id == old_session_w->store.session_id(); });
-  expect(fallback_changes.cursor == 1 && fallback_changes.dirty_session_ids == std::vector<std::string>{old_session_w->store.session_id()} && fallback_refresh &&
-             *fallback_refresh && old_after_fallback != after_fallback.session_tree->sessions.end() &&
+  auto old_after_fallback = std::ranges::find_if(after_fallback.session_tree->sessions,
+                                                 [&](auto const& node) { return node.summary.session_id == old_session_w->store.session_id(); });
+  expect(fallback_changes.cursor == 1 && fallback_changes.dirty_session_ids == std::vector<std::string>{old_session_w->store.session_id()} &&
+             fallback_refresh && *fallback_refresh && old_after_fallback != after_fallback.session_tree->sessions.end() &&
              old_after_fallback->summary.title == "Fallback Old Session Catalog Title" && tree_builds == 1 && workspace_walks == 1,
          "fallback notification refreshes only its exact current authority before navigation");
 

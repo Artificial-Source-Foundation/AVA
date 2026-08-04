@@ -77,10 +77,10 @@ void test_app_compact_provider_summary_success()
     return;
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   auto seeded = session_w->append_owned(ava::session::SessionEntry{.id = "entry_user_compact_source",
-                                                                 .parent_id = "",
-                                                                 .type = ava::session::EntryType::UserMessage,
-                                                                 .timestamp = "2026-05-01T00:00:00Z",
-                                                                 .data_json = "{\"text\":\"Goal: refactor compaction\"}"});
+                                                                   .parent_id = "",
+                                                                   .type = ava::session::EntryType::UserMessage,
+                                                                   .timestamp = "2026-05-01T00:00:00Z",
+                                                                   .data_json = "{\"text\":\"Goal: refactor compaction\"}"});
   expect(seeded.has_value(), "provider-backed /compact test seeds source entry");
   auto seeded_reasoning = session_w->append_owned(ava::session::SessionEntry{
       .id = "entry_reasoning_compact_source",
@@ -110,11 +110,12 @@ void test_app_compact_provider_summary_success()
 
   auto compact = ava::app::run_command(
       *session_w, ava::app::CommandRequest{
-                    .command = "/compact Keep decisions",
-                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                                        std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport, run_options);
-                    }});
+                      .command = "/compact Keep decisions",
+                      .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
+                                                          std::string_view instructions, std::size_t estimated_tokens) {
+                        return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport,
+                                                                     run_options);
+                      }});
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("compaction summary recorded") != std::string::npos,
          "/compact records a provider-generated summary");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("Goal: refactor compaction") != std::string::npos &&
@@ -271,11 +272,12 @@ void test_app_compact_provider_failure_leaves_session_untouched()
 
   auto compact = ava::app::run_command(
       *session_w, ava::app::CommandRequest{
-                    .command = "/compact",
-                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                                        std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport, run_options);
-                    }});
+                      .command = "/compact",
+                      .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
+                                                          std::string_view instructions, std::size_t estimated_tokens) {
+                        return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, provider, transport,
+                                                                     run_options);
+                      }});
   auto entries = session_w->store.load();
   expect(compact && compact->handled && !compact->output.empty() &&
              compact->output[0].find("compaction summary request failed with status 500") != std::string::npos &&
@@ -364,10 +366,10 @@ void test_app_auto_compaction_provider_cancellation_leaves_session_untouched()
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   session_w->model_selection().model.context_window_tokens = 100;
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_canceled_auto_compact",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + std::string(420, 'c') + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + std::string(420, 'c') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   CancelAfterRequestTransport transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"CANCELED SUMMARY\"}"});
@@ -406,10 +408,10 @@ void test_app_compact_oversized_summary_leaves_session_untouched()
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
 
   auto compact = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{
-                    .command = "/compact",
-                    .compaction_summary_generator = [](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&, std::string_view,
-                                                       std::size_t) -> ava::core::Result<std::string> { return std::string("this summary is too large"); }});
+      *session_w, ava::app::CommandRequest{.command = "/compact",
+                                           .compaction_summary_generator =
+                                               [](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&, std::string_view,
+                                                  std::size_t) -> ava::core::Result<std::string> { return std::string("this summary is too large"); }});
   auto entries = session_w->store.load();
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("generated compaction summary is too large") != std::string::npos,
          "/compact reports oversized generated summary");
@@ -643,33 +645,33 @@ void test_app_manual_compaction_uses_only_active_context()
     return;
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "replaced_old_user",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = "2026-05-01T00:00:00Z",
-                                                                     .data_json = "{\"text\":\"REPLACED_OLD_CONTEXT\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = "2026-05-01T00:00:00Z",
+                                                                       .data_json = "{\"text\":\"REPLACED_OLD_CONTEXT\"}"}));
   static_cast<void>(
       session_w->append_owned(ava::session::SessionEntry{.id = "existing_boundary",
-                                                       .parent_id = "",
-                                                       .type = ava::session::EntryType::Compaction,
-                                                       .timestamp = "2026-05-01T00:00:01Z",
-                                                       .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\",\"history_projection\":\"portable-v1\"}"}));
+                                                         .parent_id = "",
+                                                         .type = ava::session::EntryType::Compaction,
+                                                         .timestamp = "2026-05-01T00:00:01Z",
+                                                         .data_json = "{\"summary\":\"EXISTING_ACTIVE_SUMMARY\",\"history_projection\":\"portable-v1\"}"}));
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "active_new_user",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = "2026-05-01T00:00:02Z",
-                                                                     .data_json = "{\"text\":\"ACTIVE_NEW_CONTEXT\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = "2026-05-01T00:00:02Z",
+                                                                       .data_json = "{\"text\":\"ACTIVE_NEW_CONTEXT\"}"}));
 
   bool saw_active_projection = false;
   auto compact = ava::app::run_command(
       *session_w, ava::app::CommandRequest{
-                    .command = "/compact",
-                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const&,
-                                                        std::string_view, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
-                      saw_active_projection = entries.size() == 2 && entries.front().type == ava::session::EntryType::UserMessage &&
-                                              entries.front().data_json.find("EXISTING_ACTIVE_SUMMARY") != std::string::npos &&
-                                              entries.back().data_json.find("ACTIVE_NEW_CONTEXT") != std::string::npos && estimated_tokens > 0;
-                      return std::string("NEXT ACTIVE SUMMARY");
-                    }});
+                      .command = "/compact",
+                      .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const&,
+                                                          std::string_view, std::size_t estimated_tokens) -> ava::core::Result<std::string> {
+                        saw_active_projection = entries.size() == 2 && entries.front().type == ava::session::EntryType::UserMessage &&
+                                                entries.front().data_json.find("EXISTING_ACTIVE_SUMMARY") != std::string::npos &&
+                                                entries.back().data_json.find("ACTIVE_NEW_CONTEXT") != std::string::npos && estimated_tokens > 0;
+                        return std::string("NEXT ACTIVE SUMMARY");
+                      }});
   auto entries = session_w->store.load();
   auto const checkpoint = entries ? latest_compaction_entry(*entries) : std::nullopt;
   auto const recent = checkpoint ? ava::core::json::string_field(checkpoint->data_json, "recent_context").value_or("") : std::string{};
@@ -711,10 +713,10 @@ void test_app_compact_honors_cross_provider_selection()
   }
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "cross_provider_user",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"cross provider source\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"cross provider source\"}"}));
 
   ava::provider::OpenAIProvider const active_provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -723,12 +725,12 @@ void test_app_compact_honors_cross_provider_selection()
   run_options.access_token = "active-openai-token";
   auto compact = ava::app::run_command(
       *session_w, ava::app::CommandRequest{
-                    .command = "/compact",
-                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
-                                                        std::string_view instructions, std::size_t estimated_tokens) {
-                      return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, active_provider, transport,
-                                                                   run_options);
-                    }});
+                      .command = "/compact",
+                      .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
+                                                          std::string_view instructions, std::size_t estimated_tokens) {
+                        return ava::app::generate_compaction_summary(*session_w, entries, config, instructions, estimated_tokens, active_provider, transport,
+                                                                     run_options);
+                      }});
   if (saved_key)
     setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
   else
@@ -764,17 +766,17 @@ void test_app_auto_compaction_appends_summary_and_rebuilds_context()
 
   std::string const old_context = "old context marker " + std::string(420, 'x');
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_old_user",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + ava::core::json::escape(old_context) + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + ava::core::json::escape(old_context) + "\"}"}));
   for (int index = 0; index < 6; ++index)
   {
     static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_recent_" + std::to_string(index),
-                                                                       .parent_id = "",
-                                                                       .type = ava::session::EntryType::AssistantMessage,
-                                                                       .timestamp = ava::session::now_timestamp(),
-                                                                       .data_json = "{\"text\":\"recent filler " + std::to_string(index) + "\"}"}));
+                                                                         .parent_id = "",
+                                                                         .type = ava::session::EntryType::AssistantMessage,
+                                                                         .timestamp = ava::session::now_timestamp(),
+                                                                         .data_json = "{\"text\":\"recent filler " + std::to_string(index) + "\"}"}));
   }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
@@ -878,10 +880,10 @@ void test_app_auto_compaction_recent_context_truncates_utf8_safely()
   std::string emoji_tail;
   for (int index = 0; index < 80; ++index) emoji_tail += "\xF0\x9F\x98\x80";
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_utf8_budget",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + ava::core::json::escape(emoji_tail) + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + ava::core::json::escape(emoji_tail) + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
@@ -925,10 +927,10 @@ void test_app_auto_compaction_explicit_zero_disables()
   ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
   session_w->model_selection().model.context_window_tokens = 10;
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_big_user",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + std::string(240, 'd') + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + std::string(240, 'd') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(final_text_sse("no compact answer"))});
@@ -964,10 +966,10 @@ void test_app_auto_compaction_uses_default_threshold_without_context_window_meta
   auto const config = ava::session::default_compaction_config();
   auto const threshold = ava::session::effective_auto_threshold_tokens(config, std::nullopt);
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_default_threshold_big",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + std::string(threshold * 4, 'f') + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + std::string(threshold * 4, 'f') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{\"output_text\":\"DEFAULT SUMMARY\"}"},
@@ -1004,10 +1006,10 @@ void test_app_auto_compaction_retries_stale_snapshot_before_append()
   session_w->model_selection().model.context_window_tokens = 100;
 
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_revalidate_big",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + std::string(420, 'r') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(session_w->owner_append_route_1(),
@@ -1063,10 +1065,10 @@ void test_app_auto_compaction_repeated_stale_snapshot_fails_without_append()
   session_w->model_selection().model.context_window_tokens = 100;
 
   static_cast<void>(session_w->append_owned(ava::session::SessionEntry{.id = "entry_repeated_stale_big",
-                                                                     .parent_id = "",
-                                                                     .type = ava::session::EntryType::UserMessage,
-                                                                     .timestamp = ava::session::now_timestamp(),
-                                                                     .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
+                                                                       .parent_id = "",
+                                                                       .type = ava::session::EntryType::UserMessage,
+                                                                       .timestamp = ava::session::now_timestamp(),
+                                                                       .data_json = "{\"text\":\"" + std::string(420, 's') + "\"}"}));
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   MutatingSummaryTransport transport(session_w->owner_append_route_1(),

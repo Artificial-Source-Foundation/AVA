@@ -23,8 +23,10 @@ Convert AVA session call sites carefully, one translation unit and one object ta
 ## Core Invariants
 
 - A function that passes `unlocked_PATTERN` (e.g `unlocked_session`) should already own or receive that unlocked wrapper. Never derive a `session_ts&` from a locked `Session&`; that direction is prohibited by design.
-- Use `unlocked_PATTERN` only while no `crat`, `rat`, or `wat` created from it is locked. Before passing the wrapper to code that locks it, release the existing guard with `CRITICAL_AREA_END_R(PATTERN)` or `CRITICAL_AREA_END_W(PATTERN)`.
-- Never retain a pointer, reference, `string_view`, iterator, span, or other view into `Session` storage across the end of its critical area. Copy values that must outlive the guard.
+- Use `unlocked_PATTERN` only while no guard created from it, i.e. `crat`, `rat`, or `wat` instance, is locked.
+- Before passing the unlocked wrapper to a function (or otherwise use it), release the existing guard with `CRITICAL_AREA_END_R(PATTERN)` or `CRITICAL_AREA_END_W(PATTERN)`. Do NOT call `unlock()` or `relock(...)` directly on a guard instance directly (e.g., no `session_w.unlock()`). In situations that an unlock is required you should always use the provided `CRITICAL_AREA_*` macros.
+- If a function needs read or write access but never uses the unlocked wrapper, then do not use the `CRITICAL_AREA_*` macros. Simply create a `PATTERN_r` or `PATTERN_w` guard directly (e.g. `ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);`).
+- NEVER retain a pointer, reference, `string_view`, iterator, span, or other view into `Session` storage across the end of its critical area. Copy values that must outlive the guard.
 - Never hide a `Session&` obtained through an access guard inside a callback capture. If the callback is guaranteed to run while the guard remains locked, capture the guard itself by reference and access the Session through it. This makes the callback's lifetime and locking dependency explicit, and use after `unlock()` fails immediately instead of silently racing through a retained `Session&`.
 - Use read access for const operations. Use write access only when mutation is required or an existing API takes `Session&`.
 - Treat a temporary access guard as protecting only its full expression. Use a named guard or a critical-area macro when several statements require access.
@@ -135,6 +137,8 @@ runtime::session_ts& unlocked_session(*unlocked_session_result);
 CRITICAL_AREA_BEGIN_W(session);
 ```
 
+Only do this when `CRITICAL_AREA_*` macros are used (i.e. the code below uses an unlocked wrapper too).
+
 ### 5. Convert struct members when necessary
 
 If a caller only has a struct's `Session`, `Session&`, or `Session const&` member, convert that member respectively to the appropriate `session_ts`, `session_ts&`, or `session_ts const&` form. Remove a parallel `session_mutex` member because `session_ts` owns the mutex.
@@ -177,3 +181,5 @@ Do not perform a broad cascade preemptively. Compile and review one translation 
 - [ ] Read-only code uses read access.
 - [ ] Struct mutexes made redundant by `session_ts` were removed when that struct was converted.
 - [ ] No broader build or tests were run without permission.
+- [ ] After creating an unlocked alias, for the sake of macros, the code below it no longer uses the source (e.g. `*unlocked_session_result`) - but only uses the alias.
+- [ ] Every `CRITICAL_AREA_BEGIN_*` is followed by a `CRITICAL_AREA_END_*` followed by usage of the unlocked wrapper.

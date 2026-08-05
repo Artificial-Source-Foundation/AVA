@@ -7,7 +7,7 @@
 
 int main(int argc, char** argv)
 {
-  Debug(ava::app::debug_init());
+  Debug(ava::app::initialize_debug());
   ava::app::Application application;
   application.initialize(argc, argv);
   return ava::app::run(argc, argv);

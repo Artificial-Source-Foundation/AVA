@@ -16,7 +16,6 @@ add_library(ava_test_support
   "support/app_rpc_test_support.cpp"
   "support/app_runtime_support.cpp"
   "support/fake_transport.cpp"
-  "support/libcwd_test_output.cpp"
   "support/session_test_support.cpp"
   "support/test_harness.cpp"
 )
@@ -235,7 +234,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   # AVA_NO_DEBUG_OUTPUT makes ava::app::debug_init() skip NAMESPACE_DEBUG::init()
   # when no private output was requested, so libcwd cannot contaminate the test
   # protocol. A nonempty inherited AVA_DEBUG_OUTPUT_DIR overrides suppression
-  # after LibcwdTestOutput installs its validated per-suite private stream.
+  # after LibcwdOutputSink installs its validated per-suite private stream.
   set_tests_properties(ava_tests.${AVA_TEST_SUITE} PROPERTIES
     ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endforeach()
@@ -849,7 +848,8 @@ if(OptionEnableLibcwd)
       NAME ava_debug.libcwd_output_routing
       COMMAND ${Python3_EXECUTABLE}
               ${CMAKE_CURRENT_SOURCE_DIR}/libcwd_debug_output_test.py
-              --ava $<TARGET_FILE:ava_tests>)
+              --ava $<TARGET_FILE:ava_tests>
+              --ava-exe $<TARGET_FILE:ava>)
     set_tests_properties(ava_debug.libcwd_output_routing PROPERTIES
       TIMEOUT 120
       TIMEOUT_SIGNAL_NAME SIGTERM
@@ -864,6 +864,11 @@ endif()
 get_property(AVA_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
 if(AVA_REGISTERED_TESTS)
   set_property(TEST ${AVA_REGISTERED_TESTS} APPEND PROPERTY ENVIRONMENT "AVA_SESSION_TITLES=off")
+  foreach(_ava_test IN LISTS AVA_REGISTERED_TESTS)
+    # One canonical identity tells any child `ava` process both that it is
+    # running under CTest and which per-test libcwd filename it must use.
+    set_property(TEST ${_ava_test} APPEND PROPERTY ENVIRONMENT "AVA_TEST_NAME=${_ava_test}")
+  endforeach()
 endif()
 
 # ava_cli.* and ava_tui.* drive the real `ava` binary (cmake -P shell drivers

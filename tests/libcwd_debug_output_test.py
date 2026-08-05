@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression coverage for ava_tests per-suite libcwd output routing."""
+"""Regression coverage for ava_tests and real-ava libcwd output routing."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import time
 
 
 MARKER_PREFIX = "AVA libcwd routing marker: suite="
+APP_MARKER_PREFIX = "AVA libcwd routing marker: test="
 PROCESS_TIMEOUT = 12.0
 TERM_GRACE = 0.5
 KILL_GRACE = 1.0
@@ -80,8 +81,9 @@ def finish(process: subprocess.Popen[str], timeout: float = PROCESS_TIMEOUT) -> 
 
 def run(ava: Path, arguments: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
     result = finish(start(ava, arguments, env, cwd))
-    require(MARKER_PREFIX not in result.stdout, f"libcwd marker leaked to stdout: {result.stdout!r}")
-    require(MARKER_PREFIX not in result.stderr, f"libcwd marker leaked to stderr: {result.stderr!r}")
+    for prefix in (MARKER_PREFIX, APP_MARKER_PREFIX):
+        require(prefix not in result.stdout, f"libcwd marker leaked to stdout: {result.stdout!r}")
+        require(prefix not in result.stderr, f"libcwd marker leaked to stderr: {result.stderr!r}")
     return result
 
 
@@ -107,7 +109,11 @@ def private_file(path: Path, content: str) -> None:
 
 
 def log_text(output_directory: Path, suite: str) -> str:
-    path = output_directory / f"ava_tests.{suite}.libcwd.log"
+    return named_log_text(output_directory, f"ava_tests.{suite}")
+
+
+def named_log_text(output_directory: Path, log_stem: str) -> str:
+    path = output_directory / f"{log_stem}.libcwd.log"
     require(path.is_file(), f"missing per-suite libcwd log: {path}")
     require(stat.S_IMODE(path.stat().st_mode) == 0o600, f"libcwd log does not have exact mode 0600: {path}")
     return path.read_text(encoding="utf-8")
@@ -120,8 +126,10 @@ def marker(suite: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ava", type=Path, required=True)
+    parser.add_argument("--ava-exe", type=Path, required=True)
     args = parser.parse_args()
     ava = args.ava.resolve(strict=True)
+    ava_exe = args.ava_exe.resolve(strict=True)
 
     previous_handlers = {
         signal_number: signal.signal(signal_number, interrupt_handler)
@@ -188,6 +196,27 @@ def main() -> int:
             require(marker("diagnostics") not in core_log, "diagnostics marker collided with core suite log")
             require(marker("diagnostics") in diagnostics_log, "diagnostics routing marker missing from its log")
             require(marker("core_mode") not in diagnostics_log, "core marker collided with diagnostics suite log")
+
+            real_test_name = "ava_cli.headless_rpc_question_reply"
+            real_env = opted_env.copy()
+            real_env["AVA_TEST_NAME"] = real_test_name
+            real_result = run(ava_exe, ["--help"], real_env, root)
+            require(real_result.returncode == 0, f"real ava debug-routing run failed: {real_result.stderr}")
+            real_log = named_log_text(output_directory, real_test_name)
+            require(
+                APP_MARKER_PREFIX + real_test_name in real_log,
+                "real ava routing marker missing from its per-test log",
+            )
+
+            unsafe_env = opted_env.copy()
+            unsafe_env["AVA_TEST_NAME"] = "../escape"
+            unsafe_result = run(ava_exe, ["--help"], unsafe_env, root)
+            require(unsafe_result.returncode == 0, f"unsafe test-name run failed unexpectedly: {unsafe_result.stderr}")
+            require(
+                "libcwd log stem must contain only ASCII letters" in unsafe_result.stderr,
+                f"unsafe test-name failure was not actionable: {unsafe_result.stderr!r}",
+            )
+            require(not (root / "escape.libcwd.log").exists(), "unsafe test name escaped AVA_DEBUG_OUTPUT_DIR")
 
             stale_path = output_directory / "ava_tests.core_mode.libcwd.log"
             stale_path.write_text("STALE-CONTENT\n", encoding="utf-8")

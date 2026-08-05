@@ -1,9 +1,11 @@
 #include "sys.h"
-#include "tests/support/libcwd_test_output.h"
 #include "tests/support/test_harness.h"
 #include "ava/app/ava_debug.h"
 #include "ava/core/path.h"
 #include "ava/core/trusted_home.h"
+#ifdef CWDEBUG
+#include "ava/debug/libcwd_output_sink.h"
+#endif
 
 #ifdef DEBUGGLOBAL
 #include "utils/GlobalObjectManager.h"
@@ -12,6 +14,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <unistd.h>
 #include "debug.h"
@@ -118,6 +121,7 @@ constexpr std::array kTestSuites{
 // (ava_tests.<token>.libcwd.log). "all" when no suite argument is given,
 // the suite name when it matches a registered suite, "invalid" otherwise
 // (which also keeps path separators in a bad argv[1] out of the filename).
+#ifdef CWDEBUG
 std::string_view libcwd_suite_token(int argc, char** argv)
 {
   if (argc == 1)
@@ -133,6 +137,7 @@ std::string_view libcwd_suite_token(int argc, char** argv)
   }
   return "invalid";
 }
+#endif
 
 void run_suite(TestSuite const& suite)
 {
@@ -170,8 +175,9 @@ int main(int argc, char** argv)
   GlobalObjectManager::main_entered();
 #endif
 
+#ifdef CWDEBUG
   std::string_view const debug_suite_token = libcwd_suite_token(argc, argv);
-  ava::test::LibcwdTestOutput libcwd_output(debug_suite_token);
+  ava::debug::LibcwdOutputSink libcwd_output("ava_tests." + std::string(debug_suite_token));
   Debug(ava::app::debug_init(libcwd_output.enabled()));
   libcwd_output.after_libcwd_init();
   if (!libcwd_output.setup_succeeded())
@@ -180,13 +186,14 @@ int main(int argc, char** argv)
     return 2;
   }
 
+  Dout(dc::notice, "AVA libcwd routing marker: suite=" << debug_suite_token);
+#endif
+
   if (argc > 2)
   {
     std::cerr << "usage: ava_tests [suite]\n";
     return 2;
   }
-
-  Dout(dc::notice, "AVA libcwd routing marker: suite=" << debug_suite_token);
 
   // CTest may change the working directory without updating $PWD, which
   // would cause logical_cwd() to throw. Verify and fix $PWD to match the

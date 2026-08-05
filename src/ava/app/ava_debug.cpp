@@ -1,13 +1,37 @@
 #include "sys.h"
+#include "ava/debug/libcwd_output_sink.h"
 #include "ava/app/ava_debug.h"
 
 #include <cstdlib>
+#include <iostream>
+#include <string>
 #ifdef DEBUGGLOBAL
 #include "utils/GlobalObjectManager.h"
 #endif
 #include "debug.h"
 
 namespace ava::app {
+
+// Install a process-lifetime private sink before libcwd initialization, then
+// balance initialization when no requested test output file could be enabled.
+// Ordinary, non-test processes retain the pre-existing debug initialization.
+void initialize_debug()
+{
+  char const* test_name = std::getenv("AVA_TEST_NAME");
+  if (test_name == nullptr || test_name[0] == '\0')
+  {
+    debug_init();
+    return;
+  }
+
+  static std::string const log_stem(test_name);
+  static ava::debug::LibcwdOutputSink output(log_stem);
+  debug_init(output.enabled());
+  output.after_libcwd_init();
+  if (!output.setup_succeeded())
+    std::cerr << "failed to configure libcwd output: " << output.setup_error() << '\n';
+  Dout(dc::notice, "AVA libcwd routing marker: test=" << log_stem);
+}
 
 // Initialize libcwd for the process unless AVA_NO_DEBUG_OUTPUT suppresses it.
 // The test executable may override suppression only after it has installed a
@@ -17,9 +41,9 @@ namespace ava::app {
 //
 // This does not silence LIBCWD_ASSERT / the dc::core ("COREDUMP") channel,
 // which libcwd configures in static initializers.
-void debug_init(bool private_output_ready)
+void debug_init(bool have_private_output_stream)
 {
-  if (!private_output_ready && std::getenv("AVA_NO_DEBUG_OUTPUT") != nullptr)
+  if (!have_private_output_stream && std::getenv("AVA_NO_DEBUG_OUTPUT") != nullptr)
   {
 #ifdef DEBUGGLOBAL
     if (!Singleton<GlobalObjectManager>::instantiate().is_after_global_constructors())
@@ -37,7 +61,8 @@ void debug_init(bool private_output_ready)
     return;
   }
 
-  Debug(NAMESPACE_DEBUG::init());
+  Debug(::NAMESPACE_DEBUG::init());
+  Debug(libcw_do.always_flush_on());
 }
 
 }  // namespace ava::app

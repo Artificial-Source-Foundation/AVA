@@ -62,6 +62,12 @@ def _compatibility_environment(*, home: pathlib.Path, tmpdir: pathlib.Path) -> d
         value = os.environ.get(name)
         if value:
             environment[name] = value
+    # Explicit debug-routing opt-ins are safe exceptions to the sealed parent
+    # environment: they identify the CTest owner and private output policy.
+    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR", "LIBCWD_RCFILE_NAME", "LIBCWD_RCFILE_OVERRIDE_NAME"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
     return environment
 
 

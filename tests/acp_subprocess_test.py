@@ -28,7 +28,7 @@ def environment(root):
     libcwd_rcfile = (root / "libcwdrc").absolute()
     libcwd_rcfile.write_text(
         "silent = on\nchannels_default = off\n", encoding="utf-8")
-    return {
+    env = {
         "HOME": str(home),
         "XDG_CONFIG_HOME": str(root / "config"),
         "XDG_DATA_HOME": str(root / "data"),
@@ -48,8 +48,16 @@ def environment(root):
         "AVA_NO_DEBUG_OUTPUT": "1",
         # Debug builds must remain protocol-quiet even when an isolated HOME
         # has no developer libcwd configuration.
-        "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
+        #FIXME: remove this? LIBCWD_NO_STARTUP_MSGS should be enough. "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
     }
+    # Preserve explicit per-test debug routing despite the otherwise isolated
+    # environment. The fixed base rcfile stays silent unless an override was
+    # deliberately exported by the developer.
+    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR", "LIBCWD_RCFILE_OVERRIDE_NAME"):
+        value = os.environ.get(name)
+        if value:
+            env[name] = value
+    return env
 
 
 def owned_popen(*arguments, **options):

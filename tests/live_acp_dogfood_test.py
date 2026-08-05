@@ -19,7 +19,7 @@ def write_executable(path, body):
 
 
 def clean_environment(root):
-    return {
+    env = {
         "HOME": str(root / "launcher-home"),
         "PATH": "/usr/bin:/bin",
         "TMPDIR": str(root),
@@ -31,6 +31,13 @@ def clean_environment(root):
         "LIBCWD_NO_STARTUP_MSGS": "1",
         "AVA_NO_DEBUG_OUTPUT": "1",
     }
+    # Preserve only explicit debug-routing inputs from the parent; all other
+    # developer environment remains excluded from this launcher fixture.
+    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR", "LIBCWD_RCFILE_NAME", "LIBCWD_RCFILE_OVERRIDE_NAME"):
+        value = os.environ.get(name)
+        if value:
+            env[name] = value
+    return env
 
 
 def run_launcher(script, arguments, root, stdin=""):

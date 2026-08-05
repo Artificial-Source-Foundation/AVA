@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "tests/support/libcwd_test_output.h"
+#include "ava/debug/libcwd_output_sink.h"
 
 #include <cerrno>
 #include <cstdlib>
@@ -10,18 +10,15 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-
-#ifdef CWDEBUG
 #include <ext/stdio_filebuf.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
+#include "debug.h"
 
-namespace ava::test {
+namespace ava::debug {
 namespace {
 
-#ifdef CWDEBUG
 class UniqueFd final
 {
  public:
@@ -68,18 +65,28 @@ bool same_identity(struct stat const& lhs, struct stat const& rhs)
 {
   return lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino;
 }
-#endif
+
+bool valid_log_stem(std::string_view log_stem)
+{
+  if (log_stem.empty() || log_stem == "." || log_stem == "..")
+    return false;
+  for (unsigned char character : log_stem)
+  {
+    bool const ascii_alphanumeric = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9');
+    if (!ascii_alphanumeric && character != '.' && character != '_' && character != '-')
+      return false;
+  }
+  return true;
+}
 
 }  // namespace
 
-struct LibcwdTestOutput::Impl
+struct LibcwdOutputSink::Impl
 {
-#ifdef CWDEBUG
   NullStreambuf null_buffer;
   std::ostream null_stream{&null_buffer};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> file_buffer;
   std::unique_ptr<std::ostream> file_stream;
-#endif
   bool enabled = false;
   bool libcwd_turned_off = false;
   std::string error;
@@ -87,17 +94,22 @@ struct LibcwdTestOutput::Impl
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-LibcwdTestOutput::LibcwdTestOutput(std::string_view suite_token) : impl_(std::make_unique<Impl>())
+// Redirect libcwd before its initialization can emit parser diagnostics, then
+// safely create the configured private destination when one was requested.
+LibcwdOutputSink::LibcwdOutputSink(std::string_view log_stem) : impl_(std::make_unique<Impl>())
 {
-#ifdef CWDEBUG
-  // This must precede ava::app::debug_init(): rcfile selection and parser
-  // diagnostics are libcwd output too and must never reach the test protocol.
   impl_->null_stream << std::unitbuf;
   Debug(libcw_do.set_ostream(&impl_->null_stream));
 
   char const* configured_directory = std::getenv("AVA_DEBUG_OUTPUT_DIR");
   if (configured_directory == nullptr || configured_directory[0] == '\0')
     return;
+
+  if (!valid_log_stem(log_stem))
+  {
+    impl_->error = "libcwd log stem must contain only ASCII letters, digits, '.', '_' or '-': '" + std::string(log_stem) + "'";
+    return;
+  }
 
   std::filesystem::path output_directory(configured_directory);
   if (!output_directory.is_absolute())
@@ -184,41 +196,41 @@ LibcwdTestOutput::LibcwdTestOutput(std::string_view suite_token) : impl_(std::ma
     return;
   }
 
-  std::string const filename = "ava_tests." + std::string(suite_token) + ".libcwd.log";
+  std::string const filename = std::string(log_stem) + ".libcwd.log";
   std::filesystem::path const display_path = output_directory / filename;
   UniqueFd output_fd(::openat(directory_fd.get(), filename.c_str(), O_WRONLY | O_CREAT | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0600));
   if (output_fd.get() < 0)
   {
-    impl_->error = errno_message("cannot open libcwd test log", display_path, errno);
+    impl_->error = errno_message("cannot open libcwd log", display_path, errno);
     return;
   }
 
   struct stat file_status{};
   if (::fstat(output_fd.get(), &file_status) != 0)
   {
-    impl_->error = errno_message("cannot verify libcwd test log", display_path, errno);
+    impl_->error = errno_message("cannot verify libcwd log", display_path, errno);
     return;
   }
   if (!S_ISREG(file_status.st_mode) || file_status.st_uid != ::geteuid() || file_status.st_nlink != 1)
   {
-    impl_->error = "libcwd test log must be a current-user regular file with link count 1: '" + display_path.string() + "'";
+    impl_->error = "libcwd log must be a current-user regular file with link count 1: '" + display_path.string() + "'";
     return;
   }
   if (::fchmod(output_fd.get(), 0600) != 0)
   {
-    impl_->error = errno_message("cannot set libcwd test log mode", display_path, errno);
+    impl_->error = errno_message("cannot set libcwd log mode", display_path, errno);
     return;
   }
   if (::ftruncate(output_fd.get(), 0) != 0 || ::lseek(output_fd.get(), 0, SEEK_SET) < 0)
   {
-    impl_->error = errno_message("cannot truncate libcwd test log", display_path, errno);
+    impl_->error = errno_message("cannot truncate libcwd log", display_path, errno);
     return;
   }
 
   int const descriptor_flags = ::fcntl(output_fd.get(), F_GETFL);
   if (descriptor_flags < 0 || ::fcntl(output_fd.get(), F_SETFL, descriptor_flags & ~O_NONBLOCK) != 0)
   {
-    impl_->error = errno_message("cannot prepare libcwd test log", display_path, errno);
+    impl_->error = errno_message("cannot prepare libcwd log", display_path, errno);
     return;
   }
 
@@ -228,21 +240,17 @@ LibcwdTestOutput::LibcwdTestOutput(std::string_view suite_token) : impl_(std::ma
   if (!impl_->file_buffer->is_open())
   {
     impl_->file_buffer.reset();
-    impl_->error = "cannot attach a stream to libcwd test log: '" + display_path.string() + "'";
+    impl_->error = "cannot attach a stream to libcwd log: '" + display_path.string() + "'";
     return;
   }
   impl_->file_stream = std::make_unique<std::ostream>(impl_->file_buffer.get());
   *impl_->file_stream << std::unitbuf;
   Debug(libcw_do.set_ostream(impl_->file_stream.get()));
   impl_->enabled = true;
-#else
-  static_cast<void>(suite_token);
-#endif
 }
 
-LibcwdTestOutput::~LibcwdTestOutput()
+LibcwdOutputSink::~LibcwdOutputSink()
 {
-#ifdef CWDEBUG
   // set_ostream waits for the configured libcwd stream mutex, so no writer can
   // retain the file stream when its owning RAII objects are destroyed. Standard
   // error remains alive through static teardown; the implementation-owned null
@@ -252,33 +260,30 @@ LibcwdTestOutput::~LibcwdTestOutput()
     impl_->file_stream->flush();
   impl_->file_stream.reset();
   impl_->file_buffer.reset();
-#endif
 }
 
-void LibcwdTestOutput::after_libcwd_init()
+void LibcwdOutputSink::after_libcwd_init()
 {
-#ifdef CWDEBUG
   if (!impl_->enabled && !impl_->libcwd_turned_off)
   {
     Debug(libcw_do.off());
     impl_->libcwd_turned_off = true;
   }
-#endif
 }
 
-bool LibcwdTestOutput::enabled() const noexcept
+bool LibcwdOutputSink::enabled() const noexcept
 {
   return impl_->enabled;
 }
 
-bool LibcwdTestOutput::setup_succeeded() const noexcept
+bool LibcwdOutputSink::setup_succeeded() const noexcept
 {
   return impl_->error.empty();
 }
 
-std::string const& LibcwdTestOutput::setup_error() const noexcept
+std::string const& LibcwdOutputSink::setup_error() const noexcept
 {
   return impl_->error;
 }
 
-}  // namespace ava::test
+}  // namespace ava::debug

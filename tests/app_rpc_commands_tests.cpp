@@ -86,7 +86,7 @@ void test_app_rpc_model_commands()
          "RPC get_session_stats reports model_change count");
   expect(jsonl.find("\"id\":\"cycle\"") != std::string::npos && jsonl.find("\"provider\":\"deepseek\"") != std::string::npos,
          "RPC cycle_model advances to the next configured provider model");
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   expect(session_w->model().provider_id == "deepseek", "RPC cycle_model updates active session model");
   auto previous = ava::app::rpc::previous_runtime_model(session_w);
   expect(previous && previous->provider_id == "anthropic" && previous->model_id == "claude-sonnet-4-5",
@@ -136,7 +136,7 @@ void test_app_rpc_reasoning_commands()
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC reasoning command loop completes successfully");
   expect(jsonl.find("\"id\":\"set\"") != std::string::npos && jsonl.find("\"reasoning_enabled\":true") != std::string::npos &&
@@ -190,7 +190,7 @@ void test_app_rpc_reasoning_model_serialization_exposes_resolved_maps()
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result =
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = out.str();
 
   expect(result.has_value(), "RPC reasoning serialization loop completes successfully");
@@ -431,7 +431,7 @@ void test_app_rpc_protocol_version_and_session_commands()
          "RPC validate_session reports a clean replay audit for the active session");
   expect(jsonl.find("\"id\":\"new\"") != std::string::npos && jsonl.find("\"created\":true") != std::string::npos,
          "RPC new_session creates and switches to a new active session");
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   expect(session_r->store.session_id() == initial_id && jsonl.find("\"id\":\"switch\"") != std::string::npos,
          "RPC switch_session switches back to the requested session");
 }

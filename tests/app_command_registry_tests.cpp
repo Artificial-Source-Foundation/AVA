@@ -85,7 +85,7 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
   write_app_test_file(workspace / ".ava" / "commands" / "defaults.md", "Default ${1:-release} ${2:-notes}\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   auto const* review = find_entry(registry, "/review");
   expect(review != nullptr && review->source == ava::app::UnifiedCommandSource::PromptProject && review->description == "Project review" &&
@@ -123,7 +123,7 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
                       "---\nname: release\ndescription: Prepare release work\n---\nRelease skill body\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto registry = session_w->load_command_registry();
   ava::app::CommandRegistryEntry const* entry_skill_release = find_entry(registry, "/skill:release");
   ava::app::CommandRegistryEntry const* entry_release = find_entry(registry, "/release");
@@ -155,7 +155,7 @@ void test_plugin_commands_are_registry_entries()
   write_app_test_file(plugin_dir / "plugin.json", app_test_plugin_manifest_json("com.example.cmd", "Command Plugin"));
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto enabled = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins enable com.example.cmd"});
   expect(enabled && enabled->handled, "plugin command registry test enables a project plugin without execution");
 
@@ -180,7 +180,7 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
   write_app_test_file(workspace / ".ava" / "mcp.json", app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::Operation> operations;
   auto registry =
       session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
@@ -211,7 +211,7 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   std::filesystem::create_directories(workspace);
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{
       .include_prompt_commands = false, .include_skills = false, .include_plugin_commands = false, .include_mcp_prompts = false});
   auto const* entry = find_entry(registry, "/session");
@@ -264,7 +264,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto& session = *session_w;
   auto coordinator = session.subagent_coordinator();
   expect(coordinator != nullptr, "interactive jobs human-output test requires a coordinator");
@@ -463,7 +463,7 @@ void test_project_trust_gates_project_resource_commands()
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.local" / "skills" / "triage.md", "Local plugin skill\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  ava::app::runtime::session_ts::wat session_w(unlocked_session);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::string const& system_prompt = session_w->system_prompt();
 
   expect(session_w->project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session_w->project_trust()),

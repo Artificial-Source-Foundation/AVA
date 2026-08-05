@@ -195,7 +195,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session
       if (options.output_format == PrintOutputFormat::Json)
       {
         // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
-        runtime::session_ts::rat session_r(unlocked_session);
+        SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
         static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(*session_r, result.error()))));
       }
       else

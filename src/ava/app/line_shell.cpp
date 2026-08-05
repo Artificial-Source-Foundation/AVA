@@ -148,7 +148,8 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
             if (!request_id.empty())
               run_options.request_id = request_id;
             run_options.on_subagent_launch = on_subagent_launch;
-            runtime::session_ts::wat command_session_w(state.unlocked_session);
+            runtime::session_ts& unlocked_command_session = state.unlocked_session;
+            SCOPED_CRITICAL_AREA_W(command_session_w, unlocked_command_session);
             auto command_result = ava::app::run_command(
                 *command_session_w,
                 ava::app::CommandRequest{.command = line,

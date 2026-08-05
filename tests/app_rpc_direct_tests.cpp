@@ -74,7 +74,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   input_buffer.close();
   rpc_thread.join();
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();
   auto const audited_allow = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
@@ -140,7 +140,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   input_buffer.close();
   rpc_thread.join();
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();
   auto const audited_deny = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
@@ -254,7 +254,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
   bool const failed = output_buffer.wait_contains("compaction summary request failed with status 500", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();
   expect(result.has_value() && failed, "RPC compact failure loop completes after error response");
@@ -291,7 +291,7 @@ void test_app_rpc_compact_cancellation_is_error_response_without_provider_reques
 
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
   auto result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = out.str();
   auto entries = session_r->store.load();
   expect(result.has_value(), "RPC compact cancellation loop completes after error response");

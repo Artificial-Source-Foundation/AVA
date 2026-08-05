@@ -355,7 +355,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 {
 #ifdef CWDEBUG
   {
-    runtime::session_ts::rat session_r(unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id() << ", provider_id=" << session_r->model().provider_id
                                                                << ", model_id=" << session_r->model().model_id);
   }
@@ -493,7 +493,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
           return written;
         continue;
       }
-      runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);  // FIXME: should NOT lock session here.
       runtime::Session& session(*session_w);
       auto envelope =
           rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), *revoked);
@@ -507,7 +507,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     if (command->type == "permission_grants_clear")
     {
       auto const cleared = rpc::permission_session_grants_clear_result_json(pending_state);
-      runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);  // FIXME: should NOT lock session here.
       runtime::Session& session(*session_w);
       auto envelope =
           rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), cleared);
@@ -529,7 +529,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       std::lock_guard lock(session_mutex);      // FIXME: remove this once all session_mutex have been replaced by the mutex in unlocked_session.
-      runtime::session_ts::wat session_w(unlocked_session);
+      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
       auto registry = session_w->load_command_registry(
           CommandRegistryOptions{.include_builtins = true,
                                  .include_prompt_commands = true,
@@ -576,7 +576,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::config::XdgPaths paths;
       {
         std::lock_guard lock(session_mutex);
-        runtime::session_ts::wat session_w(unlocked_session); // FIXME: use session_r here instead and don't pass session_mutex...
+        SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);        // FIXME: use session_r here instead and don't pass session_mutex...
         runtime::Session& session(*session_w);
         paths = session.paths();
         auto result =
@@ -1059,7 +1059,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 
   if (prompt_worker)
   {
-    runtime::session_ts::wat session_w(unlocked_session); // FIXME: should NOT lock session here.
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);    // FIXME: should NOT lock session here.
     runtime::Session& session(*session_w);
 
     auto cleared = rpc::close_input_and_cancel(run_state);
@@ -1133,7 +1133,7 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
   // The Provider is kept alive till the end of this function.
   std::unique_ptr<ava::provider::Provider> provider;
   {
-    runtime::session_ts::rat session_r(unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
 
     runtime_options.permission_resolver = build_headless_permission_resolver(options.permission_policy);
     runtime_options.question_resolver = nullptr;

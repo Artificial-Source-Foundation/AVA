@@ -478,7 +478,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     input_buffer.close();
     rpc_thread.join();
 
-    ava::app::runtime::session_ts::rat session_r(unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     auto const jsonl = output_buffer.str();
     expect(result.has_value() && completed, "RPC permission reply loop exits successfully");
     expect(jsonl.find("\"id\":\"reply\"") != std::string::npos && jsonl.find("\"success\":true") != std::string::npos &&
@@ -551,7 +551,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
   input_buffer.close();
   rpc_thread.join();
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = output_buffer.str();
   expect(result.has_value() && first_completed && grant_listed && second_completed, "RPC permission session grant loop exits successfully");
   expect(count_substrings(jsonl, "\"name\":\"permission_requested\"") == 1 && jsonl.find("\"payload_type\":\"permission\"") != std::string::npos &&
@@ -906,7 +906,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   input_buffer.close();
   rpc_thread.join();
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
 
   auto const jsonl = output_buffer.str();
   auto entries = session_r->store.load();

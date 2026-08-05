@@ -1198,8 +1198,8 @@ void test_enabled_plugin_dynamic_resources_list_and_read()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamic", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic resource test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1254,8 +1254,8 @@ void test_disabled_plugin_dynamic_resources_do_not_execute()
              "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1294,8 +1294,8 @@ void test_dynamic_resources_require_explicit_manifest_capability()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.nodynamic", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic capability test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1330,8 +1330,8 @@ void test_dynamic_resource_read_rejects_invalid_names_before_launch()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicname", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic invalid-name test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1377,8 +1377,8 @@ void test_dynamic_resource_proxy_requests_use_core_service_handler()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicproxy", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic proxy test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1422,8 +1422,8 @@ void test_plugin_reported_dynamic_resource_errors_surface_text()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamicerrors", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic error test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -1457,8 +1457,8 @@ void test_dynamic_resource_commands_respect_prelaunch_cancellation()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.dynamiccancel", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "dynamic cancellation test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1500,8 +1500,8 @@ void test_malformed_dynamic_resource_result_fails_safely()
   auto enabled = ava::plugin::set_plugin_enabled(state_file, workspace, "com.example.malformedresource", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "malformed dynamic resource test enables project plugin");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
@@ -1529,8 +1529,8 @@ void test_static_plugin_resources_remain_manifest_only()
   write_text(plugin_dir / "prompts" / "review.md", "Static prompt body\n");
   write_text(plugin_dir / "plugin.sh", "printf '%s\\n' executed > executed.txt\n");
 
-  auto session = plugin_command_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
+  auto unlocked_session = plugin_command_test_session(paths, workspace);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto prompt = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
   auto const output = command_output_text(prompt);
   expect(prompt && prompt->handled && output.find("Static prompt body") != std::string::npos && output.find("path:") != std::string::npos,

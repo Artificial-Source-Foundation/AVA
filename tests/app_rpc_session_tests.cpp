@@ -317,7 +317,7 @@ void test_app_rpc_current_session_reads_reject_path_replacement()
   auto result =
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
 
   auto const jsonl = out.str();
   auto pathname_entries = session_r->store.load();
@@ -356,7 +356,7 @@ void test_app_rpc_session_metadata_name_and_labels()
   auto result =
       ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat session_r(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto const jsonl = out.str();
   auto metadata = ava::session::load_session_metadata(session_r->store);
   auto entries = session_r->store.load();
@@ -435,7 +435,7 @@ void test_app_rpc_session_tree_command_and_switch_navigation()
   auto result =
       ava::app::run_rpc_loop(unlocked_child, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat child_r(unlocked_child);
+  SCOPED_CRITICAL_AREA_R(child_r, unlocked_child);
   auto const jsonl = out.str();
   expect(result.has_value(), "RPC session_tree loop completes successfully");
   expect(jsonl.find("\"id\":\"tree\"") != std::string::npos && jsonl.find("\"current_session_id\":\"" + child_id + "\"") != std::string::npos &&
@@ -581,7 +581,7 @@ void test_app_rpc_branch_construction_failure_rolls_back_created_file()
   auto result =
       ava::app::run_rpc_loop(unlocked_source, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
 
-  ava::app::runtime::session_ts::rat source_r(unlocked_source);
+  SCOPED_CRITICAL_AREA_R(source_r, unlocked_source);
   auto const jsonl = out.str();
   auto const marker = std::string("created_session_id: ");
   auto const marker_offset = jsonl.find(marker);
@@ -654,7 +654,7 @@ void test_app_rpc_noncurrent_branch_source_recovers_torn_tail()
   std::ostringstream out;
   auto result =
       ava::app::run_rpc_loop(unlocked_current, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out, ava::app::rpc::RpcInputWake{});
-  ava::app::runtime::session_ts::rat current_r(unlocked_current);
+  SCOPED_CRITICAL_AREA_R(current_r, unlocked_current);
   auto cloned_entries = current_r->store.load();
   auto cloned_metadata = ava::session::load_session_metadata(current_r->store);
   expect(result && out.str().find("\"id\":\"clone\"") != std::string::npos && current_r->store.session_id() != source_id && cloned_entries &&

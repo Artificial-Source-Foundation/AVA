@@ -328,6 +328,8 @@ void test_idle_delivery_and_terminal_before_registration()
   auto fixture = make_fixture("subagent-delivery-idle", state, true);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   std::atomic_int permission_callbacks = 0;
   std::atomic_int question_callbacks = 0;
   ava::app::runtime::RunOptions options;
@@ -344,20 +346,18 @@ void test_idle_delivery_and_terminal_before_registration()
     ++question_callbacks;
     return ava::agent::QuestionAnswer{};
   };
-  auto refreshed = fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options);
+  auto refreshed = fixture.manager->refresh_parent(unlocked_fixture_session, options);
   expect(refreshed.has_value(), "ordinary parent configuration is retained before a job registers");
   auto started = start_completed(fixture);
   if (started.job.identity.job_id.empty())
     return;
   expect(state->wait_completed(), "idle automatic delivery finishes through a fresh transport");
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::rat fixture_session_r(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_R(fixture_session);
   std::string fixture_session_id = fixture_session_r->store.session_id();
   auto& fixture_workspace_dir = fixture_session_r->workspace_dir();
   auto history = fixture_session_r->read_authority_1();
-  fixture_session_r.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_R(fixture_session);
 
   auto snapshot = fixture.coordinator->snapshot(fixture_session_id, started.job.identity.job_id);
   expect(snapshot && snapshot->job.delivery == ava::agent::SubagentDeliveryState::Acknowledged && snapshot->job.committed_turn_id,
@@ -384,7 +384,7 @@ void test_idle_delivery_and_terminal_before_registration()
                 state->delivery_run_request_id != snapshot->job.delivery_attempt_history.back().attempt_id),
            "delivery clears stale credentials and integration routes, advertises no tools, and uses a distinct automatic-run identity");
   }
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "acknowledged parent may refresh without replaying delivery");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "acknowledged parent may refresh without replaying delivery");
   fixture.manager->shutdown();
   {
     std::lock_guard lock(state->mutex);
@@ -400,12 +400,13 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
       make_fixture("subagent-delivery-navigation", state, false, 3, [admission](std::stop_token stop_token) { admission->arrive_and_wait(stop_token); });
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   ava::app::runtime::RunOptions options;
   options.access_token = "navigation-token";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "navigation parent capsule refreshes");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "navigation parent capsule refreshes");
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::rat fixture_session_r(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_R(fixture_session);
 
   auto const parent_id = fixture_session_r->store.session_id();
   auto* const parent_controller = fixture_session_r->run_controller().get();
@@ -425,14 +426,12 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(unlocked_continued_result.has_value(), "continue session reopens the retained parent runtime");
   if (!unlocked_continued_result)
     return;
-  ava::app::runtime::session_ts::wat continued_w(*unlocked_continued_result);
-  expect(continued_w->run_controller().get() == parent_controller,
+  expect(ava::app::runtime::session_ts::wat(*unlocked_continued_result)->run_controller().get() == parent_controller,
          "continue attaches the retained last parent before attempting pathname lease reacquisition");
   auto guard = fixture_session_r->run_controller()->admit({.request_id = "active-parent-turn"});
   expect(guard.has_value(), "parent active turn is admitted before child terminal publication");
 
-  fixture_session_r.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_R(fixture_session);
 
   auto started = start_completed(fixture, "child_navigation");
   if (!guard || started.job.identity.job_id.empty())
@@ -454,7 +453,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
 
   ava::app::runtime::RunOptions refreshed_options;
   refreshed_options.access_token = "navigation-token-refreshed";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, refreshed_options).has_value(),
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, refreshed_options).has_value(),
          "active parent refresh replaces the retained runtime configuration before delivery");
 
   auto building = guard->transition(ava::app::RunPhase::BuildingContext);
@@ -464,8 +463,7 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(building && awaiting && completing && completed, "active parent turn closes before synthetic delivery admission");
   expect(admission->wait_reached(), "delivery worker reaches pre-admission after the parent controller becomes idle");
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::wat fixture_session_w(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_W(fixture_session);
 
   ava::app::runtime::OpenContext base;
   base.paths = fixture.paths;
@@ -475,12 +473,12 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(unlocked_replacement_result.has_value(), "navigation creates another visible session while parent delivery is pending");
   if (!unlocked_replacement_result)
     return;
-  std::string replacement_id;
-  {
-    ava::app::runtime::session_ts::wat replacement_w(*unlocked_replacement_result);
-    replacement_id = replacement_w->store.session_id();
-    expect(fixture_session_w->replace_with(std::move(*replacement_w)).has_value(), "navigation replaces the visible session");
-  }
+  ava::app::runtime::session_ts& unlocked_replacement = *unlocked_replacement_result;
+
+  CRITICAL_AREA_BEGIN_W(replacement);
+  auto replacement_id = replacement_w->store.session_id();
+  expect(fixture_session_w->replace_with(std::move(*replacement_w)).has_value(), "navigation replaces the visible session");
+  CRITICAL_AREA_END_W(replacement);
 
   ava::app::runtime::OpenContext reopen = base;
   reopen.workspace_dir = fixture_session_w->workspace_dir();
@@ -495,8 +493,8 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(unlocked_retained_result.has_value(), "retained parent session reopens by prefix");
   if (!unlocked_retained_result)
     return;
-  ava::app::runtime::session_ts::wat retained_w(*unlocked_retained_result);
-  expect(retained_w->run_controller().get() == parent_controller,
+
+  expect(ava::app::runtime::session_ts::wat(*unlocked_retained_result)->run_controller().get() == parent_controller,
          "reopening a retained parent attaches its exact shared controller without lease reacquisition conflict");
   admission->release();
   expect(state->wait_completed(), "inactive retained parent delivery completes after navigation");
@@ -511,8 +509,6 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
          "inactive parent receives and acknowledges automatic delivery in exactly one attempt");
   expect(fixture_session_w->store.session_id() == replacement_id, "inactive delivery does not change the visible session");
   fixture.manager->shutdown();
-
-  // fixture.unlocked_session_opt critical area end.
 }
 
 void test_retained_session_workspace_isolation()
@@ -521,9 +517,11 @@ void test_retained_session_workspace_isolation()
   auto fixture = make_fixture("subagent-delivery-workspace-isolation", state);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   ava::app::runtime::RunOptions options;
   options.access_token = "workspace-token";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "workspace isolation fixture retains its parent");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "workspace isolation fixture retains its parent");
 
   auto const foreign_workspace = fixture.root / "foreign-workspace";
   std::filesystem::create_directories(foreign_workspace);
@@ -553,18 +551,19 @@ void test_capsule_generation_release_and_active_retention()
   auto fixture = make_fixture("subagent-delivery-capsule-generations", state);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   ava::app::runtime::RunOptions first_options;
   first_options.access_token = "first-retained-token";
-  auto first = fixture.manager->refresh_parent(*fixture.unlocked_session_opt, first_options);
+  auto first = fixture.manager->refresh_parent(unlocked_fixture_session, first_options);
   ava::app::runtime::RunOptions second_options;
   second_options.access_token = "second-retained-token";
-  auto second = fixture.manager->refresh_parent(*fixture.unlocked_session_opt, second_options);
+  auto second = fixture.manager->refresh_parent(unlocked_fixture_session, second_options);
   expect(first && second && *first != *second, "capsule refresh publishes immutable increasing generations");
   if (!first || !second)
     return;
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::rat fixture_session_r(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_R(fixture_session);
 
   fixture.manager->release_parent_if_unused(fixture_session_r->store.session_id(), *first);
   auto retained_after_old_release = fixture.manager->retained_session(fixture_session_r->store.session_id(), fixture_session_r->workspace_dir(), true);
@@ -585,14 +584,12 @@ void test_capsule_generation_release_and_active_retention()
   auto released = fixture.manager->retained_session(fixture_session_r->store.session_id(), fixture_session_r->workspace_dir(), true);
   expect(released && !*released, "the exact current inactive generation releases when no live or pending job needs it");
 
-  fixture_session_r.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_R(fixture_session);
 
-  auto third = fixture.manager->refresh_parent(*fixture.unlocked_session_opt, first_options);
-  auto fourth = fixture.manager->refresh_parent(*fixture.unlocked_session_opt, second_options);
+  auto third = fixture.manager->refresh_parent(unlocked_fixture_session, first_options);
+  auto fourth = fixture.manager->refresh_parent(unlocked_fixture_session, second_options);
 
-  // fixture.unlocked_session_opt critical area start.
-  fixture_session_r.relock(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_CONTINUE_R(fixture_session);
 
   auto blocking = std::make_shared<DeliveryBlockingJob>();
   auto job =
@@ -616,8 +613,6 @@ void test_capsule_generation_release_and_active_retention()
   if (job)
     static_cast<void>(fixture.coordinator->wait(fixture_session_r->store.session_id(), job->job.identity.job_id, std::chrono::seconds(2)));
   fixture.manager->shutdown();
-
-  // fixture.unlocked_session_opt critical area end.
 }
 
 void test_runtime_mutations_refresh_retained_delivery_configuration()
@@ -626,12 +621,13 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
   auto fixture = make_fixture("subagent-delivery-runtime-mutations", state);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   ava::app::runtime::RunOptions options;
   options.access_token = "stale-before-mutation-token";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "runtime mutation fixture retains initial configuration");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "runtime mutation fixture retains initial configuration");
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::wat fixture_session_w(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_W(fixture_session);
 
   auto model = fixture_session_w->model();
   model.model_id = "gpt-5.5-delivery-refresh-test";
@@ -650,8 +646,7 @@ void test_runtime_mutations_refresh_retained_delivery_configuration()
              (*retained)->anchor_set() == fixture_session_w->anchor_set(),
          "retained-session attachment returns the latest configuration with the exact logical workspace and shared AnchorSet authority");
 
-  fixture_session_w.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_W(fixture_session);
 
   auto started = start_completed(fixture, "child_runtime_mutation");
   if (started.job.identity.job_id.empty())
@@ -713,7 +708,9 @@ void test_bounded_delivery_retries()
   run_options.access_token = "bounded-token";
   expect(manager->refresh_parent(*unlocked_session_result, run_options).has_value(), "bounded retry parent refreshes");
 
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+
   auto started = coordinator->start_background(session_w->store.session_id(), {.title = "retry", .description = "retry", .child_session_id = "child_retry"},
                                                [](auto const&) {
                                                  return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
@@ -808,10 +805,13 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   auto unlocked_session_result = ava::app::runtime::Session::open(open);
   if (!unlocked_session_result)
     return;
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+
   ava::app::runtime::RunOptions options;
   options.access_token = "retry-token";
-  expect(manager->refresh_parent(*unlocked_session_result, options).has_value(), "after-user-append retry parent refreshes");
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  expect(manager->refresh_parent(unlocked_session, options).has_value(), "after-user-append retry parent refreshes");
+
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto started = coordinator->start_background(session_w->store.session_id(), {.title = "retry", .description = "retry", .child_session_id = "child_user_append"},
                                                [](auto const&) {
                                                  return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
@@ -846,9 +846,11 @@ void test_two_pending_deliveries_survive_coordinator_retention()
       make_fixture("subagent-delivery-retention-one", state, false, 3, [admission](std::stop_token stop_token) { admission->arrive_and_wait(stop_token); }, 1);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   ava::app::runtime::RunOptions options;
   options.access_token = "retention-token";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "retention-one parent capsule refreshes");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "retention-one parent capsule refreshes");
   auto first = start_completed(fixture, "child_retention_one");
   auto second = start_completed(fixture, "child_retention_two");
   if (first.job.identity.job_id.empty() || second.job.identity.job_id.empty())
@@ -906,12 +908,13 @@ void test_forged_text_marker_cannot_ack_delivery()
   auto fixture = make_fixture("subagent-delivery-forged-marker", state);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   auto started = start_completed(fixture, "child_forged_marker");
   if (started.job.identity.job_id.empty())
     return;
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::wat fixture_session_w(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_W(fixture_session);
 
   auto terminal = fixture.coordinator->wait(fixture_session_w->store.session_id(), started.job.identity.job_id, std::chrono::seconds(2));
   auto const fingerprint = terminal ? delivery_prompt_fingerprint(terminal->job) : std::string{};
@@ -926,12 +929,11 @@ void test_forged_text_marker_cannot_ack_delivery()
                                                          fixture_session_w->model().model_id, {}, std::nullopt);
   expect(terminal && attempt && forged_user && forged_commit, "forged-marker fixture commits ordinary user text and a corresponding assistant turn");
 
-  fixture_session_w.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_W(fixture_session);
 
   ava::app::runtime::RunOptions options;
   options.access_token = "stale-forged-token";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(), "forged-marker fixture registers delivery parent");
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(), "forged-marker fixture registers delivery parent");
   expect(state->wait_completed(), "forged text marker does not suppress the real automatic provider integration");
   auto acknowledged = fixture.coordinator->snapshot(fixture.session_r()->store.session_id(), started.job.identity.job_id);
   std::size_t factories = 0;
@@ -951,12 +953,13 @@ void test_same_process_reconciliation_acks_existing_commit_without_rerun()
   auto fixture = make_fixture("subagent-delivery-reconcile", state);
   if (!fixture.unlocked_session_opt)
     return;
+  ava::app::runtime::session_ts& unlocked_fixture_session = fixture.unlocked_session_opt.value();
+
   auto started = start_completed(fixture, "child_reconcile");
   if (started.job.identity.job_id.empty())
     return;
 
-  // fixture.unlocked_session_opt critical area start.
-  ava::app::runtime::session_ts::wat fixture_session_w(fixture.unlocked_session_opt.value());
+  CRITICAL_AREA_BEGIN_W(fixture_session);
 
   std::string const fixture_session_id = fixture_session_w->store.session_id();
   auto terminal = fixture.coordinator->wait(fixture_session_id, started.job.identity.job_id, std::chrono::seconds(2));
@@ -976,12 +979,11 @@ void test_same_process_reconciliation_acks_existing_commit_without_rerun()
                                                      fixture_session_w->model().model_id, {}, std::nullopt);
   expect(appended_user && persisted, "reconciliation fixture commits marker and assistant transaction before acknowledgement");
 
-  fixture_session_w.unlock();
-  // fixture.unlocked_session_opt critical area end.
+  CRITICAL_AREA_END_W(fixture_session);
 
   ava::app::runtime::RunOptions options;
   options.access_token = "must-not-be-used";
-  expect(fixture.manager->refresh_parent(*fixture.unlocked_session_opt, options).has_value(),
+  expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(),
          "reconciliation registers retained parent after a same-process acknowledgement failure");
   auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   ava::agent::SubagentDeliveryState delivery = ava::agent::SubagentDeliveryState::Attempting;

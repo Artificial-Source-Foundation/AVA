@@ -104,13 +104,13 @@ void run_tui_selector_tests()
   branch_operation.source_label = "Résumé 父";
   branch_operation.model_label = "模型 β";
   auto const branch_confirmation_view = ava::tui::runtime_views::branch_summary_operation_view(branch_operation);
-  auto const branch_confirmation_rows_8 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 64, 8);
-  auto const branch_confirmation_rows_12 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 64, 12);
+  auto const branch_confirmation_rows_8 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 72, 8);
+  auto const branch_confirmation_rows_12 = ava::tui::detail::render_select_list_modal(branch_confirmation_view, 72, 12);
   auto const branch_confirmation_screen_8 = tui_test_support::join_visible_lines(branch_confirmation_rows_8);
   auto const branch_confirmation_screen_12 = tui_test_support::join_visible_lines(branch_confirmation_rows_12);
   branch_operation.phase = ava::tui::TuiBranchSummaryPhase::Generating;
   auto const branch_progress_view = ava::tui::runtime_views::branch_summary_operation_view(branch_operation);
-  auto const branch_progress_screen = tui_test_support::join_visible_lines(ava::tui::detail::render_select_list_modal(branch_progress_view, 64, 8));
+  auto const branch_progress_screen = tui_test_support::join_visible_lines(ava::tui::detail::render_select_list_modal(branch_progress_view, 72, 8));
   expect(branch_confirmation_view.items.size() == 1 && branch_confirmation_view.items.front().enabled &&
              branch_confirmation_view.items.front().label == "Generate summary",
          "parent-summary confirmation modal exposes one explicit generation action");
@@ -289,6 +289,22 @@ void run_tui_selector_tests()
              generic_parity_screen.find("Move up  Default  Arrow Up  configurable") != std::string::npos &&
              ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 2, 88, 6) == std::size_t{0},
          "generic keybinding-style selectors preserve label/badge/description/detail order and mouse mapping when no priority suffix is requested");
+
+  auto const roomy_inset_rows = ava::tui::detail::render_select_list_modal(generic_parity_view, 80, 14);
+  auto const narrow_inset_rows = ava::tui::detail::render_select_list_modal(generic_parity_view, 55, 12);
+  auto const roomy_title = strip_sgr(roomy_inset_rows[1]);
+  auto const roomy_item = strip_sgr(roomy_inset_rows[3]);
+  auto const narrow_title = strip_sgr(narrow_inset_rows[0]);
+  expect(roomy_inset_rows.size() == 6 && strip_sgr(roomy_inset_rows.front()) == std::string(80, ' ') &&
+             strip_sgr(roomy_inset_rows.back()) == std::string(80, ' ') && roomy_title.starts_with("    Keybindings") &&
+             roomy_title.ends_with(std::string(4, ' ')) && roomy_item.starts_with("    ›") && roomy_item.ends_with(std::string(4, ' ')) &&
+             !ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 0, 80, 14) &&
+             ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 3, 80, 14) == std::size_t{0} && narrow_inset_rows.size() == 4 &&
+             narrow_title.starts_with("  Keybindings") && !narrow_title.starts_with("    ") && narrow_title.ends_with(std::string(2, ' ')) &&
+             strip_sgr(narrow_inset_rows.front()).find("Keybindings") != std::string::npos &&
+             strip_sgr(narrow_inset_rows.back()).find("Esc") != std::string::npos &&
+             ava::tui::detail::select_list_item_for_modal_row(generic_parity_view, 2, 55, 12) == std::size_t{0},
+         "centered selectors use complete responsive horizontal insets, add only roomy vertical inset rows, and keep render/hit-test rows coupled");
 
   auto reasoning_model = make_model("openai", "reasoning-policy", "Reasoning Policy", "gpt-5", true, {"off", "low", "medium", "high", "disabled", "blocked"});
   reasoning_model.reasoning_level_mappings.push_back(

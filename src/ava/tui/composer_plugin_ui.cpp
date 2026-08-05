@@ -9,12 +9,12 @@ namespace {
 
 std::string plugin_id_host_text(TuiPluginUiBinding const& binding)
 {
-  return "  Plugin ID · " + binding.plugin_id;
+  return "Plugin ID · " + binding.plugin_id;
 }
 
 std::string plugin_command_host_text(TuiPluginUiBinding const& binding)
 {
-  return "  Command · " + binding.command;
+  return "Command · " + binding.command;
 }
 
 std::string plugin_controls_host_text(TuiPluginUiKind kind)
@@ -23,11 +23,11 @@ std::string plugin_controls_host_text(TuiPluginUiKind kind)
   {
     case TuiPluginUiKind::Status:
     case TuiPluginUiKind::Widget:
-      return "  Ctrl+C stop · 120s max";
+      return "Ctrl+C stop · 120s max";
     case TuiPluginUiKind::Select:
-      return "  Enter select · Esc cancel · Ctrl+C stop · 120s max";
+      return "Enter select · Esc cancel · Ctrl+C stop · 120s max";
     case TuiPluginUiKind::Confirm:
-      return "  Enter confirm · Esc cancel · Ctrl+C stop · 120s max";
+      return "Enter confirm · Esc cancel · Ctrl+C stop · 120s max";
   }
   return {};
 }
@@ -54,8 +54,14 @@ bool plugin_ui_host_chrome_fits(TuiPluginUiBinding const& binding, TuiPluginUiKi
 {
   try
   {
-    return max_lines >= plugin_minimum_surface_rows(kind) && detail::terminal_text_columns(plugin_id_host_text(binding)) <= width &&
-           detail::terminal_text_columns(plugin_command_host_text(binding)) <= width && detail::terminal_text_columns(plugin_controls_host_text(kind)) <= width;
+    auto const centered_modal = kind == TuiPluginUiKind::Select || kind == TuiPluginUiKind::Confirm;
+    auto const inset = centered_modal ? detail::modal_horizontal_inset(width) : std::size_t{2};
+    auto const reserved_width = centered_modal ? 2 * inset : inset;
+    auto const content_width = width > reserved_width ? width - reserved_width : 0;
+    auto const minimum_rows = plugin_minimum_surface_rows(kind) + (centered_modal ? 2 * detail::modal_vertical_inset(max_lines) : 0);
+    return max_lines >= minimum_rows && detail::terminal_text_columns(plugin_id_host_text(binding)) <= content_width &&
+           detail::terminal_text_columns(plugin_command_host_text(binding)) <= content_width &&
+           detail::terminal_text_columns(plugin_controls_host_text(kind)) <= content_width;
   }
   catch (...)
   {
@@ -71,6 +77,13 @@ std::string plugin_surface_line(std::string content, std::size_t width, std::str
   return surface_line(background, "  " + std::move(content), width);
 }
 
+std::string plugin_modal_surface_line(std::string content, std::size_t width)
+{
+  auto const inset = modal_horizontal_inset(width);
+  content = fit_line_preserving_sgr(std::move(content), modal_content_width(width));
+  return surface_line(kSgrComposerBg, std::string(inset, ' ') + std::move(content), width);
+}
+
 std::size_t plugin_option_count(TuiPluginUiModalView const& view)
 {
   return view.kind == TuiPluginUiKind::Confirm ? std::size_t{2} : view.options.size();
@@ -78,7 +91,7 @@ std::size_t plugin_option_count(TuiPluginUiModalView const& view)
 
 std::size_t plugin_option_row_budget(std::size_t max_lines)
 {
-  constexpr std::size_t fixed_rows = 5;
+  auto const fixed_rows = std::size_t{5} + 2 * modal_vertical_inset(max_lines);
   return max_lines > fixed_rows ? max_lines - fixed_rows : 0;
 }
 
@@ -159,9 +172,11 @@ std::vector<std::string> render_plugin_ui_modal(TuiPluginUiModalView const& view
   lines.reserve(max_lines);
   auto push = [&](std::string content) {
     if (lines.size() < max_lines)
-      lines.push_back(plugin_surface_line(std::move(content), width, kSgrComposerBg));
+      lines.push_back(plugin_modal_surface_line(std::move(content), width));
   };
 
+  if (modal_vertical_inset(max_lines) != 0)
+    push({});
   push(std::string(kSgrAccent) + "Plugin ID" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " · " + view.binding.plugin_id);
   push(std::string(kSgrMuted) + "Command" + std::string(kSgrReset) + std::string(kSgrComposerBg) + " · " + view.binding.command);
   auto const kind_label = view.kind == TuiPluginUiKind::Confirm ? std::string("Confirm") : std::string("Select");
@@ -182,9 +197,12 @@ std::vector<std::string> render_plugin_ui_modal(TuiPluginUiModalView const& view
       line += "  " + std::string(kSgrMuted) + *description + std::string(kSgrReset) + std::string(kSgrComposerBg);
     push(std::move(line));
   }
-  while (lines.size() + 1 < max_lines) push({});
+  auto const bottom_inset = modal_vertical_inset(max_lines);
+  while (lines.size() + 1 + bottom_inset < max_lines) push({});
   auto const enter = view.kind == TuiPluginUiKind::Confirm ? std::string("Enter confirm") : std::string("Enter select");
   push(std::string(kSgrMuted) + enter + " · Esc cancel · Ctrl+C stop · 120s max" + std::string(kSgrReset));
+  if (bottom_inset != 0)
+    push({});
   return lines;
 }
 
@@ -192,7 +210,7 @@ std::optional<std::size_t> plugin_ui_option_for_modal_row(TuiPluginUiModalView c
 {
   if (!plugin_ui_host_chrome_fits(view.binding, view.kind, width, max_lines))
     return std::nullopt;
-  constexpr std::size_t first_option_row = 4;
+  auto const first_option_row = std::size_t{4} + modal_vertical_inset(max_lines);
   auto const budget = plugin_option_row_budget(max_lines);
   if (modal_row < first_option_row || modal_row >= first_option_row + budget)
     return std::nullopt;

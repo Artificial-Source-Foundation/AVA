@@ -78,7 +78,9 @@ std::optional<int> item_match_score(SelectListView const& view, SelectListItemVi
 
 std::string select_modal_line(std::string content, std::size_t width)
 {
-  return detail::composer_surface_line("  " + std::move(content), width);
+  auto const inset = detail::modal_horizontal_inset(width);
+  content = detail::fit_line_preserving_sgr(std::move(content), detail::modal_content_width(width));
+  return detail::composer_surface_line(std::string(inset, ' ') + std::move(content), width);
 }
 
 std::string select_title_line(SelectListView const& view, std::size_t width)
@@ -90,7 +92,7 @@ std::string select_title_line(SelectListView const& view, std::size_t width)
     line +=
         "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(view.subtitle) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
-  return select_modal_line(detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width), width);
+  return select_modal_line(std::move(line), width);
 }
 
 std::string select_search_line(SelectListView const& view, std::size_t width)
@@ -124,7 +126,7 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
   {
     auto const priority = "  " + std::string(detail::kSgrMuted) + sanitize_terminal_text(item.priority_suffix) + std::string(detail::kSgrReset) +
                           std::string(detail::kSgrComposerBg);
-    auto const content_width = width > 4 ? width - 4 : width;
+    auto const content_width = detail::modal_content_width(width);
     auto const priority_width = detail::terminal_text_columns(priority);
     auto const trailing_reserve = !item.description.empty() || !item.detail.empty() || !item.enabled ? std::size_t{3} : std::size_t{0};
     auto const reserved_width = priority_width + trailing_reserve;
@@ -151,7 +153,7 @@ std::string select_item_line(SelectListItemView const& item, bool selected, std:
       line += ": " + sanitize_terminal_text(item.disabled_reason);
     line += std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
-  line = detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width);
+  line = detail::fit_line_preserving_sgr(std::move(line), detail::modal_content_width(width));
   if (!item.enabled)
     line = std::string(detail::kSgrDim) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   return select_modal_line(std::move(line), width);
@@ -161,7 +163,7 @@ std::string select_item_launch_line(SelectListItemView const& item, std::size_t 
 {
   auto line = std::string("    ") + std::string(detail::kSgrMuted) + "Launch: " + sanitize_terminal_text(item.non_searchable_suffix) +
               std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  line = detail::fit_line_preserving_sgr(std::move(line), width > 4 ? width - 4 : width);
+  line = detail::fit_line_preserving_sgr(std::move(line), detail::modal_content_width(width));
   if (!item.enabled)
     line = std::string(detail::kSgrDim) + line + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   return select_modal_line(std::move(line), width);
@@ -169,7 +171,7 @@ std::string select_item_launch_line(SelectListItemView const& item, std::size_t 
 
 std::string select_footer_line(SelectListView const& view, std::size_t width)
 {
-  auto const content_width = width > 4 ? width - 4 : width;
+  auto const content_width = detail::modal_content_width(width);
   auto const session_selector = view.title.find("session") != std::string::npos || view.title.find("Session") != std::string::npos;
   auto const scoped_models = view.title.find("Scoped model") != std::string::npos;
   std::string hint;
@@ -670,6 +672,10 @@ std::vector<std::string> select_list_modal_prefix(SelectListView const& view, st
   std::vector<std::string> lines;
   if (max_lines == 0)
     return lines;
+  if (modal_vertical_inset(max_lines) != 0)
+    lines.push_back(composer_surface_line({}, width));
+  if (lines.size() >= max_lines)
+    return lines;
   lines.push_back(select_title_line(view, width));
   if (lines.size() < max_lines)
     lines.push_back(select_search_line(view, width));
@@ -685,7 +691,7 @@ std::optional<std::size_t> select_list_item_for_modal_row(SelectListView const& 
   if (modal_row < content_start)
     return std::nullopt;
 
-  auto const reserved_footer = std::size_t{1};
+  auto const reserved_footer = std::size_t{1} + modal_vertical_inset(max_lines);
   auto const budget = max_lines > content_start + reserved_footer ? max_lines - content_start - reserved_footer : 0;
   auto const content_rows = select_list_content_rows(view, budget);
   auto const content_row = modal_row - content_start;
@@ -702,7 +708,7 @@ std::vector<std::string> render_select_list_modal(SelectListView const& view, st
 
   auto const matches = filter_select_list_items(view);
   auto const selected = clamp_select_list_selection(view, view.selected_item_index);
-  auto const reserved_footer = std::size_t{1};
+  auto const reserved_footer = std::size_t{1} + modal_vertical_inset(max_lines);
   auto const budget = max_lines > lines.size() + reserved_footer ? max_lines - lines.size() - reserved_footer : 0;
   auto const content_rows = select_list_content_rows(view, budget);
 
@@ -735,6 +741,8 @@ std::vector<std::string> render_select_list_modal(SelectListView const& view, st
 
   if (lines.size() < max_lines)
     lines.push_back(select_footer_line(view, width));
+  if (modal_vertical_inset(max_lines) != 0 && lines.size() < max_lines)
+    lines.push_back(composer_surface_line({}, width));
   return lines;
 }
 

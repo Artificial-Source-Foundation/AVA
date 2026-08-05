@@ -17,6 +17,25 @@ inline constexpr std::size_t kMinHeight = 8;
 inline constexpr std::size_t kMinComposerBlockLines = 2;
 inline constexpr std::size_t kMaxComposerBlockLines = 8;
 inline constexpr std::size_t kMaxPaletteLines = 8;
+inline constexpr std::size_t kWideModalMinimumWidth = 56;
+inline constexpr std::size_t kRoomyModalMinimumLines = 14;
+
+[[nodiscard]] inline constexpr std::size_t modal_horizontal_inset(std::size_t width) noexcept
+{
+  return width >= kWideModalMinimumWidth ? 4 : 2;
+}
+
+[[nodiscard]] inline constexpr std::size_t modal_vertical_inset(std::size_t max_lines) noexcept
+{
+  return max_lines >= kRoomyModalMinimumLines ? 1 : 0;
+}
+
+[[nodiscard]] inline constexpr std::size_t modal_content_width(std::size_t width) noexcept
+{
+  auto const insets = 2 * modal_horizontal_inset(width);
+  return width > insets ? width - insets : 0;
+}
+
 inline constexpr std::string_view kReverseVideo = "\x1b[7m";
 inline constexpr std::string_view kReverseVideoOff = "\x1b[27m";
 

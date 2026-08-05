@@ -365,10 +365,10 @@ std::string question_option_line(QuestionPromptView const& prompt, std::size_t i
   return fit_line_preserving_sgr(style + text + std::string(kSgrReset), width);
 }
 
-std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width)
+std::string question_custom_content(QuestionPromptView const& prompt)
 {
   auto const cursor = question_custom_owns_cursor(prompt);
-  std::string text = cursor ? "  › Custom: " : "    Custom: ";
+  std::string text = cursor ? "› Custom: " : "  Custom: ";
   if (prompt.custom_text.empty())
   {
     text += prompt.secret ? std::string("paste secret") : std::string("type to answer");
@@ -382,7 +382,12 @@ std::string question_custom_line(QuestionPromptView const& prompt, std::size_t w
     text += sanitize_terminal_text(prompt.custom_text);
   }
   auto const style = cursor ? std::string(kSgrAccent) + std::string(kSgrBold) : std::string(kSgrTextDimmed);
-  return fit_line_preserving_sgr(style + text + std::string(kSgrReset), width);
+  return style + text + std::string(kSgrReset);
+}
+
+std::string question_custom_line(QuestionPromptView const& prompt, std::size_t width)
+{
+  return fit_line_preserving_sgr("  " + question_custom_content(prompt), width);
 }
 
 std::string lower_ascii(std::string_view text)
@@ -488,13 +493,20 @@ std::optional<std::string_view> copy_text_for_option(QuestionPromptOptionView co
 
 std::string modal_line(std::string content, std::size_t width)
 {
-  return question_surface_line("  " + std::move(content), width);
+  auto const inset = modal_horizontal_inset(width);
+  content = fit_line_preserving_sgr(std::move(content), modal_content_width(width));
+  return question_surface_line(std::string(inset, ' ') + std::move(content), width);
+}
+
+std::string modal_custom_line(QuestionPromptView const& prompt, std::size_t width)
+{
+  return modal_line(question_custom_content(prompt), width);
 }
 
 std::vector<std::string> modal_wrapped_lines(std::string_view text, std::size_t width)
 {
   std::vector<std::string> lines;
-  auto const content_width = width > 4 ? width - 4 : width;
+  auto const content_width = modal_content_width(width);
   for (auto const& raw_line : split_lines(text))
   {
     for (auto const& wrapped : wrap_transcript_text(raw_line, content_width))
@@ -513,8 +525,9 @@ std::string modal_title_line(QuestionPromptView const& prompt, std::size_t width
   std::string const esc = std::string(kSgrMuted) + "esc" + std::string(kSgrReset) + std::string(kSgrQuestionBg);
   auto const line_cols = terminal_text_columns(line);
   auto const esc_cols = terminal_text_columns(esc);
-  if (line_cols + esc_cols + 3 < width)
-    line += std::string(width - line_cols - esc_cols - 2, ' ') + esc;
+  auto const content_width = modal_content_width(width);
+  if (line_cols + esc_cols + 1 < content_width)
+    line += std::string(content_width - line_cols - esc_cols, ' ') + esc;
   return modal_line(std::move(line), width);
 }
 
@@ -847,7 +860,7 @@ QuestionRenderRows render_question_modal_rows(QuestionPromptView const& prompt, 
   }
 
   if (prompt.allow_custom && !prompt.searchable && rows.lines.size() < max_lines)
-    append_question_row(rows, question_custom_line(prompt, width));
+    append_question_row(rows, modal_custom_line(prompt, width));
   if (rows.lines.size() < max_lines)
     append_question_row(rows, question_surface_line("", width));
   if (rows.lines.size() < max_lines)

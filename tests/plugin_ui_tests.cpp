@@ -7,6 +7,7 @@
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/tui/composer.h"
+#include "ava/tui/composer_internal.h"
 #include "ava/tui/runtime_plugin_ui_internal.h"
 #include "ava/plugin/enablement.h"
 #include "ava/plugin/manifest.h"
@@ -916,7 +917,6 @@ void test_app_direct_command_claims_ui_and_caches_permission_once()
       ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.ui", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "plugin UI integration plugin is enabled");
   auto session = plugin_ui_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
 
   CapabilityFixture fixture;
   auto capability = make_capability(fixture);
@@ -925,9 +925,9 @@ void test_app_direct_command_claims_ui_and_caches_permission_once()
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
-  auto result = ava::app::run_plugin_command(*session_w, ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}",
-                                                                                  .permission_resolver = allow,
-                                                                                  .plugin_ui_capability = capability ? *capability : nullptr});
+  auto result = ava::app::run_plugin_command(
+      session, ava::app::CommandRequest{
+                   .command = "/plugin run com.example.ui run {}", .permission_resolver = allow, .plugin_ui_capability = capability ? *capability : nullptr});
   auto const first_ui_prompts =
       std::ranges::count_if(prompts, [](auto const& prompt) { return prompt.operation == ava::permissions::Operation::PluginUiPresent; });
   expect(result && result->handled && !result->output.empty() && result->output.back().find("done") != std::string::npos && fixture.presented.size() == 2,
@@ -938,9 +938,9 @@ void test_app_direct_command_claims_ui_and_caches_permission_once()
   CapabilityFixture second_fixture;
   auto second_capability = make_capability(second_fixture, "/plugin run com.example.ui run {}", "invocation_2");
   auto second_result =
-      ava::app::run_plugin_command(*session_w, ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}",
-                                                                        .permission_resolver = allow,
-                                                                        .plugin_ui_capability = second_capability ? *second_capability : nullptr});
+      ava::app::run_plugin_command(session, ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}",
+                                                                     .permission_resolver = allow,
+                                                                     .plugin_ui_capability = second_capability ? *second_capability : nullptr});
   auto const all_ui_prompts =
       std::ranges::count_if(prompts, [](auto const& prompt) { return prompt.operation == ava::permissions::Operation::PluginUiPresent; });
   expect(second_result && second_fixture.presented.size() == 2 && second_fixture.closed.size() == 1 && all_ui_prompts == 2,
@@ -962,7 +962,6 @@ void test_app_ui_permission_deny_and_exact_binding_fail_closed()
         ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.ui", true, ava::plugin::PluginScope::Project);
     expect(enabled.has_value(), "plugin UI denial fixture is enabled");
     auto session = plugin_ui_test_session(paths, workspace);
-    ava::app::runtime::session_ts::wat session_w(session);
     CapabilityFixture fixture;
     std::shared_ptr<ava::app::PluginUiInvocationCapability> capability;
     if (supply_capability)
@@ -982,14 +981,16 @@ void test_app_ui_permission_deny_and_exact_binding_fail_closed()
       return ava::permissions::PermissionResolution::Allow;
     };
     auto result = ava::app::run_plugin_command(
-        *session_w,
-        ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}", .permission_resolver = resolver, .plugin_ui_capability = capability});
+        session, ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}", .permission_resolver = resolver, .plugin_ui_capability = capability});
     std::string output;
     if (result)
     {
       for (auto const& line : result->output) output += line;
     }
-    auto authority = session_w->read_authority_1();
+    auto authority = [&] {
+      ava::app::runtime::session_ts::wat session_w(session);
+      return session_w->read_authority_1();
+    }();
     auto entries = [&]() -> ava::core::Result<std::vector<ava::session::SessionEntry>> {
       if (!authority)
         return std::unexpected(std::move(authority.error()));
@@ -1063,7 +1064,6 @@ void test_external_disable_revokes_active_ui_command()
       ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.ui", true, ava::plugin::PluginScope::Project);
   expect(enabled.has_value(), "external-disable fixture is initially enabled");
   auto session = plugin_ui_test_session(paths, workspace);
-  ava::app::runtime::session_ts::wat session_w(session);
 
   ava::tui::RuntimePluginUiCoordinator coordinator;
   ava::tui::ComposerSnapshot snapshot;
@@ -1129,8 +1129,7 @@ void test_external_disable_revokes_active_ui_command()
   };
   auto result = std::async(std::launch::async, [&] {
     return ava::app::run_plugin_command(
-        *session_w,
-        ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}", .permission_resolver = allow, .plugin_ui_capability = *capability});
+        session, ava::app::CommandRequest{.command = "/plugin run com.example.ui run {}", .permission_resolver = allow, .plugin_ui_capability = *capability});
   });
   bool modal_opened = false;
   auto const open_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -1170,7 +1169,10 @@ void test_external_disable_revokes_active_ui_command()
   }
   auto current_enabled =
       ava::plugin::plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.ui", ava::plugin::PluginScope::Project);
-  auto authority = session_w->read_authority_1();
+  auto authority = [&] {
+    ava::app::runtime::session_ts::wat session_w(session);
+    return session_w->read_authority_1();
+  }();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(std::move(authority.error())));
   bool const session_has_canary =
       entries && std::ranges::any_of(*entries, [](auto const& entry) { return entry.data_json.find("DISABLE_RAW_CANARY_51ac") != std::string::npos; });
@@ -1723,6 +1725,38 @@ void test_tui_plugin_ui_close_poll_race_does_not_publish_after_invalidation()
          "a generation close serialized after dequeue but before apply cancels the record and cannot ACK or transiently publish a surface");
 }
 
+void test_plugin_ui_centered_modal_insets_and_hit_geometry()
+{
+  ava::tui::TuiPluginUiModalView view{.binding = {.plugin_id = "com.example.ui", .command = "choose", .invocation_id = "hidden"},
+                                      .request_id = "hidden",
+                                      .kind = ava::tui::TuiPluginUiKind::Select,
+                                      .title = "Choose",
+                                      .description = "Select one",
+                                      .options = {{.id = "alpha", .label = "Alpha", .description = std::nullopt}},
+                                      .selected_option = 0};
+  auto const roomy = ava::tui::detail::render_plugin_ui_modal(view, 80, 14);
+  auto const narrow = ava::tui::detail::render_plugin_ui_modal(view, 55, 12);
+  auto const roomy_identity = strip_sgr(roomy[1]);
+  auto const roomy_option = strip_sgr(roomy[5]);
+  auto const narrow_identity = strip_sgr(narrow[0]);
+  expect(roomy.size() == 14 && strip_sgr(roomy.front()) == std::string(80, ' ') && strip_sgr(roomy.back()) == std::string(80, ' ') &&
+             roomy_identity.starts_with("    Plugin ID") && roomy_identity.ends_with(std::string(4, ' ')) && roomy_option.starts_with("    › Alpha") &&
+             roomy_option.ends_with(std::string(4, ' ')) && !ava::tui::detail::plugin_ui_option_for_modal_row(view, 0, 80, 14) &&
+             ava::tui::detail::plugin_ui_option_for_modal_row(view, 5, 80, 14) == std::size_t{0} && narrow.size() == 12 &&
+             narrow_identity.starts_with("  Plugin ID") && !narrow_identity.starts_with("    ") && narrow_identity.ends_with(std::string(2, ' ')) &&
+             strip_sgr(narrow.front()).find("Plugin ID") != std::string::npos && strip_sgr(narrow.back()).find("Enter select") != std::string::npos &&
+             ava::tui::detail::plugin_ui_option_for_modal_row(view, 4, 55, 12) == std::size_t{0} &&
+             ava::tui::plugin_ui_host_chrome_fits(view.binding, view.kind, 80, 14),
+         "plugin Select modal uses responsive complete insets, reserves roomy blank rows from selection, and retains host attribution and controls");
+
+  view.kind = ava::tui::TuiPluginUiKind::Confirm;
+  auto const confirm = ava::tui::detail::render_plugin_ui_modal(view, 80, 14);
+  expect(confirm.size() == 14 && strip_sgr(confirm[5]).find("Confirm plugin action") != std::string::npos &&
+             strip_sgr(confirm[12]).find("Enter confirm · Esc cancel · Ctrl+C stop · 120s max") != std::string::npos &&
+             ava::tui::detail::plugin_ui_option_for_modal_row(view, 5, 80, 14) == std::size_t{0},
+         "plugin Confirm modal keeps both host-owned choice attribution and controls inside the inset geometry");
+}
+
 void test_tui_plugin_ui_renderer_is_bounded_sanitized_and_host_owned()
 {
   ava::tui::ComposerSnapshot snapshot;
@@ -1783,5 +1817,6 @@ void run_plugin_ui_tests()
   test_tui_plugin_ui_modal_input_conflict_cancel_and_deadline();
   test_tui_plugin_ui_attribution_fit_policy();
   test_tui_plugin_ui_close_poll_race_does_not_publish_after_invalidation();
+  test_plugin_ui_centered_modal_insets_and_hit_geometry();
   test_tui_plugin_ui_renderer_is_bounded_sanitized_and_host_owned();
 }

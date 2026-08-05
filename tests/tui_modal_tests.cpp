@@ -853,8 +853,41 @@ void run_tui_modal_tests_part_3()
           .context_source_count = 1}};
   auto const sidebar_modal_frame = ava::tui::render_composer(sidebar_modal_snapshot);
   expect(ava::tui::composer_canvas_layout(sidebar_modal_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(sidebar_modal_snapshot).left == 28 &&
-             std::ranges::any_of(sidebar_modal_frame, [](std::string const& line) { return strip_sgr(line).find("? Connect OpenAI") == 54; }),
+             std::ranges::any_of(sidebar_modal_frame, [](std::string const& line) { return strip_sgr(line).find("? Connect OpenAI") == 56; }),
          "tui modal centers inside the width-limited canvas when an automatic rail snapshot exists");
+  auto const wide_question_modal = ava::tui::detail::render_question_modal(*sidebar_modal_snapshot.question_prompt, 80, 14);
+  auto const narrow_question_modal = ava::tui::detail::render_question_modal(*sidebar_modal_snapshot.question_prompt, 55, 12);
+  auto const wide_question_title = strip_sgr(wide_question_modal[1]);
+  auto const narrow_question_title = strip_sgr(narrow_question_modal[1]);
+  expect(wide_question_title.starts_with("    ? Connect OpenAI") && wide_question_title.ends_with(std::string(4, ' ')) &&
+             narrow_question_title.starts_with("  ? Connect OpenAI") && !narrow_question_title.starts_with("    ") &&
+             narrow_question_title.ends_with(std::string(2, ' ')),
+         "centered question modals share the complete responsive horizontal inset without changing their existing vertical padding");
+
+  auto custom_secret_prompt = *sidebar_modal_snapshot.question_prompt;
+  custom_secret_prompt.options.clear();
+  custom_secret_prompt.allow_custom = true;
+  custom_secret_prompt.secret = true;
+  auto visible_custom_line = [](std::vector<std::string> const& rows) {
+    for (auto const& row : rows)
+    {
+      auto visible = strip_sgr(row);
+      if (visible.find("Custom:") != std::string::npos)
+        return visible;
+    }
+    return std::string{};
+  };
+  auto const wide_empty_custom = visible_custom_line(ava::tui::detail::render_question_modal(custom_secret_prompt, 80, 14));
+  auto const narrow_empty_custom = visible_custom_line(ava::tui::detail::render_question_modal(custom_secret_prompt, 55, 12));
+  custom_secret_prompt.custom_text = "sk-must-stay-hidden";
+  auto const wide_entered_custom = visible_custom_line(ava::tui::detail::render_question_modal(custom_secret_prompt, 80, 14));
+  auto const narrow_entered_custom = visible_custom_line(ava::tui::detail::render_question_modal(custom_secret_prompt, 55, 12));
+  expect(wide_empty_custom.starts_with("      Custom: paste secret") && wide_empty_custom.ends_with(std::string(4, ' ')) &&
+             wide_entered_custom.starts_with("    › Custom: *******************") && wide_entered_custom.ends_with(std::string(4, ' ')) &&
+             narrow_empty_custom.starts_with("    Custom: paste secret") && narrow_empty_custom.ends_with(std::string(2, ' ')) &&
+             narrow_entered_custom.starts_with("  › Custom: *******************") && narrow_entered_custom.ends_with(std::string(2, ' ')) &&
+             wide_entered_custom.find("sk-must-stay-hidden") == std::string::npos && narrow_entered_custom.find("sk-must-stay-hidden") == std::string::npos,
+         "centered custom-answer rows retain complete responsive modal insets before and after secret entry without exposing the secret");
   expect(std::ranges::none_of(sidebar_modal_frame,
                               [](std::string const& line) {
                                 auto const visible = strip_sgr(line);

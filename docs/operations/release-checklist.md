@@ -119,7 +119,7 @@ If the host cannot run ASan/UBSan, record the exact environment blocker rather t
 On a host with tmux and terminal support:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 23 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 22 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Other terminal and intentionally credential-gated live-provider checks remain classified in [`TESTING.md`](testing.md). They are not package-script steps.

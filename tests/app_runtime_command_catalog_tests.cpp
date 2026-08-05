@@ -66,6 +66,9 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   auto const* thinking_item = tui_test_support::find_slash_command_item(slash_items, "/thinking");
   auto const* export_item = tui_test_support::find_slash_command_item(slash_items, "/export");
   auto const* import_item = tui_test_support::find_slash_command_item(slash_items, "/import");
+  auto const* setup_item = tui_test_support::find_slash_command_item(slash_items, "/setup");
+  auto const setup_matches = ava::tui::filter_slash_commands("/setup", slash_items);
+  expect(setup_item == nullptr && setup_matches.empty(), "removed /setup command is absent from the slash catalog and completion matches");
   expect(details_item != nullptr && details_item->hint == "[compact|rich|expanded]" && details_item->description.find("Rich") != std::string::npos,
          "slash catalog exposes explicit Compact, Rich, and Expanded tool-card modes");
   expect(search_item != nullptr && search_item->hint == "[query]" && search_item->description.find("currently rendered") != std::string::npos,

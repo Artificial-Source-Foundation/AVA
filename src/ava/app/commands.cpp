@@ -1087,10 +1087,6 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   {
     return handled_text("The startup resources overview is an interactive TUI view. Use /overview inside the TUI to toggle it.");
   }
-  if (request.command == "/setup")
-  {
-    return handled_text("The local-only first-run setup wizard is available inside the interactive TUI. Use /setup there to open it.");
-  }
   if (starts_with_command(request.command, "/search"))
   {
     return handled_text(

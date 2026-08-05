@@ -18,7 +18,7 @@ Use this symptom-first runbook for common local failures. Start with `ava doctor
 
 ## Authentication, provider, or model fails
 
-**Symptom:** missing credential, expired OAuth, unauthorized response, or first-run setup guidance.
+**Symptom:** missing credential, expired OAuth, unauthorized response, or disconnected authentication guidance.
 
 - Run `ava connect <provider>` (OpenAI also supports browser or headless OAuth) or use a documented provider environment variable for this process.
 - Confirm status with `ava doctor` or `/providers`; these surfaces report source/status, not secret values.

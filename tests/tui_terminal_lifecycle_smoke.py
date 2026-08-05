@@ -243,14 +243,6 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
     for path in (workspace, home, config, state, data, cache, runtime):
         path.mkdir(parents=True, exist_ok=True)
     runtime.chmod(0o700)
-    # Non-setup PTY smokes need a pre-seeded skip marker; fresh private XDG state
-    # otherwise auto-opens First-run setup and steals commands/Ctrl-D.
-    ava_state = state / "ava"
-    ava_state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ava_state.chmod(0o700)
-    onboarding = ava_state / "onboarding.json"
-    onboarding.write_text('{"version":1,"status":"skipped"}\n', encoding="utf-8")
-    onboarding.chmod(0o600)
     (workspace / "AGENTS.md").write_text(f"terminal lifecycle {case}\n", encoding="utf-8")
 
     env = allowlisted_environment()

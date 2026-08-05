@@ -1,6 +1,6 @@
 # AVA Frontend Roadmap
 
-**Status: F8 complete; Pi-inspired TUI Waves 1–6 implemented and fully validated**
+**Status: F8 complete; retained Pi-inspired TUI Waves 1–3 and 5–6 implemented and fully validated; Wave 4 removed**
 
 This is a post-MVP product-maturity roadmap for AVA's terminal frontend. It
 sets the sequence, evidence, and scope boundaries for making AVA feel more
@@ -65,9 +65,9 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 23 tmux scenarios:
+Current CTest inventory has 22 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`nested_settings_preview`, `startup_overview`, `setup_wizard`, `active_run`,
+`nested_settings_preview`, `startup_overview`, `active_run`,
 `restore_followup`, `streaming_scroll`, `transcript_search`,
 `transcript_selection`, `subagent_workspace`, `branch_summary`,
 `main_startup_trust_keybinds`, `main_models_selectors`, `main_editor_input`,
@@ -108,12 +108,12 @@ AVA already has a strong terminal frontend foundation:
 - transcript rendering for assistant text, markdown, reasoning, tool lifecycle
   updates, diffs, changed paths, bounded output, cancellation, and errors;
 - permission and question flows, model/settings/scoped-model/session/tree and
-  other selectors, session navigation, onboarding, and active-run queue
-  feedback;
+  other selectors, session navigation, disconnected auth guidance, and active-run
+  queue feedback;
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 23 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 22 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -1431,11 +1431,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the 23 isolated tmux scenarios only when the change touches their
+Run the 22 isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 23 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 22 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1523,7 +1523,7 @@ This historical cut line governed the staged F0–F6 implementation. F8 now
 closes the roadmap: completed work is recorded above, and no further
 implementation is authorized by this document alone. The separate
 [Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md)
-records the later six-wave implementation and its final integrated verification gate. The local-only setup wizard and constrained host-rendered plugin UI are implemented; arbitrary plugin renderers and terminal control remain excluded.
+records the retained expansion waves and their final integrated verification gate. Wave 4's local-only setup wizard was removed and superseded by product decision; the constrained host-rendered plugin UI remains implemented, while arbitrary plugin renderers and terminal control remain excluded.
 
 ## Approved post-roadmap rich-tool and responsiveness pass
 
@@ -1557,7 +1557,7 @@ Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 23 isolated scenarios, including `nested_settings_preview`, `startup_overview`, `setup_wizard`, `branch_summary`, and `plugin_ui`;
+The credential-free fake-provider tmux matrix now has 22 isolated scenarios, including `nested_settings_preview`, `startup_overview`, `branch_summary`, and `plugin_ui`;
 `streaming_scroll` and `active_run` measure idle/streaming flood responsiveness, active presentation
 commands, draft preservation, detached stability, prompt wheel ordering, resize
 synchronization, terminal hygiene, and cleanup.

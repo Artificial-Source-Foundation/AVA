@@ -74,8 +74,7 @@ enum class ActiveSelectList
   TranscriptSearch,
   ForkUserTurn,
   CopyUserTurn,
-  Overview,
-  Setup
+  Overview
 };
 
 enum class ComposerJumpMode

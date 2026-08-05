@@ -254,14 +254,6 @@ struct TuiRuntimeOptions
   bool show_images = true;
   std::size_t image_width_cells = 60;
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
-  // Interactive TUI only. Automatic open requires absent current-version state and height ≥12.
-  bool auto_open_setup_wizard = false;
-  // Path-free diagnostic when onboarding state is unsupported/malformed; presentation-only.
-  std::optional<std::string> setup_state_diagnostic = std::nullopt;
-  SetupReadinessSnapshot setup_readiness = {};
-  // Invoked only when setup actually opens. The application callback is presence-only
-  // and must never materialize or return credential values.
-  std::function<SetupReadinessSnapshot()> on_setup_readiness;
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
@@ -319,9 +311,6 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
-  // Persist only completed/skipped onboarding status. Theme confirmation reuses on_settings_selected.
-  // Never performs auth/session/provider writes.
-  std::function<ava::core::VoidResult(SetupWizardPersistStatus)> on_setup_persist_status;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   // No value clears the explicit AVA level and restores model/provider default.
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::optional<std::string>)> on_reasoning_selected;
@@ -352,7 +341,7 @@ enum class SettingsSection
   InputAndKeybindings,
   SessionsAndWorkspace,
   ToolsAndExtensions,
-  PrivacyAndSetup,
+  Privacy,
   About,
 };
 

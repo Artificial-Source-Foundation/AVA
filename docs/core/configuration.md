@@ -11,7 +11,6 @@ AVA uses XDG paths on Linux. Process environment inputs and script-only controls
 | Workspace-keyed permission rules | `$XDG_CONFIG_HOME/ava/workspace-permission-rules/<hash>/permission-rules.json` or `~/.config/ava/workspace-permission-rules/<hash>/permission-rules.json` |
 | Session state | `$XDG_STATE_HOME/ava/sessions` or `~/.local/state/ava/sessions` |
 | Project trust state | `$XDG_STATE_HOME/ava/project-trust.json` or `~/.local/state/ava/project-trust.json` |
-| First-run setup marker | `$XDG_STATE_HOME/ava/onboarding.json` or `~/.local/state/ava/onboarding.json` (versioned `completed`/`skipped` only; Finish/Skip write) |
 | Private diagnostic state | `$XDG_STATE_HOME/ava/diagnostics` or `~/.local/state/ava/diagnostics` |
 | Private runtime traces | `$XDG_STATE_HOME/ava/diagnostics/traces` or `~/.local/state/ava/diagnostics/traces` |
 | Local support exports | `$XDG_STATE_HOME/ava/support` or `~/.local/state/ava/support` |

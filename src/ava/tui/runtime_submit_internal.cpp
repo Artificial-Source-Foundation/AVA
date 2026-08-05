@@ -89,7 +89,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
            (exact_command(draft.text, "/scoped-models") && options_.scoped_model_selector_view) ||
            ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
             options_.session_selector_view) ||
-           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview") || exact_command(draft.text, "/setup"))
+           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview"))
   {
     immediate_slash_submission = expanded_composer_draft_text(draft);
   }
@@ -394,16 +394,6 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     {
       push_history(input_history, submitted);
       if (!action_controller_.toggle_startup_overview())
-      {
-        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-      }
-      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
-    }
-    if (exact_command(submitted, "/setup"))
-    {
-      // Exact local slash command: never append/session/provider. Runtime opens the wizard.
-      push_history(input_history, submitted);
-      if (!action_controller_.open_setup_wizard())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }

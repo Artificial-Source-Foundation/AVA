@@ -148,12 +148,6 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     clear_local_command_draft();
     return action_controller_.toggle_startup_overview();
   }
-  if (runtime_commands::exact_command(draft.text, "/setup"))
-  {
-    push_history(input_history, draft.text);
-    clear_local_command_draft();
-    return action_controller_.open_setup_wizard();
-  }
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);

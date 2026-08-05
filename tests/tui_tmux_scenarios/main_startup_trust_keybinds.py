@@ -28,9 +28,14 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     ctx.ava_config.joinpath("display.json").write_text('{"theme":"light"}\n', encoding="utf-8")
     tmux_exe, root, workspace, ava_config, env_prefix, session = _main_session(ctx)
     import_keybinds_content = ctx.import_keybinds_content
-    initial = wait_for(tmux_exe, session, r"Type a message|Session", "initial TUI frame")
+    initial = wait_for(tmux_exe, session, r"Type a message", "fresh startup composer")
+    if "Type a message" not in initial or "First-run setup" in initial:
+        raise RuntimeError(f"fresh startup did not enter the normal composer directly\nscreen:\n{initial}")
     if "! OpenAI not connected · /connect" not in initial or "auth.json" in initial or "OPENAI_API_KEY" in initial:
-        raise RuntimeError(f"first-run onboarding advisory was not one actionable path-free row\nscreen:\n{initial}")
+        raise RuntimeError(f"first-run auth guidance was not one actionable path-free row\nscreen:\n{initial}")
+    onboarding_marker = ctx.state / "ava" / "onboarding.json"
+    if onboarding_marker.exists():
+        raise RuntimeError(f"fresh TUI startup created an onboarding marker: {onboarding_marker}")
     footer_lines = [line for line in initial.splitlines() if "GPT-5.5" in line and "ctx " in line]
     footer_text = footer_lines[-1].removeprefix("│  ").strip() if footer_lines else ""
     if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer_text) or any(

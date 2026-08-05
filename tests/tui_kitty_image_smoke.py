@@ -239,14 +239,6 @@ def main() -> int:
     for path in (workspace, home, config, state, data, cache, runtime):
         path.mkdir(parents=True, exist_ok=True)
     runtime.chmod(0o700)
-    # Non-setup PTY smokes need a pre-seeded skip marker; fresh private XDG state
-    # otherwise auto-opens First-run setup and steals commands/Ctrl-D.
-    ava_state = state / "ava"
-    ava_state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ava_state.chmod(0o700)
-    onboarding = ava_state / "onboarding.json"
-    onboarding.write_text('{"version":1,"status":"skipped"}\n', encoding="utf-8")
-    onboarding.chmod(0o600)
     (workspace / "AGENTS.md").write_text(f"{args.protocol} image smoke context\n", encoding="utf-8")
     (workspace / "screen.png").write_bytes(b"\x89PNG\r\n\x1a\nava-kitty-image")
 

@@ -46,7 +46,6 @@ void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
 void test_app_command_dispatcher();
 void test_startup_overview_snapshot_bounds_order_redaction();
 void test_startup_overview_bounded_lower_bound_counts();
-void test_onboarding_state_load_store_and_readiness();
 void test_app_session_jsonl_import_export_portable_attachments();
 void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();
 void test_app_session_branch_commands();

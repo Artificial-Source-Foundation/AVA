@@ -315,8 +315,6 @@ void populate_tools_section(SelectListView& view)
 void populate_privacy_section(SelectListView& view)
 {
   add_settings_row(view, "Privacy", "Telemetry", "none", "AVA collects no telemetry; provider prompts go only to the selected provider when submitted");
-  add_settings_action_row(view, std::string(kSettingsOpenSetup), "Setup", "First-run setup wizard", "/setup", "Enter opens the local-only setup wizard",
-                          "open");
   add_settings_row(view, "Privacy", "Credentials", "local only", "auth and secrets stay in XDG config; settings never display credential values");
 }
 
@@ -694,7 +692,7 @@ SelectListView build_settings_select_list_view_for_section(SettingsSection secti
       add_section_row(view, kSettingsSectionInput, "Input And Keybindings", "Active bindings and keybinds.json");
       add_section_row(view, kSettingsSectionSessions, "Sessions And Workspace", "Session, trust, workspace");
       add_section_row(view, kSettingsSectionTools, "Tools And Extensions", "Permissions, plugins, MCP, jobs");
-      add_section_row(view, kSettingsSectionPrivacy, "Privacy And Setup", "Telemetry stance and setup guidance");
+      add_section_row(view, kSettingsSectionPrivacy, "Privacy", "Telemetry and credential handling");
       add_section_row(view, kSettingsSectionAbout, "About", "Version and interface");
       return view;
     }
@@ -738,9 +736,8 @@ SelectListView build_settings_select_list_view_for_section(SettingsSection secti
       populate_tools_section(view);
       return view;
     }
-    case SettingsSection::PrivacyAndSetup: {
-      auto view = make_settings_shell("Settings · Privacy And Setup", "Local-only privacy stance · first-run setup wizard", "Search privacy",
-                                      "No privacy settings match",
+    case SettingsSection::Privacy: {
+      auto view = make_settings_shell("Settings · Privacy", "Local-only privacy and credential handling", "Search privacy", "No privacy settings match",
                                       footer_hint.empty() ? std::string("Type to filter · Enter open · Esc back") : std::move(footer_hint));
       view.items.reserve(4);
       populate_privacy_section(view);
@@ -875,49 +872,6 @@ void DisplayPreviewTransaction::clear_theme_overlay() const
   clear_tui_theme_preview();
 }
 
-void ThemePreviewTransaction::update(DisplayPreviewOverlay next)
-{
-  // Setup accepts theme candidates only. Discard image fields defensively so this
-  // transaction can never acquire presentation authority over them.
-  next.show_images.reset();
-  next.image_width_cells.reset();
-  if (!next.theme)
-  {
-    cancel();
-    return;
-  }
-  overlay = std::move(next);
-  apply_theme_overlay();
-}
-
-void ThemePreviewTransaction::cancel()
-{
-  overlay.reset();
-  clear_tui_theme_preview();
-}
-
-void ThemePreviewTransaction::apply_theme_overlay() const
-{
-  if (overlay && overlay->theme)
-    set_tui_theme_preview(*overlay->theme);
-  else
-    clear_tui_theme_preview();
-}
-
-void reapply_setup_theme_preview_after_display_reload(ThemePreviewTransaction& preview, ComposerSnapshot const& snapshot)
-{
-  if (!preview.overlay)
-  {
-    clear_tui_theme_preview();
-    return;
-  }
-  auto const staged_token = preview.overlay->action_token;
-  if (auto refreshed = settings_preview_overlay_for_action(staged_token, snapshot))
-    preview.update(std::move(*refreshed));
-  else
-    preview.apply_theme_overlay();
-}
-
 void reapply_settings_preview_after_display_reload(DisplayPreviewTransaction& preview, ComposerSnapshot& snapshot)
 {
   // Always rebase from the hydrated authoritative presentation. Do not compare overlay values.
@@ -970,155 +924,6 @@ bool SettingsNavigationState::is_root() const
   return section == SettingsSection::Root;
 }
 
-void SetupWizardState::reset()
-{
-  open = false;
-  step = SetupWizardStep::Welcome;
-  pending_connect_openai = false;
-  preview.cancel();
-}
-
-SetupWizardStep setup_wizard_next_step(SetupWizardStep step) noexcept
-{
-  switch (step)
-  {
-    case SetupWizardStep::Welcome:
-      return SetupWizardStep::Theme;
-    case SetupWizardStep::Theme:
-      return SetupWizardStep::Provider;
-    case SetupWizardStep::Provider:
-      return SetupWizardStep::Privacy;
-    case SetupWizardStep::Privacy:
-      return SetupWizardStep::Finish;
-    case SetupWizardStep::Finish:
-      return SetupWizardStep::Finish;
-  }
-  return SetupWizardStep::Finish;
-}
-
-bool setup_wizard_action_is_theme(std::string_view value) noexcept
-{
-  return value.starts_with("theme:") && value != "theme:reset";
-}
-
-namespace {
-
-void add_setup_action(SelectListView& view, std::string value, std::string label, std::string detail, std::string badge = {})
-{
-  view.items.push_back(SelectListItemView{.value = std::move(value),
-                                          .label = std::move(label),
-                                          .description = {},
-                                          .group = "Setup",
-                                          .detail = std::move(detail),
-                                          .badge = std::move(badge),
-                                          .current = false,
-                                          .enabled = true,
-                                          .disabled_reason = {}});
-}
-
-void add_setup_info_row(SelectListView& view, std::string label, std::string detail)
-{
-  view.items.push_back(SelectListItemView{.value = {},
-                                          .label = std::move(label),
-                                          .description = {},
-                                          .group = "Setup",
-                                          .detail = std::move(detail),
-                                          .badge = {},
-                                          .current = false,
-                                          .enabled = false,
-                                          .disabled_reason = "info"});
-}
-
-}  // namespace
-
-SelectListView setup_wizard_select_list_view(SetupWizardStep step, ComposerSnapshot const& snapshot, SetupReadinessSnapshot const& readiness)
-{
-  SelectListView view{.title = "First-run setup",
-                      .subtitle = "Local-only · no telemetry · Esc cancels without writing setup state",
-                      .items = {},
-                      .selected_item_index = 0,
-                      .query = {},
-                      .placeholder = "Filter setup",
-                      .empty_text = "No setup rows match",
-                      .footer_hint = "Type to filter · Enter choose · Esc cancel · Skip available",
-                      .freeze_underlying_transcript_layout = true};
-
-  switch (step)
-  {
-    case SetupWizardStep::Welcome:
-      view.subtitle = "Welcome · local terminal setup · reopen anytime with /setup";
-      add_setup_info_row(view, "Local-only wizard",
-                         "Theme preview, provider readiness labels, and privacy stance. No browser, provider call, auth write, or session append.");
-      add_setup_info_row(view, "Reopen later", "Exact /setup reopens this wizard even after Finish or Skip.");
-      add_setup_action(view, std::string(kSetupContinue), "Continue", "Enter advances to theme selection", "next");
-      add_setup_action(view, std::string(kSetupSkip), "Skip setup", "Persist skipped and close without other writes", "skip");
-      break;
-    case SetupWizardStep::Theme: {
-      view.subtitle = "Theme · highlight previews · Enter confirms once · Keep current writes nothing";
-      auto const theme = active_tui_theme();
-      add_setup_info_row(view, "Current theme", theme.name.empty() ? std::string("built-in") : theme.name);
-      add_setup_action(view, std::string(kSetupThemeKeep), "Keep current theme", "Advance without writing display.json", "keep");
-      add_theme_settings_action(view, "dark", "Theme dark", "built-in dark ncurses token palette",
-                                theme.kind == TuiThemeKind::Dark && theme.name == "ava-dark");
-      add_theme_settings_action(view, "light", "Theme light", "built-in light ncurses token palette", theme.kind == TuiThemeKind::Light);
-      add_theme_settings_action(view, "plain", "Theme plain", "disable ANSI styling in rendered frames", theme.kind == TuiThemeKind::Plain);
-      for (auto const& custom_theme : snapshot.custom_themes)
-      {
-        if (!custom_theme.palette)
-          continue;
-        add_custom_theme_settings_action(view, custom_theme, theme.kind == TuiThemeKind::Custom && custom_theme.name == theme.name);
-      }
-      add_setup_action(view, std::string(kSetupSkip), "Skip setup", "Persist skipped and close", "skip");
-      break;
-    }
-    case SetupWizardStep::Provider: {
-      view.subtitle = "Provider readiness · boolean labels only · no credentials or network";
-      std::string readiness_detail;
-      if (!readiness.active_provider_readiness_known)
-        readiness_detail =
-            "readiness unknown for " + (readiness.active_provider_label.empty() ? std::string("active provider") : readiness.active_provider_label);
-      else if (readiness.active_provider_ready)
-        readiness_detail = (readiness.active_provider_label.empty() ? std::string("Active provider") : readiness.active_provider_label) + " ready";
-      else
-        readiness_detail = (readiness.active_provider_label.empty() ? std::string("Active provider") : readiness.active_provider_label) + " not connected";
-      add_setup_info_row(view, "Active provider", std::move(readiness_detail));
-      add_setup_info_row(view, "OpenAI connect guidance", "Optional: after Finish, draft /connect openai in the composer. Never submitted automatically.");
-      add_setup_action(view, std::string(kSetupProviderConnectOpenai), "Draft /connect openai after Finish", "Stage allowlisted OpenAI connect guidance only",
-                       "stage");
-      add_setup_action(view, std::string(kSetupProviderContinue), "Continue without connect draft", "Advance without staging a connect command", "next");
-      add_setup_action(view, std::string(kSetupSkip), "Skip setup", "Persist skipped and close · never drafts /connect", "skip");
-      break;
-    }
-    case SetupWizardStep::Privacy:
-      view.subtitle = "Privacy · no telemetry · provider traffic only on explicit submit";
-      add_setup_info_row(view, "Telemetry", "AVA collects no telemetry, analytics, remote checks, or tracking.");
-      add_setup_info_row(view, "Provider prompts", "Provider requests leave this machine only when you explicitly submit a prompt or connect command.");
-      add_setup_action(view, std::string(kSetupContinue), "Continue", "Enter advances to Finish", "next");
-      add_setup_action(view, std::string(kSetupSkip), "Skip setup", "Persist skipped and close", "skip");
-      break;
-    case SetupWizardStep::Finish:
-      view.subtitle = "Finish · persists setup status only";
-      add_setup_info_row(view, "Completed marker", "Finish writes onboarding status=completed under local state. Skip writes status=skipped.");
-      if (readiness.active_provider_readiness_known && !readiness.active_provider_ready)
-        add_setup_info_row(view, "Auth guidance", "Disconnected provider guidance remains available after setup closes.");
-      add_setup_action(view, std::string(kSetupFinish), "Finish setup", "Persist completed · draft /connect openai only if staged", "finish");
-      add_setup_action(view, std::string(kSetupSkip), "Skip setup", "Persist skipped · never drafts /connect", "skip");
-      break;
-  }
-  // Prefer the first enabled actionable row so Enter does not land on info rows.
-  std::size_t initial = 0;
-  for (std::size_t index = 0; index < view.items.size(); ++index)
-  {
-    if (view.items[index].enabled && !view.items[index].value.empty())
-    {
-      initial = index;
-      break;
-    }
-  }
-  view.selected_item_index = clamp_select_list_selection(view, initial);
-  return view;
-}
-
 bool SettingsNavigationState::in_display() const
 {
   return section == SettingsSection::Display;
@@ -1160,7 +965,7 @@ std::optional<SettingsSection> settings_section_for_action(std::string_view valu
   if (value == kSettingsSectionTools)
     return SettingsSection::ToolsAndExtensions;
   if (value == kSettingsSectionPrivacy)
-    return SettingsSection::PrivacyAndSetup;
+    return SettingsSection::Privacy;
   if (value == kSettingsSectionAbout)
     return SettingsSection::About;
   return std::nullopt;

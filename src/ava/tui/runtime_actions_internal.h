@@ -45,10 +45,6 @@ class RuntimeActionController final
   [[nodiscard]] bool open_session_selector();
   // Toggle the read-only startup overview select-list. No-op when no snapshot is present.
   [[nodiscard]] bool toggle_startup_overview();
-  // Open or rebuild the local-only first-run setup wizard. Host-owned; no backend mutation here.
-  // Wired from runtime with a process-local open callback because preview state lives there.
-  void set_open_setup_wizard(std::function<bool()> opener) { open_setup_wizard_ = std::move(opener); }
-  [[nodiscard]] bool open_setup_wizard();
   // Shared with snapshot-apply / prompt-preempt paths that must close or rebuild overview.
   [[nodiscard]] ActiveSelectList& active_select_list() noexcept { return active_select_list_; }
   [[nodiscard]] ActiveSelectList const& active_select_list() const noexcept { return active_select_list_; }
@@ -67,7 +63,6 @@ class RuntimeActionController final
   std::optional<PendingSessionArchiveAction>& session_archive_confirmation_;
   std::chrono::steady_clock::time_point next_display_reload_check_;
   std::optional<std::string> last_display_reload_error_;
-  std::function<bool()> open_setup_wizard_;
 };
 
 }  // namespace ava::tui

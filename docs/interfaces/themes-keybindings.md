@@ -84,7 +84,7 @@ names, or invalid custom theme files are reported with path-specific diagnostics
 while the previous active presentation remains in use. Use `/reload theme` when
 you want an explicit retry or diagnostic. `/settings` opens a shallow nested root
 (Display, Models And Reasoning, Input And Keybindings, Sessions And Workspace,
-Tools And Extensions, Privacy And Setup, About). The Display section exposes
+Tools And Extensions, Privacy, About). The Display section exposes
 theme and image visibility/width rows that call the same authoritative commands.
 Highlighting a previewable Display row applies a presentation-only overlay and
 never writes config; Enter confirms once through the application-owned writer.
@@ -231,7 +231,6 @@ but the theme system is not a full Pi clone.
 | Project-local themes | Not implemented. Themes are loaded only from the user's global XDG config directory. |
 | Package-delivered themes and package theme filters | Deferred with package/resource management. AVA does not install or activate theme packages. |
 | Remote package/theme marketplace | Deferred pending provenance, trust, compatibility, rollback, and update policy. |
-| Local-only first-run setup wizard with theme preview | Implemented. Interactive TTY TUI auto-opens when `$XDG_STATE_HOME/ava/onboarding.json` is absent and height ≥12; exact `/setup` always reopens. Theme highlighting reuses the Wave 2 presentation-only preview; Enter confirms once through the normal display writer. Finish/Skip alone persist onboarding status. No telemetry, browser, provider call, auth write, or session append. |
 
 ## Keybinding overrides
 

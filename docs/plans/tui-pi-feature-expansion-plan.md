@@ -1,13 +1,13 @@
 # Pi-Inspired TUI Feature Expansion Plan
 
-Status: Complete — Waves 0–6 implemented, integrated, reviewed, and validated on 2026-08-03.
+Status: Complete for retained Waves 0–3 and 5–6. Wave 4 was removed and superseded by product decision; it is not a current capability.
 
-This plan adds six user-facing terminal capabilities requested after comparing AVA with Pi:
+This plan originally proposed six user-facing terminal capabilities after comparing AVA with Pi. Five remain implemented; the fourth was subsequently removed:
 
 1. persisted image visibility and sizing controls;
 2. a deeper unified settings interface with reversible live previews;
 3. an expandable startup overview;
-4. a local-only first-run setup wizard;
+4. ~~a local-only first-run setup wizard~~ — removed by product decision;
 5. safe abandoned-branch summarization from the session tree; and
 6. a narrow, host-rendered plugin UI surface.
 
@@ -32,7 +32,7 @@ Wave 0 rebaseline record (2026-08-03):
 
 - `HEAD`, local `develop`, and `origin/develop` all remained exactly at the written baseline `f54f8d318fbcccd1d6c7c36c858c3755159922b1`; there were no intervening commits.
 - The display, session, runtime/TUI, plugin, and permission seams named by this plan were re-audited and remain valid. The optional `display_reload.{h,cpp}` seam is absent because reload ownership remains in the existing TUI/application callbacks; the plan already qualifies those files with “if still present.”
-- Existing `onboarding.{h,cpp}` remains auth-guidance code, so the planned local wizard state still belongs in a separate `onboarding_state.{h,cpp}` seam.
+- Historical note, now superseded: this rebaseline proposed a separate `onboarding_state.{h,cpp}` seam. That seam and the local wizard were later removed; `onboarding.{h,cpp}` remains ordinary disconnected auth guidance.
 - `BranchSummaryOptions` still lacks explicit read limits and its preparation path still performs an unbounded source load; Wave 5's bounded exact-lease work remains required.
 - The product-approval documentation was updated without presenting any expansion-plan capability as implemented.
 - `scripts/build.sh --build-dir build` and the full default `scripts/run-tests.sh --build-dir build` baseline passed. Optional live-provider, dependency, tmux, and direct-terminal tests retained their normal skip gates; no paid provider call was used.
@@ -55,7 +55,7 @@ Core AVA owns:
 - editor contents;
 - transcript rendering;
 - settings navigation and previews;
-- startup and setup flows;
+- startup flows;
 - image protocol emission;
 - session/provider/config authority; and
 - all filesystem, auth, session, and permission writes.
@@ -92,15 +92,13 @@ Image width is expressed in terminal cells. AVA preserves image aspect ratio usi
 
 This plan does not add unbounded or timing-sensitive terminal pixel queries. The renderer keeps a documented fallback cell geometry when exact values are unavailable. A future separately tested terminal capability may improve that estimate without changing the persisted cell-width contract.
 
-### First-Run Privacy
+### First-Run Product Decision
 
-AVA continues to collect no telemetry. The setup wizard explains that fact; it does not add analytics, remote checks, update checks, or tracking.
-
-The wizard does not contact a provider, launch a browser, start a plugin/MCP/LSP process, write credentials, or mutate a session. It may prepare or display the existing `/connect` command after setup, but the user must explicitly submit that separate command through the existing authenticated flow.
+Wave 4's local setup wizard was removed and superseded by product decision. AVA retains its ordinary disconnected auth-first guidance (`! OpenAI not connected · /connect`) and continues to collect no telemetry. It does not read, write, migrate, or delete a local onboarding marker; stale files are ignored.
 
 ## Goals
 
-- Deliver all six requested capabilities without weakening backend safety boundaries.
+- Deliver the five retained capabilities without weakening backend safety boundaries.
 - Keep every wave independently buildable, testable, reviewable, and revertible.
 - Reuse existing selectors, commands, snapshots, permission paths, and async-run machinery.
 - Make all persisted configuration backward compatible and atomically updated.
@@ -163,15 +161,13 @@ The wizard does not contact a provider, launch a browser, start a plugin/MCP/LSP
 
 ## Wave 0 — Rebaseline And Record Approval
 
-**Status: Complete — 2026-08-03.** This wave changed documentation only; it did not itself implement any of the six user-facing capabilities.
+**Status: Complete — 2026-08-03.** This wave changed documentation only; it did not itself implement any proposed user-facing capability.
 
 ### Work
 
 - Reconcile this plan with current `develop`.
 - Confirm the display, session, runtime, plugin, and permission seams named below still exist.
-- Update the former deferral language in planning/roadmap documents to say that the user approved:
-  - a local-only setup wizard; and
-  - a constrained host-rendered plugin UI protocol.
+- Historical approval record, now superseded in part: the user originally approved a local-only setup wizard and a constrained host-rendered plugin UI protocol. The wizard approval was later revoked; the plugin UI remains.
 - Keep current product docs truthful: planned features must not be described as available before their landing wave.
 
 ### Likely Files
@@ -207,7 +203,7 @@ Documentation-only; revert the approval update without changing runtime behavior
 - `git --no-pager diff --check` was clean for the Wave 1 edits.
 - No paid/live provider calls were used.
 
-This wave establishes the persistence and runtime foundation needed by later settings and setup UI.
+This wave establishes the persistence and runtime foundation used by later settings UI.
 
 ### Data Model
 
@@ -402,10 +398,10 @@ Recommended root sections:
 - Input And Keybindings
 - Sessions And Workspace
 - Tools And Extensions
-- Privacy And Setup
+- Privacy
 - About
 
-Rows should reuse existing commands/selectors for models, scoped models, reasoning, keybindings, trust, permissions, tools, plugin/MCP/LSP diagnostics, and setup. Do not duplicate backend semantics inside TUI reducers.
+Rows should reuse existing commands/selectors for models, scoped models, reasoning, keybindings, trust, permissions, tools, and plugin/MCP/LSP diagnostics. Do not duplicate backend semantics inside TUI reducers.
 
 Add a small settings navigation stack:
 
@@ -601,104 +597,15 @@ Add a native collapsed startup card/banner that consumes a small fixed number of
 
 Remove the card/view/command; no persistent state or session migration exists.
 
-## Wave 4 — Local-Only First-Run Setup Wizard
+## Wave 4 — Local-Only First-Run Setup Wizard (Removed)
 
-**Status: Implemented.**
+**Status: Removed and superseded by product decision.** This wave is not implemented and is not a current product capability.
 
-### State Model
+The former implementation and plan were removed completely: there is no wizard UI, automatic or deferred open, `/setup` command, Privacy setup row, onboarding-state read/write/eligibility logic, setup-only credential-presence probe, or wizard test scenario. AVA does not inspect or delete stale `$XDG_STATE_HOME/ava/onboarding.json` files; they are simply ignored.
 
-Add a versioned onboarding-state document under `$XDG_STATE_HOME/ava`, separate from auth, display config, and sessions.
+The product retains `src/ava/app/onboarding.{h,cpp}` and the ordinary disconnected auth-first guidance shown by TUI and line-shell paths, including `! OpenAI not connected · /connect`. Generic `/settings` display/theme preview transactions and reload behavior also remain.
 
-Suggested shape:
-
-```json
-{
-  "version": 1,
-  "status": "completed"
-}
-```
-
-Accepted statuses are `completed` and `skipped`. Use approved bounded/atomic state-file helpers and owner-only permissions. Unknown or malformed state must produce safe diagnostics without overwriting unrelated files.
-
-The automatic wizard is eligible only when:
-
-- AVA is in an interactive TTY TUI;
-- onboarding state for the current wizard version is absent;
-- no explicit headless/print/RPC/ACP mode is active; and
-- startup has enough terminal rows to render safely, otherwise show a deferred `/setup` hint.
-
-`/setup` reopens the wizard explicitly even after completion or skip.
-
-### Steps
-
-1. Welcome
-   - Explain local terminal behavior and how to reopen setup.
-2. Theme
-   - Reuse the Wave 2 presentation-only preview transaction.
-   - Confirm through the normal display writer.
-3. Provider readiness
-   - Show locally known configured/auth presence as boolean labels only.
-   - Offer guidance such as “draft `/connect openai` after setup” or “skip.”
-   - Do not open a browser, contact a provider, read/display credentials, or write auth.
-4. Privacy
-   - State that AVA has no telemetry.
-   - Explain that provider prompts go to the selected provider only when the user submits them.
-   - Do not add analytics choices that imply hidden collection.
-5. Finish or Skip
-   - Atomically persist only onboarding status.
-   - If the user requested connection guidance, place a sanitized `/connect <provider>` draft in the composer or show the command; require an explicit separate submission.
-
-Cancellation before Finish/Skip leaves onboarding state absent and restores any unconfirmed display preview.
-
-Preserve the current disconnected/auth-first startup guidance after completion or skip when credentials are missing.
-
-### Likely Files
-
-- new `src/ava/app/onboarding_state.{h,cpp}`
-- `src/ava/app/interactive_tui.cpp`
-- `src/ava/app/command_catalog.cpp`
-- `src/ava/app/command_registry.cpp`
-- `src/ava/tui/runtime.h`
-- `src/ava/tui/composer.h`
-- `src/ava/tui/runtime_views.cpp`
-- `src/ava/tui/runtime_actions_internal.cpp`
-- `tests/app_runtime_tests.cpp`
-- `tests/tui_composer_tests.cpp`
-- `tests/tui_tmux_scenarios/`
-- `docs/core/usage.md`
-- `docs/security/` or privacy documentation if a current page owns the no-telemetry statement
-
-Every new `.cpp` begins with `#include "sys.h"`, and new header-defined types use the required debug print-members marker.
-
-### Tests
-
-- First interactive TTY launch shows the wizard.
-- Headless, print, RPC, and ACP never show or block on it.
-- Theme preview cancellation restores the prior palette.
-- Finish and Skip persist independently and suppress automatic reappearance.
-- `/setup` reopens after either state.
-- No provider/network/browser/plugin/MCP/LSP/auth/session operation occurs during the wizard.
-- No auth file is created or changed.
-- No session entry is appended.
-- Private-root tmux scenario proves persistence across restart.
-- Small-terminal fallback remains navigable or defers with an actionable hint.
-
-### Completion Gate
-
-- The wizard is local-only and nonblocking outside TUI.
-- It introduces no telemetry or automatic login.
-- Existing auth onboarding remains available.
-
-### Wave 4 evidence
-
-- App seam: `src/ava/app/onboarding_state.{h,cpp}` with descriptor-bounded no-follow read, strict version/status JSON, owner-only state dir, atomic 0600 Finish/Skip writes, path-free diagnostics, and boolean `SetupReadinessSnapshot`.
-- TUI: `ActiveSelectList::Setup`, process-local `SetupWizardState`, SelectListView steps, Wave 2 theme preview reuse, `/setup` exact local command, Privacy settings open-setup row, auto-open after curses dimensions with height &lt;12 deferred hint.
-- Tests: `test_onboarding_state_load_store_and_readiness`, `test_setup_wizard_steps_preview_and_persist_semantics`, opt-in `ava_tui.tmux_smoke_setup_wizard`; inventory 20→21.
-- Docs: usage, themes-keybindings, testing/release/dogfood/frontend inventories, and this plan status.
-
-### Rollback
-
-Stop reading the onboarding marker and remove `/setup`. The state file is harmless and can remain; do not delete user state automatically.
+Historical Wave 4 implementation evidence is superseded and must not be used as a current capability claim. The rollback described by the former plan is now the landed product decision.
 
 ## Wave 5 — Abandoned-Parent Branch Summary Action
 
@@ -1021,15 +928,17 @@ Disable/remove UI capability negotiation and TUI event consumption. Existing plu
 
 ## Integrated Validation
 
-**Status: Complete — 2026-08-03.** The integrated tree passed the following final gates without a paid or live-provider call:
+**Status: Complete — 2026-08-03.** The original six-wave integrated tree passed the following gates without a paid or live-provider call:
 
 - normal build and full default CTest: 130/130 passed, with the documented optional/live gates skipped;
-- all 23 isolated tmux scenarios passed together;
+- all 23 then-registered isolated tmux scenarios passed together, including the later-removed setup-wizard scenario;
 - Kitty, iTerm2, terminal-lifecycle, and OSC 8/52 direct PTY smokes passed together;
 - full ASan/UBSan default CTest passed 130/130, followed by a clean focused rerun after the final plugin-geometry fix;
 - focused TSan coverage passed for branch-summary, application-runtime, plugin UI, and TUI/composer concurrency surfaces;
 - the integrated review and focused `W6-001` re-review closed all material in-scope findings; and
 - `git diff --check`, Markdown links, documentation structure, and changed-line clang-format checks passed.
+
+The subsequent Wave 4 removal and modal-padding closure was validated separately on the current retained-feature tree: normal build and full default CTest passed 129/129, all 22 current tmux scenarios passed together, all four direct PTY smokes passed, and documentation/diff checks passed. No post-removal sanitizer rerun is claimed; the sanitizer results above describe the original six-wave tree.
 
 An intentionally broader, non-gating TSan run reported an RPC output/session lock-order inversion in unchanged `rpc_mode.cpp`; the integrated reviewer classified it as unrelated to these waves. The focused affected-surface TSan gate above remained clean.
 
@@ -1046,7 +955,7 @@ scripts/run-tests.sh --build-dir build
 Real terminal wave:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 22 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run relevant direct PTY/Kitty/iTerm2 tests with their documented gates for image and terminal-protocol behavior. Use private XDG/session/plugin roots and fake providers.
@@ -1075,7 +984,8 @@ Do not build and test concurrently in the same build tree. Use `scripts/build.sh
 Use one integrated reviewer per completed wave, selected by dominant risk:
 
 - Waves 1–2: default reviewer, focused on config preservation and TUI regressions.
-- Waves 3–4: default reviewer, focused on redaction, local-state behavior, and onboarding regressions.
+- Wave 3: default reviewer, focused on redaction and startup-view behavior.
+- Wave 4: removed; no implementation review gate remains.
 - Wave 5: session/database or architecture specialist, focused on lease authority, append states, schema semantics, and async cancellation.
 - Wave 6: security specialist, focused on invocation authority, spoofing, terminal control, framing, bounds, process cleanup, and cross-frontend rejection.
 
@@ -1090,26 +1000,24 @@ Prefer sequential, independently revertible commits:
 3. nested settings state;
 4. display preview transaction;
 5. startup overview snapshot/view;
-6. onboarding state/wizard;
-7. branch eligibility/preparation;
-8. asynchronous branch-summary TUI action;
-9. plugin protocol/capability parsing;
-10. plugin invocation authority and permissions;
-11. plugin host events/rendering/lifecycle;
-12. final docs/evidence cleanup.
+6. branch eligibility/preparation;
+7. asynchronous branch-summary TUI action;
+8. plugin protocol/capability parsing;
+9. plugin invocation authority and permissions;
+10. plugin host events/rendering/lifecycle;
+11. final docs/evidence cleanup.
 
 Do not combine unfinished waves into one merge. Every commit should build and retain existing behavior unless its user-visible change is fully tested. Push only after local validation and review appropriate to that wave.
 
 ## Final Definition Of Done
 
-All six capabilities are complete only when:
+The five retained capabilities are complete only when:
 
 - image visibility and width persist without destroying theme or unknown fields;
 - disabled images avoid byte loading and graphics emission;
 - nested settings work at narrow heights and preview without writes until confirm;
 - preview cancellation/reload restores the latest authoritative state;
 - startup overview is bounded, redacted, expandable, and never session/provider content;
-- first-run setup is local-only, telemetry-free, nonblocking outside TUI, and safely reopenable;
 - abandoned-parent summarization follows exact metadata-only semantics, uses bounded lease authority, runs asynchronously, and exposes append commit state without retry;
 - plugin UI is optional, bounded, attributed, host-rendered, command-scoped, and unreachable from RPC/headless/model/background paths;
 - existing plugin/session/config formats remain compatible or have an explicitly reviewed migration;

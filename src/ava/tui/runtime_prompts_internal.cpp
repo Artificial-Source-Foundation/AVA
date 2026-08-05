@@ -54,12 +54,9 @@ void close_overview_for_prompt(ComposerSnapshot& snapshot, ActiveSelectList* act
 {
   if (!active_select_list)
     return;
-  // Competing prompt authority closes overview/setup so they cannot hide under the prompt.
-  // Setup theme preview is cleared process-locally; the runtime loop finishes wizard flag cleanup.
-  if (*active_select_list != ActiveSelectList::Overview && *active_select_list != ActiveSelectList::Setup)
+  // Competing prompt authority closes overview so it cannot hide under the prompt.
+  if (*active_select_list != ActiveSelectList::Overview)
     return;
-  if (*active_select_list == ActiveSelectList::Setup)
-    clear_tui_theme_preview();
   snapshot.select_list.reset();
   *active_select_list = ActiveSelectList::None;
 }

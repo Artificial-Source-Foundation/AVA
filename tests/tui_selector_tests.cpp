@@ -740,32 +740,31 @@ void run_tui_selector_tests()
                                                                                         .select_list = settings_root,
                                                                                         .width = 96,
                                                                                         .height = 20});
-  expect(settings_root.title == "Settings" && settings_root.items.size() == 7 &&
-             std::ranges::any_of(settings_root.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "settings:section.display" && item.label == "Display" && item.badge == "section";
-                                 }) &&
-             std::ranges::any_of(
-                 settings_root.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.models" && item.label == "Models And Reasoning"; }) &&
-             std::ranges::any_of(
-                 settings_root.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.input" && item.label == "Input And Keybindings"; }) &&
-             std::ranges::any_of(settings_root.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "settings:section.sessions" && item.label == "Sessions And Workspace";
-                                 }) &&
-             std::ranges::any_of(
-                 settings_root.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.tools" && item.label == "Tools And Extensions"; }) &&
-             std::ranges::any_of(
-                 settings_root.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.privacy" && item.label == "Privacy And Setup"; }) &&
-             std::ranges::any_of(settings_root.items,
-                                 [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.about" && item.label == "About"; }) &&
-             std::ranges::none_of(settings_root.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("theme:"); }) &&
-             std::ranges::any_of(settings_root_frame, [](std::string const& line) { return strip_sgr(line).find("Settings") != std::string::npos; }),
-         "settings root exposes only shallow section rows and never flattens theme actions");
+  expect(
+      settings_root.title == "Settings" && settings_root.items.size() == 7 &&
+          std::ranges::any_of(settings_root.items,
+                              [](ava::tui::SelectListItemView const& item) {
+                                return item.value == "settings:section.display" && item.label == "Display" && item.badge == "section";
+                              }) &&
+          std::ranges::any_of(
+              settings_root.items,
+              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.models" && item.label == "Models And Reasoning"; }) &&
+          std::ranges::any_of(
+              settings_root.items,
+              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.input" && item.label == "Input And Keybindings"; }) &&
+          std::ranges::any_of(
+              settings_root.items,
+              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.sessions" && item.label == "Sessions And Workspace"; }) &&
+          std::ranges::any_of(
+              settings_root.items,
+              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.tools" && item.label == "Tools And Extensions"; }) &&
+          std::ranges::any_of(settings_root.items,
+                              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.privacy" && item.label == "Privacy"; }) &&
+          std::ranges::any_of(settings_root.items,
+                              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.about" && item.label == "About"; }) &&
+          std::ranges::none_of(settings_root.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("theme:"); }) &&
+          std::ranges::any_of(settings_root_frame, [](std::string const& line) { return strip_sgr(line).find("Settings") != std::string::npos; }),
+      "settings root exposes only shallow section rows and never flattens theme actions");
 
   expect(std::ranges::any_of(
              settings_display.items,
@@ -1031,41 +1030,6 @@ void run_tui_selector_tests()
     preview.apply_image_overlay(overlay_snapshot);
     expect(!preview.active() && !ava::tui::tui_theme_preview_active() && !overlay_snapshot.show_images && overlay_snapshot.image_width_cells == 40,
            "cancel restores the latest authoritative image presentation and clears theme preview");
-
-    // Setup uses a theme-only transaction: even a defensively malformed overlay cannot
-    // acquire image authority, and external hydration/cancel keeps the latest image values.
-    {
-      using ava::tui::runtime_views::reapply_setup_theme_preview_after_display_reload;
-      using ava::tui::runtime_views::ThemePreviewTransaction;
-      ThemePreviewTransaction setup_preview;
-      auto setup_overlay = settings_preview_overlay_for_action("theme:light", snapshot);
-      expect(setup_overlay.has_value(), "setup theme-only preview test resolves a built-in theme");
-      if (setup_overlay)
-      {
-        setup_overlay->show_images = true;
-        setup_overlay->image_width_cells = 12;
-        setup_preview.update(std::move(*setup_overlay));
-      }
-      ava::tui::ComposerSnapshot setup_snapshot = snapshot;
-      setup_snapshot.show_images = false;
-      setup_snapshot.image_width_cells = 88;
-      ava::tui::set_tui_config_theme(std::string("dark"));
-      reapply_setup_theme_preview_after_display_reload(setup_preview, setup_snapshot);
-      expect(setup_preview.active() && setup_preview.overlay && !setup_preview.overlay->show_images && !setup_preview.overlay->image_width_cells &&
-                 !setup_snapshot.show_images && setup_snapshot.image_width_cells == 88,
-             "setup preview strips image fields and leaves hydrated visibility/width authoritative");
-
-      // A second external reload changes both authoritative theme and image settings.
-      ava::tui::set_tui_config_theme(std::string("plain"));
-      setup_snapshot.show_images = true;
-      setup_snapshot.image_width_cells = 104;
-      reapply_setup_theme_preview_after_display_reload(setup_preview, setup_snapshot);
-      setup_preview.cancel();
-      expect(!ava::tui::tui_theme_preview_active() && ava::tui::active_tui_theme().name == "plain" && setup_snapshot.show_images &&
-                 setup_snapshot.image_width_cells == 104,
-             "setup cancel reveals latest authoritative theme and never restores stale image values");
-      ava::tui::set_tui_config_theme(std::nullopt);
-    }
 
     // W2-001: authoritative true + overlay false, external reload sets false. Post-hydration values are
     // equal (false→false); applied reload must still rebase so Esc restores the new authority, not stale true.

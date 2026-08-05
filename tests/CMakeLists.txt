@@ -752,7 +752,6 @@ if(Python3_Interpreter_FOUND)
     theme_persisted
     nested_settings_preview
     startup_overview
-    setup_wizard
     active_run
     restore_followup
     streaming_scroll

@@ -34,7 +34,6 @@ struct TuiKeyBindings;
 namespace runtime_views {
 
 inline constexpr std::string_view kSettingsOpenKeybindings = "settings:keybindings.open";
-inline constexpr std::string_view kSettingsValidateKeybindings = "settings:keybindings.validate";
 inline constexpr std::string_view kSettingsEditKeybindings = "settings:keybindings.edit";
 inline constexpr std::string_view kSettingsReloadKeybindings = "settings:keybindings.reload";
 inline constexpr std::string_view kSettingsOpenModels = "settings:models.open";
@@ -57,13 +56,12 @@ inline constexpr std::string_view kSettingsDraftJobs = "settings:draft.jobs";
 inline constexpr std::string_view kSettingsDraftSessions = "settings:draft.sessions";
 inline constexpr std::string_view kSettingsDraftThinking = "settings:draft.thinking";
 inline constexpr std::string_view kSettingsDraftDetails = "settings:draft.details";
+inline constexpr std::string_view kSettingsSectionTheme = "settings:section.theme";
 inline constexpr std::string_view kSettingsSectionDisplay = "settings:section.display";
 inline constexpr std::string_view kSettingsSectionModels = "settings:section.models";
 inline constexpr std::string_view kSettingsSectionInput = "settings:section.input";
 inline constexpr std::string_view kSettingsSectionSessions = "settings:section.sessions";
 inline constexpr std::string_view kSettingsSectionTools = "settings:section.tools";
-inline constexpr std::string_view kSettingsSectionPrivacy = "settings:section.privacy";
-inline constexpr std::string_view kSettingsSectionAbout = "settings:section.about";
 
 struct SettingsFrameState
 {

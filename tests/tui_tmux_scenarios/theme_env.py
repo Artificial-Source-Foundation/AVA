@@ -45,11 +45,11 @@ def scenario_theme_env(ctx: SmokeContext) -> None:
     light_settings_modal = open_settings_section(
         tmux_exe,
         theme_session,
-        "Display",
-        r"ava-light|AVA_TUI_THEME|Search display",
+        "Theme",
+        r"Settings › Theme|Light",
         "light-theme display settings",
     )
-    if "ava-light" not in light_settings_modal or "AVA_TUI_THEME" not in light_settings_modal:
+    if "Light" not in light_settings_modal or "current" not in light_settings_modal:
         raise RuntimeError(f"settings modal did not report AVA_TUI_THEME=light\nscreen:\n{light_settings_modal}")
     tmux(tmux_exe, "kill-session", "-t", theme_session, check=False)
 
@@ -79,11 +79,11 @@ def scenario_theme_env(ctx: SmokeContext) -> None:
     background_theme_modal = open_settings_section(
         tmux_exe,
         background_theme_session,
-        "Display",
-        r"ava-light|COLORFGBG|Search display",
+        "Theme",
+        r"Settings › Theme|Light",
         "terminal-background display settings",
     )
-    if "ava-light" not in background_theme_modal or "COLORFGBG" not in background_theme_modal:
+    if "Light" not in background_theme_modal or "current" not in background_theme_modal:
         raise RuntimeError(
             f"settings modal did not report COLORFGBG-derived light theme\nscreen:\n{background_theme_modal}"
         )

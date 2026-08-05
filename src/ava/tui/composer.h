@@ -528,6 +528,8 @@ struct SelectListView
   std::string placeholder = "Search";
   std::string empty_text = "No matches";
   std::string footer_hint;
+  // Settings-only chrome: omit the empty search row and honor the supplied compact footer.
+  bool compact_settings_chrome = false;
   // When set, RuntimeRenderer freezes the pre-modal transcript layout cache for draws
   // while this selector is shown, even if the modal canvas width differs.
   bool freeze_underlying_transcript_layout = false;

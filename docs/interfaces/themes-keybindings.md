@@ -82,12 +82,12 @@ theme file. Valid hand edits are applied automatically; invalid JSON, unsupporte
 theme names, malformed `show_images`/`image_width_cells`, duplicate custom theme
 names, or invalid custom theme files are reported with path-specific diagnostics
 while the previous active presentation remains in use. Use `/reload theme` when
-you want an explicit retry or diagnostic. `/settings` opens a shallow nested root
-(Display, Models And Reasoning, Input And Keybindings, Sessions And Workspace,
-Tools And Extensions, Privacy, About). The Display section exposes
-theme and image visibility/width rows that call the same authoritative commands.
-Highlighting a previewable Display row applies a presentation-only overlay and
-never writes config; Enter confirms once through the application-owned writer.
+you want an explicit retry or diagnostic. `/settings` opens a compact shallow root
+(Theme, Display, Model, Input, Workspace, Tools). Empty search chrome stays hidden
+until typing. Theme contains built-in/custom theme choices; Display contains image
+visibility/width and thinking-block rows. Both call the same authoritative commands.
+Highlighting a previewable Theme or Display row applies a presentation-only overlay
+and never writes config; Enter confirms once through the application-owned writer.
 Esc, selector replacement, error, or shutdown restores the latest authoritative
 presentation. Mouse clicks in settings change selection/highlight only.
 
@@ -96,7 +96,7 @@ presentation. Mouse clicks in settings change selection/highlight only.
 The active theme is resolved in this order:
 
 1. `NO_COLOR` with any non-empty value forces `plain` mode.
-2. An active `/settings` Display highlight preview (presentation-only; cleared on
+2. An active `/settings` Theme or Display highlight preview (presentation-only; cleared on
    confirm/cancel/replacement/shutdown) sits above process and file config.
 3. `AVA_TUI_THEME=dark|light|plain` overrides persisted config for this process.
 4. `display.json` selects a built-in theme or a valid custom theme.
@@ -126,9 +126,10 @@ only OSC 11 replies terminated by BEL or ST, bounded to 256 bytes, in the forms
 `rgb:R/G/B`, `rgba:R/G/B/A` (alpha ignored when valid), `#RRGGBB`, and
 `#RRRRGGGGBBBB` with equal 1-4 hex channel widths. Channels are scaled to 0..255
 and classified with the existing integer luminance threshold of 180
-(`(R*299 + G*587 + B*114) / 1000`). `/settings` reports the source as `OSC 11`
-without exposing raw color data. Built-in light/dark palettes keep the ordinary
-screen canvas at the terminal-default background (`screen_bg = -1`).
+(`(R*299 + G*587 + B*114) / 1000`). The settings panel marks the resulting theme
+as current without exposing probe-source or raw-color diagnostics. Built-in
+light/dark palettes keep the ordinary screen canvas at the terminal-default
+background (`screen_bg = -1`).
 
 The query is skipped under tmux (`TMUX` set or `TERM` starting with `tmux`); AVA
 does not attempt tmux passthrough wrapping. Detection is session-scoped: it is

@@ -336,13 +336,12 @@ struct TuiRuntimeOptions
 enum class SettingsSection
 {
   Root,
+  Theme,
   Display,
   ModelsAndReasoning,
   InputAndKeybindings,
   SessionsAndWorkspace,
   ToolsAndExtensions,
-  Privacy,
-  About,
 };
 
 [[nodiscard]] int run_interactive_composer(TuiRuntimeOptions options);

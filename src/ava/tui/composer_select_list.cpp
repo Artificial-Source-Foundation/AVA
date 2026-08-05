@@ -103,8 +103,9 @@ std::string select_search_line(SelectListView const& view, std::size_t width)
     query = std::string(detail::kSgrMuted) + sanitize_terminal_text(view.placeholder) + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
   }
   query += std::string(detail::kSgrAccent) + "█" + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg);
-  return select_modal_line(
-      std::string(detail::kSgrMuted) + "filter  " + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg) + std::move(query), width);
+  auto const prefix = view.compact_settings_chrome ? std::string("Search  ") : std::string("filter  ");
+  return select_modal_line(std::string(detail::kSgrMuted) + prefix + std::string(detail::kSgrReset) + std::string(detail::kSgrComposerBg) + std::move(query),
+                           width);
 }
 
 std::string select_group_line(std::string_view group, std::size_t width)
@@ -175,7 +176,9 @@ std::string select_footer_line(SelectListView const& view, std::size_t width)
   auto const session_selector = view.title.find("session") != std::string::npos || view.title.find("Session") != std::string::npos;
   auto const scoped_models = view.title.find("Scoped model") != std::string::npos;
   std::string hint;
-  if ((view.title == "Select thinking mode" || view.placeholder.empty()) && !view.footer_hint.empty())
+  if (view.compact_settings_chrome && !view.footer_hint.empty())
+    hint = sanitize_terminal_text(view.footer_hint);
+  else if ((view.title == "Select thinking mode" || view.placeholder.empty()) && !view.footer_hint.empty())
     hint = sanitize_terminal_text(view.footer_hint);
   else if (session_selector && content_width >= 67)
     hint = "↑↓ navigate · Enter open · type filter · Esc close · Ctrl+D archive";
@@ -677,7 +680,7 @@ std::vector<std::string> select_list_modal_prefix(SelectListView const& view, st
   if (lines.size() >= max_lines)
     return lines;
   lines.push_back(select_title_line(view, width));
-  if (lines.size() < max_lines)
+  if (lines.size() < max_lines && (!view.compact_settings_chrome || !view.query.empty()))
     lines.push_back(select_search_line(view, width));
   return lines;
 }

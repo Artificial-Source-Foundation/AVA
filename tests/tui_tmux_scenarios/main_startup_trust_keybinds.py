@@ -19,7 +19,7 @@ from tui_smoke_helpers import (
     wait_for_absent,
     wait_for_screen_change,
 )
-from .common import _finish_main, _main_session, close_settings, open_settings_section
+from .common import _finish_main, _main_session, clear_settings_filter, close_settings, open_settings_section
 
 
 def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
@@ -272,11 +272,11 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     settings_modal = open_settings_section(
         tmux_exe,
         session,
-        "Display",
-        r"plain|NO_COLOR|Search display",
-        "settings display section for NO_COLOR",
+        "Theme",
+        r"Settings › Theme|Plain",
+        "settings theme section for NO_COLOR",
     )
-    if "plain" not in settings_modal or "NO_COLOR" not in settings_modal:
+    if "Plain" not in settings_modal or "current" not in settings_modal:
         raise RuntimeError(f"settings modal did not report the active NO_COLOR plain mode\nscreen:\n{settings_modal}")
     save_evidence(root, "settings-plain-no-color", settings_modal)
     styled_settings = capture_styled(tmux_exe, session)
@@ -287,18 +287,16 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     open_settings_section(
         tmux_exe,
         session,
-        "Sessions",
-        r"Search sessions|Project trust|Trust status",
+        "Workspace",
+        r"Settings › Workspace|Project trust|Trust project",
         "settings sessions section for trust rows",
     )
     send_literal(tmux_exe, session, "trust")
     settings_trust_rows = wait_for(
-        tmux_exe, session, r"filter\s+trust", "settings trust filtered rows"
+        tmux_exe, session, r"Search\s{2}trust", "settings trust filtered rows"
     )
     if (
         "Project trust" not in settings_trust_rows
-        or "project resources" not in settings_trust_rows
-        or "Trust status" not in settings_trust_rows
         or "Trust project" not in settings_trust_rows
         or "Deny project" not in settings_trust_rows
     ):
@@ -310,15 +308,15 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     open_settings_section(
         tmux_exe,
         session,
-        "Sessions",
-        r"Search sessions|Trust status",
+        "Workspace",
+        r"Settings › Workspace|Project trust",
         "settings sessions section before trust status action",
     )
-    send_literal(tmux_exe, session, "trust status")
+    send_literal(tmux_exe, session, "project trust")
     settings_trust_status_row = wait_for(
-        tmux_exe, session, r"filter\s+trust status", "settings trust status filtered row"
+        tmux_exe, session, r"Search\s{2}project trust", "settings trust status filtered row"
     )
-    if "Trust status" not in settings_trust_status_row or "/trust status" not in settings_trust_status_row:
+    if "Project trust" not in settings_trust_status_row:
         raise RuntimeError(
             f"settings modal did not expose the trust status action when filtered\nscreen:\n{settings_trust_status_row}"
         )
@@ -338,21 +336,19 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Input",
-        r"Search input|Keybindings file",
+        r"Settings › Input|Keybindings|Edit config",
         "settings input section before keybinding rows",
     )
     send_literal(tmux_exe, session, "Keybindings")
-    wait_for(tmux_exe, session, r"filter\s+Keybindings", "settings keybinding filter state")
-    settings_keybinding_rows = wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding filtered rows")
+    wait_for(tmux_exe, session, r"Search\s{2}Keybindings", "settings keybinding filter state")
+    settings_keybinding_rows = clear_settings_filter(tmux_exe, session, "settings keybinding filter cleared for mouse rows")
     keybindings_row = next(
         (
             (index + 1, line)
             for index, line in enumerate(settings_keybinding_rows.splitlines())
             if "Keybindings" in line
-            and "open" in line
-            and "file" not in line
-            and "edit" not in line
-            and "reload" not in line
+            and "Edit config" not in line
+            and "Reload" not in line
         ),
         None,
     )
@@ -363,20 +359,20 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     keybindings_row_number, keybindings_row_text = keybindings_row
     keybindings_column = max(1, len(keybindings_row_text) - len(keybindings_row_text.lstrip()) + 4)
     # Click a non-selected sibling first so the later open-row click must move selection.
-    file_row = next(
+    edit_row = next(
         (
             (index + 1, line)
             for index, line in enumerate(settings_keybinding_rows.splitlines())
-            if "Keybindings file" in line
+            if "Edit config" in line
         ),
         None,
     )
-    if file_row is not None:
-        file_row_number, file_row_text = file_row
-        file_column = max(1, len(file_row_text) - len(file_row_text.lstrip()) + 4)
+    if edit_row is not None:
+        edit_row_number, edit_row_text = edit_row
+        edit_column = max(1, len(edit_row_text) - len(edit_row_text.lstrip()) + 4)
         before_file = capture(tmux_exe, session)
-        send_literal(tmux_exe, session, f"\x1b[<0;{file_column};{file_row_number}M")
-        wait_for_screen_change(tmux_exe, session, before_file, "settings keybindings file mouse select")
+        send_literal(tmux_exe, session, f"\x1b[<0;{edit_column};{edit_row_number}M")
+        wait_for_screen_change(tmux_exe, session, before_file, "settings keybindings edit mouse select")
     before_mouse = capture(tmux_exe, session)
     send_literal(tmux_exe, session, f"\x1b[<0;{keybindings_column};{keybindings_row_number}M")
     # Settings mouse clicks select/highlight only; Enter still confirms the route.
@@ -387,7 +383,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(
             f"settings mouse click persisted/opened keybindings instead of selecting only\nscreen:\n{mouse_selected}"
         )
-    if "Search input" not in mouse_selected and "Keybindings" not in mouse_selected:
+    if "Settings › Input" not in mouse_selected and "Keybindings" not in mouse_selected:
         raise RuntimeError(
             f"settings mouse click left the input settings section unexpectedly\nscreen:\n{mouse_selected}"
         )
@@ -421,26 +417,11 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Input",
-        r"Search input|Keybindings file",
-        "settings input section before keybinding validate",
-    )
-    send_literal(tmux_exe, session, "validate")
-    wait_for(tmux_exe, session, r"Keybindings file", "settings keybinding validate row")
-    send_keys(tmux_exe, session, "Enter")
-    settings_validate = wait_for(tmux_exe, session, r"keybindings file is valid", "settings keybinding validate action")
-    if "keybindings file is valid" not in settings_validate:
-        raise RuntimeError(f"settings keybinding validate row did not run validation\nscreen:\n{settings_validate}")
-
-    send_keys(tmux_exe, session, "C-u")
-    open_settings_section(
-        tmux_exe,
-        session,
-        "Input",
-        r"Search input|Keybindings edit",
+        r"Settings › Input|Edit config",
         "settings input section before keybinding edit",
     )
-    send_literal(tmux_exe, session, "keybindings edit")
-    wait_for(tmux_exe, session, r"Keybindings edit", "settings keybinding edit row")
+    send_literal(tmux_exe, session, "edit config")
+    wait_for(tmux_exe, session, r"Edit config", "settings keybinding edit row")
     send_keys(tmux_exe, session, "Enter")
     # Anchor on the composer draft row. Bare "/keybindings set" already appears in the
     # settings row description, so an unanchored wait races into open_settings_root while
@@ -458,14 +439,14 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Input",
-        r"Search input|Keybindings reload",
+        r"Settings › Input|Reload",
         "settings input section before keybinding reload",
     )
     send_literal(tmux_exe, session, "reload")
     settings_reload_row = wait_for(
-        tmux_exe, session, r"filter\s+reload[^\n]*\n(?:[^\n]*\n)*[^\n]*Keybindings reload", "settings keybinding reload row"
+        tmux_exe, session, r"Search\s{2}reload[^\n]*\n(?:[^\n]*\n)*[^\n]*Reload", "settings keybinding reload row"
     )
-    if "Keybindings reload" not in settings_reload_row or "/reload keybindings" not in settings_reload_row:
+    if "Reload" not in settings_reload_row:
         raise RuntimeError(
             f"settings modal did not expose keybinding reload guidance when filtered\nscreen:\n{settings_reload_row}"
         )
@@ -478,15 +459,15 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     open_settings_section(
         tmux_exe,
         session,
-        "Models",
-        r"Search models|Model selector",
+        "Model",
+        r"Settings › Model|Model|Reasoning",
         "settings models section before model selector",
     )
-    send_literal(tmux_exe, session, "Model selector")
+    send_literal(tmux_exe, session, "Model")
     settings_model_selector_row = wait_for(
-        tmux_exe, session, r"filter\s+Model selector", "settings model selector row"
+        tmux_exe, session, r"Search\s{2}Model", "settings model selector row"
     )
-    if "Model selector" not in settings_model_selector_row or "openai/GPT" not in settings_model_selector_row:
+    if "Model" not in settings_model_selector_row or "openai/GPT" not in settings_model_selector_row:
         raise RuntimeError(
             f"settings modal did not expose the model selector action\nscreen:\n{settings_model_selector_row}"
         )
@@ -506,17 +487,17 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     open_settings_section(
         tmux_exe,
         session,
-        "Models",
-        r"Search models|Model cycle scope",
+        "Model",
+        r"Settings › Model|Cycle scope",
         "settings models section before scoped models",
     )
     send_literal(tmux_exe, session, "cycle scope")
     settings_scoped_model_row = wait_for(
-        tmux_exe, session, r"filter\s+cycle scope", "settings scoped model row"
+        tmux_exe, session, r"Search\s{2}cycle scope", "settings scoped model row"
     )
     if (
-        "Model cycle scope" not in settings_scoped_model_row
-        or "Ctrl+P scoped cycle" not in settings_scoped_model_row
+        "Cycle scope" not in settings_scoped_model_row
+        or "Ctrl+P" not in settings_scoped_model_row
     ):
         raise RuntimeError(
             f"settings modal did not expose scoped model-cycle persistence guidance\nscreen:\n{settings_scoped_model_row}"

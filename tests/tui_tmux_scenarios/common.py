@@ -110,14 +110,10 @@ def _finish_main(tmux_exe: object, session: str) -> None:
     wait_for_session_exit(tmux_exe, session)
 
 
-# Match settings while open even when a non-empty filter hides the placeholder text.
-_SETTINGS_OPEN_PATTERN = (
-    r"Search settings|Search display|Search models|Search input|Search sessions|"
-    r"Search tools|Search privacy|Search about|Choose a section|"
-    r"Settings · |filter\s+\S|Type to filter · highlight previews|Type to filter · Enter open"
-)
-# Root-only markers: do not match section titles like "Settings · Display".
-_SETTINGS_ROOT_PATTERN = r"Choose a section|Search settings|Models And Reasoning"
+# Match settings while open with either empty or active compact search chrome.
+_SETTINGS_OPEN_PATTERN = r"Settings ›|Search\s{2}\S|Enter open · Esc close|Enter select · Esc back"
+# Root-only markers: section titles always include the breadcrumb separator.
+_SETTINGS_ROOT_PATTERN = r"(?s)Settings.*Theme.*Display.*Model.*Input.*Workspace.*Tools"
 # Composer rows only: reject transcript/modal copy that mentions the same text.
 _COMPOSER_EMPTY_PATTERN = r"(?m)^\s*│\s+Type a message\.\.\."
 _COMPOSER_SETTINGS_DRAFT_PATTERN = r"(?m)^\s*│\s+/settings(?:\s|$)"
@@ -180,7 +176,10 @@ def open_settings_section(
 
     open_settings_root(tmux_exe, session, f"{label} root")
     send_literal(tmux_exe, session, section_query)
-    wait_for(tmux_exe, session, rf"filter\s+{re.escape(section_query)}", f"{label} section filter")
+    query_pattern = re.escape(section_query)
+    if len(section_query) > 1:
+        query_pattern = rf"(?:{query_pattern}|{re.escape(section_query[1:])})"
+    wait_for(tmux_exe, session, rf"Search\s{{2}}{query_pattern}", f"{label} section filter")
     # Jump to the best/first match. Weak fuzzy hits can leave the previous root row
     # selected (for example Display's value settings:section.display matching "Sessions").
     send_keys(tmux_exe, session, "Home")
@@ -199,11 +198,11 @@ def clear_settings_filter(tmux_exe: object, session: str, label: str = "settings
     # Select-list filters are short; bound the clear so a stuck modal cannot hang the smoke.
     for _ in range(48):
         screen = capture(tmux_exe, session)
-        if re.search(r"filter\s+(?:Search |█)", screen) or not re.search(r"filter\s+\S", screen):
+        if not re.search(r"Search\s{2}\S", screen):
             return screen
         send_keys(tmux_exe, session, "BSpace")
     after = capture(tmux_exe, session)
-    if after == before or re.search(r"filter\s+\S", after):
+    if after == before or re.search(r"Search\s{2}\S", after):
         raise RuntimeError(f"{label}; filter did not clear\nscreen:\n{after}")
     return after
 

@@ -326,7 +326,7 @@ Remove the two optional fields and command rows; legacy theme behavior remains r
 
 ## Wave 2 — Nested Unified Settings With Reversible Preview
 
-**Status: Complete — 2026-08-03.** Shallow nested `/settings` root sections with section-local filter/back stack, Display highlight previews that never write config, Enter confirm through app authority, Esc/replacement/error/shutdown restore of authoritative presentation, external reload rebase+reapply, app-delivered custom theme palette/revision (no renderer FS reads), and no attachment load during image preview are landed in this tree. Existing model/reasoning/keybinding/trust/tool/extension routes remain reachable from nested sections.
+**Status: Complete — 2026-08-03.** Shallow nested `/settings` root sections with section-local filter/back stack, Theme/Display highlight previews that never write config, Enter confirm through app authority, Esc/replacement/error/shutdown restore of authoritative presentation, external reload rebase+reapply, app-delivered custom theme palette/revision (no renderer FS reads), and no attachment load during image preview are landed in this tree. Existing model/reasoning/keybinding/trust/tool/extension routes remain reachable from nested sections.
 
 ### Wave 2 evidence
 
@@ -391,7 +391,7 @@ W2-002-R1/R2 re-fix (below-cap triple-equality + remove probabilistic race; no W
 
 Evolve `/settings` into a native root selector with shallow, explicit sections rather than replacing every select-list implementation.
 
-Recommended root sections:
+The original Wave 2 root sections were:
 
 - Display
 - Models And Reasoning
@@ -401,7 +401,9 @@ Recommended root sections:
 - Privacy
 - About
 
-Rows should reuse existing commands/selectors for models, scoped models, reasoning, keybindings, trust, permissions, tools, and plugin/MCP/LSP diagnostics. Do not duplicate backend semantics inside TUI reducers.
+A later usability pass simplified the shipped root to Theme, Display, Model, Input, Workspace, and Tools. Theme choices moved out of Display; informational Privacy/About and status-dashboard rows left the settings panel. Empty search chrome is hidden until typing, and root rows are label-only. The same shallow navigation, reversible preview, and application-authority boundaries remain in force.
+
+Rows reuse existing commands/selectors for models, scoped models, reasoning, keybindings, trust, permissions, tools, and plugin/MCP/LSP diagnostics. Backend semantics remain outside TUI reducers.
 
 Add a small settings navigation stack:
 

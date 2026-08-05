@@ -33,7 +33,7 @@ Use this symptom-first runbook for common local failures. Start with `ava doctor
 
 ## TUI, keyboard, mouse, or display is wrong
 
-- Run `/settings`, `/hotkeys`, or `/keybindings validate` to inspect effective theme, terminal capability, and bindings.
+- Run `/settings` to inspect concise display choices, `/hotkeys` to inspect effective bindings, or `/keybindings validate` for a validation-only config check.
 - Try `NO_COLOR=1 ava` for a plain diagnostic run. Under tmux, terminal capabilities may need explicit forwarding; do not infer support from `TERM` alone.
 - If keys arrive incorrectly, test without tmux and without custom `keybinds.json`, then restore settings one at a time. Plain Up/Down scroll transcript history by default; they do not replace the draft.
 - Clipboard images require a supported image type and an available Wayland/X11 helper; unsupported terminals retain text metadata rather than an inline preview.

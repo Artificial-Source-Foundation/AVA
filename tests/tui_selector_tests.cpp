@@ -721,15 +721,21 @@ void run_tui_selector_tests()
 
   auto const settings_snapshot = make_settings_snapshot();
   auto const settings_root = ava::tui::settings_select_list_view(settings_snapshot, settings_key_bindings);
+  auto const settings_theme = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, settings_snapshot, settings_key_bindings);
   auto const settings_display = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, settings_snapshot, settings_key_bindings);
   auto const settings_models =
       ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::ModelsAndReasoning, settings_snapshot, settings_key_bindings);
   auto const settings_input =
       ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::InputAndKeybindings, settings_snapshot, settings_key_bindings);
-  auto const settings_sessions =
+  auto const settings_workspace =
       ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::SessionsAndWorkspace, settings_snapshot, settings_key_bindings);
   auto const settings_tools =
       ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::ToolsAndExtensions, settings_snapshot, settings_key_bindings);
+  auto labels = [](ava::tui::SelectListView const& view) {
+    std::vector<std::string> result;
+    for (auto const& item : view.items) result.push_back(item.label);
+    return result;
+  };
   auto const settings_root_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                         .provider = "openai",
                                                                                         .model = "gpt-5.5",
@@ -740,183 +746,96 @@ void run_tui_selector_tests()
                                                                                         .select_list = settings_root,
                                                                                         .width = 96,
                                                                                         .height = 20});
+  auto frame_contains = [](std::vector<std::string> const& frame, std::string_view text) {
+    return std::ranges::any_of(frame, [&](std::string const& line) { return strip_sgr(line).find(text) != std::string::npos; });
+  };
+  expect(settings_root.title == "Settings" && settings_root.subtitle.empty() && settings_root.compact_settings_chrome &&
+             labels(settings_root) == std::vector<std::string>({"Theme", "Display", "Model", "Input", "Workspace", "Tools"}) &&
+             std::ranges::all_of(settings_root.items,
+                                 [](ava::tui::SelectListItemView const& item) {
+                                   return item.description.empty() && item.group.empty() && item.detail.empty() && item.badge.empty();
+                                 }) &&
+             !frame_contains(settings_root_frame, "Search") && frame_contains(settings_root_frame, "Enter open · Esc close"),
+         "settings root has the approved label-only order and compact chrome");
+
+  expect(settings_theme.title == "Settings › Theme" && labels(settings_theme) == std::vector<std::string>({"Dark", "Light", "Plain", "Default"}) &&
+             settings_theme.items[0].current && settings_theme.items[0].value == "theme:dark" && settings_theme.items[3].value == "theme:reset" &&
+             std::ranges::none_of(settings_theme.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("settings:images"); }) &&
+             settings_display.title == "Settings › Display" &&
+             labels(settings_display) == std::vector<std::string>({"Images on", "Images off", "Images default", "Width 40", "Width 60", "Width 80", "Width 120",
+                                                                   "Width default", "Thinking blocks"}) &&
+             std::ranges::none_of(settings_display.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("theme:"); }),
+         "theme choices are isolated from display while both retain their stable action tokens");
+
+  expect(settings_models.title == "Settings › Model" && labels(settings_models) == std::vector<std::string>({"Model", "Reasoning", "Cycle scope"}) &&
+             settings_models.items[0].value == "settings:models.open" && settings_models.items[0].description == "openai/gpt-5.5" &&
+             settings_models.items[1].value == "settings:reasoning.open" && settings_models.items[2].value == "settings:models.scoped" &&
+             settings_input.title == "Settings › Input" && labels(settings_input) == std::vector<std::string>({"Keybindings", "Edit config", "Reload"}) &&
+             settings_input.items[0].value == "settings:keybindings.open" && settings_input.items[1].value == "settings:keybindings.edit" &&
+             settings_input.items[2].value == "settings:keybindings.reload",
+         "model and input sections lead with actionable selectors and use concise rows");
+
   expect(
-      settings_root.title == "Settings" && settings_root.items.size() == 7 &&
-          std::ranges::any_of(settings_root.items,
-                              [](ava::tui::SelectListItemView const& item) {
-                                return item.value == "settings:section.display" && item.label == "Display" && item.badge == "section";
-                              }) &&
-          std::ranges::any_of(
-              settings_root.items,
-              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.models" && item.label == "Models And Reasoning"; }) &&
-          std::ranges::any_of(
-              settings_root.items,
-              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.input" && item.label == "Input And Keybindings"; }) &&
-          std::ranges::any_of(
-              settings_root.items,
-              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.sessions" && item.label == "Sessions And Workspace"; }) &&
-          std::ranges::any_of(
-              settings_root.items,
-              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.tools" && item.label == "Tools And Extensions"; }) &&
-          std::ranges::any_of(settings_root.items,
-                              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.privacy" && item.label == "Privacy"; }) &&
-          std::ranges::any_of(settings_root.items,
-                              [](ava::tui::SelectListItemView const& item) { return item.value == "settings:section.about" && item.label == "About"; }) &&
-          std::ranges::none_of(settings_root.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("theme:"); }) &&
-          std::ranges::any_of(settings_root_frame, [](std::string const& line) { return strip_sgr(line).find("Settings") != std::string::npos; }),
-      "settings root exposes only shallow section rows and never flattens theme actions");
-
-  expect(std::ranges::any_of(
-             settings_display.items,
-             [](ava::tui::SelectListItemView const& item) { return item.label == "Theme" && item.description == "ava-dark" && item.badge == "built-in"; }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "theme:dark" && item.label == "Theme dark" && item.detail.find("Enter confirms") != std::string::npos &&
-                                          item.badge == "current" && item.current;
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "theme:light" && item.label == "Theme light" &&
-                                          item.detail.find("highlight previews") != std::string::npos && item.badge == "preview" && !item.current;
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.value == "theme:reset" && item.detail.find("no live preview") != std::string::npos && item.badge == "confirm";
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Image preview" && !item.description.empty() && !item.detail.empty() && !item.badge.empty();
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Images on" && item.value == "settings:images.on" && item.badge == "on";
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Images off" && item.value == "settings:images.off" && item.badge == "off";
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Images reset" && item.value == "settings:images.reset" && item.badge == "reset";
-                                 }) &&
-             std::ranges::any_of(settings_display.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Image width" && item.description.find("60 cells") != std::string::npos;
-                                 }) &&
-             std::ranges::any_of(
-                 settings_display.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.label == "Image width reset" && item.value == "settings:image-width.reset"; }),
-         "display settings section exposes theme/image rows with highlight-preview semantics");
-
-  expect(std::ranges::any_of(settings_models.items,
-                             [](ava::tui::SelectListItemView const& item) {
-                               return item.label == "Model selector" && item.value == "settings:models.open" && item.description == "openai/gpt-5.5" &&
-                                      item.detail == "Enter opens /models selector" && item.badge == "open";
-                             }) &&
-             std::ranges::any_of(settings_models.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Model cycle scope" && item.value == "settings:models.scoped" &&
-                                          item.description == "Ctrl+P scoped cycle" && item.detail.find("/scoped-models") != std::string::npos &&
-                                          item.detail.find("Ctrl+S") != std::string::npos && item.badge == "open";
-                                 }) &&
-             std::ranges::any_of(
-                 settings_models.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.label == "Reasoning selector" && item.value == "settings:reasoning.open"; }) &&
-             std::ranges::any_of(settings_input.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Keybindings" && item.value == "settings:keybindings.open" &&
-                                          item.description.find("active actions") != std::string::npos && item.detail == "Enter opens active bindings" &&
-                                          item.badge == "open";
-                                 }) &&
-             std::ranges::any_of(settings_input.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Keybindings file" && item.value == "settings:keybindings.validate" &&
-                                          item.description == "$XDG_CONFIG_HOME/ava/keybinds.json" &&
-                                          item.detail == "Enter validates with /keybindings validate" && item.badge == "validate";
-                                 }) &&
-             std::ranges::any_of(settings_input.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Keybindings edit" && item.value == "settings:keybindings.edit" &&
-                                          item.description == "/keybindings set <action> <key>" &&
-                                          item.detail == "Enter drafts the edit command; reset removes one override" && item.badge == "draft";
-                                 }) &&
-             std::ranges::any_of(settings_input.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Keybindings reload" && item.value == "settings:keybindings.reload" &&
-                                          item.description == "/reload keybindings" && item.detail == "Enter applies valid keybinds.json edits" &&
-                                          item.badge == "live";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Current directory" && item.description == "/workspace/project" && item.detail == "project";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Project trust" && item.description == "trusted" && item.detail == "project resources enabled" &&
-                                          item.badge == "trusted";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Protected resources" && item.description == "3 protected project resources" &&
-                                          item.detail == "matched /workspace/project";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Trust status" && item.value == "settings:trust.status" && item.description == "/trust status" &&
-                                          item.badge == "status";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Trust project" && item.value == "settings:trust.project" &&
-                                          item.detail == "Enter runs /trust project" && item.badge == "trust";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Deny project" && item.value == "settings:trust.deny" && item.detail == "Enter runs /trust deny" &&
-                                          item.badge == "deny";
-                                 }) &&
-             std::ranges::any_of(settings_sessions.items,
-                                 [](ava::tui::SelectListItemView const& item) {
-                                   return item.label == "Clear trust decision" && item.value == "settings:trust.clear" &&
-                                          item.detail == "Enter runs /trust clear" && item.badge == "clear";
-                                 }) &&
-             std::ranges::any_of(
-                 settings_tools.items,
-                 [](ava::tui::SelectListItemView const& item) { return item.label == "Permissions" && item.value == "settings:draft.permissions"; }) &&
-             std::ranges::any_of(settings_tools.items,
-                                 [](ava::tui::SelectListItemView const& item) { return item.label == "Plugins" && item.value == "settings:draft.plugins"; }) &&
-             std::ranges::any_of(settings_tools.items,
-                                 [](ava::tui::SelectListItemView const& item) { return item.label == "MCP" && item.value == "settings:draft.mcp"; }),
-         "nested settings sections keep model/keybinding/trust/extension routes on existing action tokens");
+      settings_workspace.title == "Settings › Workspace" &&
+          labels(settings_workspace) == std::vector<std::string>({"Sessions", "Project trust", "Trust project", "Deny project", "Clear trust decision"}) &&
+          settings_workspace.items[0].value == "settings:draft.sessions" && settings_workspace.items[1].value == "settings:trust.status" &&
+          std::ranges::none_of(settings_workspace.items,
+                               [](ava::tui::SelectListItemView const& item) {
+                                 return item.label == "Current directory" || item.label == "Git branch" || item.label == "Token status" ||
+                                        item.label == "Context sources" || item.label == "Protected resources";
+                               }) &&
+          settings_tools.title == "Settings › Tools" &&
+          labels(settings_tools) == std::vector<std::string>({"Tool details", "Permissions", "Plugins", "MCP", "Jobs"}) &&
+          settings_tools.items[0].value == "settings:draft.tools" && settings_tools.items[0].description == "rich" &&
+          std::ranges::none_of(settings_root.items, [](ava::tui::SelectListItemView const& item) { return item.label == "Privacy" || item.label == "About"; }),
+      "workspace contains only session/trust preferences and tools owns tool visibility and extension routes");
 
   {
     auto root_filter = settings_root;
-    // "Theme light" is a nested Display action label; root only has the Display section blurb "Theme, images...".
     root_filter.query = "Theme light";
-    expect(ava::tui::filter_select_list_items(root_filter).empty(), "root settings filter is section-local and does not surface nested theme action rows");
-    auto display_filter = settings_display;
-    display_filter.query = "Theme light";
-    auto const display_matches = ava::tui::filter_select_list_items(display_filter);
-    expect(display_matches.size() == 1 && display_filter.items[display_matches.front()].value == "theme:light",
-           "display settings filter matches only the current section's theme rows");
-    auto sessions_filter = settings_sessions;
-    sessions_filter.query = "trust";
-    auto const trust_matches = ava::tui::filter_select_list_items(sessions_filter);
-    expect(!trust_matches.empty() && std::ranges::all_of(trust_matches,
-                                                         [&](std::size_t index) {
-                                                           auto const& item = sessions_filter.items[index];
-                                                           return item.label.find("Trust") != std::string::npos ||
-                                                                  item.label.find("trust") != std::string::npos ||
-                                                                  item.label.find("Deny") != std::string::npos ||
-                                                                  item.label.find("Protected") != std::string::npos ||
-                                                                  item.label.find("Clear") != std::string::npos;
-                                                         }),
-           "sessions settings filter stays inside the sessions section");
+    expect(ava::tui::filter_select_list_items(root_filter).empty(), "root settings filter does not surface nested theme actions");
+    auto theme_filter = settings_theme;
+    theme_filter.query = "light";
+    auto const theme_matches = ava::tui::filter_select_list_items(theme_filter);
+    expect(theme_matches.size() == 1 && theme_filter.items[theme_matches.front()].value == "theme:light",
+           "theme settings filtering selects the matching theme action");
+
+    theme_filter.query = "light";
+    theme_filter.selected_item_index = 1;
+    auto const filtered_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                     .provider = "openai",
+                                                                                     .model = "gpt-5.5",
+                                                                                     .session_id = "session_test",
+                                                                                     .input = "",
+                                                                                     .status = "settings opened",
+                                                                                     .transcript = {},
+                                                                                     .select_list = theme_filter,
+                                                                                     .width = 72,
+                                                                                     .height = 10});
+    auto const filtered_selected_line =
+        std::ranges::find_if(filtered_frame, [](std::string const& line) { return strip_sgr(line).find("Light") != std::string::npos; });
+    auto const filtered_hit =
+        filtered_selected_line == filtered_frame.end()
+            ? std::optional<std::size_t>{}
+            : ava::tui::select_list_selection_for_screen_position(ava::tui::ComposerSnapshot{.mode = "build",
+                                                                                             .provider = "openai",
+                                                                                             .model = "gpt-5.5",
+                                                                                             .session_id = "session_test",
+                                                                                             .input = "",
+                                                                                             .status = "settings opened",
+                                                                                             .transcript = {},
+                                                                                             .select_list = theme_filter,
+                                                                                             .width = 72,
+                                                                                             .height = 10},
+                                                                  static_cast<std::size_t>(filtered_selected_line - filtered_frame.begin()) + 1, 24);
+    expect(frame_contains(filtered_frame, "Search  light") && frame_contains(filtered_frame, "Enter select · Esc back") && filtered_hit && *filtered_hit == 1,
+           "compact settings chrome reveals one concise search row and keeps queried-row hit testing aligned");
   }
 
   for (std::size_t height : {8u, 9u, 10u, 11u, 12u})
   {
-    for (auto section : {ava::tui::SettingsSection::Root, ava::tui::SettingsSection::Display, ava::tui::SettingsSection::SessionsAndWorkspace})
+    for (auto section : {ava::tui::SettingsSection::Root, ava::tui::SettingsSection::Theme, ava::tui::SettingsSection::Display,
+                         ava::tui::SettingsSection::SessionsAndWorkspace})
     {
       auto view = ava::tui::settings_select_list_view_for_section(section, settings_snapshot, settings_key_bindings);
       if (view.items.empty())
@@ -1112,7 +1031,7 @@ void run_tui_selector_tests()
               ava::tui::TuiThemePalette{
                   .text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255, .composer_bg = 236},
           .revision = "sunrise-selected"}});
-      auto before = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, sunrise_only, settings_key_bindings);
+      auto before = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, sunrise_only, settings_key_bindings);
       std::optional<std::size_t> sunrise_index;
       for (std::size_t index = 0; index < before.items.size(); ++index)
       {
@@ -1143,7 +1062,7 @@ void run_tui_selector_tests()
                    ava::tui::TuiThemePalette{
                        .text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255, .composer_bg = 236},
                .revision = "sunrise-selected"}});
-      auto after = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, with_alpha, settings_key_bindings);
+      auto after = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, with_alpha, settings_key_bindings);
       after.query = before.query;
       // Index-only preservation would land on whatever now occupies sunrise's old slot (alpha).
       auto const index_only = *sunrise_index < after.items.size() ? *sunrise_index : std::size_t{0};
@@ -1174,7 +1093,7 @@ void run_tui_selector_tests()
               ava::tui::TuiThemePalette{
                   .text = -1, .muted = 242, .success = 34, .warning = 220, .error = 196, .accent = 39, .screen_bg = 255, .composer_bg = 230},
           .revision = "alpha-v1"}});
-      auto fallback_view = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, alpha_only, settings_key_bindings);
+      auto fallback_view = ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, alpha_only, settings_key_bindings);
       // Stage alpha, then ask reselect to recover via staged overlay after selected value vanished.
       fallback_view.selected_item_index = reselect_settings_display_row_after_rebuild(fallback_view, "theme:sunrise", "theme:alpha", sunrise_index);
       expect(fallback_view.selected_item_index < fallback_view.items.size() && fallback_view.items[fallback_view.selected_item_index].value == "theme:alpha",
@@ -1192,13 +1111,9 @@ void run_tui_selector_tests()
     ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
     ava::tui::set_tui_config_theme(std::nullopt);
     auto const light_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
-    expect(std::ranges::any_of(light_settings_view.items,
-                               [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "ava-light" && item.detail == "built-in light ncurses token palette" &&
-                                        item.badge == "AVA_TUI_THEME";
-                               }),
-           "settings view reports process-selected built-in light theme from AVA_TUI_THEME");
+        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, make_settings_snapshot(), settings_key_bindings);
+    expect(std::ranges::any_of(light_settings_view.items, [](ava::tui::SelectListItemView const& item) { return item.value == "theme:light" && item.current; }),
+           "settings view marks the process-selected built-in light theme as current");
   }
 
   {
@@ -1207,16 +1122,10 @@ void run_tui_selector_tests()
     ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
     ava::tui::set_tui_config_theme("light");
     auto const configured_light_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
+        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, make_settings_snapshot(), settings_key_bindings);
     expect(std::ranges::any_of(configured_light_settings_view.items,
-                               [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "ava-light" && item.detail == "built-in light ncurses token palette" &&
-                                        item.badge == "display.json";
-                               }) &&
-               std::ranges::any_of(
-                   configured_light_settings_view.items,
-                   [](ava::tui::SelectListItemView const& item) { return item.value == "theme:light" && item.badge == "current" && item.current; }),
-           "settings view reports persisted built-in light theme from display.json");
+                               [](ava::tui::SelectListItemView const& item) { return item.value == "theme:light" && item.current; }),
+           "settings view marks the persisted built-in light theme as current");
     ava::tui::set_tui_config_theme(std::nullopt);
   }
 
@@ -1233,84 +1142,17 @@ void run_tui_selector_tests()
         .revision = "test-custom-theme"};
     ava::tui::set_tui_config_theme("sunrise", custom_theme);
     auto const custom_settings_view = ava::tui::settings_select_list_view_for_section(
-        ava::tui::SettingsSection::Display,
+        ava::tui::SettingsSection::Theme,
         make_settings_snapshot({ava::tui::ThemeOptionItem{
             .name = "sunrise", .detail = "/tmp/ava/sunrise.json", .palette = custom_theme.palette, .revision = custom_theme.revision}}),
         settings_key_bindings);
     expect(std::ranges::any_of(custom_settings_view.items,
                                [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "sunrise" && item.detail.find("sunrise.json") != std::string::npos &&
-                                        item.badge == "display.json";
-                               }) &&
-               std::ranges::any_of(custom_settings_view.items,
-                                   [](ava::tui::SelectListItemView const& item) {
-                                     return item.value == "theme:sunrise" && item.label == "Theme sunrise" && item.description == "custom theme" &&
-                                            item.detail.find("sunrise.json") != std::string::npos && item.badge == "current" && item.current;
-                                   }),
-           "settings view reports and exposes a selected custom TUI theme from display.json");
+                                 return item.value == "theme:sunrise" && item.label == "sunrise" && item.description == "current" && item.current &&
+                                        item.detail.empty();
+                               }),
+           "settings view exposes a selected custom theme without showing its filesystem path");
     ava::tui::set_tui_config_theme(std::nullopt);
-  }
-
-  {
-    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
-    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
-    ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
-    ava::tui::set_tui_config_theme(std::nullopt);
-    auto const terminal_light_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
-    expect(std::ranges::any_of(terminal_light_settings_view.items,
-                               [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "ava-light" &&
-                                        item.detail == "terminal background appears light from COLORFGBG" && item.badge == "COLORFGBG";
-                               }) &&
-               std::ranges::any_of(
-                   terminal_light_settings_view.items,
-                   [](ava::tui::SelectListItemView const& item) { return item.value == "theme:light" && item.badge == "current" && item.current; }),
-           "settings view reports terminal-background light theme inferred from COLORFGBG");
-  }
-
-  {
-    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
-    ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
-    ScopedEnvVar colorfgbg_guard("COLORFGBG", "15;0");
-    ava::tui::set_tui_config_theme(std::nullopt);
-    auto const terminal_dark_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
-    expect(
-        std::ranges::any_of(terminal_dark_settings_view.items,
-                            [](ava::tui::SelectListItemView const& item) {
-                              return item.label == "Theme" && item.description == "ava-dark" &&
-                                     item.detail == "terminal background appears dark from COLORFGBG" && item.badge == "COLORFGBG";
-                            }) &&
-            std::ranges::any_of(terminal_dark_settings_view.items,
-                                [](ava::tui::SelectListItemView const& item) { return item.value == "theme:dark" && item.badge == "current" && item.current; }),
-        "settings view reports terminal-background dark theme inferred from COLORFGBG");
-  }
-
-  {
-    ScopedEnvVar no_color_settings_guard("NO_COLOR", "");
-    ScopedEnvVar plain_theme_guard("AVA_TUI_THEME", "plain");
-    ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
-    ava::tui::set_tui_config_theme(std::nullopt);
-    auto const env_plain_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
-    auto const env_plain_settings_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                                               .provider = "openai",
-                                                                                               .model = "gpt-5.5",
-                                                                                               .session_id = "session_test",
-                                                                                               .input = "",
-                                                                                               .status = "settings opened",
-                                                                                               .transcript = {},
-                                                                                               .select_list = env_plain_settings_view,
-                                                                                               .width = 96,
-                                                                                               .height = 20});
-    expect(std::ranges::any_of(env_plain_settings_view.items,
-                               [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "plain" && item.detail == "AVA_TUI_THEME=plain disables ANSI styling" &&
-                                        item.badge == "AVA_TUI_THEME";
-                               }) &&
-               std::ranges::all_of(env_plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
-           "AVA_TUI_THEME=plain selects the same no-ANSI rendering path as NO_COLOR without requiring NO_COLOR");
   }
 
   {
@@ -1319,7 +1161,7 @@ void run_tui_selector_tests()
     ScopedEnvVar colorfgbg_guard("COLORFGBG", "0;15");
     ava::tui::set_tui_config_theme(std::nullopt);
     auto const plain_settings_view =
-        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Display, make_settings_snapshot(), settings_key_bindings);
+        ava::tui::settings_select_list_view_for_section(ava::tui::SettingsSection::Theme, make_settings_snapshot(), settings_key_bindings);
     auto const plain_settings_frame = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                            .provider = "openai",
                                                                                            .model = "gpt-5.5",
@@ -1330,14 +1172,10 @@ void run_tui_selector_tests()
                                                                                            .select_list = plain_settings_view,
                                                                                            .width = 96,
                                                                                            .height = 20});
-    expect(std::ranges::any_of(plain_settings_view.items,
-                               [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Theme" && item.description == "plain" && item.detail == "NO_COLOR disables ANSI styling" &&
-                                        item.badge == "NO_COLOR";
-                               }) &&
-               std::ranges::any_of(plain_settings_frame, [](std::string const& line) { return line.find("plain") != std::string::npos; }) &&
-               std::ranges::all_of(plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
-           "settings view reports active NO_COLOR plain display mode without ANSI styling");
+    expect(
+        std::ranges::any_of(plain_settings_view.items, [](ava::tui::SelectListItemView const& item) { return item.value == "theme:plain" && item.current; }) &&
+            std::ranges::all_of(plain_settings_frame, [](std::string const& line) { return line.find("\x1b[") == std::string::npos; }),
+        "settings view marks NO_COLOR plain mode current without ANSI styling");
   }
 
   ava::tui::clear_tui_theme_preview();

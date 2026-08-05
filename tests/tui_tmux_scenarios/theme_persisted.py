@@ -44,12 +44,12 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        "Display",
-        r"Search display|Theme dark|Theme light",
+        "Theme",
+        r"Settings › Theme|Dark|Light|Plain|ocean",
         "persisted-theme display settings",
     )
-    send_literal(tmux_exe, persisted_theme_session, "theme light")
-    wait_for(tmux_exe, persisted_theme_session, r"filter\s+theme light", "persisted-theme filtered theme row")
+    send_literal(tmux_exe, persisted_theme_session, "light")
+    wait_for(tmux_exe, persisted_theme_session, r"Search\s{2}light", "persisted-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
     applied_theme = wait_for(
         tmux_exe, persisted_theme_session, r"Stored TUI theme light", "settings theme selection applied"
@@ -78,23 +78,23 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     persisted_theme_modal = open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        "Display",
-        r"ava-light|display\.json|Search display",
+        "Theme",
+        r"Settings › Theme|Dark|Light|Plain|ocean",
         "persisted-theme display settings after restart",
     )
-    if "ava-light" not in persisted_theme_modal or "display.json" not in persisted_theme_modal:
+    if "Light" not in persisted_theme_modal or "current" not in persisted_theme_modal:
         raise RuntimeError(f"settings modal did not report persisted display.json light theme\nscreen:\n{persisted_theme_modal}")
     close_settings(tmux_exe, persisted_theme_session, "persisted-theme settings modal canceled")
     send_keys(tmux_exe, persisted_theme_session, "C-u")
     open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        "Display",
-        r"Search display|Theme ocean|Theme light",
+        "Theme",
+        r"Settings › Theme|Dark|Light|Plain|ocean",
         "custom-theme display settings",
     )
-    send_literal(tmux_exe, persisted_theme_session, "theme ocean")
-    wait_for(tmux_exe, persisted_theme_session, r"filter\s+theme ocean", "custom-theme filtered theme row")
+    send_literal(tmux_exe, persisted_theme_session, "ocean")
+    wait_for(tmux_exe, persisted_theme_session, r"Search\s{2}ocean", "custom-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
     applied_custom_theme = wait_for(
         tmux_exe, persisted_theme_session, r"Stored TUI theme ocean", "settings custom theme selection applied"
@@ -119,11 +119,11 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     reloaded_theme_modal = open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        "Display",
-        r"plain|display\.json|Search display",
+        "Theme",
+        r"Settings › Theme|Dark|Light|Plain|ocean",
         "settings modal after display theme reload",
     )
-    if "plain" not in reloaded_theme_modal or "display.json" not in reloaded_theme_modal:
+    if "Plain" not in reloaded_theme_modal or "current" not in reloaded_theme_modal:
         raise RuntimeError(f"settings modal did not report reloaded display.json plain theme\nscreen:\n{reloaded_theme_modal}")
     close_settings(tmux_exe, persisted_theme_session, "reloaded-theme settings modal canceled")
     display_config.write_text('{\n  "theme": "light"\n}\n', encoding="utf-8")
@@ -139,11 +139,11 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     auto_reloaded_theme_modal = open_settings_section(
         tmux_exe,
         persisted_theme_session,
-        "Display",
-        r"ava-light|display\.json|Search display",
+        "Theme",
+        r"Settings › Theme|Dark|Light|Plain|ocean",
         "settings modal after automatic display theme reload",
     )
-    if "ava-light" not in auto_reloaded_theme_modal or "display.json" not in auto_reloaded_theme_modal:
+    if "Light" not in auto_reloaded_theme_modal or "current" not in auto_reloaded_theme_modal:
         raise RuntimeError(
             f"settings modal did not report auto-reloaded display.json light theme\nscreen:\n{auto_reloaded_theme_modal}"
         )

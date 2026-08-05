@@ -118,7 +118,7 @@ Notes:
 
 - Direct terminal sessions are the intended path for inline previews.
 - iTerm2 protocol support is runtime/protocol support only. macOS packaging docs are deferred; this guide does not add a macOS install path.
-- If `/settings` reports `Image preview: text-only` or `hidden`, AVA will still attach the image; only the terminal-side preview is missing or suppressed.
+- If an imported image renders as text metadata only, AVA will still attach it; only the terminal-side preview is missing or suppressed.
 - If Ctrl+V does not import an image on Linux, install or configure `wl-paste` for Wayland or `xclip` for X11, or use `/attach <path>` directly. `AVA_CLIPBOARD_IMAGE_FILE=/absolute/path.png` is reserved for deterministic smoke tests.
 
 References: [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/), [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), and [iTerm2 inline images](https://iterm2.com/documentation-images.html).
@@ -214,7 +214,7 @@ Notes:
 - `NO_COLOR=1` and `AVA_TUI_THEME=plain` preserve layout/content but strip ANSI styling and suppress graphics overlays.
 - OSC 11 runs once at interactive startup on direct terminals and is skipped under tmux; it is not re-probed on suspend/resume.
 - `COLORFGBG` is only a hint when no explicit theme is set and OSC 11 did not decide. AVA reads the final foreground/background field and chooses a light or dark built-in palette when it can infer luminance.
-- `/settings` reports the active theme source (`NO_COLOR`, `AVA_TUI_THEME`, `display.json`, `OSC 11`, `COLORFGBG`, or built-in). `/theme` persists normal display choices to `display.json`.
+- `/settings` marks the resolved theme as current without exposing source diagnostics. `/theme` persists normal display choices to `display.json`.
 
 ## SSH, Containers, And Remote Terminals
 

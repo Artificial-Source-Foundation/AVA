@@ -771,14 +771,6 @@ int run_tui(ShellState state)
                                        ava::permissions::PermissionAction action) { return remember_permission_rule_for_prompt(unlocked_session, prompt, action); },
       .on_settings_selected = [&unlocked_session, &invocation_paths, &state_snapshot, &refresh_display_watch_state, &application_catalog, &hotkeys,
                                remember_effective_display_settings](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
-        if (value == "settings:keybindings.validate")
-        {
-          auto validated = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings validate"});
-          if (!validated)
-            return std::unexpected(std::move(validated.error()));
-          auto status = validated->output.empty() ? std::string("keybindings validation complete") : validated->output.front();
-          return state_snapshot(std::move(status));
-        }
         constexpr std::string_view trust_prefix = "settings:trust.";
         if (value.starts_with(trust_prefix))
         {

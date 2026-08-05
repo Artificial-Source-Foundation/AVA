@@ -4,7 +4,6 @@
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_views_internal.h"
-#include "ava/tui/terminal_image.h"
 #include "ava/tui/theme.h"
 #include "ava/permissions/permission.h"
 
@@ -60,41 +59,27 @@ std::string value_or_unknown(std::string value)
   return value.empty() ? std::string("unknown") : std::move(value);
 }
 
-void add_settings_row(SelectListView& view, std::string group, std::string label, std::string description, std::string detail = {}, std::string badge = {})
-{
-  view.items.push_back(SelectListItemView{.value = group + ":" + label,
-                                          .label = std::move(label),
-                                          .description = std::move(description),
-                                          .group = std::move(group),
-                                          .detail = std::move(detail),
-                                          .badge = std::move(badge),
-                                          .current = false,
-                                          .enabled = true,
-                                          .disabled_reason = {}});
-}
-
-void add_settings_action_row(SelectListView& view, std::string value, std::string group, std::string label, std::string description, std::string detail = {},
-                             std::string badge = {})
+void add_settings_action_row(SelectListView& view, std::string value, std::string label, std::string description = {}, std::string detail = {})
 {
   view.items.push_back(SelectListItemView{.value = std::move(value),
                                           .label = std::move(label),
                                           .description = std::move(description),
-                                          .group = std::move(group),
+                                          .group = {},
                                           .detail = std::move(detail),
-                                          .badge = std::move(badge),
+                                          .badge = {},
                                           .current = false,
                                           .enabled = true,
                                           .disabled_reason = {}});
 }
 
-void add_theme_settings_action(SelectListView& view, std::string value, std::string label, std::string description, bool current)
+void add_theme_settings_action(SelectListView& view, std::string value, std::string label, bool current)
 {
   view.items.push_back(SelectListItemView{.value = "theme:" + value,
                                           .label = std::move(label),
-                                          .description = std::move(description),
-                                          .group = "Display",
-                                          .detail = current ? std::string("current · Enter confirms") : std::string("highlight previews · Enter confirms"),
-                                          .badge = current ? std::string("current") : std::string("preview"),
+                                          .description = current ? std::string("current") : std::string{},
+                                          .group = {},
+                                          .detail = {},
+                                          .badge = {},
                                           .current = current,
                                           .enabled = true,
                                           .disabled_reason = {}});
@@ -102,42 +87,31 @@ void add_theme_settings_action(SelectListView& view, std::string value, std::str
 
 void add_custom_theme_settings_action(SelectListView& view, ThemeOptionItem const& theme, bool current)
 {
-  view.items.push_back(SelectListItemView{
-      .value = "theme:" + theme.name,
-      .label = "Theme " + theme.name,
-      .description = "custom theme",
-      .group = "Display",
-      .detail = theme.detail.empty() ? (current ? std::string("current · Enter confirms") : std::string("highlight previews · Enter confirms")) : theme.detail,
-      .badge = current ? std::string("current") : std::string("preview"),
-      .current = current,
-      .enabled = true,
-      .disabled_reason = {}});
-}
-
-void add_section_row(SelectListView& view, std::string_view value, std::string label, std::string description, std::string detail = {})
-{
-  view.items.push_back(SelectListItemView{.value = std::string(value),
-                                          .label = std::move(label),
-                                          .description = std::move(description),
-                                          .group = "Settings",
-                                          // Keep detail free of the word "section" so filters like "Sessions"
-                                          // do not weakly match every root row through this shared hint.
-                                          .detail = detail.empty() ? std::string("Enter opens") : std::move(detail),
-                                          .badge = "section",
-                                          .current = false,
+  view.items.push_back(SelectListItemView{.value = "theme:" + theme.name,
+                                          .label = theme.name,
+                                          .description = current ? std::string("current") : std::string{},
+                                          .group = {},
+                                          .detail = {},
+                                          .badge = {},
+                                          .current = current,
                                           .enabled = true,
                                           .disabled_reason = {}});
+}
+
+void add_section_row(SelectListView& view, std::string_view value, std::string label)
+{
+  add_settings_action_row(view, std::string(value), std::move(label));
 }
 
 void add_image_width_action(SelectListView& view, std::size_t width, std::size_t current_width)
 {
   bool const current = width == current_width;
   view.items.push_back(SelectListItemView{.value = std::string(kSettingsImageWidthPrefix) + std::to_string(width),
-                                          .label = "Image width " + std::to_string(width),
-                                          .description = std::to_string(width) + " cells",
-                                          .group = "Display",
-                                          .detail = current ? std::string("current · Enter confirms") : std::string("highlight previews · Enter confirms"),
-                                          .badge = current ? std::string("current") : std::string("preview"),
+                                          .label = "Width " + std::to_string(width),
+                                          .description = current ? std::string("current") : std::string{},
+                                          .group = {},
+                                          .detail = {},
+                                          .badge = {},
                                           .current = current,
                                           .enabled = true,
                                           .disabled_reason = {}});
@@ -171,58 +145,38 @@ TuiThemeInfo built_in_theme_info(std::string_view name)
                       .revision = "built-in-dark"};
 }
 
-SelectListView make_settings_shell(std::string title, std::string subtitle, std::string placeholder, std::string empty_text, std::string footer_hint)
+SelectListView make_settings_shell(std::string title, std::string empty_text, std::string footer_hint)
 {
   return SelectListView{.title = std::move(title),
-                        .subtitle = std::move(subtitle),
+                        .subtitle = {},
                         .items = {},
                         .selected_item_index = 0,
                         .query = {},
-                        .placeholder = std::move(placeholder),
+                        .placeholder = {},
                         .empty_text = std::move(empty_text),
-                        .footer_hint = std::move(footer_hint)};
+                        .footer_hint = std::move(footer_hint),
+                        .compact_settings_chrome = true};
+}
+
+void populate_theme_section(SelectListView& view, ComposerSnapshot const& snapshot)
+{
+  auto const theme = active_tui_theme();
+  add_theme_settings_action(view, "dark", "Dark", theme.kind == TuiThemeKind::Dark && theme.name == "ava-dark");
+  add_theme_settings_action(view, "light", "Light", theme.kind == TuiThemeKind::Light);
+  add_theme_settings_action(view, "plain", "Plain", theme.kind == TuiThemeKind::Plain);
+  for (auto const& custom_theme : snapshot.custom_themes)
+  {
+    if (custom_theme.palette)
+      add_custom_theme_settings_action(view, custom_theme, theme.kind == TuiThemeKind::Custom && custom_theme.name == theme.name);
+  }
+  add_settings_action_row(view, "theme:reset", "Default");
 }
 
 void populate_display_section(SelectListView& view, ComposerSnapshot const& snapshot)
 {
-  auto const theme = active_tui_theme();
-  add_settings_row(view, "Display", "Theme", theme.name, theme.detail, theme.badge);
-  add_theme_settings_action(view, "dark", "Theme dark", "built-in dark ncurses token palette", theme.kind == TuiThemeKind::Dark && theme.name == "ava-dark");
-  add_theme_settings_action(view, "light", "Theme light", "built-in light ncurses token palette", theme.kind == TuiThemeKind::Light);
-  add_theme_settings_action(view, "plain", "Theme plain", "disable ANSI styling in rendered frames", theme.kind == TuiThemeKind::Plain);
-  // Theme reset is confirm-only: accurately previewing env/OSC/COLORFGBG without authority mutation needs terminal queries.
-  view.items.push_back(SelectListItemView{.value = "theme:reset",
-                                          .label = "Theme reset",
-                                          .description = "clear display.json theme and use built-in default",
-                                          .group = "Display",
-                                          .detail = "Enter confirms · no live preview",
-                                          .badge = "confirm",
-                                          .current = false,
-                                          .enabled = true,
-                                          .disabled_reason = {}});
-  for (auto const& custom_theme : snapshot.custom_themes)
-  {
-    // Only validated candidates with parsed palettes are listed by the application.
-    if (!custom_theme.palette)
-      continue;
-    add_custom_theme_settings_action(view, custom_theme, theme.kind == TuiThemeKind::Custom && custom_theme.name == theme.name);
-  }
-
-  auto const image_capabilities = active_terminal_image_capabilities();
-  auto const image_visibility = snapshot.show_images ? std::string("on") : std::string("off");
-  auto const image_preview_description = snapshot.show_images ? terminal_image_settings_description(image_capabilities) : std::string("hidden");
-  auto const image_preview_detail =
-      snapshot.show_images ? terminal_image_settings_detail(image_capabilities) : std::string("inline image previews are disabled in display.json");
-  add_settings_row(view, "Display", "Image preview", image_preview_description, image_preview_detail,
-                   snapshot.show_images ? image_capabilities.badge : std::string("hidden"));
-  add_settings_row(view, "Display", "Image visibility", image_visibility, "highlight previews · Enter persists with /images", image_visibility);
-  add_settings_action_row(view, std::string(kSettingsImagesOn), "Display", "Images on", "show_images=true", "highlight previews · Enter runs /images on", "on");
-  add_settings_action_row(view, std::string(kSettingsImagesOff), "Display", "Images off", "show_images=false", "highlight previews · Enter runs /images off",
-                          "off");
-  add_settings_action_row(view, std::string(kSettingsImagesReset), "Display", "Images reset", "clear show_images and use default on",
-                          "highlight previews · Enter runs /images reset", "reset");
-  add_settings_row(view, "Display", "Image width", std::to_string(snapshot.image_width_cells) + " cells",
-                   "highlight previews · Enter persists with /image-width; clamped to the viewport", std::to_string(snapshot.image_width_cells));
+  add_settings_action_row(view, std::string(kSettingsImagesOn), "Images on", snapshot.show_images ? "current" : std::string{});
+  add_settings_action_row(view, std::string(kSettingsImagesOff), "Images off", snapshot.show_images ? std::string{} : "current");
+  add_settings_action_row(view, std::string(kSettingsImagesReset), "Images default");
   constexpr std::size_t kWidthChoices[] = {40, 60, 80, 120};
   bool current_listed = false;
   for (auto const width : kWidthChoices)
@@ -233,99 +187,45 @@ void populate_display_section(SelectListView& view, ComposerSnapshot const& snap
   }
   if (!current_listed && snapshot.image_width_cells >= 8 && snapshot.image_width_cells <= 160)
     add_image_width_action(view, snapshot.image_width_cells, snapshot.image_width_cells);
-  add_settings_action_row(view, std::string(kSettingsImageWidthReset), "Display", "Image width reset", "clear image_width_cells and use default 60",
-                          "highlight previews · Enter runs /image-width reset", "reset");
-  add_settings_row(view, "Display", "Tool details", std::string(to_string(snapshot.tool_presentation)),
-                   "Ctrl+O or /details toggles rich/expanded; /details compact opts in");
-  add_settings_row(view, "Display", "Thinking blocks", snapshot.thinking_visible ? "visible" : "hidden", "toggle with /thinking");
+  add_settings_action_row(view, std::string(kSettingsImageWidthReset), "Width default");
+  add_settings_action_row(view, std::string(kSettingsDraftThinking), "Thinking blocks", snapshot.thinking_visible ? "visible" : "hidden");
 }
 
 void populate_models_section(SelectListView& view, ComposerSnapshot const& snapshot)
 {
-  add_settings_row(view, "Models", "Mode", value_or_unknown(snapshot.mode), "use /mode or Tab between turns");
-  add_settings_row(view, "Models", "Model", value_or_unknown(snapshot.provider) + "/" + value_or_unknown(snapshot.model),
-                   snapshot.reasoning_status.value_or("reasoning default"));
-  add_settings_action_row(view, std::string(kSettingsOpenModels), "Models", "Model selector",
-                          value_or_unknown(snapshot.provider) + "/" + value_or_unknown(snapshot.model), "Enter opens /models selector", "open");
-  add_settings_action_row(view, std::string(kSettingsOpenScopedModels), "Models", "Model cycle scope", "Ctrl+P scoped cycle",
-                          "Enter opens /scoped-models; Ctrl+S saves models.json", "open");
-  add_settings_action_row(view, std::string(kSettingsOpenReasoning), "Models", "Reasoning selector", snapshot.reasoning_status.value_or("reasoning default"),
-                          "Enter opens thinking-mode selector", "open");
-  add_settings_action_row(view, std::string(kSettingsDraftThinking), "Models", "Thinking visibility", "/thinking", "Enter drafts /thinking", "draft");
+  add_settings_action_row(view, std::string(kSettingsOpenModels), "Model", value_or_unknown(snapshot.provider) + "/" + value_or_unknown(snapshot.model));
+  add_settings_action_row(view, std::string(kSettingsOpenReasoning), "Reasoning", snapshot.reasoning_status.value_or("default"));
+  add_settings_action_row(view, std::string(kSettingsOpenScopedModels), "Cycle scope", "Ctrl+P");
 }
 
 void populate_input_section(SelectListView& view, TuiKeyBindings const& bindings)
 {
   auto const binding_count = key_binding_help_items(bindings).size();
-  add_settings_action_row(view, std::string(kSettingsOpenKeybindings), "Input", "Keybindings",
-                          std::to_string(binding_count) + (binding_count == 1 ? " active action" : " active actions"), "Enter opens active bindings", "open");
-  add_settings_action_row(view, std::string(kSettingsValidateKeybindings), "Input", "Keybindings file", "$XDG_CONFIG_HOME/ava/keybinds.json",
-                          "Enter validates with /keybindings validate", "validate");
-  add_settings_action_row(view, std::string(kSettingsEditKeybindings), "Input", "Keybindings edit", "/keybindings set <action> <key>",
-                          "Enter drafts the edit command; reset removes one override", "draft");
-  add_settings_action_row(view, std::string(kSettingsReloadKeybindings), "Input", "Keybindings reload", "/reload keybindings",
-                          "Enter applies valid keybinds.json edits", "live");
+  add_settings_action_row(view, std::string(kSettingsOpenKeybindings), "Keybindings", std::to_string(binding_count));
+  add_settings_action_row(view, std::string(kSettingsEditKeybindings), "Edit config");
+  add_settings_action_row(view, std::string(kSettingsReloadKeybindings), "Reload");
 }
 
 void populate_sessions_section(SelectListView& view, ComposerSnapshot const& snapshot)
 {
-  auto const sidebar = snapshot.sidebar;
-  add_settings_row(view, "Sessions", "Session", value_or_unknown(snapshot.session_id),
-                   sidebar && !sidebar->session_path.empty() ? sidebar->session_path : std::string("path unavailable"));
-  if (sidebar && sidebar->session_entry_count)
-    add_settings_row(view, "Sessions", "Session entries", std::to_string(*sidebar->session_entry_count));
-  add_settings_row(view, "Sessions", "Token status", snapshot.token_status.value_or("tokens unknown"));
-  add_settings_row(view, "Sessions", "Context sources",
-                   sidebar && sidebar->context_source_count ? std::to_string(*sidebar->context_source_count) : std::string("unknown"));
-  add_settings_action_row(view, std::string(kSettingsDraftSessions), "Sessions", "Session selector", "/sessions", "Enter drafts /sessions", "draft");
-  add_settings_row(view, "Workspace", "Current directory", sidebar && !sidebar->workspace.empty() ? sidebar->workspace : std::string("unknown"),
-                   sidebar && !sidebar->workspace.empty() ? compact_path_leaf(sidebar->workspace) : std::string{});
-  add_settings_row(view, "Workspace", "Git branch", sidebar && !sidebar->git_branch.empty() ? sidebar->git_branch : std::string("not detected"));
+  add_settings_action_row(view, std::string(kSettingsDraftSessions), "Sessions");
   if (snapshot.project_trust)
   {
     auto const& trust = *snapshot.project_trust;
-    auto const resources = trust.protected_resource_count == 1 ? std::string("1 protected project resource")
-                                                               : std::to_string(trust.protected_resource_count) + " protected project resources";
-    add_settings_row(view, "Workspace", "Project trust", value_or_unknown(trust.decision), "project resources " + value_or_unknown(trust.project_resources),
-                     value_or_unknown(trust.decision));
-    add_settings_row(view, "Workspace", "Protected resources", resources,
-                     trust.matched_path.empty() ? std::string("no saved decision matched this workspace") : "matched " + trust.matched_path);
-    if (!trust.diagnostic.empty())
-      add_settings_row(view, "Workspace", "Trust diagnostic", trust.diagnostic);
-    add_settings_action_row(view, std::string(kSettingsTrustStatus), "Workspace", "Trust status", "/trust status", "Enter prints project trust diagnostics",
-                            "status");
-    add_settings_action_row(view, std::string(kSettingsTrustProject), "Workspace", "Trust project", "allow this workspace's project resources",
-                            "Enter runs /trust project", "trust");
-    add_settings_action_row(view, std::string(kSettingsTrustDeny), "Workspace", "Deny project", "keep this workspace's project resources skipped",
-                            "Enter runs /trust deny", "deny");
-    add_settings_action_row(view, std::string(kSettingsTrustClear), "Workspace", "Clear trust decision", "remove the saved decision for this workspace",
-                            "Enter runs /trust clear", "clear");
+    add_settings_action_row(view, std::string(kSettingsTrustStatus), "Project trust", value_or_unknown(trust.decision));
+    add_settings_action_row(view, std::string(kSettingsTrustProject), "Trust project", {}, "Enables this project's resources");
+    add_settings_action_row(view, std::string(kSettingsTrustDeny), "Deny project", {}, "Keeps this project's resources disabled");
+    add_settings_action_row(view, std::string(kSettingsTrustClear), "Clear trust decision");
   }
 }
 
-void populate_tools_section(SelectListView& view)
+void populate_tools_section(SelectListView& view, ComposerSnapshot const& snapshot)
 {
-  add_settings_action_row(view, std::string(kSettingsDraftPermissions), "Tools", "Permissions", "/permissions", "Enter drafts /permissions", "draft");
-  add_settings_action_row(view, std::string(kSettingsDraftTools), "Tools", "Tool details", "/details", "Enter drafts /details", "draft");
-  add_settings_action_row(view, std::string(kSettingsDraftPlugins), "Tools", "Plugins", "/plugins", "Enter drafts /plugins", "draft");
-  add_settings_action_row(view, std::string(kSettingsDraftMcp), "Tools", "MCP", "/mcp", "Enter drafts /mcp", "draft");
-  add_settings_action_row(view, std::string(kSettingsDraftJobs), "Tools", "Background jobs", "/jobs", "Enter drafts /jobs", "draft");
-}
-
-void populate_privacy_section(SelectListView& view)
-{
-  add_settings_row(view, "Privacy", "Telemetry", "none", "AVA collects no telemetry; provider prompts go only to the selected provider when submitted");
-  add_settings_row(view, "Privacy", "Credentials", "local only", "auth and secrets stay in XDG config; settings never display credential values");
-}
-
-void populate_about_section(SelectListView& view, ComposerSnapshot const& snapshot)
-{
-  auto const sidebar = snapshot.sidebar;
-  if (sidebar && !sidebar->version.empty())
-    add_settings_row(view, "About", "AVA version", sidebar->version);
-  else
-    add_settings_row(view, "About", "AVA version", "unknown");
-  add_settings_row(view, "About", "Interface", "native C++ TUI", "settings navigation is host-owned; backend commands own config writes");
+  add_settings_action_row(view, std::string(kSettingsDraftTools), "Tool details", std::string(to_string(snapshot.tool_presentation)));
+  add_settings_action_row(view, std::string(kSettingsDraftPermissions), "Permissions");
+  add_settings_action_row(view, std::string(kSettingsDraftPlugins), "Plugins");
+  add_settings_action_row(view, std::string(kSettingsDraftMcp), "MCP");
+  add_settings_action_row(view, std::string(kSettingsDraftJobs), "Jobs");
 }
 
 }  // namespace
@@ -683,71 +583,56 @@ SelectListView build_settings_select_list_view_for_section(SettingsSection secti
   switch (section)
   {
     case SettingsSection::Root: {
-      auto view =
-          make_settings_shell("Settings", "Choose a section · Enter opens · Esc closes · search filters this list only", "Search settings", "No settings match",
-                              footer_hint.empty() ? std::string("Type to filter · PgUp/PgDn page · Enter open section · Esc close") : std::move(footer_hint));
-      view.items.reserve(8);
-      add_section_row(view, kSettingsSectionDisplay, "Display", "Theme, images, tool details, thinking");
-      add_section_row(view, kSettingsSectionModels, "Models And Reasoning", "Model, scoped cycle, reasoning");
-      add_section_row(view, kSettingsSectionInput, "Input And Keybindings", "Active bindings and keybinds.json");
-      add_section_row(view, kSettingsSectionSessions, "Sessions And Workspace", "Session, trust, workspace");
-      add_section_row(view, kSettingsSectionTools, "Tools And Extensions", "Permissions, plugins, MCP, jobs");
-      add_section_row(view, kSettingsSectionPrivacy, "Privacy", "Telemetry and credential handling");
-      add_section_row(view, kSettingsSectionAbout, "About", "Version and interface");
+      auto view = make_settings_shell("Settings", "No settings match", footer_hint.empty() ? std::string("Enter open · Esc close") : std::move(footer_hint));
+      view.items.reserve(6);
+      add_section_row(view, kSettingsSectionTheme, "Theme");
+      add_section_row(view, kSettingsSectionDisplay, "Display");
+      add_section_row(view, kSettingsSectionModels, "Model");
+      add_section_row(view, kSettingsSectionInput, "Input");
+      add_section_row(view, kSettingsSectionSessions, "Workspace");
+      add_section_row(view, kSettingsSectionTools, "Tools");
+      return view;
+    }
+    case SettingsSection::Theme: {
+      auto view = make_settings_shell("Settings › Theme", "No theme settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(8 + snapshot.custom_themes.size());
+      populate_theme_section(view, snapshot);
       return view;
     }
     case SettingsSection::Display: {
-      auto view = make_settings_shell(
-          "Settings · Display", "Highlight previews theme/images · Enter confirms once · Esc returns", "Search display", "No display settings match",
-          footer_hint.empty() ? std::string("Type to filter · highlight previews · Enter confirm · Esc back") : std::move(footer_hint));
-      view.items.reserve(28);
+      auto view = make_settings_shell("Settings › Display", "No display settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(12);
       populate_display_section(view, snapshot);
       return view;
     }
     case SettingsSection::ModelsAndReasoning: {
-      auto view = make_settings_shell("Settings · Models And Reasoning", "Opens existing selectors · backend owns model/reasoning changes", "Search models",
-                                      "No model settings match",
-                                      footer_hint.empty() ? std::string("Type to filter · Enter open/draft · Esc back") : std::move(footer_hint));
-      view.items.reserve(8);
+      auto view = make_settings_shell("Settings › Model", "No model settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(3);
       populate_models_section(view, snapshot);
       return view;
     }
     case SettingsSection::InputAndKeybindings: {
-      auto view = make_settings_shell(
-          "Settings · Input And Keybindings", "Existing keybinding actions · backend owns keybinds.json", "Search input", "No input settings match",
-          footer_hint.empty() ? std::string("Type to filter · Enter open/validate/draft/reload · Esc back") : std::move(footer_hint));
-      view.items.reserve(8);
+      auto view = make_settings_shell("Settings › Input", "No input settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(3);
       populate_input_section(view, bindings);
       return view;
     }
     case SettingsSection::SessionsAndWorkspace: {
-      auto view = make_settings_shell("Settings · Sessions And Workspace", "Session metadata and project trust · backend owns /trust", "Search sessions",
-                                      "No session settings match",
-                                      footer_hint.empty() ? std::string("Type to filter · Enter apply/draft · Esc back") : std::move(footer_hint));
-      view.items.reserve(16);
+      auto view = make_settings_shell("Settings › Workspace", "No workspace settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(5);
       populate_sessions_section(view, snapshot);
       return view;
     }
     case SettingsSection::ToolsAndExtensions: {
-      auto view =
-          make_settings_shell("Settings · Tools And Extensions", "Draft existing commands · no invented extension semantics", "Search tools",
-                              "No tool settings match", footer_hint.empty() ? std::string("Type to filter · Enter draft · Esc back") : std::move(footer_hint));
-      view.items.reserve(8);
-      populate_tools_section(view);
-      return view;
-    }
-    case SettingsSection::Privacy: {
-      auto view = make_settings_shell("Settings · Privacy", "Local-only privacy and credential handling", "Search privacy", "No privacy settings match",
-                                      footer_hint.empty() ? std::string("Type to filter · Enter open · Esc back") : std::move(footer_hint));
-      view.items.reserve(4);
-      populate_privacy_section(view);
-      return view;
-    }
-    case SettingsSection::About: {
-      auto view = make_settings_shell("Settings · About", "Host-owned interface metadata", "Search about", "No about rows match",
-                                      footer_hint.empty() ? std::string("Type to filter · Esc back") : std::move(footer_hint));
-      view.items.reserve(4);
-      populate_about_section(view, snapshot);
+      auto view = make_settings_shell("Settings › Tools", "No tool settings match",
+                                      footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
+      view.items.reserve(5);
+      populate_tools_section(view, snapshot);
       return view;
     }
   }
@@ -926,7 +811,7 @@ bool SettingsNavigationState::is_root() const
 
 bool SettingsNavigationState::in_display() const
 {
-  return section == SettingsSection::Display;
+  return section == SettingsSection::Theme || section == SettingsSection::Display;
 }
 
 bool settings_action_is_section(std::string_view value)
@@ -954,6 +839,8 @@ bool settings_action_is_previewable(std::string_view value)
 
 std::optional<SettingsSection> settings_section_for_action(std::string_view value)
 {
+  if (value == kSettingsSectionTheme)
+    return SettingsSection::Theme;
   if (value == kSettingsSectionDisplay)
     return SettingsSection::Display;
   if (value == kSettingsSectionModels)
@@ -964,10 +851,6 @@ std::optional<SettingsSection> settings_section_for_action(std::string_view valu
     return SettingsSection::SessionsAndWorkspace;
   if (value == kSettingsSectionTools)
     return SettingsSection::ToolsAndExtensions;
-  if (value == kSettingsSectionPrivacy)
-    return SettingsSection::Privacy;
-  if (value == kSettingsSectionAbout)
-    return SettingsSection::About;
   return std::nullopt;
 }
 
@@ -1064,7 +947,6 @@ using runtime_views::kSettingsTrustClear;
 using runtime_views::kSettingsTrustDeny;
 using runtime_views::kSettingsTrustProject;
 using runtime_views::kSettingsTrustStatus;
-using runtime_views::kSettingsValidateKeybindings;
 using runtime_views::question_answer_from_view;
 
 ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt)

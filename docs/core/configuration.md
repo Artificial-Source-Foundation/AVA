@@ -126,7 +126,7 @@ AVA_TUI_THEME=plain ava
 NO_COLOR=1 ava
 ```
 
-`dark` is the default fallback ncurses palette. `light` selects a light built-in palette. `plain` disables ANSI styling. Precedence is `NO_COLOR`, then an active `/settings` Display highlight preview (presentation-only), then `AVA_TUI_THEME`, then `display.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback. The `/settings` TUI opens a shallow nested root; the Display section reports the active display mode and source and exposes selectable theme/image rows. Highlighting previews without writing config; Enter confirms once through the same authoritative writers as `/theme`, `/images`, and `/image-width`. During an interactive TUI run, AVA polls `display.json` and the selected custom theme file and applies valid changes automatically.
+`dark` is the default fallback ncurses palette. `light` selects a light built-in palette. `plain` disables ANSI styling. Precedence is `NO_COLOR`, then an active `/settings` highlight preview (presentation-only), then `AVA_TUI_THEME`, then `display.json`, then terminal background inference from `COLORFGBG`, then the built-in dark fallback. The compact `/settings` TUI separates Theme choices from Display image/width controls. Highlighting a previewable row never writes config; Enter confirms once through the same authoritative writers as `/theme`, `/images`, and `/image-width`. During an interactive TUI run, AVA polls `display.json` and the selected custom theme file and applies valid changes automatically.
 
 ## Terminal Hyperlinks Under tmux
 

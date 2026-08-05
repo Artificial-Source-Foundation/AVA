@@ -515,7 +515,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       reapply_settings_preview_after_display_reload(settings_nav.preview, snapshot);
       if (settings_nav.in_display() && snapshot.select_list)
       {
-        rebuild_settings_view(SettingsSection::Display, query, std::nullopt);
+        rebuild_settings_view(settings_nav.section, query, std::nullopt);
         if (snapshot.select_list)
         {
           snapshot.select_list->selected_item_index =
@@ -1008,10 +1008,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
             begin_settings_preview_baseline();
             if (settings_nav.in_display())
             {
-              // Remain in Display with refreshed authoritative rows after a successful confirm.
+              // Remain in the presentation section with refreshed authoritative rows after a successful confirm.
               // Push a transcript receipt too: the centered modal can cover the status alert dock.
               auto const receipt = status.empty() ? std::string("display setting saved") : status;
-              rebuild_settings_view(SettingsSection::Display, current_query, current_selected);
+              rebuild_settings_view(settings_nav.section, current_query, current_selected);
               snapshot.status = receipt;
               push_transcript(snapshot, TranscriptItem{.label = "ava", .text = receipt, .meta = assistant_meta_for_snapshot(snapshot)});
               transcript_scroll_offset = 0;

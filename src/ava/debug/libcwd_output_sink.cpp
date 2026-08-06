@@ -46,16 +46,6 @@ class UniqueFd final
   int fd_;
 };
 
-class NullStreambuf final : public std::streambuf
-{
- public:
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-
- protected:
-  int_type overflow(int_type character) override { return traits_type::not_eof(character); }
-  std::streamsize xsputn(char const*, std::streamsize count) override { return count; }
-};
-
 std::string errno_message(std::string_view operation, std::filesystem::path const& path, int error_number)
 {
   return std::string(operation) + " '" + path.string() + "': " + std::error_code(error_number, std::generic_category()).message();
@@ -83,8 +73,6 @@ bool valid_log_stem(std::string_view log_stem)
 
 struct LibcwdOutputSink::Impl
 {
-  NullStreambuf null_buffer;
-  std::ostream null_stream{&null_buffer};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> file_buffer;
   std::unique_ptr<std::ostream> file_stream;
   bool enabled = false;
@@ -98,9 +86,6 @@ struct LibcwdOutputSink::Impl
 // safely create the configured private destination when one was requested.
 LibcwdOutputSink::LibcwdOutputSink(std::string_view log_stem) : impl_(std::make_unique<Impl>())
 {
-  impl_->null_stream << std::unitbuf;
-  Debug(libcw_do.set_ostream(&impl_->null_stream));
-
   char const* configured_directory = std::getenv("AVA_DEBUG_OUTPUT_DIR");
   if (configured_directory == nullptr || configured_directory[0] == '\0')
     return;

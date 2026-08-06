@@ -427,8 +427,8 @@ void test_image_attachment_import()
     return;
 
   auto const image_path = root / "input.png";
-  auto const bytes = ava::test::session_test_tiny_png_bytes();
-  ava::test::write_session_test_binary_file(image_path, bytes);
+  auto const bytes = ava::tests::session_test_tiny_png_bytes();
+  ava::tests::write_session_test_binary_file(image_path, bytes);
 
   auto imported = ava::session::import_image_attachment(*store, image_path);
   expect(imported && imported->id.starts_with("img_") && imported->mime_type == "image/png" && imported->storage_path.starts_with("attachments/") &&
@@ -440,13 +440,13 @@ void test_image_attachment_import()
   expect(loaded && loaded->bytes == bytes, "imported image attachment reloads only after size and sha verification");
 
   auto const unsupported_path = root / "not-image.txt";
-  ava::test::write_session_test_binary_file(unsupported_path, "hello");
+  ava::tests::write_session_test_binary_file(unsupported_path, "hello");
   auto unsupported = ava::session::import_image_attachment(*store, unsupported_path);
   expect(!unsupported && unsupported.error().message().find("unsupported image format") != std::string::npos,
          "image attachment import rejects unsupported byte signatures");
 
   auto const outside = root / "outside.png";
-  ava::test::write_session_test_binary_file(outside, bytes);
+  ava::tests::write_session_test_binary_file(outside, bytes);
   auto const link = root / "linked.png";
   std::error_code symlink_error;
   std::filesystem::create_symlink(outside, link, symlink_error);
@@ -496,10 +496,10 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
       auto const parked_original = root / "parked-original.jsonl";
       store.set_before_created_file_rollback_detach_for_test([&] {
         std::filesystem::rename(path, parked_original);
-        ava::test::write_session_test_binary_file(path, "replacement-session");
+        ava::tests::write_session_test_binary_file(path, "replacement-session");
       });
       auto removed = store.remove_created_file(lease);
-      expect(!removed && ava::test::read_session_test_binary_file(path) == "replacement-session" && std::filesystem::exists(parked_original),
+      expect(!removed && ava::tests::read_session_test_binary_file(path) == "replacement-session" && std::filesystem::exists(parked_original),
              "created-session rollback fails closed and preserves a replaced session basename");
     }
   }
@@ -533,10 +533,10 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
       store.set_after_created_file_rollback_detach_for_test([&] {
         std::filesystem::rename(original_parent, moved_parent);
         std::filesystem::create_directories(original_parent);
-        ava::test::write_session_test_binary_file(path, "parent-replacement-session");
+        ava::tests::write_session_test_binary_file(path, "parent-replacement-session");
       });
       auto removed = store.remove_created_file(lease);
-      expect(removed && ava::test::read_session_test_binary_file(path) == "parent-replacement-session" &&
+      expect(removed && ava::tests::read_session_test_binary_file(path) == "parent-replacement-session" &&
                  !created_session_rollback_quarantine(moved_parent / path.filename()),
              "descriptor-anchored rollback cannot redirect deletion into a replacement parent directory");
     }
@@ -547,9 +547,9 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
     if (!lease.canonical_path().empty())
     {
       auto const path = store.session_path();
-      store.set_after_created_file_rollback_detach_for_test([&] { ava::test::write_session_test_binary_file(path, "republished-session"); });
+      store.set_after_created_file_rollback_detach_for_test([&] { ava::tests::write_session_test_binary_file(path, "republished-session"); });
       auto removed = store.remove_created_file(lease);
-      expect(!removed && ava::test::read_session_test_binary_file(path) == "republished-session" && created_session_rollback_quarantine(path) &&
+      expect(!removed && ava::tests::read_session_test_binary_file(path) == "republished-session" && created_session_rollback_quarantine(path) &&
                  removed.error().format().find("created session name was republished") != std::string::npos &&
                  removed.error().format().find("quarantine_path:") != std::string::npos,
              "rollback preserves and reports its exact quarantine when the original name is republished after detach");
@@ -567,10 +567,10 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
         if (!quarantine)
           return;
         std::filesystem::rename(*quarantine, parked_original);
-        ava::test::write_session_test_binary_file(*quarantine, "quarantine-replacement");
+        ava::tests::write_session_test_binary_file(*quarantine, "quarantine-replacement");
       });
       auto removed = store.remove_created_file(lease);
-      expect(!removed && std::filesystem::exists(parked_original) && ava::test::read_session_test_binary_file(path) == "quarantine-replacement" &&
+      expect(!removed && std::filesystem::exists(parked_original) && ava::tests::read_session_test_binary_file(path) == "quarantine-replacement" &&
                  !created_session_rollback_quarantine(path),
              "rollback restores a detached quarantine mismatch to the original name without deleting either inode");
     }
@@ -596,11 +596,11 @@ void test_created_session_rollback_is_identity_safe_and_preserves_attachments()
     if (!lease.canonical_path().empty())
     {
       auto const attachment_file = ava::session::attachment_storage_root(store) / "nested" / "attachment.bin";
-      ava::test::write_session_test_binary_file(attachment_file, "retained attachment bytes");
+      ava::tests::write_session_test_binary_file(attachment_file, "retained attachment bytes");
       ava::core::Error primary(ava::core::ErrorCategory::Unknown, "runtime construction failed");
       ava::session::rollback_created_session_with_context(store, lease, primary);
       auto const formatted = primary.format();
-      expect(!std::filesystem::exists(store.session_path()) && ava::test::read_session_test_binary_file(attachment_file) == "retained attachment bytes" &&
+      expect(!std::filesystem::exists(store.session_path()) && ava::tests::read_session_test_binary_file(attachment_file) == "retained attachment bytes" &&
                  primary.message() == "runtime construction failed" && formatted.find("created_session_id: " + store.session_id()) != std::string::npos &&
                  formatted.find("rollback_attachment_path: " + ava::session::attachment_storage_root(store).string()) != std::string::npos &&
                  formatted.find("rollback_attachment_disposition: preserved") != std::string::npos,

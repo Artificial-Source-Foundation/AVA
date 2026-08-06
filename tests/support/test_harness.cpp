@@ -21,7 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace ava::test {
+namespace ava::tests {
 namespace {
 int failures_value = 0;
 bool skip_requested_value = false;
@@ -59,7 +59,7 @@ std::string skip_message()
 {
   return skip_message_value;
 }
-}  // namespace ava::test
+}  // namespace ava::tests
 
 namespace {
 
@@ -110,7 +110,7 @@ void expect(bool condition, std::string const& message)
   if (!condition)
   {
     std::cerr << "FAIL: " << message << '\n';
-    ++ava::test::failure_count();
+    ++ava::tests::failure_count();
   }
 }
 

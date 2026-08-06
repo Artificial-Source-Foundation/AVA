@@ -341,7 +341,7 @@ void test_home_as_workspace_rejected()
 #endif
   if (trusted_home.empty())
   {
-    ava::test::request_skip("no writable trusted-home stand-in with a safe ancestor chain available");
+    ava::tests::request_skip("no writable trusted-home stand-in with a safe ancestor chain available");
     return;
   }
   // create_directories applies the process umask to 0777. The trusted-home
@@ -350,7 +350,7 @@ void test_home_as_workspace_rejected()
   if (::chmod(trusted_home.c_str(), S_IRWXU) != 0)
   {
     std::filesystem::remove_all(trusted_home, ec);
-    ava::test::request_skip("cannot secure the trusted-home stand-in to mode 0700");
+    ava::tests::request_skip("cannot secure the trusted-home stand-in to mode 0700");
     return;
   }
 
@@ -462,7 +462,7 @@ void test_feature_probe()
   }
   else
   {
-    ava::test::request_skip("kernel lacks required Landlock ABI or seccomp support");
+    ava::tests::request_skip("kernel lacks required Landlock ABI or seccomp support");
   }
 }
 
@@ -470,7 +470,7 @@ void test_replaced_external_path_rule_fails_child_application()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
 
@@ -606,7 +606,7 @@ void test_contained_command_writes_workspace()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("writes-workspace");
@@ -622,7 +622,7 @@ void test_contained_command_writes_private_primary_group_workspace()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   auto const private_group = private_primary_group_for_test();
@@ -651,7 +651,7 @@ void test_contained_command_writes_0755_workspace()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   // A writable workspace may be current-user-owned 0755 (group read/execute)
@@ -673,7 +673,7 @@ void test_contained_command_reads_system_libs()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("reads-system");
@@ -689,7 +689,7 @@ void test_contained_command_cannot_read_secret()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("cannot-read-secret");
@@ -705,7 +705,7 @@ void test_contained_command_cannot_write_ava_authority()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("cannot-write-authority");
@@ -722,7 +722,7 @@ void test_contained_command_cannot_open_outbound_network()
 {
   if (!landlock_available() || !python3_available())
   {
-    ava::test::request_skip("Landlock ABI or python3 insufficient");
+    ava::tests::request_skip("Landlock ABI or python3 insufficient");
     return;
   }
   ContainmentFixture fix("network-denied");
@@ -742,7 +742,7 @@ void test_contained_command_cannot_open_unix_socket()
 {
   if (!landlock_available() || !python3_available())
   {
-    ava::test::request_skip("Landlock ABI or python3 insufficient");
+    ava::tests::request_skip("Landlock ABI or python3 insufficient");
     return;
   }
   // Network-denied profile must block ALL socket creation, including
@@ -764,7 +764,7 @@ void test_contained_command_cannot_connect_abstract()
 {
   if (!landlock_available() || !python3_available())
   {
-    ava::test::request_skip("Landlock ABI or python3 insufficient");
+    ava::tests::request_skip("Landlock ABI or python3 insufficient");
     return;
   }
   // The seccomp filter blocks connect() so even an abstract socket connect
@@ -786,7 +786,7 @@ void test_contained_command_cannot_escape_via_symlink()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("symlink-escape");
@@ -806,7 +806,7 @@ void test_standard_contained_no_resolver_executes()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("no-resolver");
@@ -828,7 +828,7 @@ void test_contained_command_cancel()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   ContainmentFixture fix("cancel");
@@ -856,7 +856,7 @@ void test_contained_direct_file_recipe()
 {
   if (!landlock_available())
   {
-    ava::test::request_skip("Landlock ABI insufficient");
+    ava::tests::request_skip("Landlock ABI insufficient");
     return;
   }
   // Regular-file Landlock rules must use only file-valid rights (READ_FILE
@@ -896,15 +896,15 @@ void run_containment_tests()
   test_sensitive_network_enabled_remains_ask();
   test_critical_raw_remains_ask_no_containment();
   test_home_as_workspace_rejected();
-  if (ava::test::skip_requested())
+  if (ava::tests::skip_requested())
     return;
   test_authority_overlap_rejected();
-  if (ava::test::skip_requested())
+  if (ava::tests::skip_requested())
     return;
 
   // Feature probe: skip remaining Landlock-dependent tests if unavailable.
   test_feature_probe();
-  if (ava::test::skip_requested())
+  if (ava::tests::skip_requested())
     return;
 
   test_replaced_external_path_rule_fails_child_application();

@@ -141,13 +141,13 @@ std::string_view libcwd_suite_token(int argc, char** argv)
 
 void run_suite(TestSuite const& suite)
 {
-  ava::test::clear_skip();
+  ava::tests::clear_skip();
   suite.run();
 
-  int const failures = ava::test::failures();
-  if (failures == 0 && ava::test::skip_requested())
+  int const failures = ava::tests::failures();
+  if (failures == 0 && ava::tests::skip_requested())
   {
-    std::cout << suite.name << " tests skipped: " << ava::test::skip_message() << '\n';
+    std::cout << suite.name << " tests skipped: " << ava::tests::skip_message() << '\n';
   }
   else if (failures == 0)
   {
@@ -157,7 +157,7 @@ void run_suite(TestSuite const& suite)
 
 int print_failures()
 {
-  int const failures = ava::test::failures();
+  int const failures = ava::tests::failures();
   if (failures != 0)
   {
     std::cerr << failures << " test failure(s)\n";
@@ -233,7 +233,7 @@ int main(int argc, char** argv)
       if (suite.name == requested_suite)
       {
         run_suite(suite);
-        if (ava::test::failures() == 0 && ava::test::skip_requested())
+        if (ava::tests::failures() == 0 && ava::tests::skip_requested())
           return 77;
         return print_failures();
       }

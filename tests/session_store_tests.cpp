@@ -296,7 +296,7 @@ void test_bounded_session_reads_strictly_classify_framed_records()
   for (auto const& [kind, record] : records)
   {
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "strict_" + kind});
-    ava::test::write_session_test_binary_file(store.session_path(), record + "\n");
+    ava::tests::write_session_test_binary_file(store.session_path(), record + "\n");
     auto loaded = store.load_bounded(ava::session::SessionReadLimits{});
     std::size_t visited_entries = 0;
     auto visited = store.visit_entries(ava::session::SessionReadLimits{}, [&](ava::session::SessionEntry const&) -> ava::core::Result<bool> {
@@ -339,12 +339,12 @@ void test_ephemeral_session_store_stays_in_memory()
     auto loaded = store->load();
     expect(loaded && loaded->size() == 1 && (*loaded)[0].id == "entry_ephemeral", "ephemeral session store reloads entries from memory");
 
-    auto imported = ava::session::import_image_attachment_bytes(*store, ava::test::session_test_tiny_png_bytes(), std::string_view("image/png"));
+    auto imported = ava::session::import_image_attachment_bytes(*store, ava::tests::session_test_tiny_png_bytes(), std::string_view("image/png"));
     expect(imported.has_value(), "ephemeral session store supports temp-only attachment storage");
     if (imported)
     {
       auto loaded_attachment = ava::session::load_image_attachment(*store, *imported);
-      expect(loaded_attachment && loaded_attachment->bytes == ava::test::session_test_tiny_png_bytes(),
+      expect(loaded_attachment && loaded_attachment->bytes == ava::tests::session_test_tiny_png_bytes(),
              "ephemeral session attachments reload while the store is alive");
     }
     expect(!std::filesystem::exists(session_path), "ephemeral attachments do not create a JSONL history file");

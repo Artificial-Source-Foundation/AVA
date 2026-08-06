@@ -628,8 +628,8 @@ void test_incomplete_assistant_output_suffix_recovery()
     bool const quarantine_mode = recovered && *recovered && (*recovered)->quarantine_path &&
                                  ::stat((*recovered)->quarantine_path->c_str(), &quarantine_status) == 0 && (quarantine_status.st_mode & 0777) == 0600;
     expect(recovered && *recovered && (*recovered)->removed_entry_count == count && (*recovered)->removed_byte_count == expected_suffix.size() &&
-               (*recovered)->quarantine_path && ava::test::read_session_test_binary_file(*(*recovered)->quarantine_path) == expected_suffix &&
-               quarantine_mode && entries && entries->size() == 1 && next && ava::test::read_session_test_binary_file(path).ends_with("\n") &&
+               (*recovered)->quarantine_path && ava::tests::read_session_test_binary_file(*(*recovered)->quarantine_path) == expected_suffix &&
+               quarantine_mode && entries && entries->size() == 1 && next && ava::tests::read_session_test_binary_file(path).ends_with("\n") &&
                recovery_artifact_count(path) == 1,
            "restart recovery quarantines and removes exactly each complete uncommitted assistant-output crash prefix before a normal append");
   }
@@ -649,9 +649,9 @@ void test_incomplete_assistant_output_suffix_recovery()
     {
       auto malformed = staged("malformed-stage", "malformed-turn", 1);
       static_cast<void>(append_physical_v4_fixture(*store, malformed));
-      auto const before = ava::test::read_session_test_binary_file(store->session_path());
+      auto const before = ava::tests::read_session_test_binary_file(store->session_path());
       auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
-      expect(!recovered && ava::test::read_session_test_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
+      expect(!recovered && ava::tests::read_session_test_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
              "malformed complete staged suffix fails closed without a truncate or quarantine");
     }
   }
@@ -661,9 +661,9 @@ void test_incomplete_assistant_output_suffix_recovery()
     {
       static_cast<void>(append_physical_v4_fixture(*store, staged("interior-stage", "interior-turn", 0)));
       static_cast<void>(append_physical_v4_fixture(*store, ordinary("interior-unrelated")));
-      auto const before = ava::test::read_session_test_binary_file(store->session_path());
+      auto const before = ava::tests::read_session_test_binary_file(store->session_path());
       auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
-      expect(!recovered && ava::test::read_session_test_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
+      expect(!recovered && ava::tests::read_session_test_binary_file(store->session_path()) == before && recovery_artifact_count(store->session_path()) == 0,
              "an interior staged group followed by an unrelated entry fails closed unchanged");
     }
   }
@@ -673,9 +673,9 @@ void test_incomplete_assistant_output_suffix_recovery()
     {
       static_cast<void>(append_physical_v4_fixture(*store, staged("committed-stage", "committed-turn", 0)));
       static_cast<void>(append_physical_v4_fixture(*store, commit("committed-commit", "committed-turn", 1)));
-      auto const before = ava::test::read_session_test_binary_file(store->session_path());
+      auto const before = ava::tests::read_session_test_binary_file(store->session_path());
       auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
-      expect(recovered && !*recovered && ava::test::read_session_test_binary_file(store->session_path()) == before,
+      expect(recovered && !*recovered && ava::tests::read_session_test_binary_file(store->session_path()) == before,
              "a committed assistant turn is never recovered or removed");
     }
   }
@@ -684,11 +684,11 @@ void test_incomplete_assistant_output_suffix_recovery()
     if (store && lease)
     {
       static_cast<void>(append_physical_v4_fixture(*store, staged("limited-stage", "limited-turn", 0)));
-      auto const before = ava::test::read_session_test_binary_file(store->session_path());
+      auto const before = ava::tests::read_session_test_binary_file(store->session_path());
       auto canceled = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{}, [] { return true; });
       auto limited = store->recover_incomplete_assistant_output_suffix(
           *lease, ava::session::SessionReadLimits{.max_file_bytes = before.size(), .max_line_bytes = before.size(), .max_entries = 1});
-      expect(!canceled && !limited && ava::test::read_session_test_binary_file(store->session_path()) == before &&
+      expect(!canceled && !limited && ava::tests::read_session_test_binary_file(store->session_path()) == before &&
                  recovery_artifact_count(store->session_path()) == 0,
              "assistant-output suffix recovery honors cancellation and entry limits before mutation");
     }
@@ -699,9 +699,9 @@ void test_incomplete_assistant_output_suffix_recovery()
     if (left_store && left_lease && right_store && right_lease)
     {
       static_cast<void>(append_physical_v4_fixture(*left_store, staged("mismatch-stage", "mismatch-turn", 0)));
-      auto const before = ava::test::read_session_test_binary_file(left_store->session_path());
+      auto const before = ava::tests::read_session_test_binary_file(left_store->session_path());
       auto mismatch = left_store->recover_incomplete_assistant_output_suffix(*right_lease, ava::session::SessionReadLimits{});
-      expect(!mismatch && ava::test::read_session_test_binary_file(left_store->session_path()) == before,
+      expect(!mismatch && ava::tests::read_session_test_binary_file(left_store->session_path()) == before,
              "assistant-output suffix recovery rejects a lease for another session without touching the target");
     }
   }
@@ -716,13 +716,13 @@ void test_incomplete_assistant_output_suffix_recovery()
     auto const parked = path.string() + ".parked";
     std::filesystem::rename(path, parked, remove_error);
     if (replacement_kind == "replacement")
-      ava::test::write_session_test_binary_file(path, "replacement\\n");
+      ava::tests::write_session_test_binary_file(path, "replacement\\n");
     else if (replacement_kind == "symlink")
       std::filesystem::create_symlink(parked, path, remove_error);
     else
       ::mkfifo(path.c_str(), 0600);
     auto recovered = store->recover_incomplete_assistant_output_suffix(*lease, ava::session::SessionReadLimits{});
-    expect(!recovered && ava::test::read_session_test_binary_file(parked).find("unsafe-stage-") != std::string::npos,
+    expect(!recovered && ava::tests::read_session_test_binary_file(parked).find("unsafe-stage-") != std::string::npos,
            "assistant-output suffix recovery rejects " + replacement_kind + " replacement without mutating the leased inode");
   }
   {
@@ -770,7 +770,7 @@ void test_lease_bound_session_reads_hold_exact_authority()
     {
       auto const parked = store.session_path().string() + ".parked";
       std::filesystem::rename(store.session_path(), parked);
-      ava::test::write_session_test_binary_file(store.session_path(), "replacement\n");
+      ava::tests::write_session_test_binary_file(store.session_path(), "replacement\n");
       auto loaded = store.load(lease);
       expect(!loaded, "lease-bound load rejects a basename replaced before snapshot validation");
     }
@@ -783,7 +783,7 @@ void test_lease_bound_session_reads_hold_exact_authority()
       auto const parked = store.session_path().string() + ".parked";
       store.set_after_lease_bound_read_for_test([&] {
         std::filesystem::rename(store.session_path(), parked);
-        ava::test::write_session_test_binary_file(store.session_path(), "replacement\n");
+        ava::tests::write_session_test_binary_file(store.session_path(), "replacement\n");
       });
       auto loaded = store.load_bounded(lease, ava::session::legacy_unbounded_session_read_limits());
       store.set_after_lease_bound_read_for_test({});
@@ -800,7 +800,7 @@ void test_lease_bound_session_reads_hold_exact_authority()
       store.set_after_lease_bound_read_for_test([&] {
         std::filesystem::rename(parent, moved_parent);
         std::filesystem::create_directories(parent);
-        ava::test::write_session_test_binary_file(store.session_path(), "replacement\n");
+        ava::tests::write_session_test_binary_file(store.session_path(), "replacement\n");
       });
       auto inspected = store.inspect_bounded(lease, ava::session::legacy_unbounded_session_read_limits());
       store.set_after_lease_bound_read_for_test({});
@@ -879,7 +879,7 @@ void test_session_read_authority_binding_and_descriptor_lifetime()
   expect(replacement_line.has_value(), "replacement read-authority fixture serializes a valid session record");
   if (!replacement_line)
     return;
-  ava::test::write_session_test_binary_file(store.session_path(), *replacement_line + "\n");
+  ava::tests::write_session_test_binary_file(store.session_path(), *replacement_line + "\n");
   auto rejected = authority->load();
   auto pathname_loaded = store.load();
   expect(!rejected && pathname_loaded && pathname_loaded->size() == 1 && pathname_loaded->front().id == "replacement",
@@ -1219,7 +1219,7 @@ void test_session_append_authority_and_commit_state()
     auto committed = partial_store.append(*partial_lease, entry("committed"));
     partial_store.set_after_append_write_for_test({});
     expect(has_one_state(committed, "committed_to_leased_inode") &&
-               ava::test::read_session_test_binary_file(partial_store.session_path()).find("committed") != std::string::npos,
+               ava::tests::read_session_test_binary_file(partial_store.session_path()).find("committed") != std::string::npos,
            "post-write failures report committed-to-leased-inode state without retrying");
   }
 
@@ -1229,19 +1229,19 @@ void test_session_append_authority_and_commit_state()
   if (parent_swap_lease)
   {
     expect(parent_swap_store.append(*parent_swap_lease, entry("parent-prefix")).has_value(), "parent-swap fixture seeds its leased inode");
-    auto const original_bytes = ava::test::read_session_test_binary_file(parent_swap_store.session_path());
+    auto const original_bytes = ava::tests::read_session_test_binary_file(parent_swap_store.session_path());
     auto const parent = parent_swap_store.session_path().parent_path();
     auto const moved_parent = parent.string() + ".moved";
     parent_swap_store.set_before_append_identity_check_for_test([&] {
       std::filesystem::rename(parent, moved_parent);
       std::filesystem::create_directories(parent);
-      ava::test::write_session_test_binary_file(parent_swap_store.session_path(), "replacement\\n");
+      ava::tests::write_session_test_binary_file(parent_swap_store.session_path(), "replacement\\n");
     });
     auto parent_swap = parent_swap_store.append(*parent_swap_lease, entry("parent-race"));
     parent_swap_store.set_before_append_identity_check_for_test({});
     expect(has_one_state(parent_swap, "not_started") &&
-               ava::test::read_session_test_binary_file(moved_parent / parent_swap_store.session_path().filename()) == original_bytes &&
-               ava::test::read_session_test_binary_file(parent_swap_store.session_path()) == "replacement\\n",
+               ava::tests::read_session_test_binary_file(moved_parent / parent_swap_store.session_path().filename()) == original_bytes &&
+               ava::tests::read_session_test_binary_file(parent_swap_store.session_path()) == "replacement\\n",
            "persistent append rejects a parent-directory replacement before mutating either original or replacement name");
   }
 

@@ -14,7 +14,7 @@
 #define AVA_080_GOLDEN_DIR ""
 #endif
 
-namespace ava::test {
+namespace ava::tests {
 
 inline std::filesystem::path ava_080_golden_dir()
 {
@@ -83,4 +83,4 @@ inline void expect_json_matches_golden(std::string_view actual, std::filesystem:
   expect(actual_json == expected_json, message + "\nexpected: " + expected_json + "\nactual:   " + actual_json);
 }
 
-}  // namespace ava::test
+}  // namespace ava::tests

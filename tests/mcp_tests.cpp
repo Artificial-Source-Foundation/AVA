@@ -305,7 +305,7 @@ void test_mcp_permission_audit_golden_shape()
   event.resolution_source = "resolver";
   event.resolution_reason = "denied by contract test";
 
-  ava::test::expect_json_matches_golden(ava::tools::permission_audit_data_json(event), "permission-audit.json",
+  ava::tests::expect_json_matches_golden(ava::tools::permission_audit_data_json(event), "permission-audit.json",
                                         "permission audit JSON shape matches AVA 0.80 golden fixture");
 }
 
@@ -697,7 +697,7 @@ void test_mcp_tool_dispatcher()
   expect(mcp_schema != schemas.end(), "enabled MCP tool is exported as a provider schema");
   if (mcp_schema != schemas.end())
   {
-    ava::test::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json", "MCP tool provider schema matches AVA 0.80 golden fixture");
+    ava::tests::expect_json_matches_golden(*mcp_schema, "mcp-tool-schema.json", "MCP tool provider schema matches AVA 0.80 golden fixture");
   }
   auto const resource_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
     return schema.find("\"name\":\"" + resource_tool_name + "\"") != std::string::npos && schema.find("\"additionalProperties\":false") != std::string::npos &&

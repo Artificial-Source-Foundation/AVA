@@ -64,21 +64,21 @@ void test_session_tree_metadata_entries_validate_and_export()
   invalid_metadata[0].data_json = "{\"schema_version\":1,\"labels\":[\"dup\",\"dup\"]}";
   auto const invalid_metadata_validation = ava::session::validate_session_replay(invalid_metadata);
   expect(!invalid_metadata_validation.ok() &&
-             ava::test::session_replay_has_issue(invalid_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+             ava::tests::session_replay_has_issue(invalid_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
          "session replay validator rejects malformed tree metadata entries");
 
   auto invalid_summary = entries;
   invalid_summary[1].data_json = "{\"schema_version\":1,\"summary\":\"\"}";
   auto const invalid_summary_validation = ava::session::validate_session_replay(invalid_summary);
   expect(!invalid_summary_validation.ok() &&
-             ava::test::session_replay_has_issue(invalid_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+             ava::tests::session_replay_has_issue(invalid_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
          "session replay validator rejects malformed branch summary entries");
 
   auto expect_invalid_branch_summary = [&](std::string data_json, std::string const& message) {
     auto invalid = entries;
     invalid[1].data_json = std::move(data_json);
     auto const validation = ava::session::validate_session_replay(invalid);
-    expect(!validation.ok() && ava::test::session_replay_has_issue(validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry), message);
+    expect(!validation.ok() && ava::tests::session_replay_has_issue(validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry), message);
   };
   expect_invalid_branch_summary("{\"schema_version\":1,\"summary\":\"Missing provider\",\"model\":\"gpt-test\",\"reason\":\"test\"}",
                                 "session replay validator rejects branch summaries missing provider");
@@ -128,7 +128,7 @@ void test_session_tree_metadata_entries_validate_and_export()
                                               "\"provider\":\"openai\",\"model\":\"gpt-test\",\"reason\":\"test\"}"}};
   auto const inverted_summary_validation = ava::session::validate_session_replay(inverted_summary_entries);
   expect(!inverted_summary_validation.ok() &&
-             ava::test::session_replay_has_issue(inverted_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+             ava::tests::session_replay_has_issue(inverted_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
          "session replay validator rejects branch summaries with inverted root/tip ranges");
   expect_invalid_branch_summary(
       "{\"schema_version\":1,\"summary\":\"Bad actor\",\"source_session_id\":\"session_parent\","
@@ -161,28 +161,28 @@ void test_session_tree_metadata_entries_validate_and_export()
   non_string_origin[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"branch_origin\":123}";
   auto const non_string_origin_validation = ava::session::validate_session_replay(non_string_origin);
   expect(!non_string_origin_validation.ok() &&
-             ava::test::session_replay_has_issue(non_string_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+             ava::tests::session_replay_has_issue(non_string_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
          "session replay validator rejects non-string branch_origin values");
 
   auto non_bool_archived = entries;
   non_bool_archived[0].data_json = "{\"schema_version\":1,\"name\":\"Named\",\"archived\":\"yes\"}";
   auto const non_bool_archived_validation = ava::session::validate_session_replay(non_bool_archived);
   expect(!non_bool_archived_validation.ok() &&
-             ava::test::session_replay_has_issue(non_bool_archived_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+             ava::tests::session_replay_has_issue(non_bool_archived_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
          "session replay validator rejects non-boolean archived metadata values");
 
   auto only_empty_origin = entries;
   only_empty_origin[0].data_json = "{\"schema_version\":1,\"branch_origin\":\"\"}";
   auto const only_empty_origin_validation = ava::session::validate_session_replay(only_empty_origin);
   expect(!only_empty_origin_validation.ok() &&
-             ava::test::session_replay_has_issue(only_empty_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+             ava::tests::session_replay_has_issue(only_empty_origin_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
          "session replay validator rejects metadata entries with no meaningful fields");
 
   auto unsupported_metadata = entries;
   unsupported_metadata[0].data_json = "{\"schema_version\":2,\"name\":\"future\"}";
   auto const unsupported_metadata_validation = ava::session::validate_session_replay(unsupported_metadata);
   expect(!unsupported_metadata_validation.ok() &&
-             ava::test::session_replay_has_issue(unsupported_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
+             ava::tests::session_replay_has_issue(unsupported_metadata_validation, ava::session::SessionReplayIssueKind::InvalidSessionMetadataEntry),
          "session replay validator rejects unsupported session_metadata schema_version values");
 
   auto unsupported_summary = entries;
@@ -193,7 +193,7 @@ void test_session_tree_metadata_entries_validate_and_export()
       "\"reason\":\"test\"}";
   auto const unsupported_summary_validation = ava::session::validate_session_replay(unsupported_summary);
   expect(!unsupported_summary_validation.ok() &&
-             ava::test::session_replay_has_issue(unsupported_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
+             ava::tests::session_replay_has_issue(unsupported_summary_validation, ava::session::SessionReplayIssueKind::InvalidBranchSummaryEntry),
          "session replay validator rejects unsupported branch_summary schema_version values");
 }
 
@@ -458,7 +458,7 @@ void test_session_branch_fork_and_clone_copy_source_safely()
   expect(!fork_contender && fork_contender.error().message().find("already owned") != std::string::npos,
          "session branch retains destination ownership after all copied records and metadata are published");
   auto fork_entries = forked->store.load();
-  auto const fork_bytes = ava::test::read_session_test_binary_file(forked->store.session_path());
+  auto const fork_bytes = ava::tests::read_session_test_binary_file(forked->store.session_path());
   expect(fork_entries && forked->copied_entry_count == 2 && fork_entries->size() == 3 && (*fork_entries)[0].version == 0 && (*fork_entries)[1].version == 2 &&
              fork_bytes.starts_with("{\"id\":\"entry_start\"") && fork_entries->back().type == ava::session::EntryType::SessionMetadata &&
              forked->metadata.name == "Forked" && forked->metadata.labels.size() == 1 && forked->metadata.labels[0] == "forked" &&

@@ -98,6 +98,8 @@ class UnlockedSession : public threadsafe::Unlocked<SESSION, threadsafe::policy:
  public:
   using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<SessionDebugMutex>>::Unlocked;
   using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<SessionDebugMutex>>::mutex;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using session_ts = UnlockedSession<Session>;

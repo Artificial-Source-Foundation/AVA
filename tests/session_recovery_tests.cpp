@@ -43,7 +43,7 @@ void test_session_lease_creation_and_link_safety()
          "create_and_acquire atomically publishes a mode-0600 regular file already owned before its first append");
 
   auto created_again = ava::session::SessionLease::create_and_acquire(fresh_store.session_path());
-  expect(!created_again && fresh_status_valid && ava::test::read_session_test_binary_file(fresh_store.session_path()).empty(),
+  expect(!created_again && fresh_status_valid && ava::tests::read_session_test_binary_file(fresh_store.session_path()).empty(),
          "create_and_acquire uses exclusive creation and leaves an existing fresh session unchanged");
 
   auto first_append = fresh_lease ? fresh_store.append(*fresh_lease, ava::session::SessionEntry{.id = "fresh_first",
@@ -52,7 +52,7 @@ void test_session_lease_creation_and_link_safety()
                                                                                                 .timestamp = "2026-07-14T00:00:00Z",
                                                                                                 .data_json = "{\"mode\":\"build\"}"})
                                   : ava::core::VoidResult(std::unexpected(std::move(fresh_lease.error())));
-  expect(first_append && ava::test::read_session_test_binary_file(fresh_store.session_path()).ends_with('\n'),
+  expect(first_append && ava::tests::read_session_test_binary_file(fresh_store.session_path()).ends_with('\n'),
          "the fresh owner can append the first framed record while retaining its lease");
   fresh_lease = ava::session::SessionLease{};
 
@@ -110,12 +110,12 @@ void test_session_torn_tail_recovery()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "cut_" + std::to_string(cut)});
     auto const suffix = second_line->substr(0, cut);
-    ava::test::write_session_test_binary_file(store.session_path(), valid_prefix + suffix);
+    ava::tests::write_session_test_binary_file(store.session_path(), valid_prefix + suffix);
     auto lease = ava::session::SessionLease::acquire(store.session_path());
     auto recovered = lease ? store.recover_torn_tail(*lease, ava::session::legacy_unbounded_session_read_limits())
                            : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(lease.error())));
-    if (!recovered || !recovered->has_value() || ava::test::read_session_test_binary_file(store.session_path()) != valid_prefix ||
-        ava::test::read_session_test_binary_file(**recovered) != suffix)
+    if (!recovered || !recovered->has_value() || ava::tests::read_session_test_binary_file(store.session_path()) != valid_prefix ||
+        ava::tests::read_session_test_binary_file(**recovered) != suffix)
     {
       every_cut_recovered = false;
       break;
@@ -131,7 +131,7 @@ void test_session_torn_tail_recovery()
 
   ava::session::SessionStore idempotent_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "idempotent"});
   std::string const idempotent_suffix = "{\"version\":3,\"id\":\"partial";
-  ava::test::write_session_test_binary_file(idempotent_store.session_path(), valid_prefix + idempotent_suffix);
+  ava::tests::write_session_test_binary_file(idempotent_store.session_path(), valid_prefix + idempotent_suffix);
   auto idempotent_lease = ava::session::SessionLease::acquire(idempotent_store.session_path());
   auto first_recovery = idempotent_lease ? idempotent_store.recover_torn_tail(*idempotent_lease, ava::session::legacy_unbounded_session_read_limits())
                                          : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(idempotent_lease.error())));
@@ -140,23 +140,23 @@ void test_session_torn_tail_recovery()
           ? idempotent_store.recover_torn_tail(*idempotent_lease, ava::session::legacy_unbounded_session_read_limits())
           : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Session, "missing lease")));
   expect(first_recovery && first_recovery->has_value() && second_recovery && !second_recovery->has_value() &&
-             ava::test::read_session_test_binary_file(idempotent_store.session_path()) == valid_prefix,
+             ava::tests::read_session_test_binary_file(idempotent_store.session_path()) == valid_prefix,
          "torn tail recovery is idempotent after quarantining one invalid suffix");
 
   ava::session::SessionStore no_lf_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "complete_no_lf"});
-  ava::test::write_session_test_binary_file(no_lf_store.session_path(), *first_line);
+  ava::tests::write_session_test_binary_file(no_lf_store.session_path(), *first_line);
   auto no_lf_lease = ava::session::SessionLease::acquire(no_lf_store.session_path());
   auto no_lf_recovered = no_lf_lease ? no_lf_store.recover_torn_tail(*no_lf_lease, ava::session::legacy_unbounded_session_read_limits())
                                      : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(no_lf_lease.error())));
-  expect(no_lf_recovered && !no_lf_recovered->has_value() && ava::test::read_session_test_binary_file(no_lf_store.session_path()) == *first_line + "\n",
+  expect(no_lf_recovered && !no_lf_recovered->has_value() && ava::tests::read_session_test_binary_file(no_lf_store.session_path()) == *first_line + "\n",
          "a complete supported final record gains exactly one LF without changing its bytes");
 
   ava::session::SessionStore framed_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "framed"});
-  ava::test::write_session_test_binary_file(framed_store.session_path(), valid_prefix);
+  ava::tests::write_session_test_binary_file(framed_store.session_path(), valid_prefix);
   auto framed_lease = ava::session::SessionLease::acquire(framed_store.session_path());
   auto framed_recovered = framed_lease ? framed_store.recover_torn_tail(*framed_lease, ava::session::legacy_unbounded_session_read_limits())
                                        : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(framed_lease.error())));
-  expect(framed_recovered && !framed_recovered->has_value() && ava::test::read_session_test_binary_file(framed_store.session_path()) == valid_prefix,
+  expect(framed_recovered && !framed_recovered->has_value() && ava::tests::read_session_test_binary_file(framed_store.session_path()) == valid_prefix,
          "a fully framed session is unchanged by recovery");
 
   std::vector<std::string> invalid_suffixes = {
@@ -170,12 +170,12 @@ void test_session_torn_tail_recovery()
   {
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "special_" + std::to_string(index)});
-    ava::test::write_session_test_binary_file(store.session_path(), valid_prefix + invalid_suffixes[index]);
+    ava::tests::write_session_test_binary_file(store.session_path(), valid_prefix + invalid_suffixes[index]);
     auto lease = ava::session::SessionLease::acquire(store.session_path());
     auto recovered = lease ? store.recover_torn_tail(*lease, ava::session::legacy_unbounded_session_read_limits())
                            : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(lease.error())));
-    if (!recovered || !recovered->has_value() || ava::test::read_session_test_binary_file(**recovered) != invalid_suffixes[index] ||
-        ava::test::read_session_test_binary_file(store.session_path()) != valid_prefix)
+    if (!recovered || !recovered->has_value() || ava::tests::read_session_test_binary_file(**recovered) != invalid_suffixes[index] ||
+        ava::tests::read_session_test_binary_file(store.session_path()) != valid_prefix)
     {
       special_tails_recovered = false;
       break;
@@ -186,29 +186,29 @@ void test_session_torn_tail_recovery()
   ava::session::SessionStore quarantine_failure_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = std::string(240, 'q')});
   auto const quarantine_failure_bytes = valid_prefix + "{";
-  ava::test::write_session_test_binary_file(quarantine_failure_store.session_path(), quarantine_failure_bytes);
+  ava::tests::write_session_test_binary_file(quarantine_failure_store.session_path(), quarantine_failure_bytes);
   auto quarantine_failure_lease = ava::session::SessionLease::acquire(quarantine_failure_store.session_path());
   auto quarantine_failure = quarantine_failure_lease
                                 ? quarantine_failure_store.recover_torn_tail(*quarantine_failure_lease, ava::session::legacy_unbounded_session_read_limits())
                                 : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(quarantine_failure_lease.error())));
   expect(!quarantine_failure && quarantine_failure.error().message().find("quarantine") != std::string::npos &&
-             ava::test::read_session_test_binary_file(quarantine_failure_store.session_path()) == quarantine_failure_bytes,
+             ava::tests::read_session_test_binary_file(quarantine_failure_store.session_path()) == quarantine_failure_bytes,
          "a quarantine creation failure leaves the source session byte-for-byte unchanged");
 
   ava::session::SessionStore oversized_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "oversized"});
   auto const oversized_bytes = valid_prefix + std::string(ava::session::kMaxSessionLineBytes + 1, '{');
-  ava::test::write_session_test_binary_file(oversized_store.session_path(), oversized_bytes);
+  ava::tests::write_session_test_binary_file(oversized_store.session_path(), oversized_bytes);
   auto oversized_lease = ava::session::SessionLease::acquire(oversized_store.session_path());
   auto oversized_recovery = oversized_lease ? oversized_store.recover_torn_tail(*oversized_lease, ava::session::legacy_unbounded_session_read_limits())
                                             : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(oversized_lease.error())));
   expect(!oversized_recovery && oversized_recovery.error().message().find("scan limit") != std::string::npos &&
-             ava::test::read_session_test_binary_file(oversized_store.session_path()) == oversized_bytes,
+             ava::tests::read_session_test_binary_file(oversized_store.session_path()) == oversized_bytes,
          "an oversized unterminated suffix fails the bounded scan without mutation");
 
   ava::session::SessionStore byte_limited_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "byte_limited"});
   auto const byte_limited_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(byte_limited_store.session_path(), byte_limited_bytes);
+  ava::tests::write_session_test_binary_file(byte_limited_store.session_path(), byte_limited_bytes);
   auto byte_limited_lease = ava::session::SessionLease::acquire(byte_limited_store.session_path());
   auto byte_limited_recovery =
       byte_limited_lease ? byte_limited_store.recover_torn_tail(
@@ -216,34 +216,34 @@ void test_session_torn_tail_recovery()
                                ava::session::SessionReadLimits{.max_file_bytes = valid_prefix.size(), .max_line_bytes = valid_prefix.size(), .max_entries = 8})
                          : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(byte_limited_lease.error())));
   expect(!byte_limited_recovery && byte_limited_recovery.error().message().find("byte limit") != std::string::npos &&
-             ava::test::read_session_test_binary_file(byte_limited_store.session_path()) == byte_limited_bytes &&
+             ava::tests::read_session_test_binary_file(byte_limited_store.session_path()) == byte_limited_bytes &&
              recovery_files_for(byte_limited_store.session_path()).empty(),
          "recovery enforces the initial file byte limit before publishing quarantine or mutating the source");
 
   ava::session::SessionStore entry_limited_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "entry_limited"});
   auto const entry_limited_bytes = valid_prefix + *second_line + "\n" + idempotent_suffix;
-  ava::test::write_session_test_binary_file(entry_limited_store.session_path(), entry_limited_bytes);
+  ava::tests::write_session_test_binary_file(entry_limited_store.session_path(), entry_limited_bytes);
   auto entry_limited_lease = ava::session::SessionLease::acquire(entry_limited_store.session_path());
   auto entry_limited_recovery =
       entry_limited_lease ? entry_limited_store.recover_torn_tail(
                                 *entry_limited_lease, ava::session::SessionReadLimits{.max_file_bytes = 4096, .max_line_bytes = 2048, .max_entries = 1})
                           : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(entry_limited_lease.error())));
   expect(!entry_limited_recovery && entry_limited_recovery.error().message().find("entry count") != std::string::npos &&
-             ava::test::read_session_test_binary_file(entry_limited_store.session_path()) == entry_limited_bytes &&
+             ava::tests::read_session_test_binary_file(entry_limited_store.session_path()) == entry_limited_bytes &&
              recovery_files_for(entry_limited_store.session_path()).empty(),
          "recovery enforces the entry limit before publishing quarantine or mutating the source");
 
   ava::session::SessionStore canceled_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "canceled_scan"});
   auto const canceled_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(canceled_store.session_path(), canceled_bytes);
+  ava::tests::write_session_test_binary_file(canceled_store.session_path(), canceled_bytes);
   auto canceled_lease = ava::session::SessionLease::acquire(canceled_store.session_path());
   int cancellation_checks = 0;
   auto canceled_recovery = canceled_lease ? canceled_store.recover_torn_tail(*canceled_lease, ava::session::legacy_unbounded_session_read_limits(),
                                                                              [&cancellation_checks] { return ++cancellation_checks >= 2; })
                                           : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(canceled_lease.error())));
   expect(!canceled_recovery && canceled_recovery.error().message().find("canceled") != std::string::npos &&
-             ava::test::read_session_test_binary_file(canceled_store.session_path()) == canceled_bytes &&
+             ava::tests::read_session_test_binary_file(canceled_store.session_path()) == canceled_bytes &&
              recovery_files_for(canceled_store.session_path()).empty(),
          "recovery observes cancellation while scanning before any source or quarantine mutation");
 
@@ -262,11 +262,11 @@ void test_session_torn_tail_recovery()
   {
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "strict_" + name});
     auto const original = valid_prefix + suffix;
-    ava::test::write_session_test_binary_file(store.session_path(), original);
+    ava::tests::write_session_test_binary_file(store.session_path(), original);
     auto lease = ava::session::SessionLease::acquire(store.session_path());
     auto recovered = lease ? store.recover_torn_tail(*lease, ava::session::legacy_unbounded_session_read_limits())
                            : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(lease.error())));
-    if (recovered || ava::test::read_session_test_binary_file(store.session_path()) != original)
+    if (recovered || ava::tests::read_session_test_binary_file(store.session_path()) != original)
     {
       strict_failures_unchanged = false;
       break;
@@ -280,11 +280,11 @@ void test_session_torn_tail_recovery()
     ava::session::SessionStore store(
         ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "framed_strict_" + name});
     auto const original = valid_prefix + record + "\n";
-    ava::test::write_session_test_binary_file(store.session_path(), original);
+    ava::tests::write_session_test_binary_file(store.session_path(), original);
     auto lease = ava::session::SessionLease::acquire(store.session_path());
     auto recovered = lease ? store.recover_torn_tail(*lease, ava::session::legacy_unbounded_session_read_limits())
                            : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(lease.error())));
-    if (!recovered || recovered->has_value() || ava::test::read_session_test_binary_file(store.session_path()) != original)
+    if (!recovered || recovered->has_value() || ava::tests::read_session_test_binary_file(store.session_path()) != original)
     {
       framed_legacy_records_unchanged = false;
       break;
@@ -311,13 +311,13 @@ void test_session_torn_tail_recovery()
     {
       ava::session::SessionStore integrity_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = name});
       auto const integrity_bytes = valid_prefix + record + "\n" + idempotent_suffix;
-      ava::test::write_session_test_binary_file(integrity_store.session_path(), integrity_bytes);
+      ava::tests::write_session_test_binary_file(integrity_store.session_path(), integrity_bytes);
       auto integrity_lease = ava::session::SessionLease::acquire(integrity_store.session_path());
       auto integrity_recovery = integrity_lease ? integrity_store.recover_torn_tail(*integrity_lease, ava::session::legacy_unbounded_session_read_limits())
                                                 : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(integrity_lease.error())));
       auto const expected_message = name == "duplicate_id" ? "duplicate entry id" : "earlier record";
       expect(!integrity_recovery && integrity_recovery.error().message().find(expected_message) != std::string::npos &&
-                 ava::test::read_session_test_binary_file(integrity_store.session_path()) == integrity_bytes &&
+                 ava::tests::read_session_test_binary_file(integrity_store.session_path()) == integrity_bytes &&
                  recovery_files_for(integrity_store.session_path()).empty(),
              "recovery rejects " + name + " without source mutation or quarantine publication");
     }
@@ -325,11 +325,11 @@ void test_session_torn_tail_recovery()
 
   ava::session::SessionStore middle_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "middle"});
   auto const middle_bytes = valid_prefix + "{\n" + *second_line + "\n";
-  ava::test::write_session_test_binary_file(middle_store.session_path(), middle_bytes);
+  ava::tests::write_session_test_binary_file(middle_store.session_path(), middle_bytes);
   auto middle_lease = ava::session::SessionLease::acquire(middle_store.session_path());
   auto middle_recovery = middle_lease ? middle_store.recover_torn_tail(*middle_lease, ava::session::legacy_unbounded_session_read_limits())
                                       : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(middle_lease.error())));
-  expect(middle_recovery && !middle_recovery->has_value() && ava::test::read_session_test_binary_file(middle_store.session_path()) == middle_bytes,
+  expect(middle_recovery && !middle_recovery->has_value() && ava::tests::read_session_test_binary_file(middle_store.session_path()) == middle_bytes,
          "newline-terminated middle corruption is outside torn-tail recovery and is never mutated");
   auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace,
                                                                                        .root_dir = sessions,
@@ -339,7 +339,7 @@ void test_session_torn_tail_recovery()
                                                                                        .labels = std::nullopt,
                                                                                        .mode = ava::session::SessionBranchMode::Clone,
                                                                                        .actor = "test"});
-  expect(!branch && ava::test::read_session_test_binary_file(middle_store.session_path()) == middle_bytes,
+  expect(!branch && ava::tests::read_session_test_binary_file(middle_store.session_path()) == middle_bytes,
          "low-level branch creation remains read-only and fail-closed on corruption");
 
   ava::session::SessionStore append_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "append_guard"});
@@ -354,12 +354,12 @@ void test_session_torn_tail_recovery()
                                                        .timestamp = "2026-07-14T00:00:04Z",
                                                        .data_json = "{\"text\":\"second\"}"};
   expect(append_session_entry_for_test(append_store, first_entry).has_value(), "append guard test seeds a framed session");
-  auto append_unterminated = ava::test::read_session_test_binary_file(append_store.session_path());
+  auto append_unterminated = ava::tests::read_session_test_binary_file(append_store.session_path());
   append_unterminated.pop_back();
-  ava::test::write_session_test_binary_file(append_store.session_path(), append_unterminated);
+  ava::tests::write_session_test_binary_file(append_store.session_path(), append_unterminated);
   auto guarded_append = append_session_entry_for_test(append_store, second_entry);
   expect(!guarded_append && guarded_append.error().message().find("unterminated tail") != std::string::npos &&
-             ava::test::read_session_test_binary_file(append_store.session_path()) == append_unterminated,
+             ava::tests::read_session_test_binary_file(append_store.session_path()) == append_unterminated,
          "append refuses to concatenate onto an existing nonempty unterminated session");
   auto append_lease = ava::session::SessionLease::acquire(append_store.session_path());
   auto append_recovered = append_lease ? append_store.recover_torn_tail(*append_lease, ava::session::legacy_unbounded_session_read_limits())
@@ -372,34 +372,34 @@ void test_session_torn_tail_recovery()
   ava::session::SessionStore replaced_append_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "append_replaced_target"});
   expect(append_session_entry_for_test(replaced_append_store, first_entry).has_value(), "append replacement test seeds the intended inode");
-  auto const append_original_bytes = ava::test::read_session_test_binary_file(replaced_append_store.session_path());
+  auto const append_original_bytes = ava::tests::read_session_test_binary_file(replaced_append_store.session_path());
   auto const append_replacement_bytes = valid_prefix;
   auto const append_displaced_path = replaced_append_store.session_path().string() + ".displaced";
   replaced_append_store.set_before_append_identity_check_for_test([&] {
     std::filesystem::rename(replaced_append_store.session_path(), append_displaced_path);
-    ava::test::write_session_test_binary_file(replaced_append_store.session_path(), append_replacement_bytes);
+    ava::tests::write_session_test_binary_file(replaced_append_store.session_path(), append_replacement_bytes);
   });
   auto replaced_append = append_session_entry_for_test(replaced_append_store, second_entry);
   expect(!replaced_append && replaced_append.error().message().find("replaced") != std::string::npos &&
-             ava::test::read_session_test_binary_file(append_displaced_path) == append_original_bytes &&
-             ava::test::read_session_test_binary_file(replaced_append_store.session_path()) == append_replacement_bytes,
+             ava::tests::read_session_test_binary_file(append_displaced_path) == append_original_bytes &&
+             ava::tests::read_session_test_binary_file(replaced_append_store.session_path()) == append_replacement_bytes,
          "append rejects target replacement after opening and mutates neither the displaced inode nor replacement path");
 
   ava::session::SessionStore post_write_replaced_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "append_post_write_replaced"});
   expect(append_session_entry_for_test(post_write_replaced_store, first_entry).has_value(), "post-write append replacement test seeds the intended inode");
-  auto const post_write_original_bytes = ava::test::read_session_test_binary_file(post_write_replaced_store.session_path());
+  auto const post_write_original_bytes = ava::tests::read_session_test_binary_file(post_write_replaced_store.session_path());
   auto const post_write_displaced_path = post_write_replaced_store.session_path().string() + ".displaced";
   post_write_replaced_store.set_after_append_write_for_test([&] {
     std::filesystem::rename(post_write_replaced_store.session_path(), post_write_displaced_path);
-    ava::test::write_session_test_binary_file(post_write_replaced_store.session_path(), append_replacement_bytes);
+    ava::tests::write_session_test_binary_file(post_write_replaced_store.session_path(), append_replacement_bytes);
   });
   auto post_write_replaced = append_session_entry_for_test(post_write_replaced_store, second_entry);
   expect(!post_write_replaced && post_write_replaced.error().message().find("after the entry write") != std::string::npos &&
-             ava::test::read_session_test_binary_file(post_write_displaced_path).starts_with(post_write_original_bytes) &&
-             ava::test::read_session_test_binary_file(post_write_displaced_path).find("append_second") != std::string::npos &&
-             ava::test::read_session_test_binary_file(post_write_displaced_path).ends_with("\n") &&
-             ava::test::read_session_test_binary_file(post_write_replaced_store.session_path()) == append_replacement_bytes,
+             ava::tests::read_session_test_binary_file(post_write_displaced_path).starts_with(post_write_original_bytes) &&
+             ava::tests::read_session_test_binary_file(post_write_displaced_path).find("append_second") != std::string::npos &&
+             ava::tests::read_session_test_binary_file(post_write_displaced_path).ends_with("\n") &&
+             ava::tests::read_session_test_binary_file(post_write_replaced_store.session_path()) == append_replacement_bytes,
          "append reports namespace replacement after mutating only its anchored descriptor");
 
   ava::session::SessionStore strict_append_store(
@@ -441,7 +441,7 @@ void test_session_torn_tail_recovery()
   expect(!competing_lease && competing_lease.error().message().find("already owned") != std::string::npos,
          "torn tail recovery lease excludes a competing owner");
   ava::session::SessionStore other_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "other_lease"});
-  ava::test::write_session_test_binary_file(other_store.session_path(), valid_prefix);
+  ava::tests::write_session_test_binary_file(other_store.session_path(), valid_prefix);
   auto other_lease = ava::session::SessionLease::acquire(other_store.session_path());
   auto mismatch = other_lease ? append_store.recover_torn_tail(*other_lease, ava::session::legacy_unbounded_session_read_limits())
                               : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(other_lease.error())));
@@ -459,22 +459,22 @@ void test_session_torn_tail_recovery()
   ava::session::SessionStore replaced_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "replaced_target"});
   auto const replaced_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(replaced_store.session_path(), replaced_bytes);
+  ava::tests::write_session_test_binary_file(replaced_store.session_path(), replaced_bytes);
   auto replaced_lease = ava::session::SessionLease::acquire(replaced_store.session_path());
   auto const displaced_path = replaced_store.session_path().string() + ".displaced";
   std::filesystem::rename(replaced_store.session_path(), displaced_path);
-  ava::test::write_session_test_binary_file(replaced_store.session_path(), replaced_bytes);
+  ava::tests::write_session_test_binary_file(replaced_store.session_path(), replaced_bytes);
   auto replaced = replaced_lease ? replaced_store.recover_torn_tail(*replaced_lease, ava::session::legacy_unbounded_session_read_limits())
                                  : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(replaced_lease.error())));
   expect(!replaced && replaced.error().message().find("does not identify the recovery target") != std::string::npos &&
-             ava::test::read_session_test_binary_file(replaced_store.session_path()) == replaced_bytes &&
-             ava::test::read_session_test_binary_file(displaced_path) == replaced_bytes,
+             ava::tests::read_session_test_binary_file(replaced_store.session_path()) == replaced_bytes &&
+             ava::tests::read_session_test_binary_file(displaced_path) == replaced_bytes,
          "torn tail recovery rejects a path replaced with a different inode and leaves both files unchanged");
 
   ava::session::SessionStore prepublication_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "prepublication_cleanup"});
   auto const prepublication_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(prepublication_store.session_path(), prepublication_bytes);
+  ava::tests::write_session_test_binary_file(prepublication_store.session_path(), prepublication_bytes);
   auto prepublication_lease = ava::session::SessionLease::acquire(prepublication_store.session_path());
   bool saw_prepublication_temporary = false;
   auto prepublication_recovery =
@@ -489,14 +489,14 @@ void test_session_torn_tail_recovery()
                                                    })
           : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(prepublication_lease.error())));
   expect(!prepublication_recovery && saw_prepublication_temporary &&
-             ava::test::read_session_test_binary_file(prepublication_store.session_path()) == prepublication_bytes &&
+             ava::tests::read_session_test_binary_file(prepublication_store.session_path()) == prepublication_bytes &&
              recovery_files_for(prepublication_store.session_path()).empty(),
          "a prepublication cancellation removes the temporary quarantine and leaves no final-looking artifact");
 
   ava::session::SessionStore quarantine_swap_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "quarantine_temp_swap"});
   auto const quarantine_swap_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(quarantine_swap_store.session_path(), quarantine_swap_bytes);
+  ava::tests::write_session_test_binary_file(quarantine_swap_store.session_path(), quarantine_swap_bytes);
   auto quarantine_swap_lease = ava::session::SessionLease::acquire(quarantine_swap_store.session_path());
   std::filesystem::path attacker_temporary_path;
   std::filesystem::path validated_stash_path;
@@ -506,7 +506,7 @@ void test_session_torn_tail_recovery()
     attacker_temporary_path = temporary_path;
     validated_stash_path = temporary_path.string() + ".validated-stash";
     std::filesystem::rename(temporary_path, validated_stash_path);
-    ava::test::write_session_test_binary_file(temporary_path, "ATTACKER_QUARANTINE_INODE_CANARY");
+    ava::tests::write_session_test_binary_file(temporary_path, "ATTACKER_QUARANTINE_INODE_CANARY");
     quarantine_temporary_swapped = ::stat(temporary_path.c_str(), &attacker_status_before) == 0;
   });
   auto quarantine_swap_recovery = quarantine_swap_lease
@@ -526,20 +526,20 @@ void test_session_torn_tail_recovery()
   bool const attacker_preserved = quarantine_temporary_swapped && ::stat(attacker_temporary_path.c_str(), &attacker_status_after) == 0 &&
                                   attacker_status_before.st_dev == attacker_status_after.st_dev &&
                                   attacker_status_before.st_ino == attacker_status_after.st_ino &&
-                                  ava::test::read_session_test_binary_file(attacker_temporary_path) == "ATTACKER_QUARANTINE_INODE_CANARY";
+                                  ava::tests::read_session_test_binary_file(attacker_temporary_path) == "ATTACKER_QUARANTINE_INODE_CANARY";
   bool const exact_descriptor_published = exact_swap_quarantines.size() == 1 && ::stat(exact_swap_quarantines.front().c_str(), &published_status) == 0 &&
-                                          ava::test::read_session_test_binary_file(exact_swap_quarantines.front()) == idempotent_suffix &&
-                                          ava::test::read_session_test_binary_file(validated_stash_path) == idempotent_suffix &&
+                                          ava::tests::read_session_test_binary_file(exact_swap_quarantines.front()) == idempotent_suffix &&
+                                          ava::tests::read_session_test_binary_file(validated_stash_path) == idempotent_suffix &&
                                           (published_status.st_dev != attacker_status_after.st_dev || published_status.st_ino != attacker_status_after.st_ino);
   expect(!quarantine_swap_recovery && quarantine_swap_recovery.error().message().find("temporary name was replaced") != std::string::npos &&
-             ava::test::read_session_test_binary_file(quarantine_swap_store.session_path()) == quarantine_swap_bytes && attacker_preserved &&
+             ava::tests::read_session_test_binary_file(quarantine_swap_store.session_path()) == quarantine_swap_bytes && attacker_preserved &&
              exact_descriptor_published,
          "quarantine publication links the validated descriptor, preserves a swapped attacker inode, and fails before source recovery");
 
   ava::session::SessionStore committed_cancellation_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "committed_cancellation"});
   auto const committed_cancellation_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(committed_cancellation_store.session_path(), committed_cancellation_bytes);
+  ava::tests::write_session_test_binary_file(committed_cancellation_store.session_path(), committed_cancellation_bytes);
   auto committed_cancellation_lease = ava::session::SessionLease::acquire(committed_cancellation_store.session_path());
   bool cancel_after_publication = false;
   committed_cancellation_store.set_after_recovery_quarantine_publication_for_test([&] { cancel_after_publication = true; });
@@ -554,21 +554,21 @@ void test_session_torn_tail_recovery()
   auto const committed_recovery_files = recovery_files_for(committed_cancellation_store.session_path());
   expect(committed_cancellation_recovery && committed_cancellation_recovery->has_value() && repeated_committed_recovery &&
              !repeated_committed_recovery->has_value() &&
-             ava::test::read_session_test_binary_file(committed_cancellation_store.session_path()) == valid_prefix && committed_recovery_files.size() == 1 &&
-             ava::test::read_session_test_binary_file(committed_recovery_files.front()) == idempotent_suffix,
+             ava::tests::read_session_test_binary_file(committed_cancellation_store.session_path()) == valid_prefix && committed_recovery_files.size() == 1 &&
+             ava::tests::read_session_test_binary_file(committed_recovery_files.front()) == idempotent_suffix,
          "quarantine publication commits cancellation handling through truncation and repeated recovery does not leak another artifact");
 
   ava::session::SessionStore truncate_replacement_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "replace_before_truncate"});
   auto const truncate_replacement_bytes = valid_prefix + idempotent_suffix;
   auto const truncate_replacement_new_bytes = valid_prefix;
-  ava::test::write_session_test_binary_file(truncate_replacement_store.session_path(), truncate_replacement_bytes);
+  ava::tests::write_session_test_binary_file(truncate_replacement_store.session_path(), truncate_replacement_bytes);
   auto truncate_replacement_lease = ava::session::SessionLease::acquire(truncate_replacement_store.session_path());
   auto const truncate_displaced_path = truncate_replacement_store.session_path().string() + ".displaced";
   bool replaced_before_truncate = false;
   truncate_replacement_store.set_after_recovery_quarantine_publication_for_test([&] {
     std::filesystem::rename(truncate_replacement_store.session_path(), truncate_displaced_path);
-    ava::test::write_session_test_binary_file(truncate_replacement_store.session_path(), truncate_replacement_new_bytes);
+    ava::tests::write_session_test_binary_file(truncate_replacement_store.session_path(), truncate_replacement_new_bytes);
     replaced_before_truncate = true;
   });
   auto truncate_replacement =
@@ -577,22 +577,22 @@ void test_session_torn_tail_recovery()
           : ava::core::Result<std::optional<std::filesystem::path>>(std::unexpected(std::move(truncate_replacement_lease.error())));
   auto truncate_replacement_quarantines = recovery_files_for(truncate_replacement_store.session_path());
   bool exact_published_quarantine =
-      truncate_replacement_quarantines.size() == 1 && ava::test::read_session_test_binary_file(truncate_replacement_quarantines.front()) == idempotent_suffix;
+      truncate_replacement_quarantines.size() == 1 && ava::tests::read_session_test_binary_file(truncate_replacement_quarantines.front()) == idempotent_suffix;
   if (exact_published_quarantine)
   {
     struct stat status{};
     exact_published_quarantine = stat(truncate_replacement_quarantines.front().c_str(), &status) == 0 && (status.st_mode & 0777) == 0600;
   }
   expect(!truncate_replacement && replaced_before_truncate && truncate_replacement.error().format().find("quarantine_path") != std::string::npos &&
-             ava::test::read_session_test_binary_file(truncate_displaced_path) == truncate_replacement_bytes &&
-             ava::test::read_session_test_binary_file(truncate_replacement_store.session_path()) == truncate_replacement_new_bytes &&
+             ava::tests::read_session_test_binary_file(truncate_displaced_path) == truncate_replacement_bytes &&
+             ava::tests::read_session_test_binary_file(truncate_replacement_store.session_path()) == truncate_replacement_new_bytes &&
              exact_published_quarantine,
          "session-name replacement after quarantine publication is detected before truncate and preserves the exact mode-0600 quarantine");
 
   ava::session::SessionStore parent_replacement_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "parent_replace_before_truncate"});
   auto const parent_replacement_bytes = valid_prefix + idempotent_suffix;
-  ava::test::write_session_test_binary_file(parent_replacement_store.session_path(), parent_replacement_bytes);
+  ava::tests::write_session_test_binary_file(parent_replacement_store.session_path(), parent_replacement_bytes);
   auto parent_replacement_lease = ava::session::SessionLease::acquire(parent_replacement_store.session_path());
   auto const original_parent = parent_replacement_store.session_path().parent_path();
   auto const displaced_parent = std::filesystem::path(original_parent.string() + ".displaced");
@@ -600,7 +600,7 @@ void test_session_torn_tail_recovery()
   parent_replacement_store.set_after_recovery_quarantine_publication_for_test([&] {
     std::filesystem::rename(original_parent, displaced_parent);
     std::filesystem::create_directories(original_parent);
-    ava::test::write_session_test_binary_file(parent_replacement_store.session_path(), valid_prefix);
+    ava::tests::write_session_test_binary_file(parent_replacement_store.session_path(), valid_prefix);
     parent_replaced_before_truncate = true;
   });
   auto parent_replacement = parent_replacement_lease
@@ -619,9 +619,9 @@ void test_session_torn_tail_recovery()
   }
   expect(!parent_replacement && parent_replaced_before_truncate &&
              parent_replacement.error().message().find("directory namespace changed") != std::string::npos &&
-             ava::test::read_session_test_binary_file(displaced_session) == parent_replacement_bytes &&
-             ava::test::read_session_test_binary_file(parent_replacement_store.session_path()) == valid_prefix && displaced_quarantines.size() == 1 &&
-             ava::test::read_session_test_binary_file(displaced_quarantines.front()) == idempotent_suffix,
+             ava::tests::read_session_test_binary_file(displaced_session) == parent_replacement_bytes &&
+             ava::tests::read_session_test_binary_file(parent_replacement_store.session_path()) == valid_prefix && displaced_quarantines.size() == 1 &&
+             ava::tests::read_session_test_binary_file(displaced_quarantines.front()) == idempotent_suffix,
          "parent-directory replacement after quarantine publication is detected before truncate and preserves source and quarantine");
 
   auto ephemeral = ava::session::SessionStore::create_ephemeral(workspace);
@@ -649,10 +649,10 @@ void test_session_torn_tail_listing()
     return;
   ava::session::SessionStore torn_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "listed_torn"});
   auto const torn_bytes = *line + "\n{\"version\":3,\"id\":\"partial";
-  ava::test::write_session_test_binary_file(torn_store.session_path(), torn_bytes);
+  ava::tests::write_session_test_binary_file(torn_store.session_path(), torn_bytes);
   ava::session::SessionStore complete_store(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "listed_complete_no_lf"});
-  ava::test::write_session_test_binary_file(complete_store.session_path(), *line);
+  ava::tests::write_session_test_binary_file(complete_store.session_path(), *line);
 
   auto listed = ava::session::SessionStore::list_sessions(workspace, sessions);
   bool normal_summaries_valid = listed && listed->size() == 2;
@@ -661,22 +661,22 @@ void test_session_torn_tail_listing()
     normal_summaries_valid = std::ranges::all_of(
         *listed, [](ava::session::SessionSummary const& summary) { return summary.entry_count == 1 && summary.last_updated == "2026-07-14T00:00:00Z"; });
   }
-  expect(normal_summaries_valid && ava::test::read_session_test_binary_file(torn_store.session_path()) == torn_bytes,
+  expect(normal_summaries_valid && ava::tests::read_session_test_binary_file(torn_store.session_path()) == torn_bytes,
          "normal listing selects a valid prefix plus Invalid final suffix and includes a complete no-LF record without mutation");
 
   auto bounded = ava::session::SessionStore::list_sessions_bounded(workspace, sessions, ava::session::SessionListLimits{});
   expect(bounded && bounded->size() == 2 &&
              std::ranges::all_of(*bounded, [](ava::session::SessionSummary const& summary) { return summary.entry_count == 1; }) &&
-             ava::test::read_session_test_binary_file(torn_store.session_path()) == torn_bytes,
+             ava::tests::read_session_test_binary_file(torn_store.session_path()) == torn_bytes,
          "bounded and ACP-style listing derives summaries from validated records without repairing the file");
 
   ava::session::SessionStore framed_corrupt(
       ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "framed_corrupt"});
   auto const framed_corrupt_bytes = *line + "\n{\n";
-  ava::test::write_session_test_binary_file(framed_corrupt.session_path(), framed_corrupt_bytes);
+  ava::tests::write_session_test_binary_file(framed_corrupt.session_path(), framed_corrupt_bytes);
   listed = ava::session::SessionStore::list_sessions(workspace, sessions);
   bounded = ava::session::SessionStore::list_sessions_bounded(workspace, sessions, ava::session::SessionListLimits{});
-  expect(listed && listed->size() == 2 && !bounded && ava::test::read_session_test_binary_file(framed_corrupt.session_path()) == framed_corrupt_bytes,
+  expect(listed && listed->size() == 2 && !bounded && ava::tests::read_session_test_binary_file(framed_corrupt.session_path()) == framed_corrupt_bytes,
          "newline-terminated corruption keeps normal skip and bounded fail policies and is never treated as torn");
   std::filesystem::remove(framed_corrupt.session_path());
 
@@ -694,10 +694,10 @@ void test_session_torn_tail_listing()
   {
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "listed_" + name});
     auto const original = *line + "\n" + record;
-    ava::test::write_session_test_binary_file(store.session_path(), original);
+    ava::tests::write_session_test_binary_file(store.session_path(), original);
     auto normal_result = ava::session::SessionStore::list_sessions(workspace, sessions);
     auto bounded_result = ava::session::SessionStore::list_sessions_bounded(workspace, sessions, ava::session::SessionListLimits{});
-    if (!normal_result || normal_result->size() != 2 || bounded_result || ava::test::read_session_test_binary_file(store.session_path()) != original)
+    if (!normal_result || normal_result->size() != 2 || bounded_result || ava::tests::read_session_test_binary_file(store.session_path()) != original)
     {
       non_torn_listing_policy_preserved = false;
       break;
@@ -709,12 +709,12 @@ void test_session_torn_tail_listing()
   ava::session::SessionStore future_store(ava::session::SessionStoreOptions{.root_dir = sessions, .workspace_dir = workspace, .session_id = "listed_future"});
   auto const future_bytes =
       *line + "\n{\"version\":99,\"id\":\"future\",\"parent_id\":\"\",\"type\":\"user_message\",\"timestamp\":\"2026-07-14T00:00:01Z\",\"data\":{}}";
-  ava::test::write_session_test_binary_file(future_store.session_path(), future_bytes);
+  ava::tests::write_session_test_binary_file(future_store.session_path(), future_bytes);
   listed = ava::session::SessionStore::list_sessions(workspace, sessions);
   bounded = ava::session::SessionStore::list_sessions_bounded(workspace, sessions, ava::session::SessionListLimits{});
   expect(!listed && listed.error().message().find("unsupported session entry version") != std::string::npos && !bounded &&
              bounded.error().message().find("unsupported session entry version") != std::string::npos &&
-             ava::test::read_session_test_binary_file(future_store.session_path()) == future_bytes,
+             ava::tests::read_session_test_binary_file(future_store.session_path()) == future_bytes,
          "a strict-valid future-version final record remains an actionable listing error and is not treated as torn");
 }
 
@@ -820,7 +820,7 @@ void test_session_resume_and_listing()
   std::filesystem::create_symlink(first->session_path(), symlink_store.session_path(), symlink_error);
   if (!symlink_error)
   {
-    auto const symlink_target_bytes = ava::test::read_session_test_binary_file(first->session_path());
+    auto const symlink_target_bytes = ava::tests::read_session_test_binary_file(first->session_path());
     auto symlink_open = ava::session::SessionStore::open(workspace, "link", session_root);
     expect(!symlink_open && symlink_open.error().category() == ava::core::ErrorCategory::PermissionDenied, "session open rejects symlink session files");
     auto symlink_load = symlink_store.load();
@@ -831,11 +831,11 @@ void test_session_resume_and_listing()
                                                                                                   .timestamp = "2026-04-27T00:04:00Z",
                                                                                                   .data_json = "{\"text\":\"bad\"}"});
     expect(!symlink_append && symlink_append.error().category() == ava::core::ErrorCategory::PermissionDenied &&
-               ava::test::read_session_test_binary_file(first->session_path()) == symlink_target_bytes,
+               ava::tests::read_session_test_binary_file(first->session_path()) == symlink_target_bytes,
            "session append rejects symlink session files without mutating the target");
     auto symlink_lease = ava::session::SessionLease::acquire(symlink_store.session_path());
     expect(!symlink_lease && symlink_lease.error().category() == ava::core::ErrorCategory::PermissionDenied &&
-               ava::test::read_session_test_binary_file(first->session_path()) == symlink_target_bytes,
+               ava::tests::read_session_test_binary_file(first->session_path()) == symlink_target_bytes,
            "session lease opens the original final component with O_NOFOLLOW and never follows its target");
   }
 

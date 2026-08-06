@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace ava::test {
+namespace ava::tests {
 bool session_replay_has_issue(session::SessionReplayValidation const& validation, session::SessionReplayIssueKind kind)
 {
   return std::ranges::any_of(validation.issues, [kind](session::SessionReplayIssue const& issue) { return issue.kind == kind; });
@@ -37,4 +37,4 @@ std::string read_session_test_binary_file(std::filesystem::path const& path)
   std::ifstream file(path, std::ios::binary);
   return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
-}  // namespace ava::test
+}  // namespace ava::tests

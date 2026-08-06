@@ -188,8 +188,8 @@ void test_assistant_output_v4_session_schema_and_replay()
              !ava::session::parse_assistant_output_item(over_limit_provider_index) && !ava::session::parse_assistant_output_item(empty_reasoning) &&
              !ava::session::parse_assistant_turn_commit(invalid_commit) && ava::session::parse_assistant_turn_commit(maximum_usage_commit) &&
              !ava::session::parse_assistant_turn_commit(overflowing_usage_commit) &&
-             ava::test::session_replay_has_issue(invalid_item_validation, ava::session::SessionReplayIssueKind::InvalidAssistantOutputItem) &&
-             ava::test::session_replay_has_issue(invalid_commit_validation, ava::session::SessionReplayIssueKind::InvalidAssistantTurnCommit),
+             ava::tests::session_replay_has_issue(invalid_item_validation, ava::session::SessionReplayIssueKind::InvalidAssistantOutputItem) &&
+             ava::tests::session_replay_has_issue(invalid_commit_validation, ava::session::SessionReplayIssueKind::InvalidAssistantTurnCommit),
          "v4 codecs and replay diagnostics reject duplicate keys, incompatible variants, invalid arguments/native reasoning, and commits");
 
   auto nested_object = [](std::size_t depth) {
@@ -335,7 +335,7 @@ void test_assistant_output_v4_session_schema_and_replay()
              std::ranges::none_of(
                  reused_committed_turn_projection.diagnostics,
                  [](auto const& diagnostic) { return diagnostic.kind == ava::session::AssistantOutputDiagnosticKind::IncompleteAssistantTurn; }) &&
-             ava::test::session_replay_has_issue(reused_committed_turn_replay, ava::session::SessionReplayIssueKind::MalformedAssistantTurn),
+             ava::tests::session_replay_has_issue(reused_committed_turn_replay, ava::session::SessionReplayIssueKind::MalformedAssistantTurn),
          "a final staged v4 item cannot reuse a committed assistant turn id as an incomplete warning");
 
   auto legacy_user = make_entry("legacy_user", EntryType::UserMessage, "{\"text\":\"legacy\"}", 3);
@@ -373,17 +373,17 @@ void test_assistant_output_v4_session_schema_and_replay()
   auto const v3_private_binding_validation = ava::session::validate_session_replay({v3_private_binding});
   auto const mixed_private_projection = ava::session::project_logical_session_history({bound_function, bound_commit, v3_private_binding});
   expect(exact_binding.ok() &&
-             ava::test::session_replay_has_issue(missing_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(wrong_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(wrong_name_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(duplicate_result_validation, ava::session::SessionReplayIssueKind::DuplicateToolResult) &&
+             ava::tests::session_replay_has_issue(missing_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(wrong_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(wrong_name_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(duplicate_result_validation, ava::session::SessionReplayIssueKind::DuplicateToolResult) &&
              uncommitted_function.ok() &&
-             ava::test::session_replay_has_issue(uncommitted_function, ava::session::SessionReplayIssueKind::IncompleteAssistantTurn) &&
-             ava::test::session_replay_has_issue(unresolved_function, ava::session::SessionReplayIssueKind::UnresolvedToolCall) &&
-             ava::test::session_replay_has_issue(lenient_missing_binding, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(result_before_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(uncommitted_function, ava::session::SessionReplayIssueKind::IncompleteAssistantTurn) &&
+             ava::tests::session_replay_has_issue(unresolved_function, ava::session::SessionReplayIssueKind::UnresolvedToolCall) &&
+             ava::tests::session_replay_has_issue(lenient_missing_binding, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(result_before_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
              lenient_legacy_result.ok() &&
-             ava::test::session_replay_has_issue(v3_private_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(v3_private_binding_validation, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
              mixed_private_projection && mixed_private_projection->back().data_json.find("assistant_output_entry_id") == std::string::npos,
          "v4 tool results require exact committed bindings while every public projection strips v3/v4 private bindings");
 
@@ -402,11 +402,11 @@ void test_assistant_output_v4_session_schema_and_replay()
       ava::session::validate_session_replay({bound_function, bound_commit, make_commit("window_turn_commit", "window-next-turn", 0), bound_result});
   auto const after_compaction = ava::session::validate_session_replay(
       {bound_function, bound_commit, make_entry("window_compaction", EntryType::Compaction, "{\"summary\":\"next\"}"), bound_result});
-  expect(allowed_window.ok() && ava::test::session_replay_has_issue(after_user, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(after_assistant, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(after_output_item, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(after_turn_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
-             ava::test::session_replay_has_issue(after_compaction, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch),
+  expect(allowed_window.ok() && ava::tests::session_replay_has_issue(after_user, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(after_assistant, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(after_output_item, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(after_turn_commit, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch) &&
+             ava::tests::session_replay_has_issue(after_compaction, ava::session::SessionReplayIssueKind::ToolResultOutputItemMismatch),
          "v4 tool results remain valid across bookkeeping but must stay in their committed turn's immediate post-commit window");
 
   auto reconciliation_rejects = [](std::vector<SessionEntry> const& entries) { return !ava::session::find_unresolved_committed_function_calls(entries); };
@@ -466,7 +466,7 @@ void test_assistant_output_v4_session_schema_and_replay()
 
   auto const compaction_after_unresolved = ava::session::validate_session_replay(
       {bound_function, bound_commit, make_entry("compact_pending", EntryType::Compaction, "{\"summary\":\"pending tool\"}")});
-  expect(ava::test::session_replay_has_issue(compaction_after_unresolved, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
+  expect(ava::tests::session_replay_has_issue(compaction_after_unresolved, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
          "committed v4 function calls participate in compaction unresolved-call boundaries");
 
   auto v3_native_reasoning =
@@ -476,7 +476,7 @@ void test_assistant_output_v4_session_schema_and_replay()
                  3);
   auto const v3_native_validation = ava::session::validate_session_replay({v3_native_reasoning});
   auto const public_markdown = ava::session::format_session_markdown({reasoning, commit});
-  expect(ava::test::session_replay_has_issue(v3_native_validation, ava::session::SessionReplayIssueKind::InvalidReasoningEntry) &&
+  expect(ava::tests::session_replay_has_issue(v3_native_validation, ava::session::SessionReplayIssueKind::InvalidReasoningEntry) &&
              public_markdown.find("PRIVATE_SIGNATURE_CANARY") == std::string::npos && public_markdown.find("PRIVATE_REDACTED_CANARY") == std::string::npos,
          "native OpenAI reasoning remains strict from v3 and private v4 physical records stay out of public export");
 
@@ -561,14 +561,14 @@ void test_session_replay_validation()
   auto const over_depth_structured = ava::session::validate_session_replay(
       over_depth_structured_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(!over_depth_structured.ok() &&
-             ava::test::session_replay_has_issue(over_depth_structured, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult) &&
+             ava::tests::session_replay_has_issue(over_depth_structured, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult) &&
              std::ranges::any_of(over_depth_structured.issues, [](auto const& issue) { return issue.message.find("not valid JSON") != std::string::npos; }),
          "session replay rejects over-depth structured tool results through the shared JSON nesting boundary");
 
   auto unsupported_version_entries = valid_entries;
   unsupported_version_entries[1].version = ava::session::kCurrentSessionEntryVersion + 1;
   auto const unsupported_version = ava::session::validate_session_replay(unsupported_version_entries);
-  expect(!unsupported_version.ok() && ava::test::session_replay_has_issue(unsupported_version, ava::session::SessionReplayIssueKind::UnsupportedEntryVersion),
+  expect(!unsupported_version.ok() && ava::tests::session_replay_has_issue(unsupported_version, ava::session::SessionReplayIssueKind::UnsupportedEntryVersion),
          "session replay validator flags unsupported in-memory entry versions");
 
   std::vector<ava::session::SessionEntry> const duplicate_entry_entries = {
@@ -576,7 +576,7 @@ void test_session_replay_validation()
       valid_entries[0],
   };
   auto const duplicate_entry = ava::session::validate_session_replay(duplicate_entry_entries);
-  expect(!duplicate_entry.ok() && ava::test::session_replay_has_issue(duplicate_entry, ava::session::SessionReplayIssueKind::DuplicateEntryId),
+  expect(!duplicate_entry.ok() && ava::tests::session_replay_has_issue(duplicate_entry, ava::session::SessionReplayIssueKind::DuplicateEntryId),
          "session replay validator flags duplicate entry ids");
 
   std::vector<ava::session::SessionEntry> const unknown_parent_entries = {
@@ -587,7 +587,7 @@ void test_session_replay_validation()
                                  .data_json = "{\"text\":\"orphan\"}"},
   };
   auto const unknown_parent = ava::session::validate_session_replay(unknown_parent_entries);
-  expect(!unknown_parent.ok() && ava::test::session_replay_has_issue(unknown_parent, ava::session::SessionReplayIssueKind::UnknownParentId),
+  expect(!unknown_parent.ok() && ava::tests::session_replay_has_issue(unknown_parent, ava::session::SessionReplayIssueKind::UnknownParentId),
          "session replay validator flags parent ids that do not reference earlier entries");
 
   std::vector<ava::session::SessionEntry> const result_without_call_entries = {
@@ -599,19 +599,19 @@ void test_session_replay_validation()
                                               "\"success\":true,\"result\":\"orphan\"}"},
   };
   auto const result_without_call = ava::session::validate_session_replay(result_without_call_entries);
-  expect(!result_without_call.ok() && ava::test::session_replay_has_issue(result_without_call, ava::session::SessionReplayIssueKind::ToolResultWithoutCall),
+  expect(!result_without_call.ok() && ava::tests::session_replay_has_issue(result_without_call, ava::session::SessionReplayIssueKind::ToolResultWithoutCall),
          "session replay validator flags tool results without earlier tool calls");
 
   auto mismatch_entries = valid_entries;
   mismatch_entries.back().data_json = "{\"call_id\":\"call_read\",\"name\":\"bash\",\"success\":true,\"result\":\"wrong tool\"}";
   auto const mismatch = ava::session::validate_session_replay(mismatch_entries);
-  expect(!mismatch.ok() && ava::test::session_replay_has_issue(mismatch, ava::session::SessionReplayIssueKind::ToolResultToolMismatch),
+  expect(!mismatch.ok() && ava::tests::session_replay_has_issue(mismatch, ava::session::SessionReplayIssueKind::ToolResultToolMismatch),
          "session replay validator flags tool result name mismatches");
 
   auto unresolved_entries = valid_entries;
   unresolved_entries.pop_back();
   auto const unresolved = ava::session::validate_session_replay(unresolved_entries);
-  expect(!unresolved.ok() && ava::test::session_replay_has_issue(unresolved, ava::session::SessionReplayIssueKind::UnresolvedToolCall),
+  expect(!unresolved.ok() && ava::tests::session_replay_has_issue(unresolved, ava::session::SessionReplayIssueKind::UnresolvedToolCall),
          "session replay validator flags unresolved tool calls");
 
   auto missing_structured_entries = valid_entries;
@@ -620,7 +620,7 @@ void test_session_replay_validation()
       "\"result\":\"legacy result\"}";
   auto const missing_structured =
       ava::session::validate_session_replay(missing_structured_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!missing_structured.ok() && ava::test::session_replay_has_issue(missing_structured, ava::session::SessionReplayIssueKind::MissingStructuredToolResult),
+  expect(!missing_structured.ok() && ava::tests::session_replay_has_issue(missing_structured, ava::session::SessionReplayIssueKind::MissingStructuredToolResult),
          "session replay validator can require structured tool result payloads");
 
   auto structured_mismatch_entries = valid_entries;
@@ -632,7 +632,7 @@ void test_session_replay_validation()
   auto const structured_mismatch =
       ava::session::validate_session_replay(structured_mismatch_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(
-      !structured_mismatch.ok() && ava::test::session_replay_has_issue(structured_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
+      !structured_mismatch.ok() && ava::tests::session_replay_has_issue(structured_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
       "session replay validator flags structured result call/tool/status mismatches");
 
   auto missing_schema_entries = valid_entries;
@@ -643,7 +643,7 @@ void test_session_replay_validation()
       "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
   auto const missing_schema =
       ava::session::validate_session_replay(missing_schema_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!missing_schema.ok() && ava::test::session_replay_has_issue(missing_schema, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+  expect(!missing_schema.ok() && ava::tests::session_replay_has_issue(missing_schema, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
          "session replay validator requires structured result schema versions");
 
   auto missing_ok_entries = valid_entries;
@@ -654,7 +654,7 @@ void test_session_replay_validation()
       "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
   auto const missing_ok =
       ava::session::validate_session_replay(missing_ok_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!missing_ok.ok() && ava::test::session_replay_has_issue(missing_ok, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+  expect(!missing_ok.ok() && ava::tests::session_replay_has_issue(missing_ok, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
          "session replay validator requires structured result ok flags");
 
   auto ok_mismatch_entries = valid_entries;
@@ -665,7 +665,7 @@ void test_session_replay_validation()
       "\"content_type\":\"text/plain\",\"content\":\"note contents\"}}";
   auto const ok_mismatch =
       ava::session::validate_session_replay(ok_mismatch_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!ok_mismatch.ok() && ava::test::session_replay_has_issue(ok_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
+  expect(!ok_mismatch.ok() && ava::tests::session_replay_has_issue(ok_mismatch, ava::session::SessionReplayIssueKind::StructuredToolResultMismatch),
          "session replay validator requires structured result ok to match success status");
 
   auto missing_content_entries = valid_entries;
@@ -676,7 +676,7 @@ void test_session_replay_validation()
       "\"content_type\":\"text/plain\"}}";
   auto const missing_content =
       ava::session::validate_session_replay(missing_content_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!missing_content.ok() && ava::test::session_replay_has_issue(missing_content, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+  expect(!missing_content.ok() && ava::tests::session_replay_has_issue(missing_content, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
          "session replay validator requires structured result content data");
 
   auto invalid_metadata_entries = valid_entries;
@@ -688,7 +688,7 @@ void test_session_replay_validation()
       "\"changed_paths\":[\"note.txt\",\"note.txt\"]}}";
   auto const invalid_metadata =
       ava::session::validate_session_replay(invalid_metadata_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
-  expect(!invalid_metadata.ok() && ava::test::session_replay_has_issue(invalid_metadata, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+  expect(!invalid_metadata.ok() && ava::tests::session_replay_has_issue(invalid_metadata, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
          "session replay validator rejects malformed structured result metadata arrays");
 
   auto failed_missing_error_entries = valid_entries;
@@ -700,7 +700,7 @@ void test_session_replay_validation()
   auto const failed_missing_error = ava::session::validate_session_replay(
       failed_missing_error_entries, ava::session::SessionReplayValidationOptions{.require_structured_tool_results = true});
   expect(!failed_missing_error.ok() &&
-             ava::test::session_replay_has_issue(failed_missing_error, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
+             ava::tests::session_replay_has_issue(failed_missing_error, ava::session::SessionReplayIssueKind::InvalidStructuredToolResult),
          "session replay validator requires failed structured results to carry error details");
 
   std::vector<ava::session::SessionEntry> const valid_permission_entries = {
@@ -795,7 +795,7 @@ void test_session_replay_validation()
                                               "\"resolution_source\":\"policy\"}"},
   };
   auto const invalid_permission = ava::session::validate_session_replay(invalid_permission_entries);
-  expect(!invalid_permission.ok() && ava::test::session_replay_has_issue(invalid_permission, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
+  expect(!invalid_permission.ok() && ava::tests::session_replay_has_issue(invalid_permission, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
          "session replay validator flags malformed permission audit decisions");
 
   std::vector<ava::session::SessionEntry> const invalid_risk_entries = {
@@ -810,7 +810,7 @@ void test_session_replay_validation()
                                               "\"resolution\":\"allow\",\"resolution_source\":\"policy\"}"},
   };
   auto const invalid_risk = ava::session::validate_session_replay(invalid_risk_entries);
-  expect(!invalid_risk.ok() && ava::test::session_replay_has_issue(invalid_risk, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
+  expect(!invalid_risk.ok() && ava::tests::session_replay_has_issue(invalid_risk, ava::session::SessionReplayIssueKind::InvalidPermissionDecision),
          "session replay validator flags malformed permission risk values");
 
   std::vector<ava::session::SessionEntry> const resolution_without_ask_entries = {
@@ -826,7 +826,7 @@ void test_session_replay_validation()
   };
   auto const resolution_without_ask = ava::session::validate_session_replay(resolution_without_ask_entries);
   expect(!resolution_without_ask.ok() &&
-             ava::test::session_replay_has_issue(resolution_without_ask, ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
+             ava::tests::session_replay_has_issue(resolution_without_ask, ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
          "session replay validator flags resolver outcomes without earlier ask prompts");
 
   auto mismatched_permission_id_entries = valid_permission_entries;
@@ -838,7 +838,7 @@ void test_session_replay_validation()
       "\"resolution\":\"deny\",\"resolution_source\":\"resolver\"}";
   auto const mismatched_permission_id = ava::session::validate_session_replay(mismatched_permission_id_entries);
   expect(!mismatched_permission_id.ok() &&
-             ava::test::session_replay_has_issue(mismatched_permission_id, ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
+             ava::tests::session_replay_has_issue(mismatched_permission_id, ava::session::SessionReplayIssueKind::PermissionResolutionWithoutAsk),
          "session replay validator pairs permission resolver outcomes by stable request id when present");
 
   std::vector<ava::session::SessionEntry> const unresolved_permission_entries = {
@@ -854,7 +854,7 @@ void test_session_replay_validation()
   };
   auto const unresolved_permission = ava::session::validate_session_replay(unresolved_permission_entries);
   expect(!unresolved_permission.ok() &&
-             ava::test::session_replay_has_issue(unresolved_permission, ava::session::SessionReplayIssueKind::UnresolvedPermissionPrompt),
+             ava::tests::session_replay_has_issue(unresolved_permission, ava::session::SessionReplayIssueKind::UnresolvedPermissionPrompt),
          "session replay validator flags ask permission prompts without outcomes");
 
   auto valid_compaction_entries = valid_entries;
@@ -881,7 +881,7 @@ void test_session_replay_validation()
                                                                                "\"summary_unavailable\":false,"
                                                                                "\"summary\":\"\"}"});
   auto const invalid_compaction = ava::session::validate_session_replay(invalid_compaction_entries);
-  expect(!invalid_compaction.ok() && ava::test::session_replay_has_issue(invalid_compaction, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
+  expect(!invalid_compaction.ok() && ava::tests::session_replay_has_issue(invalid_compaction, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
          "session replay validator flags compaction entries without durable summaries");
 
   auto malformed_compaction_metadata_entries = valid_entries;
@@ -893,7 +893,7 @@ void test_session_replay_validation()
                                                                                           "\"summary_unavailable\":false,\"threshold_tokens\":1.5}"});
   auto const malformed_compaction_metadata = ava::session::validate_session_replay(malformed_compaction_metadata_entries);
   expect(!malformed_compaction_metadata.ok() &&
-             ava::test::session_replay_has_issue(malformed_compaction_metadata, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
+             ava::tests::session_replay_has_issue(malformed_compaction_metadata, ava::session::SessionReplayIssueKind::InvalidCompactionEntry),
          "session replay validator flags non-integer compaction token metadata");
 
   std::vector<std::string> const malformed_additive_compaction_metadata = {R"({"summary":"durable","provider":""})",
@@ -919,7 +919,7 @@ void test_session_replay_validation()
                                                    .data_json = malformed_additive_compaction_metadata[index]});
     auto const validation = ava::session::validate_session_replay(malformed);
     rejects_malformed_additive_metadata = rejects_malformed_additive_metadata && !validation.ok() &&
-                                          ava::test::session_replay_has_issue(validation, ava::session::SessionReplayIssueKind::InvalidCompactionEntry);
+                                          ava::tests::session_replay_has_issue(validation, ava::session::SessionReplayIssueKind::InvalidCompactionEntry);
   }
   expect(rejects_malformed_additive_metadata, "additive compaction metadata remains optional but is strictly typed and enum-validated whenever present");
 
@@ -932,7 +932,7 @@ void test_session_replay_validation()
                                                                           .data_json = "{\"summary\":\"tool call still pending\"}"});
   auto const unresolved_tool_compaction = ava::session::validate_session_replay(unresolved_tool_compaction_entries);
   expect(!unresolved_tool_compaction.ok() &&
-             ava::test::session_replay_has_issue(unresolved_tool_compaction, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
+             ava::tests::session_replay_has_issue(unresolved_tool_compaction, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedToolCall),
          "session replay validator flags compaction before unresolved tool results");
 
   std::vector<ava::session::SessionEntry> const unresolved_permission_compaction_entries = {
@@ -946,7 +946,7 @@ void test_session_replay_validation()
   auto const unresolved_permission_compaction = ava::session::validate_session_replay(unresolved_permission_compaction_entries);
   expect(
       !unresolved_permission_compaction.ok() &&
-          ava::test::session_replay_has_issue(unresolved_permission_compaction, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt),
+          ava::tests::session_replay_has_issue(unresolved_permission_compaction, ava::session::SessionReplayIssueKind::CompactionWithUnresolvedPermissionPrompt),
       "session replay validator flags compaction before unresolved permission decisions");
 
   std::vector<ava::session::SessionEntry> const valid_model_reasoning_entries = {
@@ -1005,7 +1005,7 @@ void test_session_replay_validation()
       "\"native_item_json\":\"{\\\"type\\\":\\\"message\\\"}\"}";
   auto const invalid_native_reasoning_item = ava::session::validate_session_replay(invalid_native_reasoning_item_entries);
   expect(!invalid_native_reasoning_item.ok() &&
-             ava::test::session_replay_has_issue(invalid_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(invalid_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator rejects private native items that are not reasoning objects");
 
   auto missing_native_reasoning_id_entries = valid_native_reasoning_item_entries;
@@ -1014,7 +1014,7 @@ void test_session_replay_validation()
       "\"native_item_json\":\"{\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
   auto const missing_native_reasoning_id = ava::session::validate_session_replay(missing_native_reasoning_id_entries);
   expect(!missing_native_reasoning_id.ok() &&
-             ava::test::session_replay_has_issue(missing_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(missing_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning metadata without an id");
 
   auto empty_native_reasoning_id_entries = valid_native_reasoning_item_entries;
@@ -1023,7 +1023,7 @@ void test_session_replay_validation()
       "\"native_item_json\":\"{\\\"id\\\":\\\"\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[]}\"}";
   auto const empty_native_reasoning_id = ava::session::validate_session_replay(empty_native_reasoning_id_entries);
   expect(!empty_native_reasoning_id.ok() &&
-             ava::test::session_replay_has_issue(empty_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(empty_native_reasoning_id, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning metadata with an empty id");
 
   auto missing_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
@@ -1032,7 +1032,7 @@ void test_session_replay_validation()
       "\"native_item_json\":\"{\\\"id\\\":\\\"rs_missing_summary\\\",\\\"type\\\":\\\"reasoning\\\"}\"}";
   auto const missing_native_reasoning_summary = ava::session::validate_session_replay(missing_native_reasoning_summary_entries);
   expect(!missing_native_reasoning_summary.ok() &&
-             ava::test::session_replay_has_issue(missing_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(missing_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning metadata without a summary array");
 
   auto scalar_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
@@ -1041,7 +1041,7 @@ void test_session_replay_validation()
       "\"native_item_json\":\"{\\\"id\\\":\\\"rs_scalar_summary\\\",\\\"type\\\":\\\"reasoning\\\",\\\"summary\\\":[\\\"not-an-object\\\"]}\"}";
   auto const scalar_native_reasoning_summary = ava::session::validate_session_replay(scalar_native_reasoning_summary_entries);
   expect(!scalar_native_reasoning_summary.ok() &&
-             ava::test::session_replay_has_issue(scalar_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(scalar_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning summary arrays with scalar items");
 
   auto malformed_native_reasoning_summary_entries = valid_native_reasoning_item_entries;
@@ -1051,7 +1051,7 @@ void test_session_replay_validation()
       "\"}";
   auto const malformed_native_reasoning_summary = ava::session::validate_session_replay(malformed_native_reasoning_summary_entries);
   expect(!malformed_native_reasoning_summary.ok() &&
-             ava::test::session_replay_has_issue(malformed_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(malformed_native_reasoning_summary, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning summary items without summary_text text");
 
   auto oversized_native_reasoning_item_entries = valid_native_reasoning_item_entries;
@@ -1063,7 +1063,7 @@ void test_session_replay_validation()
       ava::core::json::escape(oversized_native_item) + "\"}";
   auto const oversized_native_reasoning_item = ava::session::validate_session_replay(oversized_native_reasoning_item_entries);
   expect(!oversized_native_reasoning_item.ok() &&
-             ava::test::session_replay_has_issue(oversized_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(oversized_native_reasoning_item, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "current-version sessions reject native reasoning metadata beyond the provider-private byte bound");
 
   auto legacy_native_reasoning_item_entries = missing_native_reasoning_summary_entries;
@@ -1080,7 +1080,7 @@ void test_session_replay_validation()
                                  .data_json = "{\"mode\":\"build\",\"model\":\"gpt-5.5\"}"},
   };
   auto const invalid_model_start = ava::session::validate_session_replay(invalid_model_start_entries);
-  expect(!invalid_model_start.ok() && ava::test::session_replay_has_issue(invalid_model_start, ava::session::SessionReplayIssueKind::InvalidModelEntry),
+  expect(!invalid_model_start.ok() && ava::tests::session_replay_has_issue(invalid_model_start, ava::session::SessionReplayIssueKind::InvalidModelEntry),
          "session replay validator flags session_start entries without provider/model metadata");
 
   auto invalid_model_change_entries = valid_model_reasoning_entries;
@@ -1088,21 +1088,21 @@ void test_session_replay_validation()
       "{\"previous_provider\":\"anthropic\",\"previous_model\":\"claude\","
       "\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\"}";
   auto const invalid_model_change = ava::session::validate_session_replay(invalid_model_change_entries);
-  expect(!invalid_model_change.ok() && ava::test::session_replay_has_issue(invalid_model_change, ava::session::SessionReplayIssueKind::InvalidModelEntry),
+  expect(!invalid_model_change.ok() && ava::tests::session_replay_has_issue(invalid_model_change, ava::session::SessionReplayIssueKind::InvalidModelEntry),
          "session replay validator flags model_change entries whose previous model does not match active state");
 
   auto invalid_reasoning_change_entries = valid_model_reasoning_entries;
   invalid_reasoning_change_entries[2].data_json = "{\"provider\":\"kimi\",\"model\":\"kimi-k2-thinking\",\"enabled\":true}";
   auto const invalid_reasoning_change = ava::session::validate_session_replay(invalid_reasoning_change_entries);
   expect(!invalid_reasoning_change.ok() &&
-             ava::test::session_replay_has_issue(invalid_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(invalid_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags enabled reasoning_change entries without a level");
 
   auto mismatched_reasoning_change_entries = valid_model_reasoning_entries;
   mismatched_reasoning_change_entries[2].data_json = "{\"provider\":\"openai\",\"model\":\"gpt-5.5\",\"enabled\":true,\"level\":\"low\"}";
   auto const mismatched_reasoning_change = ava::session::validate_session_replay(mismatched_reasoning_change_entries);
   expect(!mismatched_reasoning_change.ok() &&
-             ava::test::session_replay_has_issue(mismatched_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(mismatched_reasoning_change, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags reasoning_change entries for the wrong active model");
 
   auto invalid_reasoning_block_entries = valid_model_reasoning_entries;
@@ -1111,7 +1111,7 @@ void test_session_replay_validation()
       "\"redacted\":false}";
   auto const invalid_reasoning_block = ava::session::validate_session_replay(invalid_reasoning_block_entries);
   expect(!invalid_reasoning_block.ok() &&
-             ava::test::session_replay_has_issue(invalid_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(invalid_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator flags reasoning_block entries without replayable content");
 
   auto mismatched_reasoning_block_entries = valid_model_reasoning_entries;
@@ -1120,7 +1120,7 @@ void test_session_replay_validation()
       "\"text\":\"contradictory\",\"redacted\":false}";
   auto const mismatched_reasoning_block = ava::session::validate_session_replay(mismatched_reasoning_block_entries);
   expect(!mismatched_reasoning_block.ok() &&
-             ava::test::session_replay_has_issue(mismatched_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
+             ava::tests::session_replay_has_issue(mismatched_reasoning_block, ava::session::SessionReplayIssueKind::InvalidReasoningEntry),
          "session replay validator rejects reasoning_block provider/model metadata that contradicts the active model");
 
   auto legacy_reasoning_without_active_model = valid_model_reasoning_entries[3];

@@ -181,14 +181,14 @@ void run_provider_live_smoke_tests()
 {
   if (!env_enabled("AVA_LIVE_PROVIDER_SMOKE"))
   {
-    ava::test::request_skip("set AVA_LIVE_PROVIDER_SMOKE=1 and provider credentials to run");
+    ava::tests::request_skip("set AVA_LIVE_PROVIDER_SMOKE=1 and provider credentials to run");
     return;
   }
 
   auto cases = configured_live_smokes();
   if (cases.empty())
   {
-    ava::test::request_skip("no supported provider credential environment variables are set");
+    ava::tests::request_skip("no supported provider credential environment variables are set");
     return;
   }
 

@@ -1744,7 +1744,7 @@ void test_plugin_tool_dispatcher()
   expect(plugin_schema != schemas.end(), "enabled plugin tool contribution is exported as a provider schema");
   if (plugin_schema != schemas.end())
   {
-    ava::test::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json", "plugin tool provider schema matches AVA 0.80 golden fixture");
+    ava::tests::expect_json_matches_golden(*plugin_schema, "plugin-tool-schema.json", "plugin tool provider schema matches AVA 0.80 golden fixture");
   }
   {
     ava::agent::ToolVisibilityOptions const no_builtin_visibility{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools};

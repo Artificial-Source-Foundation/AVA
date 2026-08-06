@@ -17,14 +17,14 @@
 #include <utility>
 #include <vector>
 
-namespace ava::test {
+namespace ava::tests {
 int& failure_count();
 int failures();
 void clear_skip();
 void request_skip(std::string message);
 bool skip_requested();
 std::string skip_message();
-}  // namespace ava::test
+}  // namespace ava::tests
 
 void expect(bool condition, std::string const& message);
 

@@ -295,6 +295,7 @@ target_link_libraries(ava_debug
   PUBLIC
     AVA::terminal       # ava::tui::terminal::GraphemeCluster::print_members
     ava_agent           # ava::agent::to_string
+    ava_app             # ava::app::runtime::to_string
 )
 
 ava_apply_debugging(ava_debug)

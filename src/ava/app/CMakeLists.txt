@@ -86,6 +86,7 @@ target_sources(ava_app
     "subagent_delivery_manager.cpp"
     "runtime/Session.cpp"
     "runtime/ExtensionResourcePolicy.cpp"
+    "runtime/FreshnessSourceMetadata.cpp"
     "runtime/markdown_files.cpp"
     "runtime/command_names.cpp"
 )

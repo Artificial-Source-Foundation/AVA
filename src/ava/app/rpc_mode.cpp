@@ -359,6 +359,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     DoutEntering(dc::rpc, "run_rpc_loop(...) with session_id=" << session_r->store.session_id() << ", provider_id=" << session_r->model().provider_id
                                                                << ", model_id=" << session_r->model().model_id);
   }
+  AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, "calling run_rpc_loop");
 #endif
 
   rpc::RpcRunState run_state;

@@ -312,6 +312,8 @@ namespace ava::app {
 
 int run_interactive(runtime::session_ts& unlocked_session)
 {
+  AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, "calling run_interactive");
+
   line_shell_internal::ShellState state{.unlocked_session = unlocked_session};
   if (ava::tui::terminal_is_tty())
     return line_shell_internal::run_tui(state);

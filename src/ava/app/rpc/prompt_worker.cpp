@@ -19,6 +19,8 @@ namespace ava::app::rpc {
 
 std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 {
+  DoutEntering(dc::rpc, "make_rpc_prompt_worker(options)");
+
   return ava::core::make_jthread("rpc_prompt", [options = std::move(options)](std::stop_token stop_token) mutable {
     runtime::session_ts& unlocked_session = options.unlocked_session;
     // Legacy RPC resolver/output helpers still require a mutex argument. Session access remains protected by session_ts guards, not this adapter mutex.

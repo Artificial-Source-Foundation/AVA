@@ -22,6 +22,10 @@
 #include <thread>
 #include <utility>
 
+#ifdef CWDEBUG
+#include <utils/at_scope_end.h>
+#endif
+
 namespace ava::app {
 namespace {
 
@@ -258,6 +262,11 @@ std::shared_ptr<ava::agent::SubagentCoordinator> const& SubagentDeliveryManager:
 ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryManager::refresh_parent(runtime::session_ts const& unlocked_session,
                                                                                                       runtime::RunOptions const& options)
 {
+  DoutEntering(dc::notice, "SubagentDeliveryManager::refresh_parent() from " << Location((char*)__builtin_return_address(0) + builtin_return_address_offset));
+#ifdef CWDEBUG
+  auto&& f = at_scope_end([]{ Dout(dc::notice, "Leaving SubagentDeliveryManager::refresh_parent()"); });
+#endif
+
   CRITICAL_AREA_BEGIN_CR(session);
 
   if (!session_r->run_controller())

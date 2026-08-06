@@ -107,6 +107,34 @@ std::string ambient_extension_plugin_manifest_json()
 })";
 }
 
+void test_debug_session_mutex_tracks_current_thread()
+{
+#ifdef CWDEBUG
+  using ava::app::runtime::SessionDebugMutex;
+
+  expect(!SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry starts empty");
+  SessionDebugMutex first;
+  SessionDebugMutex second;
+  first.lock();
+  expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry observes one held session lock");
+  second.lock();
+  expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry supports nested locks for different sessions");
+  first.unlock();
+  expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry supports non-LIFO unlock order");
+  second.unlock();
+  expect(!SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry empties after every session lock is released");
+
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("debug session mutex test boundary");
+  // Expose the debug mutex through the minimal session_ts-shaped interface required by the session-specific assertion.
+  struct SessionMutexWitness
+  {
+    SessionDebugMutex& value;
+    [[nodiscard]] SessionDebugMutex& mutex() const { return value; }
+  } witness{first};
+  AVA_ASSERT_SESSION_UNLOCKED(witness, "debug specific session mutex test boundary");
+#endif
+}
+
 void test_app_run_prompt_isolates_ambient_extensions()
 {
   auto const root = create_empty_root("app-runtime-ambient-extension-isolation");

@@ -1,4 +1,7 @@
 #include "sys.h"
+#ifdef CWDEBUG
+#include "ava/debug/debug_ostream_operators.h"
+#endif
 #include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/print_mode.h"
@@ -18,6 +21,10 @@
 #include <utility>
 #include <variant>
 #include <unistd.h>
+
+#ifdef CWDEBUG
+#include <utils/at_scope_end.h>
+#endif
 
 namespace ava::app {
 namespace {
@@ -154,6 +161,13 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session
                                                                 ava::http::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err)
 {
+  DoutEntering(dc::runtime, "run_print_prompt(" << unlocked_session << ", \"" << prompt << "\", " << provider << ", ...) from "
+                                                << Location((char*)__builtin_return_address(0) + builtin_return_address_offset));
+#ifdef CWDEBUG
+  auto&& f = at_scope_end([] { Dout(dc::notice, "Leaving run_print_prompt()"); });
+#endif
+  AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, "calling run_print_prompt");
+
   bool emitted_error = false;
   auto runtime_options = print_runtime_options(options.runtime_options);
   runtime_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(

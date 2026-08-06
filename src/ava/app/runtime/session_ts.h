@@ -53,7 +53,10 @@ class SessionDebugMutex final : public AIMutex
   void lock()
   {
     PRAGMA_DIAGNOSTIC_PUSH_IGNORE_frame_address
-    DoutEntering(dc::notice, "SessionDebugMutex::lock() [" << this << "] called from " << Location((char*)__builtin_return_address(3) + builtin_return_address_offset));
+    DoutEntering(dc::notice, "SessionDebugMutex::lock() [" << this << "] called from " <<
+        Location((char*)__builtin_return_address(1) + builtin_return_address_offset) << " <-- " <<
+        Location((char*)__builtin_return_address(2) + builtin_return_address_offset) << " <-- " <<
+        Location((char*)__builtin_return_address(3) + builtin_return_address_offset));
     PRAGMA_DIAGNOSTIC_POP
 
     AIMutex::lock();

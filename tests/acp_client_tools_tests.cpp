@@ -3,6 +3,7 @@
 #include "tests/support/acp_test_support.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/app/acp/client_tools.h"
 #include "ava/app/acp/peer.h"
 #include "ava/app/acp/service.h"
@@ -113,7 +114,7 @@ void test_acp_peer_prompt_terminal_commit_arbitration()
     expect(reached, cancel_wins ? "ACP peer reaches a pre-terminal-commit boundary" : "ACP peer reaches the committed Completing boundary");
     feed(state, R"({"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"prompt"}})");
     feed(state, R"({"jsonrpc":"2.0","method":"test/reader_probe","params":{}})");
-    auto const probe_deadline = std::chrono::steady_clock::now() + 2s;
+    auto const probe_deadline = ava::tests::now_plus_seconds(2);
     while (!reader_probe.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < probe_deadline) std::this_thread::sleep_for(1ms);
     barrier->release();
 

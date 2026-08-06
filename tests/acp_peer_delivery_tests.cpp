@@ -3,6 +3,7 @@
 #include "tests/support/acp_test_support.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/command/command.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/peer.h"
@@ -437,7 +438,7 @@ void test_acp_peer_started_non_cooperative_shutdown_escalates()
 
   int status = 0;
   bool exited = false;
-  auto const deadline = std::chrono::steady_clock::now() + 5s;
+  auto const deadline = ava::tests::now_plus_seconds(5);
   while (std::chrono::steady_clock::now() < deadline)
   {
     auto const waited = waitpid(child, &status, WNOHANG);

@@ -3,6 +3,7 @@
 #include "tests/support/acp_test_support.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/app/acp/codec.h"
 #include "ava/app/acp/peer.h"
 #include "ava/app/acp/service.h"
@@ -324,7 +325,7 @@ void test_acp_peer_outbound_queue_saturation()
   }
   expect(queued == kMaxOutboundRecords, "ACP peer deterministically fills the bounded outbound FIFO behind a blocked writer");
 
-  auto const old_deadline = std::chrono::steady_clock::now() + 5s;
+  auto const old_deadline = ava::tests::now_plus_seconds(5);
   std::size_t failed_requests = 0;
   for (std::size_t index = 0; index < kMaxPendingCalls; ++index)
   {

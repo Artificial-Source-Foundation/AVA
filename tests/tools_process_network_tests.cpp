@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/containment/containment.h"
 #include "ava/http/transport.h"
 #include "ava/agent/mode.h"
@@ -64,7 +65,7 @@ bool process_group_exists(pid_t pgid)
 
 bool wait_for_process_group_exit(pid_t pgid)
 {
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  auto const deadline = ava::tests::now_plus_seconds(5);
   while (process_group_exists(pgid))
   {
     if (std::chrono::steady_clock::now() >= deadline)

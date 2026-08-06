@@ -6,6 +6,9 @@ if(NOT DEFINED AVA_CLI_TEST_ROOT)
   message(FATAL_ERROR "AVA_CLI_TEST_ROOT is required")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/test_timeout.cmake")
+ava_test_timeout(AVA_PROCESS_TIMEOUT 10)
+
 get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
 set(WORKSPACE "${TEST_ROOT}/workspace")
 set(HOME_DIR "${TEST_ROOT}/home")
@@ -28,7 +31,7 @@ execute_process(
   OUTPUT_VARIABLE AVA_OUTPUT
   ERROR_VARIABLE AVA_ERROR
   RESULT_VARIABLE AVA_RESULT
-  TIMEOUT 10
+  TIMEOUT "${AVA_PROCESS_TIMEOUT}"
 )
 
 if(NOT AVA_RESULT EQUAL 1)

@@ -2,6 +2,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/app/headless_policy.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
@@ -82,7 +83,7 @@ bool process_group_exists(pid_t pgid)
 
 bool wait_for_process_group_exit(pid_t pgid)
 {
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  auto const deadline = ava::tests::now_plus_seconds(5);
   while (std::chrono::steady_clock::now() < deadline)
   {
     if (!process_group_exists(pgid))
@@ -306,7 +307,7 @@ void test_mcp_permission_audit_golden_shape()
   event.resolution_reason = "denied by contract test";
 
   ava::tests::expect_json_matches_golden(ava::tools::permission_audit_data_json(event), "permission-audit.json",
-                                        "permission audit JSON shape matches AVA 0.80 golden fixture");
+                                         "permission audit JSON shape matches AVA 0.80 golden fixture");
 }
 
 void test_mcp_stdio_client_lists_and_calls_tools()

@@ -1,3 +1,5 @@
+#include "support/test_timeout.h"
+
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -152,7 +154,7 @@ int main()
 
   int status = 0;
   bool exited = false;
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  auto const deadline = ava::tests::now_plus_seconds(5);
   while (std::chrono::steady_clock::now() < deadline)
   {
     auto const waited = waitpid(child, &status, WNOHANG);

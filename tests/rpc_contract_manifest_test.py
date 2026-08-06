@@ -11,6 +11,8 @@ import re
 import subprocess
 import tempfile
 
+from timeout_support import test_timeout
+
 
 def fail(message: str) -> None:
     raise SystemExit(message)
@@ -92,7 +94,7 @@ def main() -> int:
             cwd=workspace,
             env=env,
             check=False,
-            timeout=5,
+            timeout=test_timeout(5),
         )
         if wire.returncode != 0 or wire.stdout != wire_lines[1]:
             fail(f"real get_protocol wire output drifted: status={wire.returncode} stdout={wire.stdout!r} stderr={wire.stderr!r}")
@@ -106,7 +108,7 @@ def main() -> int:
                 cwd=workspace,
                 env=env,
                 check=False,
-                timeout=5,
+                timeout=test_timeout(5),
             )
             try:
                 decoded = run.stdout.decode("utf-8", errors="strict")

@@ -1,3 +1,5 @@
+#include "test_timeout.h"
+
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -423,7 +425,7 @@ bool write_streaming_marker(std::filesystem::path const& directory, std::string_
 bool wait_for_streaming_marker(std::filesystem::path const& marker_directory, std::string_view marker_name)
 {
   auto const marker = marker_directory / marker_name;
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+  auto const deadline = ava::tests::now_plus_seconds(12);
   while (true)
   {
     std::error_code exists_error;

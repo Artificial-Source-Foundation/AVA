@@ -4,6 +4,7 @@
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/http/transport.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
@@ -198,7 +199,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
   auto const sleep_command = "/bin/sh -c 'touch " + sleep_marker.string() + "; sleep 5'";
   input_buffer.push("{\"id\":\"cmd-sleep\",\"type\":\"run_command\",\"command\":\"" + ava::core::json::escape(sleep_command) + "\"}\n");
   bool const started = output_buffer.wait_contains("\"name\":\"tool_start\"", std::chrono::seconds(2));
-  auto const launch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  auto const launch_deadline = ava::tests::now_plus_seconds(2);
   while (!std::filesystem::exists(sleep_marker) && std::chrono::steady_clock::now() < launch_deadline)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   bool const process_started = std::filesystem::exists(sleep_marker);

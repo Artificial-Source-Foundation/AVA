@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/app/Application.h"
 #include "ava/app/commands.h"
 #include "ava/app/headless_policy.h"
@@ -104,7 +105,7 @@ struct ChildWaitResult
 
 ChildWaitResult wait_for_child_until(pid_t child, std::chrono::steady_clock::duration timeout)
 {
-  auto const deadline = std::chrono::steady_clock::now() + timeout;
+  auto const deadline = ava::tests::now_plus_seconds(timeout);
   while (std::chrono::steady_clock::now() < deadline)
   {
     int status = 0;

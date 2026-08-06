@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/command/command.h"
 #include "ava/containment/containment.h"
 #include "ava/agent/mode.h"
@@ -570,7 +571,7 @@ void test_replaced_external_path_rule_fails_child_application()
   bool child_exited = false;
   if (child > 0)
   {
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    auto const deadline = ava::tests::now_plus_seconds(2);
     while (std::chrono::steady_clock::now() < deadline)
     {
       pid_t const waited = ::waitpid(child, &child_status, WNOHANG);

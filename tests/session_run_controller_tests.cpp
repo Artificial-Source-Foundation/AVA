@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -516,7 +517,7 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
           expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return recovery_entered; }), "recovery reaches deterministic publication gate");
         }
         std::jthread shutdown([&] { controller.shutdown(); });
-        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        auto const deadline = ava::tests::now_plus_seconds(3);
         while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
                std::chrono::steady_clock::now() < deadline)
           std::this_thread::yield();
@@ -569,10 +570,10 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
             expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return active_entered; }), "active append reaches shutdown gate");
           }
           std::jthread second([&] { queued_result.emplace(owner(append_entry("shutdown-queued"))); });
-          auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+          auto const queue_deadline = ava::tests::now_plus_seconds(3);
           while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
           std::jthread shutdown([&] { controller.shutdown(); });
-          auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+          auto const close_deadline = ava::tests::now_plus_seconds(3);
           while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
                  std::chrono::steady_clock::now() < close_deadline)
             std::this_thread::yield();
@@ -704,7 +705,7 @@ void test_session_run_controller_cross_thread_observer_shutdown_is_nonblocking()
     }
     state->changed.notify_all();
   });
-  auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const queue_deadline = ava::tests::now_plus_seconds(3);
   auto queued = controller->snapshot();
   while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
   {
@@ -1060,7 +1061,7 @@ void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
   }
   std::jthread second([&] { second_result.emplace(route(std::move(second_entry))); });
   std::jthread third([&] { third_result.emplace(route(std::move(third_entry))); });
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const deadline = ava::tests::now_plus_seconds(3);
   auto queued = controller.snapshot();
   while (queued.queued_appends < 3 && std::chrono::steady_clock::now() < deadline)
   {

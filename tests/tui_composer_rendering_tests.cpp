@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
@@ -532,7 +533,7 @@ bool test_atomic_search_input_prompt_precedence()
 
     auto queued = ava::tui::SearchInputPromptDispatchResult::InputHandled;
     bool queued_attempt_dispatched = false;
-    auto const claim_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    auto const claim_deadline = ava::tests::now_plus_seconds(1);
     while (queued == ava::tui::SearchInputPromptDispatchResult::InputHandled && std::chrono::steady_clock::now() < claim_deadline)
     {
       queued_attempt_dispatched = false;

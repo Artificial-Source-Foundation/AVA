@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/test_harness.h"
+#include "tests/support/test_timeout.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -726,7 +727,7 @@ void test_bounded_delivery_retries()
     expect(false, "bounded retry job starts");
     return;
   }
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const deadline = ava::tests::now_plus_seconds(3);
   std::size_t attempts = 0;
   std::size_t factories = 0;
   while (std::chrono::steady_clock::now() < deadline)
@@ -742,7 +743,7 @@ void test_bounded_delivery_retries()
       break;
     std::this_thread::yield();
   }
-  auto const exhaustion_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const exhaustion_deadline = ava::tests::now_plus_seconds(3);
   bool retained_parent_released = false;
   while (std::chrono::steady_clock::now() < exhaustion_deadline)
   {
@@ -863,7 +864,7 @@ void test_two_pending_deliveries_survive_coordinator_retention()
   admission->release();
   expect(state->wait_completed(2), "both protected completions deliver exactly once after the barrier releases");
 
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const deadline = ava::tests::now_plus_seconds(3);
   while (std::chrono::steady_clock::now() < deadline)
   {
     auto retained = fixture.coordinator->snapshot(parent, second.job.identity.job_id);
@@ -985,7 +986,7 @@ void test_same_process_reconciliation_acks_existing_commit_without_rerun()
   options.access_token = "must-not-be-used";
   expect(fixture.manager->refresh_parent(unlocked_fixture_session, options).has_value(),
          "reconciliation registers retained parent after a same-process acknowledgement failure");
-  auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  auto const deadline = ava::tests::now_plus_seconds(3);
   ava::agent::SubagentDeliveryState delivery = ava::agent::SubagentDeliveryState::Attempting;
   while (std::chrono::steady_clock::now() < deadline)
   {

@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import time
 
+from timeout_support import test_timeout
+
 
 OWNED_PROCESSES = set()
 
@@ -53,9 +55,9 @@ def environment(root):
     # Preserve explicit per-test debug routing despite the otherwise isolated
     # environment. The fixed base rcfile stays silent unless an override was
     # deliberately exported by the developer.
-    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR", "LIBCWD_RCFILE_OVERRIDE_NAME"):
+    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR", "AVA_DEBUG_NO_TIMEOUT", "AVA_DEBUG_NO_TIMEOUT_SECONDS", "LIBCWD_RCFILE_OVERRIDE_NAME"):
         value = os.environ.get(name)
-        if value:
+        if value is not None:
             env[name] = value
     return env
 
@@ -129,7 +131,7 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
         [executable, str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment(root / "environment"),
     )
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + test_timeout(10)
     while time.monotonic() < deadline:
         assert server.poll() is None, server.stderr.read().decode(errors="replace")
         try:
@@ -173,7 +175,7 @@ def send(process, payload, ending=b"\n"):
 def read_line(process, timeout=10.0, operation="ACP response"):
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
-    ready = selector.select(timeout)
+    ready = selector.select(test_timeout(timeout))
     selector.close()
     if not ready:
         raise AssertionError(
@@ -185,7 +187,7 @@ def read_line(process, timeout=10.0, operation="ACP response"):
 
 def read_until_id(process, request_id, timeout=15.0, operation="ACP request completion"):
     records = []
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + test_timeout(timeout)
     while time.monotonic() < deadline:
         record = read_line(
             process, max(0.05, deadline - time.monotonic()), operation)
@@ -206,7 +208,7 @@ def expect_no_stdout(process, timeout=0.12):
 
 def stop_cleanly(process):
     process.stdin.close()
-    assert process.wait(timeout=10) == 0
+    assert process.wait(timeout=test_timeout(10)) == 0
     assert process.stdout.read() == b""
     assert process.stderr.read() == b""
 
@@ -222,7 +224,7 @@ def main():
     # than the build tree, whose checkout ancestor can deliberately be shared.
     root = Path(tempfile.mkdtemp(prefix="ava-acp-subprocess-"))
 
-    conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=10)
+    conflict = subprocess.run([args.ava, "--acp", "--rpc"], input=b"", capture_output=True, env=environment(root), timeout=test_timeout(10))
     assert conflict.returncode != 0 and conflict.stdout == b"" and b"standalone" in conflict.stderr
 
     parent_secret_name = "AVA_ACP_SUBPROCESS_PARENT_SECRET"
@@ -335,7 +337,7 @@ def main():
     send(loops, b'{"jsonrpc":"2.0","id":"usable","method":"initialize","params":{"protocolVersion":1}}')
     assert read_line(loops)["id"] == "usable"
     loops.stdin.close()
-    assert loops.wait(timeout=10) == 0
+    assert loops.wait(timeout=test_timeout(10)) == 0
     assert loops.stdout.read() == b""
     diagnostics = loops.stderr.read().splitlines()
     response_intent_records = len(malformed_response_intent) + 6
@@ -465,7 +467,7 @@ def main():
     send(lifecycle, json.dumps({"jsonrpc": "2.0", "id": "close-resumed", "method": "session/close", "params": {"sessionId": session_a}}).encode())
     assert read_line(lifecycle)["result"] == {}
     stop_cleanly(lifecycle)
-    assert server.wait(timeout=10) == 0, server.stderr.read().decode(errors="replace")
+    assert server.wait(timeout=test_timeout(10)) == 0, server.stderr.read().decode(errors="replace")
 
     # A real bidirectional client must be able to answer a permission request
     # while session/prompt is still in flight. Tool updates remain ordered
@@ -529,7 +531,7 @@ def main():
     assert update_kinds[-1] == "agent_message_chunk"
     assert permission_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(permission_process)
-    assert permission_server.wait(timeout=10) == 0, permission_server.stderr.read().decode(errors="replace")
+    assert permission_server.wait(timeout=test_timeout(10)) == 0, permission_server.stderr.read().decode(errors="replace")
     assert "ACP_PERMISSION_CONTENT" in permission_log.read_text(errors="replace")
 
     # M5 client filesystem routing is exercised through the real stdio peer,
@@ -584,7 +586,7 @@ def main():
             break
     assert client_fs_methods == ["session/request_permission", "fs/read_text_file"]
     stop_cleanly(client_fs)
-    assert client_fs_server.wait(timeout=10) == 0, client_fs_server.stderr.read().decode(errors="replace")
+    assert client_fs_server.wait(timeout=test_timeout(10)) == 0, client_fs_server.stderr.read().decode(errors="replace")
     client_fs_requests = client_fs_log.read_text(errors="replace")
     assert "REMOTE_CLIENT_FS_CONTENT" in client_fs_requests and "LOCAL_CONTENT_MUST_NOT_WIN" not in client_fs_requests
 
@@ -644,7 +646,7 @@ def main():
         "session/request_permission", "terminal/create", "terminal/wait_for_exit", "terminal/output", "terminal/release"
     ]
     stop_cleanly(terminal_process)
-    assert terminal_server.wait(timeout=10) == 0, terminal_server.stderr.read().decode(errors="replace")
+    assert terminal_server.wait(timeout=test_timeout(10)) == 0, terminal_server.stderr.read().decode(errors="replace")
     assert "SUBPROCESS_TERMINAL_OUTPUT" in terminal_log.read_text(errors="replace")
     assert not (workspace / "terminal-e2e-marker").exists()
 
@@ -673,7 +675,7 @@ def main():
     image_records = read_until_id(image_process, "image-prompt", operation="image session prompt completion")
     assert image_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(image_process)
-    assert image_server.wait(timeout=10) == 0, image_server.stderr.read().decode(errors="replace")
+    assert image_server.wait(timeout=test_timeout(10)) == 0, image_server.stderr.read().decode(errors="replace")
     image_requests = image_log.read_text(errors="replace")
     assert "iVBORw0KGgo=" in image_requests and "image/png" in image_requests
 
@@ -711,7 +713,7 @@ def main():
     canceled_records = read_until_id(cancel_process, "cancel-prompt", operation="active session cancellation completion")
     assert canceled_records[-1]["result"]["stopReason"] == "cancelled"
     stop_cleanly(cancel_process)
-    assert cancel_server.wait(timeout=10) == 0, cancel_server.stderr.read().decode(errors="replace")
+    assert cancel_server.wait(timeout=test_timeout(10)) == 0, cancel_server.stderr.read().decode(errors="replace")
 
     auth_root = root / "auth-env"
     configure_fake_model(auth_root)
@@ -737,7 +739,7 @@ def main():
         "models": [{"provider": "bogus", "id": "missing", "name": "Missing", "family": "fake", "supports_tools": False}],
     }))
     model_process = start(args.ava, model_root, cwd=workspace)
-    assert model_process.wait(timeout=10) != 0
+    assert model_process.wait(timeout=test_timeout(10)) != 0
     assert model_process.stdout.read() == b""
     model_diagnostic = model_process.stderr.read()
     assert b"startup provider is not registered" in model_diagnostic and b"bogus" in model_diagnostic
@@ -746,7 +748,7 @@ def main():
     broken = start(args.ava, root / "broken")
     broken.stdout.close()
     send(broken, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}).encode())
-    assert broken.wait(timeout=10) != 0
+    assert broken.wait(timeout=test_timeout(10)) != 0
     broken.stdin.close()
     diagnostic = broken.stderr.read()
     assert diagnostic and b"protocolVersion" not in diagnostic and b"initialize" not in diagnostic

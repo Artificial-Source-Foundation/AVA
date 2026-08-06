@@ -42,17 +42,19 @@ ava::core::Result<runtime::RunOptions> prepare_runtime_credentials(ava::config::
   return options;
 }
 
-ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::Session const& session, runtime::RunOptions options,
+ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::session_ts const& unlocked_session, runtime::RunOptions options,
                                                                                std::string_view purpose)
 {
   auto auth_transport = std::make_unique<ava::http::CurlCliTransport>();
-  auto prepared = prepare_runtime_credentials(session.paths(), session.model().provider_id, std::move(options), *auth_transport, purpose);
+  CRITICAL_AREA_BEGIN_CR(session);
+  auto prepared = prepare_runtime_credentials(session_r->paths(), session_r->model().provider_id, std::move(options), *auth_transport, purpose);
   if (!prepared)
     return std::unexpected(std::move(prepared.error()));
 
-  auto provider = ava::provider::builtin_provider_registry().create(session.model().provider_id);
+  auto provider = ava::provider::builtin_provider_registry().create(session_r->model().provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));
+  CRITICAL_AREA_END_R(session);
 
   std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
   return RuntimeProviderRunBundle{

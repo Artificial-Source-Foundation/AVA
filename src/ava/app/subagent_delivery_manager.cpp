@@ -704,10 +704,9 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   run_options.cancel_requested = [stop_token, deadline] { return stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline; };
 
   auto bundle = [&]() -> ava::core::Result<RuntimeProviderRunBundle> {
-    runtime::session_ts::wat session_w(selected_capsule->unlocked_session);
-    run_options.permission_resolver =
-        ava::permissions::build_persistent_permission_rule_resolver(session_w->permission_rule_store(), build_headless_permission_resolver({}));
-    return options_.provider_bundle_factory(*session_w, std::move(run_options), "automatic subagent delivery");
+    run_options.permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(
+        runtime::session_ts::rat(selected_capsule->unlocked_session)->permission_rule_store(), build_headless_permission_resolver({}));
+    return options_.provider_bundle_factory(selected_capsule->unlocked_session, std::move(run_options), "automatic subagent delivery");
   }();
   if (!bundle || !bundle->provider || !bundle->transport)
   {

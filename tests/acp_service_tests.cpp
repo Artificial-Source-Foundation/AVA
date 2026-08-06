@@ -253,10 +253,10 @@ void test_acp_startup_model_is_pinned_across_config_mutation()
   options.agent_version = "1";
   options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
-  options.provider_bundle_factory = [&observed_models, base_factory](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
+  options.provider_bundle_factory = [&observed_models, base_factory](ava::app::runtime::session_ts const& unlocked_session, ava::app::runtime::RunOptions run_options,
                                                                      std::string_view label) mutable {
-    observed_models.push_back(session.model());
-    return base_factory(session, std::move(run_options), label);
+    observed_models.push_back(ava::app::runtime::session_ts::crat(unlocked_session)->model());
+    return base_factory(unlocked_session, std::move(run_options), label);
   };
   AgentService service(options);
   service.bind_update_sender([](std::string_view, std::string_view) -> ava::core::VoidResult { return {}; });
@@ -424,7 +424,7 @@ void test_acp_session_lifecycle_real_prompt_and_provider_ownership()
 
   std::mutex ownership_mutex;
   std::size_t bundle_count = 0;
-  ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
+  ava::app::RuntimeProviderRunBundleFactory factory = [&](ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions options,
                                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto transport = std::make_unique<ava::tests::FakeTransport>(std::vector<ava::http::HttpResponse>{ava::http::HttpResponse{
         .status_code = 200, .headers = {}, .body = R"({"choices":[{"message":{"content":"owned response"},"finish_reason":"stop"}]})"}});

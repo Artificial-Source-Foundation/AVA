@@ -547,7 +547,7 @@ RequestResult AcpSessionHost::prompt(AcpPromptContent content, std::stop_token s
   provider_options.announce_execution_after_permission = true;
   provider_options.redact_permission_audit_arguments = true;
   provider_options.require_explicit_file_permissions = true;
-  auto bundle = factory(*session_r(), std::move(provider_options), "ACP prompt");
+  auto bundle = factory(unlocked_session_, std::move(provider_options), "ACP prompt");
   if (!bundle)
   {
     auto error = bundle.error();

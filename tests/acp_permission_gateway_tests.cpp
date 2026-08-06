@@ -164,9 +164,10 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
     options.launch_root = ava::core::normalized_absolute_path(workspace);
     options.paths = paths;
     options.provider_bundle_factory = [gate, transport_state, fail_setup, failure_category](
-                                          ava::app::runtime::Session const&, ava::app::runtime::RunOptions run_options,
+                                          ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions run_options,
                                           std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
       {
+        AVA_ASSERT_NO_SESSION_LOCK_HELD("provider_bundle_factory lambda");
         std::unique_lock lock(gate->mutex);
         gate->entered = true;
         gate->cv.notify_all();
@@ -936,13 +937,13 @@ void test_acp_session_grant_cannot_follow_retargeted_parent_symlink()
   options.agent_version = "1";
   options.launch_root = ava::core::normalized_absolute_path(workspace);
   options.paths = paths;
-  options.provider_bundle_factory = [&, provider_state](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions run_options,
+  options.provider_bundle_factory = [&, provider_state](ava::app::runtime::session_ts const& unlocked_session, ava::app::runtime::RunOptions run_options,
                                                         std::string_view label) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto const current = bundle_number.fetch_add(1);
     auto responses = current == 0 ? std::vector<ava::http::HttpResponse>{tool_response("grant_first", first_args), acp_text_response("first complete")}
                                   : std::vector<ava::http::HttpResponse>{tool_response("grant_second", second_args), acp_text_response("second complete")};
     auto factory = sequence_bundle_factory(provider_state, std::move(responses));
-    return factory(session, std::move(run_options), label);
+    return factory(unlocked_session, std::move(run_options), label);
   };
   AgentService service(options);
   service.bind_update_sender([](std::string_view, std::string_view) -> ava::core::VoidResult { return {}; });

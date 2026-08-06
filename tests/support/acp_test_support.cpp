@@ -188,7 +188,7 @@ class RecordingTransport final : public ava::http::Transport
 
 ava::app::RuntimeProviderRunBundleFactory recording_bundle_factory(std::string* body, std::atomic_bool* entered, std::atomic_bool* release)
 {
-  return [body, entered, release](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
+  return [body, entered, release](ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions options,
                                   std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto provider = ava::provider::builtin_provider_registry().create("moonshot");
     if (!provider)
@@ -222,7 +222,7 @@ ava::core::Result<ava::http::HttpResponse> CapturingSequenceTransport::send(ava:
 
 ava::app::RuntimeProviderRunBundleFactory sequence_bundle_factory(std::shared_ptr<CapturingSequenceState> state, std::vector<ava::http::HttpResponse> responses)
 {
-  return [state = std::move(state), responses = std::move(responses)](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
+  return [state = std::move(state), responses = std::move(responses)](ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions options,
                                                                       std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     auto provider = ava::provider::builtin_provider_registry().create("moonshot");
     if (!provider)

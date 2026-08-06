@@ -2,6 +2,7 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/http/transport.h"
 #include "ava/app/runtime.h"
+#include "ava/app/runtime/session_ts.h"
 
 #include <functional>
 #include <memory>
@@ -18,7 +19,7 @@ struct RuntimeProviderRunBundle
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-using RuntimeProviderRunBundleFactory = std::function<ava::core::Result<RuntimeProviderRunBundle>(runtime::Session const&, runtime::RunOptions, std::string_view)>;
+using RuntimeProviderRunBundleFactory = std::function<ava::core::Result<RuntimeProviderRunBundle>(runtime::session_ts const&, runtime::RunOptions, std::string_view)>;
 
 // Resolves provider credentials without assuming a frontend protocol. Errors
 // include the provider, auth file, and concrete setup guidance.
@@ -28,7 +29,7 @@ using RuntimeProviderRunBundleFactory = std::function<ava::core::Result<RuntimeP
 
 // Creates an isolated provider/transport/auth bundle for one active run. The
 // returned transports are never shared with another session or run.
-[[nodiscard]] ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::Session const& session, runtime::RunOptions options,
+[[nodiscard]] ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(runtime::session_ts const& unlocked_session, runtime::RunOptions options,
                                                                                              std::string_view purpose);
 
 }  // namespace ava::app

@@ -222,7 +222,7 @@ std::string final_response(std::string_view text)
 
 ava::app::RuntimeProviderRunBundleFactory delivery_factory(std::shared_ptr<DeliveryFactoryState> state, bool ask_question = false)
 {
-  return [state = std::move(state), ask_question](ava::app::runtime::Session const& session, ava::app::runtime::RunOptions options,
+  return [state = std::move(state), ask_question](ava::app::runtime::session_ts const& unlocked_session, ava::app::runtime::RunOptions options,
                                                   std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     {
       std::lock_guard lock(state->mutex);
@@ -235,8 +235,9 @@ ava::app::RuntimeProviderRunBundleFactory delivery_factory(std::shared_ptr<Deliv
       state->exact_builtin_tools_empty = options.exact_builtin_tool_names && options.exact_builtin_tool_names->empty();
       state->ambient_extensions_isolated = options.isolate_ambient_extensions;
       state->session_mcp_disabled = options.disable_session_mcp;
-      state->observed_model_id = session.model().model_id;
-      state->observed_reasoning_level = session.reasoning() ? session.reasoning()->level : std::string{};
+      SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+      state->observed_model_id = session_r->model().model_id;
+      state->observed_reasoning_level = session_r->reasoning() ? session_r->reasoning()->level : std::string{};
       state->delivery_run_request_id = options.request_id.value_or("");
       state->changed.notify_all();
     }
@@ -678,7 +679,7 @@ void test_bounded_delivery_retries()
     return;
   }
   auto coordinator = *coordinator_result;
-  ava::app::RuntimeProviderRunBundleFactory failing_factory = [state](ava::app::runtime::Session const&, ava::app::runtime::RunOptions,
+  ava::app::RuntimeProviderRunBundleFactory failing_factory = [state](ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions,
                                                                       std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     std::lock_guard lock(state->mutex);
     ++state->factories;
@@ -777,7 +778,7 @@ void test_retry_after_synthetic_user_append_uses_same_marker()
   if (!coordinator_result)
     return;
   auto coordinator = *coordinator_result;
-  ava::app::RuntimeProviderRunBundleFactory factory = [state](ava::app::runtime::Session const&, ava::app::runtime::RunOptions options,
+  ava::app::RuntimeProviderRunBundleFactory factory = [state](ava::app::runtime::session_ts const&, ava::app::runtime::RunOptions options,
                                                               std::string_view) -> ava::core::Result<ava::app::RuntimeProviderRunBundle> {
     std::size_t number = 0;
     {

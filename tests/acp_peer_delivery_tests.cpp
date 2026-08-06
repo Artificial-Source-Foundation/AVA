@@ -16,6 +16,7 @@
 #include "ava/core/json.h"
 #include "ava/core/path.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <chrono>
@@ -75,7 +76,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   JsonRpcPeer timeout_peer(std::make_unique<MemoryTransport>(timeout_state),
                            [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult timeout_run;
-  std::jthread timeout_thread([&] { timeout_run = timeout_peer.run(); });
+  std::jthread timeout_thread = ava::core::make_jthread("timeout_thread", [&] { timeout_run = timeout_peer.run(); });
   wait_reader(timeout_state);
   auto timed = timeout_peer.send_request("client/claimed-timeout", std::string("{}"), 250ms);
   wait_writer(timeout_state);
@@ -95,7 +96,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   eof_state->block_writes = true;
   JsonRpcPeer eof_peer(std::make_unique<MemoryTransport>(eof_state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult eof_run;
-  std::jthread eof_thread([&] { eof_run = eof_peer.run(); });
+  std::jthread eof_thread = ava::core::make_jthread("eof_thread", [&] { eof_run = eof_peer.run(); });
   wait_reader(eof_state);
   auto eof_call = eof_peer.send_request("client/claimed-eof", std::string("{}"), 5s);
   wait_writer(eof_state);
@@ -111,7 +112,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   cancel_state->block_writes = true;
   JsonRpcPeer cancel_peer(std::make_unique<MemoryTransport>(cancel_state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult cancel_run;
-  std::jthread cancel_thread([&] { cancel_run = cancel_peer.run(); });
+  std::jthread cancel_thread = ava::core::make_jthread("cancel_thread", [&] { cancel_run = cancel_peer.run(); });
   wait_reader(cancel_state);
   auto canceled = cancel_peer.send_request("client/claimed-cancel", std::string("{}"), 5s);
   wait_writer(cancel_state);
@@ -127,7 +128,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   auto staged_state = std::make_shared<MemoryTransportState>();
   staged_state->block_writes = true;
   JsonRpcPeer staged_peer(std::make_unique<MemoryTransport>(staged_state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
-  std::jthread staged_thread([&] { static_cast<void>(staged_peer.run()); });
+  std::jthread staged_thread = ava::core::make_jthread("staged_thread", [&] { static_cast<void>(staged_peer.run()); });
   wait_reader(staged_state);
   auto staged = staged_peer.send_request("session/request_permission", std::string("{}"), 2s);
   wait_writer(staged_state);
@@ -160,7 +161,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   delivered_state->block_writes = true;
   JsonRpcPeer delivered_peer(std::make_unique<MemoryTransport>(delivered_state),
                              [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
-  std::jthread delivered_thread([&] { static_cast<void>(delivered_peer.run()); });
+  std::jthread delivered_thread = ava::core::make_jthread("delivered_thread", [&] { static_cast<void>(delivered_peer.run()); });
   wait_reader(delivered_state);
   auto delivered = delivered_peer.send_request("client/delivery-wins", std::string("{}"), 2s);
   wait_writer(delivered_state);
@@ -193,7 +194,7 @@ void test_acp_peer_claimed_outbound_abort_and_delivery_races()
   JsonRpcPeer ambiguous_peer(std::make_unique<MemoryTransport>(ambiguous_state),
                              [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult ambiguous_run;
-  std::jthread ambiguous_thread([&] { ambiguous_run = ambiguous_peer.run(); });
+  std::jthread ambiguous_thread = ava::core::make_jthread("ambiguous_thread", [&] { ambiguous_run = ambiguous_peer.run(); });
   wait_reader(ambiguous_state);
   auto ambiguous = ambiguous_peer.send_request("client/ambiguous-race", std::string("{}"), 250ms);
   wait_writer(ambiguous_state);
@@ -256,7 +257,7 @@ void test_acp_prompt_admission_rollback_and_control_cancel_saturation()
     });
 
     ava::core::VoidResult run_result;
-    std::jthread peer_thread([&] { run_result = peer.run(); });
+    std::jthread peer_thread = ava::core::make_jthread("peer_thread", [&] { run_result = peer.run(); });
     wait_reader(state);
     for (std::size_t index = 0; index < kWorkerCount; ++index) feed(state, R"({"jsonrpc":"2.0","method":"test/block","params":{}})");
     {
@@ -360,7 +361,7 @@ void test_acp_peer_shutdown_abandons_queued_unstarted_request()
   });
 
   ava::core::VoidResult run_result;
-  std::jthread peer_thread([&] { run_result = peer.run(); });
+  std::jthread peer_thread = ava::core::make_jthread("peer_thread", [&] { run_result = peer.run(); });
   wait_reader(state);
   for (std::size_t index = 0; index < kWorkerCount; ++index) feed(state, R"({"jsonrpc":"2.0","method":"test/block-worker","params":{}})");
 
@@ -421,7 +422,7 @@ void test_acp_peer_started_non_cooperative_shutdown_escalates()
           while (true) std::this_thread::sleep_for(10ms);
         },
         {}, {}, make_process_shutdown_escalation(), 100ms);
-    std::jthread request_feeder([state] {
+    std::jthread request_feeder = ava::core::make_jthread("request_feeder", [state] {
       wait_reader(state);
       feed(state, R"({"jsonrpc":"2.0","id":1,"method":"never","params":{}})");
     });
@@ -497,7 +498,7 @@ void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
   state->fail_writes = true;
   JsonRpcPeer peer(std::make_unique<MemoryTransport>(state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
   feed(state, R"({"jsonrpc":"2.0","id":1,"method":"x","params":{}})");
   thread.join();
@@ -511,7 +512,7 @@ void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
     return std::string("{}");
   });
   ava::core::VoidResult blocked_result;
-  std::jthread blocked_thread([&] { blocked_result = blocked.run(); });
+  std::jthread blocked_thread = ava::core::make_jthread("blocked_thread", [&] { blocked_result = blocked.run(); });
   wait_reader(blocked_state);
   feed(blocked_state, R"({"jsonrpc":"2.0","id":1,"method":"blocked","params":{}})");
   while (!entered.load(std::memory_order_acquire)) std::this_thread::sleep_for(1ms);
@@ -530,7 +531,7 @@ void test_acp_peer_write_failure_wakes_reader_and_shutdown_race()
         while (!token.stop_requested()) std::this_thread::sleep_for(1ms);
         notification_stopped.store(true, std::memory_order_release);
       });
-  std::jthread notification_thread([&] { static_cast<void>(notifications.run()); });
+  std::jthread notification_thread = ava::core::make_jthread("notification_thread", [&] { static_cast<void>(notifications.run()); });
   wait_reader(notification_state);
   feed(notification_state, R"({"jsonrpc":"2.0","method":"blocked-notification","params":{}})");
   while (!notification_entered.load(std::memory_order_acquire)) std::this_thread::sleep_for(1ms);

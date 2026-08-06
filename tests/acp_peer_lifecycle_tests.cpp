@@ -12,6 +12,7 @@
 #include "ava/core/json.h"
 #include "ava/core/path.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <chrono>
@@ -46,7 +47,7 @@ void test_acp_peer_lifecycle_notifications_and_duplicate_ids()
       std::make_unique<MemoryTransport>(state), [&service](Request const& request, std::stop_token token) { return service.handle_request(request, token); },
       [&service](Notification const& notification, std::stop_token token) { service.handle_notification(notification, token); });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   feed(state, R"({"jsonrpc":"2.0","id":1,"method":"session/new","params":{}})");
@@ -94,7 +95,7 @@ void test_acp_peer_bidirectional_out_of_order_deadline_and_late_response()
   auto state = std::make_shared<MemoryTransportState>();
   JsonRpcPeer peer(std::make_unique<MemoryTransport>(state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   auto first = peer.send_request("client/one", std::string("{}"), 2s);
@@ -161,7 +162,7 @@ void test_acp_peer_bidirectional_out_of_order_deadline_and_late_response()
     }
     static_cast<void>(take_output(state));
     auto response_record = encode_success(call->id, "{}");
-    std::jthread responder([state, response_record, index] {
+    std::jthread responder = ava::core::make_jthread("responder", [state, response_record, index] {
       std::this_thread::sleep_for(index % 2 == 0 ? 1ms : 3ms);
       feed(state, *response_record);
     });
@@ -187,7 +188,7 @@ void test_acp_peer_cancel_duplicate_inflight_and_saturation()
     return std::unexpected(JsonRpcError{.code = -32800, .message = "cancelled", .data_json = std::nullopt, .id = std::nullopt, .suppress_response = false});
   });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   feed(state, R"({"jsonrpc":"2.0","id":null,"method":"slow","params":{}})");
@@ -269,7 +270,7 @@ void test_acp_peer_lifecycle_request_commit_linearization()
   });
 
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
   feed(state, R"({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":1}})");
   auto initialized = take_output(state);
@@ -310,7 +311,7 @@ void test_acp_peer_outbound_queue_saturation()
   state->block_writes = true;
   JsonRpcPeer peer(std::make_unique<MemoryTransport>(state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   expect(peer.send_notification("test/block", std::string("{}")).has_value(), "ACP saturation regression claims one blocked writer record");
@@ -366,7 +367,7 @@ void test_acp_peer_delivered_fail_stop_cancellation()
   auto state = std::make_shared<MemoryTransportState>();
   JsonRpcPeer peer(std::make_unique<MemoryTransport>(state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   auto write = peer.send_request("fs/write_text_file", std::string("{}"), 2s, OutboundCallPolicy::AbortConnectionIfDelivered);
@@ -388,7 +389,7 @@ void test_acp_peer_delivered_fail_stop_cancellation()
   JsonRpcPeer deadline_peer(std::make_unique<MemoryTransport>(deadline_state),
                             [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
   ava::core::VoidResult deadline_run;
-  std::jthread deadline_thread([&] { deadline_run = deadline_peer.run(); });
+  std::jthread deadline_thread = ava::core::make_jthread("deadline_thread", [&] { deadline_run = deadline_peer.run(); });
   wait_reader(deadline_state);
   auto deadline_write = deadline_peer.send_request("fs/write_text_file", std::string("{}"), 50ms, OutboundCallPolicy::AbortConnectionIfDelivered);
   auto deadline_write_record = take_output(deadline_state);
@@ -422,7 +423,7 @@ void test_acp_peer_fail_stop_poison_arbitrates_all_pending_calls()
       reader_barrier_cv.notify_all();
     });
     ava::core::VoidResult run_result;
-    std::jthread thread([&] { run_result = peer.run(); });
+    std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
     wait_reader(state);
 
     auto trigger = peer.send_request("fs/write_text_file", std::string("{}"), deadline_triggered ? 1s : 5s, OutboundCallPolicy::AbortConnectionIfDelivered);
@@ -496,7 +497,7 @@ void test_acp_peer_writer_acknowledged_lifecycle()
                    });
   handler_peer = &peer;
   ava::core::VoidResult run_result;
-  std::jthread thread([&] { run_result = peer.run(); });
+  std::jthread thread = ava::core::make_jthread("thread", [&] { run_result = peer.run(); });
   wait_reader(state);
 
   expect(peer.send_notification("test/block", std::string("{}")).has_value(), "ACP lifecycle test claims a leading stalled write");
@@ -547,7 +548,7 @@ void test_acp_peer_writer_acknowledged_lifecycle()
   auto eof_state = std::make_shared<MemoryTransportState>();
   eof_state->block_writes = true;
   JsonRpcPeer eof_peer(std::make_unique<MemoryTransport>(eof_state), [](Request const&, std::stop_token) -> RequestResult { return std::string("{}"); });
-  std::jthread eof_thread([&] { static_cast<void>(eof_peer.run()); });
+  std::jthread eof_thread = ava::core::make_jthread("eof_thread", [&] { static_cast<void>(eof_peer.run()); });
   wait_reader(eof_state);
   static_cast<void>(eof_peer.send_notification("test/eof-block", std::string("{}")));
   wait_writer(eof_state);

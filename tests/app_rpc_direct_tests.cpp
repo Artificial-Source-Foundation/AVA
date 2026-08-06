@@ -14,6 +14,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/core/json.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -56,7 +57,7 @@ void test_app_rpc_direct_run_command_permission_reply_executes_and_audits()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
@@ -121,7 +122,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });
@@ -191,7 +192,7 @@ void test_app_rpc_direct_run_command_active_rejects_and_cancels_process()
     return ava::permissions::PermissionResolution::Allow;
   };
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -248,7 +249,7 @@ void test_app_rpc_compact_provider_failure_is_error_response()
 
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"cmp-fail\",\"type\":\"compact\"}\n");

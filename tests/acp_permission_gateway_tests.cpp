@@ -23,6 +23,7 @@
 #include "ava/core/json.h"
 #include "ava/core/path.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -90,7 +91,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
       return;
 
     RequestResult prompt_result;
-    std::jthread prompt_thread([&] {
+    std::jthread prompt_thread = ava::core::make_jthread("prompt_thread", [&] {
       prompt_result =
           service.handle_request(Request{.id = std::int64_t(3),
                                          .method = "session/prompt",
@@ -195,7 +196,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
       return;
 
     RequestResult prompt_result;
-    std::jthread prompt_thread([&] {
+    std::jthread prompt_thread = ava::core::make_jthread("prompt_thread", [&] {
       prompt_result =
           service.handle_request(Request{.id = std::int64_t(3),
                                          .method = "session/prompt",

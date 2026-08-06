@@ -23,6 +23,7 @@
 #include "ava/core/json.h"
 #include "ava/core/path.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -91,7 +92,7 @@ void test_acp_peer_prompt_terminal_commit_arbitration()
     });
 
     ava::core::VoidResult run_result;
-    std::jthread peer_thread([&] { run_result = peer.run(); });
+    std::jthread peer_thread = ava::core::make_jthread("peer_thread", [&] { run_result = peer.run(); });
     wait_reader(state);
     feed(state, R"({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":1}})");
     static_cast<void>(take_output(state));

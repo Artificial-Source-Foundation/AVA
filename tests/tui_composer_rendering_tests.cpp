@@ -19,6 +19,7 @@
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/theme.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -493,7 +494,7 @@ bool test_atomic_search_input_prompt_precedence()
           return true;
         }};
 
-    std::jthread provider([&]() {
+    std::jthread provider = ava::core::make_jthread("provider", [&]() {
       {
         std::unique_lock lock(mutex);
         if (!changed.wait_for(lock, std::chrono::seconds(1), [&]() { return start_provider; }))

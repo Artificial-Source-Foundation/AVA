@@ -3,6 +3,7 @@
 #include "ava/agent/tool_scheduler.h"
 #include "ava/core/error.h"
 #include "ava/core/mode.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <array>
@@ -262,7 +263,7 @@ void test_run_parallel_tool_schedule_splits_epochs_at_barriers()
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -332,7 +333,7 @@ void test_run_parallel_tool_schedule_returns_provider_order_after_reverse_comple
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -397,7 +398,7 @@ void test_run_parallel_tool_schedule_respects_worker_cap()
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -462,7 +463,7 @@ void test_run_parallel_tool_schedule_replaces_immediately_completed_capped_worke
   std::atomic_size_t executed = 0;
   std::stop_source cancellation;
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -521,7 +522,7 @@ void test_run_parallel_tool_schedule_refills_capacity_after_retiring_a_completed
 
   std::stop_source cancellation;
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -591,7 +592,7 @@ void test_run_parallel_tool_schedule_signals_stop_to_later_workers_on_error()
 
   std::stop_source cancellation;
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -657,7 +658,7 @@ void test_run_parallel_tool_schedule_returns_first_error_in_provider_order()
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -731,7 +732,7 @@ void test_run_parallel_tool_schedule_cancels_active_epoch_from_external_stop_tok
 
   std::stop_source source;
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -818,7 +819,7 @@ void test_run_parallel_tool_schedule_converts_executor_exception()
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {
@@ -917,7 +918,7 @@ void test_run_parallel_tool_schedule_keeps_non_eligible_slots_sequential()
   } state;
 
   std::optional<ava::core::Result<std::vector<ava::agent::ToolScheduleOutcome>>> scheduled;
-  std::jthread runner([&] {
+  std::jthread runner = ava::core::make_jthread("runner", [&] {
     scheduled = ava::agent::run_parallel_tool_schedule(
         schedule,
         [&](ava::agent::ToolScheduleSlot const& slot, std::stop_token stop_token) -> ava::core::Result<ava::agent::ToolDispatchResult> {

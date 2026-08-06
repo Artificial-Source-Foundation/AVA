@@ -6,6 +6,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/session/session_store.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -244,7 +245,7 @@ void test_session_run_controller_admission_inspection_and_join()
   expect(controller.inspect_admission({.request_id = "other"}) == ava::app::AdmissionDisposition::RejectDifferentRequest,
          "different correlation has bounded reject disposition");
   std::optional<ava::app::RunOutcome> joined;
-  std::jthread waiter([&] {
+  std::jthread waiter = ava::core::make_jthread("waiter", [&] {
     auto outcome = controller.wait_outcome("same");
     if (outcome)
       joined = *outcome;
@@ -274,7 +275,7 @@ void test_session_run_controller_stable_join_and_command_kinds()
     return;
   auto guard_a = std::move(*a);
   std::optional<ava::app::RunOutcome> joined;
-  std::jthread waiter([&] {
+  std::jthread waiter = ava::core::make_jthread("waiter", [&] {
     auto outcome = controller.wait_outcome("A");
     if (outcome)
       joined = *outcome;
@@ -459,12 +460,12 @@ void test_session_run_controller_failed_and_inflight_recovery()
         auto owner = controller.owner_append_route();
         std::optional<ava::core::VoidResult> append_result;
         std::optional<ava::core::VoidResult> reset_result;
-        std::jthread writer([&] { append_result.emplace(owner(append_entry("inflight-torn"))); });
+        std::jthread writer = ava::core::make_jthread("writer", [&] { append_result.emplace(owner(append_entry("inflight-torn"))); });
         {
           std::unique_lock lock(hook_mutex);
           expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "in-flight append reaches deterministic write gate");
         }
-        std::jthread resetter([&] { reset_result.emplace(controller.reset_persistence_failure()); });
+        std::jthread resetter = ava::core::make_jthread("resetter", [&] { reset_result.emplace(controller.reset_persistence_failure()); });
         {
           std::lock_guard lock(hook_mutex);
           release = true;
@@ -511,12 +512,12 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
         auto owner = controller.owner_append_route();
         expect(!owner(append_entry("reset-torn")), "shutdown/reset fixture creates a partial persistence latch");
         std::optional<ava::core::VoidResult> reset_result;
-        std::jthread resetter([&] { reset_result.emplace(controller.reset_persistence_failure()); });
+        std::jthread resetter = ava::core::make_jthread("resetter", [&] { reset_result.emplace(controller.reset_persistence_failure()); });
         {
           std::unique_lock lock(hook_mutex);
           expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return recovery_entered; }), "recovery reaches deterministic publication gate");
         }
-        std::jthread shutdown([&] { controller.shutdown(); });
+        std::jthread shutdown = ava::core::make_jthread("shutdown", [&] { controller.shutdown(); });
         auto const deadline = ava::tests::now_plus_seconds(3);
         while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
                std::chrono::steady_clock::now() < deadline)
@@ -564,15 +565,15 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
           auto owner = controller.owner_append_route();
           std::optional<ava::core::VoidResult> active_result;
           std::optional<ava::core::VoidResult> queued_result;
-          std::jthread first([&] { active_result.emplace(active(append_entry("shutdown-active"))); });
+          std::jthread first = ava::core::make_jthread("first", [&] { active_result.emplace(active(append_entry("shutdown-active"))); });
           {
             std::unique_lock lock(hook_mutex);
             expect(hook_cv.wait_for(lock, std::chrono::seconds(3), [&] { return active_entered; }), "active append reaches shutdown gate");
           }
-          std::jthread second([&] { queued_result.emplace(owner(append_entry("shutdown-queued"))); });
+          std::jthread second = ava::core::make_jthread("second", [&] { queued_result.emplace(owner(append_entry("shutdown-queued"))); });
           auto const queue_deadline = ava::tests::now_plus_seconds(3);
           while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
-          std::jthread shutdown([&] { controller.shutdown(); });
+          std::jthread shutdown = ava::core::make_jthread("shutdown", [&] { controller.shutdown(); });
           auto const close_deadline = ava::tests::now_plus_seconds(3);
           while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
                  std::chrono::steady_clock::now() < close_deadline)
@@ -1054,13 +1055,13 @@ void test_session_run_controller_failure_drains_tickets_with_exact_accounting()
   std::optional<ava::core::VoidResult> first_result;
   std::optional<ava::core::VoidResult> second_result;
   std::optional<ava::core::VoidResult> third_result;
-  std::jthread first([&] { first_result.emplace(route(std::move(first_entry))); });
+  std::jthread first = ava::core::make_jthread("first", [&] { first_result.emplace(route(std::move(first_entry))); });
   {
     std::unique_lock lock(gate_mutex);
     expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "failure ticket first append reaches its write gate");
   }
-  std::jthread second([&] { second_result.emplace(route(std::move(second_entry))); });
-  std::jthread third([&] { third_result.emplace(route(std::move(third_entry))); });
+  std::jthread second = ava::core::make_jthread("second", [&] { second_result.emplace(route(std::move(second_entry))); });
+  std::jthread third = ava::core::make_jthread("third", [&] { third_result.emplace(route(std::move(third_entry))); });
   auto const deadline = ava::tests::now_plus_seconds(3);
   auto queued = controller.snapshot();
   while (queued.queued_appends < 3 && std::chrono::steady_clock::now() < deadline)
@@ -1157,7 +1158,7 @@ void test_session_run_controller_batch_is_one_ticket_and_latches_failure()
   };
   auto const expected_bytes = bytes(entries[0]) + bytes(entries[1]);
   std::optional<ava::core::VoidResult> result;
-  std::jthread writer([&] { result.emplace(route(std::move(entries))); });
+  std::jthread writer = ava::core::make_jthread("writer", [&] { result.emplace(route(std::move(entries))); });
   bool reached_gate = false;
   {
     std::unique_lock lock(gate_mutex);
@@ -1249,7 +1250,7 @@ void test_session_run_controller_routes_release_target_on_shutdown()
   bool writer_ready = false;
   bool release_writer = false;
   std::optional<ava::core::VoidResult> racing_result;
-  std::jthread writer([&] {
+  std::jthread writer = ava::core::make_jthread("writer", [&] {
     std::unique_lock lock(mutex);
     writer_ready = true;
     ready.notify_all();

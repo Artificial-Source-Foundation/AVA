@@ -10,6 +10,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/config/auth.h"
 #include "ava/provider/openai_provider.h"
+#include "ava/core/thread.h"
 
 #include <chrono>
 #include <filesystem>
@@ -141,7 +142,7 @@ void test_app_rpc_cancel_affects_subsequent_prompt()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"cancel\",\"type\":\"cancel\"}\n");
@@ -198,7 +199,7 @@ void test_app_rpc_active_prompt_cancel_unblocks_pending_permission()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -251,7 +252,7 @@ void test_app_rpc_steer_applies_before_next_provider_request()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -309,7 +310,7 @@ void test_app_rpc_follow_up_runs_after_active_prompt()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -426,7 +427,7 @@ void test_app_rpc_steer_after_follow_up_started_targets_follow_up()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -490,7 +491,7 @@ void test_app_rpc_queue_limit_rejects_new_items()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -547,7 +548,7 @@ void test_app_rpc_eof_clears_queued_follow_up_without_running()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -600,7 +601,7 @@ void test_app_rpc_cancel_clears_queued_steer_and_follow_up()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -665,7 +666,7 @@ void test_app_rpc_direct_command_rejects_prompt_only_queue_commands()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -717,7 +718,7 @@ void test_app_rpc_duplicate_outstanding_id_does_not_replace_original()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -776,7 +777,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 

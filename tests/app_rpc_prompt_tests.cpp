@@ -13,6 +13,7 @@
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -74,7 +75,7 @@ void test_app_rpc_prompt_with_fake_transport_streams_events()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc\"}\n");
@@ -120,7 +121,7 @@ void test_app_rpc_offline_allows_local_protocol_and_rejects_prompt_before_provid
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"proto\",\"type\":\"get_protocol\"}\n");
@@ -174,7 +175,7 @@ void test_app_rpc_prompt_imports_image_attachments()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-img\",\"type\":\"prompt\",\"message\":\"describe\",\"attachments\":[\"" + ava::core::json::escape(image_path.string()) +
@@ -231,7 +232,7 @@ void test_app_rpc_prompt_imports_inline_image_uploads()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-upload\",\"type\":\"prompt\",\"message\":\"describe\",\"images\":[{\"type\":\"image\",\"data\":\"" +
@@ -321,7 +322,7 @@ void test_app_rpc_prompt_streams_provider_deltas_before_final_response()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p1\",\"type\":\"prompt\",\"message\":\"hello rpc stream\"}\n");
@@ -370,7 +371,7 @@ void test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"p-cancel\",\"type\":\"prompt\",\"message\":\"cancel during retry\"}\n");
@@ -423,7 +424,7 @@ void test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"cancel-idle\",\"type\":\"cancel\"}\n");
@@ -486,7 +487,7 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });

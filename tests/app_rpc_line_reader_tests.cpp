@@ -11,6 +11,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/core/error.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -124,7 +125,7 @@ void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime()
       ava::core::Result<bool> read_result = true;
       std::vector<RpcInputTerminalOutcome> outcomes;
       std::string line;
-      std::jthread reading([&] { read_result = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+      std::jthread reading = ava::core::make_jthread("reading", [&] { read_result = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
       (*reader)->cancel();
       close(fds[1]);
       reading.join();
@@ -213,7 +214,7 @@ void test_app_rpc_stream_reader_wake_badbit_is_canceled()
   std::vector<RpcInputTerminalOutcome> outcomes;
   std::string line;
   ava::core::Result<bool> result = true;
-  std::jthread reader_thread([&] { result = reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+  std::jthread reader_thread = ava::core::make_jthread("reader_thread", [&] { result = reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
   bool const blocked = input_buffer.wait_until_blocked(std::chrono::seconds(2));
   reader.cancel();
   reader_thread.join();

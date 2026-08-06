@@ -19,6 +19,7 @@
 #include "ava/plugin/tool_broker.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -493,7 +494,7 @@ void test_static_plugin_resource_loader_is_descriptor_anchored()
   std::mutex fifo_mutex;
   std::condition_variable fifo_changed;
   bool fifo_read_finished = false;
-  std::jthread fifo_unblocker([&] {
+  std::jthread fifo_unblocker = ava::core::make_jthread("fifo_unblocker", [&] {
     std::unique_lock lock(fifo_mutex);
     if (fifo_changed.wait_for(lock, std::chrono::seconds(5), [&] { return fifo_read_finished; }))
       return;

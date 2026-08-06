@@ -13,6 +13,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/core/error.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -205,7 +206,7 @@ void test_app_rpc_terminal_publication_gates_prompt_id_reuse()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -253,7 +254,7 @@ void test_app_rpc_parent_terminal_precedes_queued_follow_up_start()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -367,7 +368,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       std::ostream out(&output_buffer);
       ava::core::VoidResult result;
       ava::app::runtime::session_ts unlocked_session(std::move(*session));
-      std::jthread rpc_thread([&] {
+      std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
         result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
       });
       input_buffer.push("{\"id\":\"direct\",\"type\":\"run_bash\",\"command\":\"printf direct\"}\n");
@@ -408,7 +409,7 @@ void test_app_rpc_terminal_publication_gates_direct_and_compaction_runs()
       std::ostream out(&output_buffer);
       ava::core::VoidResult result;
       ava::app::runtime::session_ts unlocked_session(std::move(*session));
-      std::jthread rpc_thread([&] {
+      std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
         result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
       });
       input_buffer.push("{\"id\":\"compact\",\"type\":\"compact\"}\n");
@@ -452,7 +453,7 @@ void test_app_rpc_worker_output_failure_wakes_blocked_input()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread([&] {
+  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, transport, runtime_options, in, out,
                                     [&] noexcept { input_buffer.close(); });
   });

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/debug/debug_ostream_operators.h"
 #include "ava/core/thread.h"
 #include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
@@ -262,7 +263,7 @@ std::shared_ptr<ava::agent::SubagentCoordinator> const& SubagentDeliveryManager:
 ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryManager::refresh_parent(runtime::session_ts const& unlocked_session,
                                                                                                       runtime::RunOptions const& options)
 {
-  DoutEntering(dc::notice, "SubagentDeliveryManager::refresh_parent() from " << Location((char*)__builtin_return_address(0) + builtin_return_address_offset));
+  DoutEntering(dc::notice, "SubagentDeliveryManager::refresh_parent(" << unlocked_session << ", " << options << ")");
 #ifdef CWDEBUG
   auto&& f = at_scope_end([]{ Dout(dc::notice, "Leaving SubagentDeliveryManager::refresh_parent()"); });
 #endif

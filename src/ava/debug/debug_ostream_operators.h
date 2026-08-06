@@ -184,9 +184,9 @@ std::ostream& operator<<(std::ostream& os, std::reference_wrapper<T> const& ref)
 }
 
 template<typename T, typename POLICY_MUTEX>
-std::ostream& operator<<(std::ostream& os, threadsafe::Unlocked<T, POLICY_MUTEX>& unlocked)
+std::ostream& operator<<(std::ostream& os, threadsafe::Unlocked<T, POLICY_MUTEX> const& unlocked)
 {
-  return os << "threadsafe::Unlocked<" << NAMESPACE_DEBUG::type_name_of<T>() << ">@" << (void*)&unlocked;
+  return os << "threadsafe::Unlocked<" << NAMESPACE_DEBUG::type_name_of<T>() << ">@" << (void const*)&unlocked;
 }
 
 template<typename... Args>

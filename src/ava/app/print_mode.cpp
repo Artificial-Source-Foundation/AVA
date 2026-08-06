@@ -161,8 +161,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session
                                                                 ava::http::Transport& transport, PrintModeRunOptions const& options, std::ostream& out,
                                                                 std::ostream& err)
 {
-  DoutEntering(dc::runtime, "run_print_prompt(" << unlocked_session << ", \"" << prompt << "\", " << provider << ", ...) from "
-                                                << Location((char*)__builtin_return_address(0) + builtin_return_address_offset));
+  DoutEntering(dc::runtime, "run_print_prompt(" << unlocked_session << ", \"" << prompt << "\", " << provider << ", ...)");
 #ifdef CWDEBUG
   auto&& f = at_scope_end([] { Dout(dc::notice, "Leaving run_print_prompt()"); });
 #endif

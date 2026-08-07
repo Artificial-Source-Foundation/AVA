@@ -9,6 +9,7 @@
 #include "ava/provider/provider.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <chrono>
@@ -139,7 +140,7 @@ class SessionTitleCoordinator final
   std::unordered_set<std::string> active_session_ids_;
   std::unordered_set<std::string> admitted_session_ids_;
   bool accepting_ = true;
-  std::vector<std::jthread> workers_;
+  std::vector<ava::core::JoinThread> workers_;
   std::vector<CatalogNotification> catalog_notifications_;
   std::atomic_size_t catalog_generation_ = 0;
 };

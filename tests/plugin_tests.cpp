@@ -494,7 +494,7 @@ void test_static_plugin_resource_loader_is_descriptor_anchored()
   std::mutex fifo_mutex;
   std::condition_variable fifo_changed;
   bool fifo_read_finished = false;
-  std::jthread fifo_unblocker = ava::core::make_jthread("fifo_unblocker", [&] {
+  ava::core::JoinThread fifo_unblocker = ava::core::JoinThread::create("fifo_unblocker", [&] {
     std::unique_lock lock(fifo_mutex);
     if (fifo_changed.wait_for(lock, std::chrono::seconds(5), [&] { return fifo_read_finished; }))
       return;

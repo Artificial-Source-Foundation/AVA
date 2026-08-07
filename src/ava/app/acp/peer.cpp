@@ -180,7 +180,7 @@ class JsonRpcPeer::State
       if (!worker_exit_cv_.wait_for(lock, shutdown_grace_, [&] { return workers_exited_ == worker_count_; }))
         shutdown_escalation_->escalate();
     }
-    std::vector<std::jthread> workers;
+    std::vector<ava::core::JoinThread> workers;
     {
       std::lock_guard workers_lock(workers_mutex_);
       workers.swap(workers_);
@@ -440,7 +440,7 @@ class JsonRpcPeer::State
     workers_.reserve(kWorkerCount);
     worker_count_ = kWorkerCount;
     for (std::size_t index = 0; index < kWorkerCount; ++index)
-      workers_.emplace_back(ava::core::make_jthread("acp_worker", [this](std::stop_token token) { worker_loop(token); }));
+      workers_.emplace_back(ava::core::JoinThread::create("acp_worker", [this](std::stop_token token) { worker_loop(token); }));
   }
 
   void request_worker_stop() noexcept
@@ -1112,7 +1112,7 @@ class JsonRpcPeer::State
   std::condition_variable task_cv_;
   std::deque<WorkerTask> tasks_;
   bool task_closing_ = false;
-  std::vector<std::jthread> workers_;
+  std::vector<ava::core::JoinThread> workers_;
   std::mutex workers_mutex_;
   std::mutex worker_exit_mutex_;
   std::condition_variable worker_exit_cv_;

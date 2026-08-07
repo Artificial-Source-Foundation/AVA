@@ -125,7 +125,8 @@ void test_app_rpc_posix_line_reader_wake_eof_and_fd_lifetime()
       ava::core::Result<bool> read_result = true;
       std::vector<RpcInputTerminalOutcome> outcomes;
       std::string line;
-      std::jthread reading = ava::core::make_jthread("reading", [&] { read_result = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+      ava::core::JoinThread reading = ava::core::JoinThread::create(
+          "reading", [&] { read_result = (*reader)->read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
       (*reader)->cancel();
       close(fds[1]);
       reading.join();
@@ -186,8 +187,8 @@ void test_app_rpc_stream_line_reader_terminal_outcomes()
   std::istream canceled_input(&canceled_input_buffer);
   ava::app::rpc::StreamRpcLineReader canceled_reader(canceled_input, [&] noexcept { canceled_input_buffer.close(); });
   ava::core::Result<bool> canceled = true;
-  std::jthread canceled_read(
-      [&] { canceled = canceled_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+  auto canceled_read = ava::core::JoinThread::create(
+      "canceled_read", [&] { canceled = canceled_reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
   bool const canceled_while_partial = canceled_input_buffer.wait_until_blocked(std::chrono::seconds(2));
   canceled_reader.cancel();
   canceled_read.join();
@@ -214,7 +215,8 @@ void test_app_rpc_stream_reader_wake_badbit_is_canceled()
   std::vector<RpcInputTerminalOutcome> outcomes;
   std::string line;
   ava::core::Result<bool> result = true;
-  std::jthread reader_thread = ava::core::make_jthread("reader_thread", [&] { result = reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
+  ava::core::JoinThread reader_thread = ava::core::JoinThread::create(
+      "reader_thread", [&] { result = reader.read_line(line, [&outcomes](RpcInputTerminalOutcome outcome) { outcomes.push_back(outcome); }); });
   bool const blocked = input_buffer.wait_until_blocked(std::chrono::seconds(2));
   reader.cancel();
   reader_thread.join();

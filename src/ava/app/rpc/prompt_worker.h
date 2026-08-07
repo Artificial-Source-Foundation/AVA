@@ -6,6 +6,7 @@
 #include "ava/app/runtime.h"
 #include "ava/session/attachments.h"
 #include "ava/provider/provider.h"
+#include "ava/core/thread.h"
 
 #include <mutex>
 #include <string>
@@ -34,6 +35,6 @@ struct RpcPromptWorkerOptions
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-[[nodiscard]] std::jthread make_rpc_prompt_worker(RpcPromptWorkerOptions options);
+[[nodiscard]] ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options);
 
 }  // namespace ava::app::rpc

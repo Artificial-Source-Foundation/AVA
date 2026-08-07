@@ -108,7 +108,7 @@ struct ParallelEpochState
 struct ActiveEpochWorker
 {
   std::size_t epoch_offset = 0;
-  std::jthread thread;
+  ava::core::JoinThread thread;
 };
 
 void request_epoch_cancellation(ParallelEpochState& state)
@@ -163,7 +163,7 @@ std::optional<ava::core::Error> launch_epoch_worker(std::span<ToolScheduleSlot c
 {
   try
   {
-    auto thread = ava::core::make_jthread("tool_scheduler", [&executor, &state, epoch, offset](std::stop_token stop_token) {
+    auto thread = ava::core::JoinThread::create("tool_scheduler", [&executor, &state, epoch, offset](std::stop_token stop_token) {
       auto result = execute_parallel_worker(executor, epoch[offset], stop_token);
       bool const failed = !result;
       {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -329,7 +330,7 @@ class QueuedJsonlRunObserver final : public RunObserver
   std::atomic<std::uint64_t> queue_dropped_ = 0;
   std::atomic<std::uint64_t> queue_failures_ = 0;
   bool closing_ = false;
-  std::jthread worker_;
+  ava::core::JoinThread worker_;
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 

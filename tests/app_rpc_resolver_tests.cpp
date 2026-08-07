@@ -223,9 +223,9 @@ ResolverRaceObservation run_resolver_cancellation_race(ResolverRaceKind kind, bo
     else
     {
       ava::core::Result<ava::app::rpc::OutputWriteResult> written = ava::app::rpc::OutputWriteResult::Skipped;
-      std::jthread publisher = ava::core::make_jthread("publisher", [&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
+      ava::core::JoinThread publisher = ava::core::JoinThread::create("publisher", [&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
       observed.publication_started = output_buffer.wait_until_write_started(std::chrono::seconds(2));
-      std::jthread canceler = ava::core::make_jthread("canceler", [&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
+      ava::core::JoinThread canceler = ava::core::JoinThread::create("canceler", [&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
       output_buffer.release_write();
       publisher.join();
       canceler.join();
@@ -255,9 +255,9 @@ ResolverRaceObservation run_resolver_cancellation_race(ResolverRaceKind kind, bo
     else
     {
       ava::core::Result<ava::app::rpc::OutputWriteResult> written = ava::app::rpc::OutputWriteResult::Skipped;
-      std::jthread publisher = ava::core::make_jthread("publisher", [&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
+      ava::core::JoinThread publisher = ava::core::JoinThread::create("publisher", [&] { written = ava::app::rpc::Output::write_record_if(output, record, gate); });
       observed.publication_started = output_buffer.wait_until_write_started(std::chrono::seconds(2));
-      std::jthread canceler = ava::core::make_jthread("canceler", [&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
+      ava::core::JoinThread canceler = ava::core::JoinThread::create("canceler", [&] { observed.cancellation_applied = ava::app::rpc::cancel_pending_resolvers(output, pending_state); });
       output_buffer.release_write();
       publisher.join();
       canceler.join();
@@ -331,7 +331,7 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
   ava::app::rpc::output_ts output(out, [] { });
   auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, *session_w, session_mutex, nullptr, "prompt-identity");
   ava::core::Result<ava::permissions::PermissionResolutionDecision> result = ava::permissions::PermissionResolution::Deny;
-  std::jthread resolver_thread = ava::core::make_jthread("resolver_thread", [&] {
+  ava::core::JoinThread resolver_thread = ava::core::JoinThread::create("resolver_thread", [&] {
     result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq-identity",
                                                          .operation = ava::permissions::Operation::ReadFile,
                                                          .mode = ava::agent::Mode::Build,
@@ -410,7 +410,7 @@ void test_app_rpc_permission_policy_auto_allows_before_resolver_event()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -464,7 +464,7 @@ void test_app_rpc_permission_reply_allow_and_deny_flows()
     std::ostream out(&output_buffer);
     ava::core::VoidResult result;
     ava::app::runtime::session_ts unlocked_session(std::move(*session));
-    std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+    ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
       result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
     });
 
@@ -534,7 +534,7 @@ void test_app_rpc_permission_reply_session_grant_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -644,7 +644,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     pending_state.permission_session_grants.front().session_id = "session_other";
   }
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> mismatched;
-  std::jthread resolver_thread = ava::core::make_jthread("resolver_thread", [&] { mismatched = resolver(prompt); });
+  ava::core::JoinThread resolver_thread = ava::core::JoinThread::create("resolver_thread", [&] { mismatched = resolver(prompt); });
   auto const resolver_request_id = wait_for_permission_request();
   auto denied = resolver_request_id.empty()
                     ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
@@ -658,7 +658,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     pending_state.permission_session_grants.clear();
   }
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> one_shot;
-  std::jthread one_shot_thread = ava::core::make_jthread("one_shot_thread", [&] { one_shot = resolver(prompt); });
+  ava::core::JoinThread one_shot_thread = ava::core::JoinThread::create("one_shot_thread", [&] { one_shot = resolver(prompt); });
   auto const one_shot_request_id = wait_for_permission_request();
   auto one_shot_allowed = one_shot_request_id.empty()
                               ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing permission request")))
@@ -756,7 +756,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   // First invocation: reply with allow_session. Because the command is
   // one-shot only, no session grant must be created.
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> first_result;
-  std::jthread first_thread = ava::core::make_jthread("first_thread", [&] { first_result = resolver(prompt); });
+  ava::core::JoinThread first_thread = ava::core::JoinThread::create("first_thread", [&] { first_result = resolver(prompt); });
   auto const first_request_id = wait_for_permission_request();
   auto first_reply = first_request_id.empty()
                          ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing first permission request")))
@@ -774,7 +774,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
   // Second invocation: because no grant was created, the resolver must be
   // called again and create a fresh pending request.
   std::optional<ava::core::Result<ava::permissions::PermissionResolutionDecision>> second_result;
-  std::jthread second_thread = ava::core::make_jthread("second_thread", [&] { second_result = resolver(prompt); });
+  ava::core::JoinThread second_thread = ava::core::JoinThread::create("second_thread", [&] { second_result = resolver(prompt); });
   auto const second_request_id = wait_for_permission_request();
   auto second_reply = second_request_id.empty()
                           ? ava::core::VoidResult(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing second permission request")))
@@ -819,7 +819,7 @@ void test_app_rpc_permission_request_includes_mutation_diff_preview()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -880,7 +880,7 @@ void test_app_rpc_persistent_permission_rule_lifecycle()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   auto const rpc_timeout = std::chrono::seconds(30);
@@ -962,7 +962,7 @@ void test_app_rpc_question_reply_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -1011,7 +1011,7 @@ void test_app_rpc_question_reply_selected_option_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 
@@ -1065,7 +1065,7 @@ void test_app_rpc_question_reply_selected_options_flow()
   std::ostream out(&output_buffer);
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
 

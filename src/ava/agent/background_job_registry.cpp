@@ -63,7 +63,7 @@ namespace {
 struct BackgroundJobRegistry::JobRecord
 {
   BackgroundJobSnapshot snapshot;
-  std::jthread thread;
+  ava::core::JoinThread thread;
   std::mutex thread_mutex;
   bool joined = false;
   bool joining = false;
@@ -220,7 +220,7 @@ ava::core::Result<BackgroundJobSnapshot> BackgroundJobRegistry::start(Background
   try
   {
     std::lock_guard thread_lock(record->thread_mutex);
-    record->thread = ava::core::make_jthread("background_job", [this, job_id, worker = std::move(worker)](std::stop_token stop_token) mutable {
+    record->thread = ava::core::JoinThread::create("background_job", [this, job_id, worker = std::move(worker)](std::stop_token stop_token) mutable {
       BackgroundJobCompletion completion;
       try
       {

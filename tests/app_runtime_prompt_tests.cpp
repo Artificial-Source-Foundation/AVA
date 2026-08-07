@@ -30,6 +30,7 @@
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -44,6 +45,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <sys/stat.h>
@@ -107,22 +109,38 @@ std::string ambient_extension_plugin_manifest_json()
 })";
 }
 
+// Verify debug session-lock tracking and the checked cooperative-thread owner.
+//
+// The JoinThread scope must request stop and join normally. Debug builds additionally verify that session mutexes participate in the neutral core
+// registry consulted at join boundaries.
 void test_debug_session_mutex_tracks_current_thread()
 {
+  std::atomic<bool> worker_finished = false;
+  {
+    auto worker = ava::core::JoinThread::create("join_thread_test", [&worker_finished](std::stop_token stop_token) {
+      while (!stop_token.stop_requested()) std::this_thread::yield();
+      worker_finished.store(true, std::memory_order_release);
+    });
+  }
+  expect(worker_finished.load(std::memory_order_acquire), "JoinThread destruction requests stop and joins its worker");
+
 #ifdef CWDEBUG
   using ava::app::runtime::SessionDebugMutex;
 
   expect(!SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry starts empty");
+  expect(!ava::core::current_thread_holds_long_wait_incompatible_lock(), "core long-wait registry starts empty");
   SessionDebugMutex first;
   SessionDebugMutex second;
   first.lock();
   expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry observes one held session lock");
+  expect(ava::core::current_thread_holds_long_wait_incompatible_lock(), "session mutex registers with core long-wait tracking");
   second.lock();
   expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry supports nested locks for different sessions");
   first.unlock();
   expect(SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry supports non-LIFO unlock order");
   second.unlock();
   expect(!SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry empties after every session lock is released");
+  expect(!ava::core::current_thread_holds_long_wait_incompatible_lock(), "core long-wait registry empties after every session lock is released");
 
   AVA_ASSERT_NO_SESSION_LOCK_HELD("debug session mutex test boundary");
   // Expose the debug mutex through the minimal session_ts-shaped interface required by the session-specific assertion.

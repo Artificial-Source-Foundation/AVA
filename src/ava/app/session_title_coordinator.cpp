@@ -628,7 +628,7 @@ void SessionTitleCoordinator::start()
     return;
   workers_.reserve(options_.worker_count);
   for (std::size_t index = 0; index < options_.worker_count; ++index)
-    workers_.emplace_back(ava::core::make_jthread("session_title", [this](std::stop_token token) { worker_loop(token); }));
+    workers_.emplace_back(ava::core::JoinThread::create("session_title", [this](std::stop_token token) { worker_loop(token); }));
 }
 
 void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
@@ -791,7 +791,7 @@ bool SessionTitleCoordinator::wait_until_idle(std::chrono::milliseconds timeout)
 
 void SessionTitleCoordinator::shutdown() noexcept
 {
-  std::vector<std::jthread> workers;
+  std::vector<ava::core::JoinThread> workers;
   {
     std::lock_guard lock(mutex_);
     if (!accepting_ && workers_.empty())

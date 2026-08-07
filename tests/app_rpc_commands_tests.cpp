@@ -671,7 +671,7 @@ void test_app_rpc_command_responses_for_context_compact_export()
   };
   ava::core::VoidResult result;
   ava::app::runtime::session_ts unlocked_session(std::move(*session));
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push(std::string("{\"id\":\"plugins\",\"type\":\"list_plugins\"}\n") +

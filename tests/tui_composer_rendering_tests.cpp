@@ -494,7 +494,7 @@ bool test_atomic_search_input_prompt_precedence()
           return true;
         }};
 
-    std::jthread provider = ava::core::make_jthread("provider", [&]() {
+    ava::core::JoinThread provider = ava::core::JoinThread::create("provider", [&]() {
       {
         std::unique_lock lock(mutex);
         if (!changed.wait_for(lock, std::chrono::seconds(1), [&]() { return start_provider; }))

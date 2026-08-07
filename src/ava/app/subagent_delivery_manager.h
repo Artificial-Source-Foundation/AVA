@@ -4,6 +4,7 @@
 #include "ava/app/runtime_credentials.h"
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/core/result.h"
+#include "ava/core/thread.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -103,7 +104,7 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   std::deque<ava::agent::SubagentCoordinatorJobSnapshot> queue_;
   bool accepting_ = true;
   CapsuleGeneration next_generation_ = 1;
-  std::jthread worker_;
+  ava::core::JoinThread worker_;
 };
 
 }  // namespace ava::app

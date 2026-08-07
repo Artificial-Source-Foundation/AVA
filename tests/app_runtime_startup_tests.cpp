@@ -210,17 +210,21 @@ void test_app_runtime_preserves_legacy_subagent_job_tree()
   expect(unlocked_session_result.has_value(), unlocked_session_result ? "runtime legacy subagent job tree test opens a real runtime session" : unlocked_session_result.error().format());
   if (unlocked_session_result)
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+    CRITICAL_AREA_BEGIN_W(session);
     expect(session_w->subagent_coordinator() && session_w->subagent_delivery_manager(),
            "real runtime session constructs its application coordinator and delivery manager against the seeded XDG state root");
     auto coordinator = session_w->subagent_coordinator();
     auto manager = session_w->subagent_delivery_manager();
+    std::string session_id = session_w->store.session_id();
+    CRITICAL_AREA_END_W(session);
+
     auto started =
-        coordinator->start(session_w->store.session_id(), ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_runtime_legacy"}, [](auto const&) {
+        coordinator->start(session_id, ava::agent::SubagentJobMode::Foreground, {.child_session_id = "child_runtime_legacy"}, [](auto const&) {
           return ava::agent::BackgroundJobCompletion{
               .state = ava::agent::BackgroundJobState::Completed, .final_text = "runtime result", .stop_reason = "completed"};
         });
-    auto completed = started ? coordinator->wait(session_w->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2))
+    auto completed = started ? coordinator->wait(session_id, started->job.identity.job_id, std::chrono::seconds(2))
                              : ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>(std::unexpected(started.error()));
     expect(completed && completed->job.delivery == ava::agent::SubagentDeliveryState::Direct,
            "real runtime coordinator executes a foreground process-local job without legacy persistence");

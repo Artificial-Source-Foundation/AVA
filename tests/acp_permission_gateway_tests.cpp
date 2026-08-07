@@ -91,7 +91,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
       return;
 
     RequestResult prompt_result;
-    std::jthread prompt_thread = ava::core::make_jthread("prompt_thread", [&] {
+    ava::core::JoinThread prompt_thread = ava::core::JoinThread::create("prompt_thread", [&] {
       prompt_result =
           service.handle_request(Request{.id = std::int64_t(3),
                                          .method = "session/prompt",
@@ -197,7 +197,7 @@ void test_acp_cancel_terminal_arbitration_and_provider_setup_paths()
       return;
 
     RequestResult prompt_result;
-    std::jthread prompt_thread = ava::core::make_jthread("prompt_thread", [&] {
+    ava::core::JoinThread prompt_thread = ava::core::JoinThread::create("prompt_thread", [&] {
       prompt_result =
           service.handle_request(Request{.id = std::int64_t(3),
                                          .method = "session/prompt",
@@ -1076,10 +1076,10 @@ void test_acp_close_timeout_is_internal_error_with_eventual_cleanup()
       Request{.id = std::int64_t(2), .method = "session/new", .params_json = std::string("{\"cwd\":\"") + workspace.string() + "\",\"mcpServers\":[]}"}, {});
   auto id = created ? ava::core::json::string_field(*created, "sessionId") : std::nullopt;
   RequestResult prompt_result;
-  std::jthread prompt_thread;
+  ava::core::JoinThread prompt_thread;
   if (id)
   {
-    prompt_thread = std::jthread([&] {
+    prompt_thread = ava::core::JoinThread::create("prompt_thread", [&] {
       prompt_result =
           service.handle_request(Request{.id = std::int64_t(3),
                                          .method = "session/prompt",

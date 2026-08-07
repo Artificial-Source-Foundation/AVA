@@ -179,9 +179,9 @@ struct RpcCompactionWorkerOptions
   std::optional<std::string> instructions;
 };
 
-std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions options)
+ava::core::JoinThread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions options)
 {
-  return ava::core::make_jthread("rpc_direct_command", [options = std::move(options)](std::stop_token stop_token) mutable {
+  return ava::core::JoinThread::create("rpc_direct_command", [options = std::move(options)](std::stop_token stop_token) mutable {
     auto finish = [&](ava::core::Result<std::string> result) {
       auto const reason = (stop_token.stop_requested() || rpc::cancel_requested(options.run_state)) ? std::string_view("canceled")
                                                                                                     : std::string_view("run_completed_before_safe_point");
@@ -233,9 +233,9 @@ std::jthread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions option
   });
 }
 
-std::jthread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
+ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions options)
 {
-  return ava::core::make_jthread("rpc_compaction", [options = std::move(options)](std::stop_token stop_token) mutable {
+  return ava::core::JoinThread::create("rpc_compaction", [options = std::move(options)](std::stop_token stop_token) mutable {
     auto finish = [&](ava::core::Result<std::string> result) {
       static_cast<void>(rpc::begin_terminal_publication(options.run_state));
       ava::core::VoidResult written;
@@ -372,7 +372,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
   });
   std::mutex session_mutex;
-  std::optional<std::jthread> prompt_worker;
+  std::optional<ava::core::JoinThread> prompt_worker;
 
   // At this point we are still single-threaded.
   CRITICAL_AREA_BEGIN_R(session);

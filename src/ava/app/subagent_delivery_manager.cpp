@@ -247,7 +247,7 @@ void SubagentDeliveryManager::start()
     if (auto manager = weak.lock())
       manager->enqueue(snapshot);
   });
-  worker_ = ava::core::make_jthread("SA_delivery", [this](std::stop_token stop_token) { worker_loop(stop_token); });
+  worker_ = ava::core::JoinThread::create("SA_delivery", [this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
 SubagentDeliveryManager::~SubagentDeliveryManager()

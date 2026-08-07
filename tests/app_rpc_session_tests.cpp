@@ -224,7 +224,7 @@ void test_app_rpc_job_controls_are_active_safe_and_redacted()
   ThreadSafeStringBuf output_buffer;
   std::ostream out(&output_buffer);
   ava::core::VoidResult rpc_result;
-  std::jthread rpc_thread = ava::core::make_jthread("rpc_thread", [&] {
+  ava::core::JoinThread rpc_thread = ava::core::JoinThread::create("rpc_thread", [&] {
     rpc_result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, runtime_options, in, out, [&] noexcept { input_buffer.close(); });
   });
   input_buffer.push("{\"id\":\"prompt\",\"type\":\"prompt\",\"message\":\"keep active\"}\n");

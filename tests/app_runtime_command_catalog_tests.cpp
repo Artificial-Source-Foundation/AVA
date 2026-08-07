@@ -38,11 +38,17 @@ namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
 
-void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, ava::config::XdgPaths const& paths, std::filesystem::path const& workspace,
-                                         std::vector<ava::app::CommandHotkey> const& custom_hotkeys)
+// Exercise command catalog and dispatcher behavior while releasing session access around background-job waits.
+//
+// unlocked_session supplies the runtime session, while paths, workspace, and custom_hotkeys provide the fixture configuration and expected catalog
+// customization. The function updates session-backed command state as part of the test.
+void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked_session, ava::config::XdgPaths const& paths,
+                                         std::filesystem::path const& workspace, std::vector<ava::app::CommandHotkey> const& custom_hotkeys)
 {
-  auto const slash_items = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
-  auto const file_reference_items = ava::app::file_reference_items(*session);
+  CRITICAL_AREA_BEGIN_W(session);
+
+  auto const slash_items = ava::app::command_catalog_slash_items_1(*session_w, custom_hotkeys);
+  auto const file_reference_items = ava::app::file_reference_items(*session_w);
   auto has_alias = [](ava::tui::SlashCommandItem const& item, std::string_view value) { return std::ranges::find(item.aliases, value) != item.aliases.end(); };
   auto has_file_reference = [&file_reference_items](std::string_view value) {
     return std::ranges::any_of(file_reference_items, [&](auto const& item) { return item.value == value; });
@@ -102,7 +108,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
           !tui_test_support::has_slash_argument_completion(connect_item, 1, "headless-oauth", {"openai"}) &&
           tui_test_support::has_slash_argument_completion(models_item, 0, "openai/gpt-5.5") &&
           !tui_test_support::has_slash_argument_completion(models_item, 0, "gpt-5.5") &&
-          tui_test_support::has_slash_argument_completion(sessions_item, 0, session->store.session_id()) &&
+          tui_test_support::has_slash_argument_completion(sessions_item, 0, session_w->store.session_id()) &&
           tui_test_support::has_slash_argument_completion(context_item, 0, (workspace / "AGENTS.md").generic_string()) &&
           tui_test_support::has_slash_argument_completion(read_item, 0, "src/main.cpp") &&
           tui_test_support::has_slash_argument_completion(write_item, 0, "src/main.cpp") &&
@@ -139,21 +145,22 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
           tui_test_support::has_slash_argument_completion(permissions_item, 1, "reason=", {"add"}),
       "command catalog argument completions keep /connect provider and method choices in the modal while "
       "populating model, session, context, export format, file path, file reference, MCP, plugin, and permission-rule metadata");
-  auto disable_plugin = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins disable com.example.project"});
+  auto disable_plugin = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins disable com.example.project"});
   expect(disable_plugin && disable_plugin->handled && !disable_plugin->output.empty() &&
              disable_plugin->output[0].find("Disabled project plugin com.example.project") != std::string::npos &&
              disable_plugin->output[0].find("No plugin process was stopped") != std::string::npos,
          "command dispatcher /plugins disable records state without stopping plugin processes");
-  auto validate_plugin = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins validate .ava/plugins/com.example.project/plugin.json"});
+  auto validate_plugin =
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins validate .ava/plugins/com.example.project/plugin.json"});
   expect(validate_plugin && validate_plugin->handled && !validate_plugin->output.empty() &&
              validate_plugin->output[0].find("Valid plugin manifest") != std::string::npos &&
              validate_plugin->output[0].find("no entrypoint was executed") != std::string::npos,
          "command dispatcher /plugins validate parses manifests without executing entrypoints");
-  auto plugin_failures = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/plugins failures"});
+  auto plugin_failures = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins failures"});
   expect(plugin_failures && plugin_failures->handled && !plugin_failures->output.empty() &&
              plugin_failures->output[0].find("com.example.bad") != std::string::npos,
          "command dispatcher /plugins failures reports invalid discovered manifests");
-  auto models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/model"});
+  auto models = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/model"});
   expect(models && models->handled && !models->output.empty() && models->output[0].find("Models:") != std::string::npos &&
              models->output[0].find("current ") != std::string::npos && models->output[0].find("reasoning current") != std::string::npos &&
              models->output[0].find("reasoning levels: low, medium, high, xhigh") != std::string::npos &&
@@ -162,11 +169,11 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              models->output[0].find("Shift+Tab cycles") != std::string::npos &&
              models->output[0].find("Ctrl+T opens the policy-resolved thinking-mode selector") != std::string::npos,
          "command dispatcher lists provider/model reasoning metadata and documents TUI reasoning controls");
-  auto filtered_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/models gpt-5.5"});
+  auto filtered_models = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/models gpt-5.5"});
   expect(filtered_models && filtered_models->handled && !filtered_models->output.empty() &&
              filtered_models->output[0].find("filter gpt-5.5") != std::string::npos && filtered_models->output[0].find("gpt-5.5") != std::string::npos,
          "command dispatcher /models accepts backend-backed autocomplete query text without switching models");
-  auto diagnostic_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/models diagnostic-local"});
+  auto diagnostic_models = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/models diagnostic-local"});
   expect(diagnostic_models && diagnostic_models->handled && !diagnostic_models->output.empty() &&
              diagnostic_models->output[0].find("Diagnostic Local") != std::string::npos &&
              diagnostic_models->output[0].find("diagnostics:") != std::string::npos &&
@@ -175,7 +182,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              diagnostic_models->output[0].find("custom model has unknown tool support") != std::string::npos &&
              diagnostic_models->output[0].find("reasoning model has no reasoning_levels") != std::string::npos,
          "command dispatcher /models reports actionable custom-model diagnostics");
-  auto unavailable_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/models ghost"});
+  auto unavailable_models = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/models ghost"});
   expect(unavailable_models && unavailable_models->handled && !unavailable_models->output.empty() &&
              unavailable_models->output[0].find("Remote Missing") != std::string::npos &&
              unavailable_models->output[0].find("provider is not registered") != std::string::npos &&
@@ -184,7 +191,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "command dispatcher /models reports unregistered provider diagnostics");
   {
     ScopedEnvVar openai_key("OPENAI_API_KEY", "providers-secret-openai-key");
-    auto providers = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/providers"});
+    auto providers = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/providers"});
     expect(providers && providers->handled && !providers->output.empty() && providers->output[0].find("Providers:") != std::string::npos &&
                providers->output[0].find("openai  OpenAI") != std::string::npos && providers->output[0].find("anthropic  Anthropic") != std::string::npos &&
                providers->output[0].find("auth=api_key source=env:OPENAI_API_KEY") != std::string::npos &&
@@ -196,7 +203,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   }
   {
     ScopedEnvVar anthropic_oauth("ANTHROPIC_OAUTH_TOKEN", "providers-secret-anthropic-token");
-    auto filtered_providers = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/providers anthropic"});
+    auto filtered_providers = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/providers anthropic"});
     expect(filtered_providers && filtered_providers->handled && !filtered_providers->output.empty() &&
                filtered_providers->output[0].find("filter anthropic") != std::string::npos &&
                filtered_providers->output[0].find("anthropic  Anthropic") != std::string::npos &&
@@ -206,7 +213,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
            "command dispatcher /providers accepts query text without exposing unrelated provider rows or env token values");
   }
 
-  auto context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context"});
+  auto context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context"});
   expect(context && context->handled && !context->output.empty() && context->output[0].find("Context freshness:") != std::string::npos &&
              context->output[0].find("mode=plan") != std::string::npos && context->output[0].find("model=openai/gpt-5.5") != std::string::npos &&
              context->output[0].find("prompt=override") != std::string::npos && context->output[0].find("plan.txt") != std::string::npos &&
@@ -221,48 +228,49 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              context->output[0].find("loaded_bytes=") != std::string::npos && context->output[0].find("status=changed") != std::string::npos &&
              context->output[0].find("current_bytes=") != std::string::npos,
          "command dispatcher /context reports context freshness metadata without loading disabled plugin resources");
-  auto prompt_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context prompt"});
+  auto prompt_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context prompt"});
   expect(prompt_context && prompt_context->handled && !prompt_context->output.empty() &&
              prompt_context->output[0].find("prompt=override") != std::string::npos && prompt_context->output[0].find("plan.txt") != std::string::npos &&
              prompt_context->output[0].find("prompt_command  project  prompt-check") != std::string::npos &&
              prompt_context->output[0].find("plugin_prompt  project  com.example.project/review") == std::string::npos &&
              prompt_context->output[0].find("AGENTS.md") == std::string::npos,
          "command dispatcher /context can filter to prompt freshness metadata");
-  auto prompt_command_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context prompt-check"});
+  auto prompt_command_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context prompt-check"});
   expect(prompt_command_context && prompt_command_context->handled && !prompt_command_context->output.empty() &&
              prompt_command_context->output[0].find("prompt_command  project  prompt-check") != std::string::npos &&
              prompt_command_context->output[0].find("status=changed") != std::string::npos &&
              prompt_command_context->output[0].find("AGENTS.md") == std::string::npos,
          "command dispatcher /context can filter to prompt command freshness metadata");
-  auto skill_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context dispatcher-skill"});
+  auto skill_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context dispatcher-skill"});
   expect(skill_context && skill_context->handled && !skill_context->output.empty() &&
              skill_context->output[0].find("skill  project  dispatcher-skill") != std::string::npos &&
              skill_context->output[0].find("status=changed") != std::string::npos && skill_context->output[0].find("AGENTS.md") == std::string::npos,
          "command dispatcher /context can filter to loaded skill freshness metadata");
-  auto plugin_prompt_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context review"});
+  auto plugin_prompt_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context review"});
   expect(plugin_prompt_context && plugin_prompt_context->handled && !plugin_prompt_context->output.empty() &&
              plugin_prompt_context->output[0].find("No context sources matching: review") != std::string::npos,
          "command dispatcher /context does not report disabled plugin prompt resources loaded before plugin enablement");
-  auto filtered_context = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/context AGENTS"});
+  auto filtered_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context AGENTS"});
   expect(filtered_context && filtered_context->handled && !filtered_context->output.empty() &&
              filtered_context->output[0].find("Context freshness:") != std::string::npos &&
              filtered_context->output[0].find("AGENTS.md") != std::string::npos && filtered_context->output[0].find("status=changed") != std::string::npos &&
              filtered_context->output[0].find("prompt=override") == std::string::npos,
          "command dispatcher /context accepts backend context-source query text");
-  auto reload_prompts = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload prompts"});
+  auto reload_prompts = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload prompts"});
   expect(reload_prompts && reload_prompts->handled && !reload_prompts->output.empty() &&
              reload_prompts->output[0].find("Reload report:") != std::string::npos && reload_prompts->output[0].find("prompts: loaded") != std::string::npos &&
              reload_prompts->output[0].find("context_sources: 1") != std::string::npos &&
-             session->system_prompt().find("dispatcher context changed after session open") != std::string::npos,
+             session_w->system_prompt().find("dispatcher context changed after session open") != std::string::npos,
          "command dispatcher /reload prompts re-reads prompt and context resources without restarting");
   write_app_test_file(paths.models_file, "{\n  \"scoped_model_cycle\": [\"openai/gpt-5.5\"]\n}\n");
-  auto reload_models = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload models"});
+  auto reload_models = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload models"});
   expect(reload_models && reload_models->handled && !reload_models->output.empty() && reload_models->output[0].find("models: loaded") != std::string::npos &&
              reload_models->output[0].find("scoped_cycle: configured") != std::string::npos &&
-             reload_models->output[0].find("active_model: openai/gpt-5.5 (unchanged)") != std::string::npos && session->scoped_model_cycle() &&
-             session->scoped_model_cycle()->size() == 1 && session->scoped_model_cycle()->front() == "openai/gpt-5.5" && session->model().model_id == "gpt-5.5",
+             reload_models->output[0].find("active_model: openai/gpt-5.5 (unchanged)") != std::string::npos && session_w->scoped_model_cycle() &&
+             session_w->scoped_model_cycle()->size() == 1 && session_w->scoped_model_cycle()->front() == "openai/gpt-5.5" &&
+             session_w->model().model_id == "gpt-5.5",
          "command dispatcher /reload models refreshes model config without silently switching active model");
-  auto reload_all = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload"});
+  auto reload_all = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload"});
   expect(reload_all && reload_all->handled && !reload_all->output.empty() && reload_all->output[0].find("display: loaded") != std::string::npos &&
              reload_all->output[0].find("models: loaded") != std::string::npos && reload_all->output[0].find("trust: loaded") != std::string::npos &&
              reload_all->output[0].find("compaction: validated") != std::string::npos &&
@@ -274,13 +282,13 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              reload_all->output[0].find("plugins: restart-required") != std::string::npos,
          "command dispatcher /reload reports hot-reloaded and restart-required config domains");
   write_app_test_file(paths.compaction_file, "{\n  \"max_summary_bytes\": 0\n}\n");
-  auto reload_compaction = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload compaction"});
+  auto reload_compaction = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload compaction"});
   expect(reload_compaction && reload_compaction->handled && !reload_compaction->output.empty() &&
              reload_compaction->output[0].find("compaction: error") != std::string::npos &&
              reload_compaction->output[0].find("compaction max summary bytes must be greater than zero") != std::string::npos,
          "command dispatcher /reload compaction reports config validation errors without crashing");
   write_app_test_file(paths.compaction_file, "{\n  \"provider\": \"anthropic\", \"model\": \"unknown-summary-model\"\n}\n");
-  auto reload_unknown_compaction = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/reload compaction"});
+  auto reload_unknown_compaction = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload compaction"});
   expect(reload_unknown_compaction && reload_unknown_compaction->handled && !reload_unknown_compaction->output.empty() &&
              reload_unknown_compaction->output[0].find("compaction: error") != std::string::npos &&
              reload_unknown_compaction->output[0].find("compaction_provider: anthropic") != std::string::npos &&
@@ -288,12 +296,13 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "command dispatcher /reload compaction performs runtime provider/model catalog validation");
   std::error_code remove_compaction_error;
   std::filesystem::remove(paths.compaction_file, remove_compaction_error);
-  auto filtered_sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions " + session->store.session_id()});
+  auto filtered_sessions = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions " + session_w->store.session_id()});
   expect(filtered_sessions && filtered_sessions->handled && !filtered_sessions->output.empty() &&
-             filtered_sessions->output[0].find(session->store.session_id()) != std::string::npos,
+             filtered_sessions->output[0].find(session_w->store.session_id()) != std::string::npos,
          "command dispatcher /sessions accepts backend session-id query text");
-  auto archive_active = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions archive " + session->store.session_id() + " --confirm"});
-  auto active_metadata_after_archive_attempt = ava::session::load_session_metadata(session->store);
+  auto archive_active =
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions archive " + session_w->store.session_id() + " --confirm"});
+  auto active_metadata_after_archive_attempt = ava::session::load_session_metadata(session_w->store);
   expect(archive_active && archive_active->handled && !archive_active->output.empty() &&
              archive_active->output[0].find("Cannot archive the active session") != std::string::npos && active_metadata_after_archive_attempt &&
              !active_metadata_after_archive_attempt->archived,
@@ -301,16 +310,16 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto branch = ava::session::create_session_branch(
       ava::session::SessionBranchOptions{.workspace_dir = workspace,
                                          .root_dir = paths.sessions_dir,
-                                         .source_session_id = session->store.session_id(),
+                                         .source_session_id = session_w->store.session_id(),
                                          .branch_from_entry_id = {},
                                          .name = std::optional<std::string>("Review branch"),
                                          .labels = std::optional<std::vector<std::string>>(std::vector<std::string>{"review", "ui"}),
-                                         .source_lease = &session->lease(),
+                                         .source_lease = &session_w->lease(),
                                          .mode = ava::session::SessionBranchMode::Fork,
                                          .actor = "test"});
   expect(branch.has_value(),
          branch ? "command dispatcher /sessions test creates a branch" : "command dispatcher /sessions test creates a branch: " + branch.error().format());
-  auto tree_sessions = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions review"});
+  auto tree_sessions = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions review"});
   expect(tree_sessions && tree_sessions->handled && !tree_sessions->output.empty() && tree_sessions->output[0].find("Sessions:") != std::string::npos &&
              tree_sessions->output[0].find("Review branch") != std::string::npos && tree_sessions->output[0].find("origin=fork") != std::string::npos &&
              tree_sessions->output[0].find("labels=review,ui") != std::string::npos && tree_sessions->output[0].find("parent=") != std::string::npos,
@@ -319,10 +328,10 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   {
     branch->lease = ava::session::SessionLease{};
     auto const branch_session_id = branch->store.session_id();
-    auto target_labels = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id + " triage selected"});
+    auto target_labels = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id + " triage selected"});
     auto branch_metadata_after_labels = ava::session::load_session_metadata(branch->store);
-    auto target_label_status = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id});
-    auto target_label_query = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions triage"});
+    auto target_label_status = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id});
+    auto target_label_query = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions triage"});
     expect(target_labels && target_labels->handled && !target_labels->output.empty() &&
                target_labels->output[0].find("session " + branch_session_id + " labels set: triage,selected") != std::string::npos &&
                branch_metadata_after_labels && branch_metadata_after_labels->labels.size() == 2 && branch_metadata_after_labels->labels[0] == "triage" &&
@@ -330,19 +339,19 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                !target_label_status->output.empty() &&
                target_label_status->output[0].find("session " + branch_session_id + " labels: triage,selected") != std::string::npos && target_label_query &&
                target_label_query->handled && !target_label_query->output.empty() &&
-               target_label_query->output[0].find("labels=triage,selected") != std::string::npos && session->store.session_id() != branch_session_id,
+               target_label_query->output[0].find("labels=triage,selected") != std::string::npos && session_w->store.session_id() != branch_session_id,
            "slash /sessions labels updates a selected session without switching runtime sessions");
 
-    auto archive_without_confirm = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions archive " + branch_session_id});
+    auto archive_without_confirm = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions archive " + branch_session_id});
     auto metadata_before_archive = ava::session::load_session_metadata(branch->store);
     expect(archive_without_confirm && archive_without_confirm->handled && !archive_without_confirm->output.empty() &&
                archive_without_confirm->output[0].find("--confirm") != std::string::npos && metadata_before_archive && !metadata_before_archive->archived,
            "slash /sessions archive requires explicit confirmation before mutating metadata");
 
-    auto archived = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions archive " + branch_session_id + " --confirm"});
+    auto archived = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions archive " + branch_session_id + " --confirm"});
     auto metadata_after_archive = ava::session::load_session_metadata(branch->store);
-    auto hidden_archived = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions review"});
-    auto visible_archived = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions --archived review"});
+    auto hidden_archived = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions review"});
+    auto visible_archived = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions --archived review"});
     expect(archived && archived->handled && !archived->output.empty() &&
                archived->output[0].find("session " + branch_session_id + " archived") != std::string::npos && metadata_after_archive &&
                metadata_after_archive->archived && hidden_archived && hidden_archived->handled && !hidden_archived->output.empty() &&
@@ -351,7 +360,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                visible_archived->output[0].find("archived") != std::string::npos,
            "slash /sessions archive hides sessions from default lists while --archived includes them");
 
-    auto unarchived = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/sessions unarchive " + branch_session_id});
+    auto unarchived = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions unarchive " + branch_session_id});
     auto metadata_after_unarchive = ava::session::load_session_metadata(branch->store);
     expect(unarchived && unarchived->handled && !unarchived->output.empty() &&
                unarchived->output[0].find("session " + branch_session_id + " unarchived") != std::string::npos && metadata_after_unarchive &&
@@ -359,14 +368,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
            "slash /sessions unarchive restores archived sessions to default views");
   }
 
-  auto permissions_empty = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions"});
+  auto permissions_empty = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions"});
   expect(permissions_empty && permissions_empty->handled && !permissions_empty->output.empty() &&
              permissions_empty->output[0].find("Permission rules:") != std::string::npos &&
              permissions_empty->output[0].find("No persistent permission rules") != std::string::npos,
          "command dispatcher /permissions lists empty persistent permission rules with storage context");
   auto add_permission_rule =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
-                                                                          "reason=\"trusted local read\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
+                                                                            "reason=\"trusted local read\""});
   expect(add_permission_rule && add_permission_rule->handled && !add_permission_rule->output.empty() &&
              add_permission_rule->output[0].find("added permission rule") != std::string::npos &&
              add_permission_rule->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
@@ -388,8 +397,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
          "command dispatcher /permissions add exposes the created rule id on a secondary line");
 
   auto add_explore_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
-                                                                          "reason=\"no explore subagents\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
+                                                                            "reason=\"no explore subagents\""});
   expect(add_explore_deny && add_explore_deny->handled && !add_explore_deny->output.empty() &&
              add_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
          "command dispatcher /permissions add claims Explore only for command=explore with default tool=task");
@@ -397,21 +406,22 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   expect(!explore_rule_id.empty(), "command dispatcher /permissions add exposes Explore rule id secondarily");
 
   auto add_skill_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
   expect(add_skill_deny && add_skill_deny->handled && !add_skill_deny->output.empty() &&
              add_skill_deny->output[0].find("Block skills · Workspace") != std::string::npos,
          "command dispatcher /permissions add summarizes skill blocks in human form");
   auto const skill_rule_id = add_skill_deny ? extract_rule_id(add_skill_deny->output[0]) : std::string{};
 
-  auto add_global_read = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
-                                                                                             "path=/etc/hosts reason=\"global reads\""});
+  auto add_global_read = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
+                                                                                               "path=/etc/hosts reason=\"global reads\""});
   expect(add_global_read && add_global_read->handled && !add_global_read->output.empty() &&
              add_global_read->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos,
          "command dispatcher /permissions add summarizes global file-read allows");
   auto const global_read_rule_id = add_global_read ? extract_rule_id(add_global_read->output[0]) : std::string{};
 
-  auto add_exact_command_deny = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
-                                                                                                    "command=\"git push origin main\" reason=\"block push\""});
+  auto add_exact_command_deny =
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
+                                                                            "command=\"git push origin main\" reason=\"block push\""});
   expect(add_exact_command_deny && add_exact_command_deny->handled && !add_exact_command_deny->output.empty() &&
              add_exact_command_deny->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              add_exact_command_deny->output[0].find("git push origin main") == std::string::npos,
@@ -419,8 +429,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const exact_command_rule_id = add_exact_command_deny ? extract_rule_id(add_exact_command_deny->output[0]) : std::string{};
   expect(!exact_command_rule_id.empty(), "command dispatcher /permissions add exposes exact-command rule id secondarily");
 
-  auto add_path_command_deny = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
-                                                                                                   "command=\"git status\" reason=\"path qualified bash\""});
+  auto add_path_command_deny = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
+                                                                                                     "command=\"git status\" reason=\"path qualified bash\""});
   expect(add_path_command_deny && add_path_command_deny->handled && !add_path_command_deny->output.empty() &&
              add_path_command_deny->output[0].find("Block Exact command · scripts · Workspace") != std::string::npos &&
              add_path_command_deny->output[0].find("git status") == std::string::npos,
@@ -428,16 +438,16 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const path_command_rule_id = add_path_command_deny ? extract_rule_id(add_path_command_deny->output[0]) : std::string{};
 
   auto add_path_explore_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
-                                                                          "path=src reason=\"path qualified explore\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
+                                                                            "path=src reason=\"path qualified explore\""});
   expect(add_path_explore_deny && add_path_explore_deny->handled && !add_path_explore_deny->output.empty() &&
              add_path_explore_deny->output[0].find("Block Explore subagents · src · Workspace") != std::string::npos,
          "command dispatcher /permissions add path-qualifies TaskRun Explore summaries");
   auto const path_explore_rule_id = add_path_explore_deny ? extract_rule_id(add_path_explore_deny->output[0]) : std::string{};
 
   auto add_forged_task_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task "
-                                                                          "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task "
+                                                                            "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
   expect(add_forged_task_deny && add_forged_task_deny->handled && !add_forged_task_deny->output.empty() &&
              add_forged_task_deny->output[0].find("Block subagents · Workspace") != std::string::npos &&
              add_forged_task_deny->output[0].find("rm -rf") == std::string::npos && add_forged_task_deny->output[0].find("/tmp/forged") == std::string::npos,
@@ -445,24 +455,24 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const forged_task_rule_id = add_forged_task_deny ? extract_rule_id(add_forged_task_deny->output[0]) : std::string{};
 
   auto add_typed_task_allow =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=task tool=task command=coder "
-                                                                          "reason=\"typed coder subagent\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=task tool=task command=coder "
+                                                                            "reason=\"typed coder subagent\""});
   expect(add_typed_task_allow && add_typed_task_allow->handled && !add_typed_task_allow->output.empty() &&
              add_typed_task_allow->output[0].find("Allow subagents · coder · Workspace") != std::string::npos,
          "command dispatcher /permissions add appends only identifier-like TaskRun type qualifiers");
   auto const typed_task_rule_id = add_typed_task_allow ? extract_rule_id(add_typed_task_allow->output[0]) : std::string{};
 
   auto add_explore_explore_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=explore "
-                                                                          "reason=\"agreeing explore identity\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=explore "
+                                                                            "reason=\"agreeing explore identity\""});
   expect(add_explore_explore_deny && add_explore_explore_deny->handled && !add_explore_explore_deny->output.empty() &&
              add_explore_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
          "command dispatcher /permissions add claims Explore when command and tool both agree on explore");
   auto const explore_explore_rule_id = add_explore_explore_deny ? extract_rule_id(add_explore_explore_deny->output[0]) : std::string{};
 
   auto add_tool_only_explore_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
-                                                                          "reason=\"tool-only explore must not claim class\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
+                                                                            "reason=\"tool-only explore must not claim class\""});
   expect(add_tool_only_explore_deny && add_tool_only_explore_deny->handled && !add_tool_only_explore_deny->output.empty() &&
              add_tool_only_explore_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_tool_only_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -470,8 +480,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const tool_only_explore_rule_id = add_tool_only_explore_deny ? extract_rule_id(add_tool_only_explore_deny->output[0]) : std::string{};
 
   auto add_freeform_explore_tool_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
-                                                                          "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
+                                                                            "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
   expect(add_freeform_explore_tool_deny && add_freeform_explore_tool_deny->handled && !add_freeform_explore_tool_deny->output.empty() &&
              add_freeform_explore_tool_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_freeform_explore_tool_deny->output[0].find("Block Explore subagents") == std::string::npos &&
@@ -482,8 +492,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const freeform_explore_tool_rule_id = add_freeform_explore_tool_deny ? extract_rule_id(add_freeform_explore_tool_deny->output[0]) : std::string{};
 
   auto add_mixed_coder_explore_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=coder "
-                                                                          "reason=\"mixed coder command explore tool\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=coder "
+                                                                            "reason=\"mixed coder command explore tool\""});
   expect(add_mixed_coder_explore_deny && add_mixed_coder_explore_deny->handled && !add_mixed_coder_explore_deny->output.empty() &&
              add_mixed_coder_explore_deny->output[0].find("Block subagents · coder · Workspace") != std::string::npos &&
              add_mixed_coder_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -491,8 +501,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const mixed_coder_explore_rule_id = add_mixed_coder_explore_deny ? extract_rule_id(add_mixed_coder_explore_deny->output[0]) : std::string{};
 
   auto add_mixed_explore_coder_deny =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=coder command=explore "
-                                                                          "reason=\"mixed explore command conflicting tool\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=coder command=explore "
+                                                                            "reason=\"mixed explore command conflicting tool\""});
   expect(add_mixed_explore_coder_deny && add_mixed_explore_coder_deny->handled && !add_mixed_explore_coder_deny->output.empty() &&
              add_mixed_explore_coder_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_mixed_explore_coder_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -518,13 +528,13 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
         .actor = {},
         .created_at = {},
     };
-    expect(ava::app::format_permission_rule_summary(explore_empty_tool, session->workspace_dir()) == "Block Explore subagents · Workspace",
+    expect(ava::app::format_permission_rule_summary(explore_empty_tool, session_w->workspace_dir()) == "Block Explore subagents · Workspace",
            "permission rule summary claims Explore for command=explore with empty tool_name");
   }
 
   auto add_mcp_read_collision =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=mcp.tool.call tool=read "
-                                                                          "reason=\"mcp read collision\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=mcp.tool.call tool=read "
+                                                                            "reason=\"mcp read collision\""});
   expect(add_mcp_read_collision && add_mcp_read_collision->handled && !add_mcp_read_collision->output.empty() &&
              add_mcp_read_collision->output[0].find("Allow MCP tool calls · read · Workspace") != std::string::npos &&
              add_mcp_read_collision->output[0].find("Allow file reads") == std::string::npos &&
@@ -533,8 +543,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const mcp_read_rule_id = add_mcp_read_collision ? extract_rule_id(add_mcp_read_collision->output[0]) : std::string{};
 
   auto add_plugin_bash_collision =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=plugin.tool.call tool=bash "
-                                                                          "reason=\"plugin bash collision\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=plugin.tool.call tool=bash "
+                                                                            "reason=\"plugin bash collision\""});
   expect(add_plugin_bash_collision && add_plugin_bash_collision->handled && !add_plugin_bash_collision->output.empty() &&
              add_plugin_bash_collision->output[0].find("Allow plugin tool calls · bash · Workspace") != std::string::npos &&
              add_plugin_bash_collision->output[0].find("Allow shell commands") == std::string::npos &&
@@ -543,7 +553,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const plugin_bash_rule_id = add_plugin_bash_collision ? extract_rule_id(add_plugin_bash_collision->output[0]) : std::string{};
 
   auto add_forged_recipe_allow = ava::app::run_command(
-      *session,
+      *session_w,
       ava::app::CommandRequest{.command = "/permissions add action=allow operation=bash "
                                           "recipe_key=sha256:ava-command-workspace-recipe-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
                                           "recipe_display=\"shell commands\" reason=\"forged recipe subject\""});
@@ -577,7 +587,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
         .actor = {},
         .created_at = {},
     };
-    auto const long_summary = ava::app::format_permission_rule_summary(long_recipe_rule, session->workspace_dir());
+    auto const long_summary = ava::app::format_permission_rule_summary(long_recipe_rule, session_w->workspace_dir());
     expect(long_summary.starts_with("Allow recipe · ") && long_summary.find(" · Workspace") != std::string::npos &&
                long_summary.find(long_unicode_display) == std::string::npos && long_summary.find("bbbbbbbb") == std::string::npos &&
                long_summary.size() < long_unicode_display.size(),
@@ -604,12 +614,12 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
         .actor = {},
         .created_at = {},
     };
-    auto const network_summary = ava::app::format_permission_rule_summary(network_read_collision, session->workspace_dir());
+    auto const network_summary = ava::app::format_permission_rule_summary(network_read_collision, session_w->workspace_dir());
     expect(network_summary == "Allow network fetches · read · Workspace",
            "permission rule summary keeps network operation class when tool_name collides with read");
   }
 
-  auto permissions_list = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list trusted"});
+  auto permissions_list = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions list trusted"});
   expect(permissions_list && permissions_list->handled && !permissions_list->output.empty() &&
              permissions_list->output[0].find("1. Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
              permissions_list->output[0].find(permission_rule_id) == std::string::npos &&
@@ -618,14 +628,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_list->output[0].find("/permissions explain or /permissions remove") != std::string::npos,
          "command dispatcher /permissions list filters by reason privately and shows human ordinals only");
 
-  auto permissions_list_human = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list file reads"});
+  auto permissions_list_human = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions list file reads"});
   expect(permissions_list_human && permissions_list_human->handled && !permissions_list_human->output.empty() &&
              permissions_list_human->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
              permissions_list_human->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos &&
              permissions_list_human->output[0].find("Block Explore subagents") == std::string::npos,
          "command dispatcher /permissions list filters by human summary words");
 
-  auto permissions_list_command_private = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
+  auto permissions_list_command_private = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
   expect(permissions_list_command_private && permissions_list_command_private->handled && !permissions_list_command_private->output.empty() &&
              permissions_list_command_private->output[0].find("filter: git push origin main") != std::string::npos &&
              permissions_list_command_private->output[0].find("1. Block Exact command · Workspace") != std::string::npos &&
@@ -635,7 +645,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_list_command_private->output[0].find("permrule_") == std::string::npos,
          "command dispatcher /permissions list can match command text privately without printing rule bodies");
 
-  auto permissions_list_all = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list"});
+  auto permissions_list_all = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions list"});
   expect(permissions_list_all && permissions_list_all->handled && !permissions_list_all->output.empty() &&
              permissions_list_all->output[0].find("1. ") != std::string::npos && permissions_list_all->output[0].find("2. ") != std::string::npos &&
              permissions_list_all->output[0].find("Block Explore subagents · Workspace") != std::string::npos &&
@@ -650,7 +660,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_list_all->output[0].find("sha256:ava-command-workspace-recipe-v1:") == std::string::npos,
          "command dispatcher /permissions list leads with stable human ordinals and omits rule ids and command bodies");
 
-  auto permissions_explain = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permission-rules explain " + permission_rule_id});
+  auto permissions_explain = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permission-rules explain " + permission_rule_id});
   expect(permissions_explain && permissions_explain->handled && !permissions_explain->output.empty() &&
              permissions_explain->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
              permissions_explain->output[0].find("rule id: " + permission_rule_id) != std::string::npos &&
@@ -659,46 +669,46 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_explain->output[0].find("precedence: built-in hard denies run first") != std::string::npos,
          "command dispatcher /permissions explain leads with human summary and retains authority details");
 
-  auto permissions_explain_command = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
+  auto permissions_explain_command = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
   expect(permissions_explain_command && permissions_explain_command->handled && !permissions_explain_command->output.empty() &&
              permissions_explain_command->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              permissions_explain_command->output[0].find("command: git push origin main") != std::string::npos &&
              permissions_explain_command->output[0].find("rule id: " + exact_command_rule_id) != std::string::npos,
          "command dispatcher /permissions explain retains exact command authority details");
 
-  auto permissions_remove_ordinal = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove 1"});
+  auto permissions_remove_ordinal = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions remove 1"});
   expect(permissions_remove_ordinal && permissions_remove_ordinal->handled && !permissions_remove_ordinal->output.empty() &&
              permissions_remove_ordinal->output[0].find("list ordinals are display-only") != std::string::npos,
          "command dispatcher /permissions remove rejects display ordinals");
 
-  auto permissions_explain_ordinal = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions explain 1"});
+  auto permissions_explain_ordinal = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions explain 1"});
   expect(permissions_explain_ordinal && permissions_explain_ordinal->handled && !permissions_explain_ordinal->output.empty() &&
              permissions_explain_ordinal->output[0].find("list ordinals are display-only") != std::string::npos,
          "command dispatcher /permissions explain rejects display ordinals");
 
-  auto permissions_diagnose = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/perms diagnose"});
+  auto permissions_diagnose = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/perms diagnose"});
   expect(permissions_diagnose && permissions_diagnose->handled && !permissions_diagnose->output.empty() &&
              permissions_diagnose->output[0].find("loaded rules: 17") != std::string::npos &&
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto append_permission_audit = ava::agent::append_permission_decision(
-      session->owner_append_route_1(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
-                                                                      .operation = ava::permissions::Operation::RunCommand,
-                                                                      .mode = ava::agent::Mode::Build,
-                                                                      .tool_name = "bash",
-                                                                      .action = ava::permissions::PermissionAction::Deny,
-                                                                      .reason = "command can change external or destructive state",
-                                                                      .risk = ava::permissions::PermissionRisk::High,
-                                                                      .command = "git push origin main",
-                                                                      .resolution = "deny",
-                                                                      .resolution_source = "resolver",
-                                                                      .resolution_reason = "remembered deny | rule",
-                                                                      .actor = "tui",
-                                                                      .rule_id = permission_rule_id});
+      session_w->owner_append_route_1(), ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
+                                                                          .operation = ava::permissions::Operation::RunCommand,
+                                                                          .mode = ava::agent::Mode::Build,
+                                                                          .tool_name = "bash",
+                                                                          .action = ava::permissions::PermissionAction::Deny,
+                                                                          .reason = "command can change external or destructive state",
+                                                                          .risk = ava::permissions::PermissionRisk::High,
+                                                                          .command = "git push origin main",
+                                                                          .resolution = "deny",
+                                                                          .resolution_source = "resolver",
+                                                                          .resolution_reason = "remembered deny | rule",
+                                                                          .actor = "tui",
+                                                                          .rule_id = permission_rule_id});
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());
-  auto permissions_audit = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit permreq_runtime"});
+  auto permissions_audit = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions audit permreq_runtime"});
   expect(permissions_audit && permissions_audit->handled && !permissions_audit->output.empty() &&
              permissions_audit->output[0].find("Permission audit:") != std::string::npos &&
              permissions_audit->output[0].find("permreq_runtime_deny") != std::string::npos &&
@@ -707,7 +717,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_audit->output[0].find("git push origin main") == std::string::npos &&
              permissions_audit->output[0].find("remembered deny | rule") == std::string::npos,
          "command dispatcher /permissions audit filters persisted permission decisions");
-  auto permissions_audit_summary = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit summary permreq_runtime"});
+  auto permissions_audit_summary = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions audit summary permreq_runtime"});
   expect(permissions_audit_summary && permissions_audit_summary->handled && !permissions_audit_summary->output.empty() &&
              permissions_audit_summary->output[0].find("Permission audit summary:") != std::string::npos &&
              permissions_audit_summary->output[0].find("filter: permreq_runtime") != std::string::npos &&
@@ -720,7 +730,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_audit_summary->output[0].find("by tool: bash=1") != std::string::npos &&
              permissions_audit_summary->output[0].find("/permissions audit show permreq_runtime_deny") != std::string::npos,
          "command dispatcher /permissions audit summary groups matching permission decisions for browsing");
-  auto permissions_audit_export = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit export permreq_runtime"});
+  auto permissions_audit_export = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions audit export permreq_runtime"});
   expect(permissions_audit_export && permissions_audit_export->handled && !permissions_audit_export->output.empty() &&
              permissions_audit_export->output[0].find("Permission audit export:") != std::string::npos &&
              permissions_audit_export->output[0].find("format: markdown table") != std::string::npos &&
@@ -730,7 +740,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_audit_export->output[0].find("git push origin main") == std::string::npos &&
              permissions_audit_export->output[0].find("remembered deny") == std::string::npos,
          "command dispatcher /permissions audit export renders copyable markdown and escapes table cells");
-  auto permissions_diagnose_denial = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions diagnose permreq_runtime"});
+  auto permissions_diagnose_denial = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions diagnose permreq_runtime"});
   expect(permissions_diagnose_denial && permissions_diagnose_denial->handled && !permissions_diagnose_denial->output.empty() &&
              permissions_diagnose_denial->output[0].find("Permission rule diagnostics:") != std::string::npos &&
              permissions_diagnose_denial->output[0].find("Recent permission denials:") != std::string::npos &&
@@ -742,7 +752,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_diagnose_denial->output[0].find("remembered deny | rule") == std::string::npos &&
              permissions_diagnose_denial->output[0].find("next: /permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions diagnose explains recent denied decisions with follow-up commands");
-  auto permissions_audit_detail = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit show permreq_runtime"});
+  auto permissions_audit_detail = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions audit show permreq_runtime"});
   expect(permissions_audit_detail && permissions_audit_detail->handled && !permissions_audit_detail->output.empty() &&
              permissions_audit_detail->output[0].find("Permission audit detail:") != std::string::npos &&
              permissions_audit_detail->output[0].find("selector: permreq_runtime") != std::string::npos &&
@@ -754,11 +764,11 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              permissions_audit_detail->output[0].find("/permissions audit export permreq_runtime") != std::string::npos &&
              permissions_audit_detail->output[0].find("/permissions explain " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions audit show drills into a permission request by id prefix");
-  auto permissions_audit_empty = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions audit unmatched-query"});
+  auto permissions_audit_empty = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions audit unmatched-query"});
   expect(permissions_audit_empty && permissions_audit_empty->handled && !permissions_audit_empty->output.empty() &&
              permissions_audit_empty->output[0].find("No permission audit entries match") != std::string::npos,
          "command dispatcher /permissions audit reports empty filtered results");
-  auto slash_items_after_permission_rule = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
+  auto slash_items_after_permission_rule = ava::app::command_catalog_slash_items_1(*session_w, custom_hotkeys);
   auto const* permissions_completion_item = tui_test_support::find_slash_command_item(slash_items_after_permission_rule, "/permissions");
   auto const* hotkeys_completion_item = tui_test_support::find_slash_command_item(slash_items_after_permission_rule, "/hotkeys");
   auto find_argument_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
@@ -778,8 +788,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
     expect(collision_refs.size() == 3 && collision_refs[0] == "abcdef1" && collision_refs[1] == "abcdef2" && collision_refs[2] == "zzzzzz" &&
                ava::app::id_payload_after_family_prefix("permrule_abcdef111111") == "abcdef111111" &&
                ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"}).size() == 2 &&
-               ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[0] ==
-                   ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[1],
+               ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[0] == ava::app::unique_short_id_refs({"job_aaaaaa111", "job_aaaaaa111"})[1],
            "unique_short_id_refs extends past six chars only until the displayed set is unique and stays stable for identical ids");
   }
 
@@ -819,37 +828,37 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                                                                        .width = 96,
                                                                                        .height = 14});
   auto const permission_ref = permission_explain ? extract_completion_ref(permission_explain->description) : std::string{};
-  expect(permission_explain != nullptr && permission_remove != nullptr && permission_explain->value == permission_rule_id &&
-             permission_remove->value == permission_rule_id && permission_explain->display_label == kPermissionSummary &&
-             permission_remove->display_label == kPermissionSummary && permission_explain->display_label.find("permrule_") == std::string::npos &&
-             permission_remove->display_label.find("permrule_") == std::string::npos &&
-             permission_explain->description.find("permrule_") == std::string::npos && permission_remove->description.find("permrule_") == std::string::npos &&
-             permission_explain->description.starts_with("Explain rule · ref ") && permission_remove->description.starts_with("Remove rule · ref ") &&
-             !permission_ref.empty() && permission_ref.size() >= 6 && permission_explain->description.find(permission_rule_id) == std::string::npos &&
-             permission_match_index.has_value() && permission_matches[*permission_match_index].display_label == kPermissionSummary &&
-             permission_matches[*permission_match_index].display_label.find("permrule_") == std::string::npos &&
-             permission_selection == "/permissions explain " + permission_rule_id &&
-             std::ranges::none_of(permission_palette,
-                                  [](std::string const& line) {
-                                    auto const visible = strip_sgr(line);
-                                    return visible.find("[complete]") != std::string::npos || visible.find("permrule_") != std::string::npos;
-                                  }) &&
-             std::ranges::any_of(permission_palette, [](std::string const& line) { return strip_sgr(line).find("Allow file reads") != std::string::npos; }) &&
-             std::ranges::any_of(permission_palette,
-                                 [&](std::string const& line) { return strip_sgr(line).find("ref " + permission_ref) != std::string::npos; }),
-         "permission explain/remove completions keep exact rule ids as values while rendering human summaries plus short refs without raw ids or [complete]");
+  expect(
+      permission_explain != nullptr && permission_remove != nullptr && permission_explain->value == permission_rule_id &&
+          permission_remove->value == permission_rule_id && permission_explain->display_label == kPermissionSummary &&
+          permission_remove->display_label == kPermissionSummary && permission_explain->display_label.find("permrule_") == std::string::npos &&
+          permission_remove->display_label.find("permrule_") == std::string::npos && permission_explain->description.find("permrule_") == std::string::npos &&
+          permission_remove->description.find("permrule_") == std::string::npos && permission_explain->description.starts_with("Explain rule · ref ") &&
+          permission_remove->description.starts_with("Remove rule · ref ") && !permission_ref.empty() && permission_ref.size() >= 6 &&
+          permission_explain->description.find(permission_rule_id) == std::string::npos && permission_match_index.has_value() &&
+          permission_matches[*permission_match_index].display_label == kPermissionSummary &&
+          permission_matches[*permission_match_index].display_label.find("permrule_") == std::string::npos &&
+          permission_selection == "/permissions explain " + permission_rule_id &&
+          std::ranges::none_of(permission_palette,
+                               [](std::string const& line) {
+                                 auto const visible = strip_sgr(line);
+                                 return visible.find("[complete]") != std::string::npos || visible.find("permrule_") != std::string::npos;
+                               }) &&
+          std::ranges::any_of(permission_palette, [](std::string const& line) { return strip_sgr(line).find("Allow file reads") != std::string::npos; }) &&
+          std::ranges::any_of(permission_palette, [&](std::string const& line) { return strip_sgr(line).find("ref " + permission_ref) != std::string::npos; }),
+      "permission explain/remove completions keep exact rule ids as values while rendering human summaries plus short refs without raw ids or [complete]");
 
   // Two same-summary rules must stay visually distinct via short refs and still draft separate exact ids.
   auto add_duplicate_permission_rule =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
-                                                                          "reason=\"duplicate summary completion fixture\""});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
+                                                                            "reason=\"duplicate summary completion fixture\""});
   expect(add_duplicate_permission_rule && add_duplicate_permission_rule->handled && !add_duplicate_permission_rule->output.empty() &&
              add_duplicate_permission_rule->output[0].find(kPermissionSummary) != std::string::npos,
          "duplicate-summary permission rule fixture adds with the same human summary");
   auto const duplicate_permission_rule_id = add_duplicate_permission_rule ? extract_rule_id(add_duplicate_permission_rule->output[0]) : std::string{};
   expect(!duplicate_permission_rule_id.empty() && duplicate_permission_rule_id != permission_rule_id,
          "duplicate-summary permission rule fixture exposes a distinct authority id");
-  auto const slash_items_duplicate_rules = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
+  auto const slash_items_duplicate_rules = ava::app::command_catalog_slash_items_1(*session_w, custom_hotkeys);
   auto const* permissions_duplicate_item = tui_test_support::find_slash_command_item(slash_items_duplicate_rules, "/permissions");
   auto const* permission_explain_a = find_argument_completion(permissions_duplicate_item, 1, permission_rule_id, {"explain"});
   auto const* permission_explain_b = find_argument_completion(permissions_duplicate_item, 1, duplicate_permission_rule_id, {"explain"});
@@ -858,22 +867,20 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
   auto const duplicate_permission_matches = ava::tui::filter_slash_commands("/permissions explain ", slash_items_duplicate_rules);
   auto const match_a = match_index_for_value(duplicate_permission_matches, permission_rule_id);
   auto const match_b = match_index_for_value(duplicate_permission_matches, duplicate_permission_rule_id);
-  auto const selection_a =
-      match_a ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_a) : std::string{};
-  auto const selection_b =
-      match_b ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_b) : std::string{};
+  auto const selection_a = match_a ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_a) : std::string{};
+  auto const selection_b = match_b ? ava::tui::slash_command_selection_text("/permissions explain ", slash_items_duplicate_rules, *match_b) : std::string{};
   auto render_permission_palette = [&](std::size_t selected_index) {
     return ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                               .provider = "openai",
-                                                               .model = "gpt-5.5",
-                                                               .session_id = "session_test",
-                                                               .input = "/permissions explain ",
-                                                               .status = "ready",
-                                                               .transcript = {},
-                                                               .slash_commands = slash_items_duplicate_rules,
-                                                               .selected_slash_command_index = selected_index,
-                                                               .width = 96,
-                                                               .height = 16});
+                                                                .provider = "openai",
+                                                                .model = "gpt-5.5",
+                                                                .session_id = "session_test",
+                                                                .input = "/permissions explain ",
+                                                                .status = "ready",
+                                                                .transcript = {},
+                                                                .slash_commands = slash_items_duplicate_rules,
+                                                                .selected_slash_command_index = selected_index,
+                                                                .width = 96,
+                                                                .height = 16});
   };
   auto const duplicate_permission_palette_a = render_permission_palette(match_a.value_or(0));
   auto const duplicate_permission_palette_b = render_permission_palette(match_b.value_or(0));
@@ -913,12 +920,13 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
              keybinding_selection.find("Submit custom") == std::string::npos,
          "keybinding set/reset/unset completions show human labels with keys-first descriptions while drafting canonical action ids");
 
-  auto coordinator = session->subagent_coordinator();
+  auto coordinator = session_w->subagent_coordinator();
+  std::string const coordinator_session_id = session_w->store.session_id();
   expect(coordinator != nullptr, "catalog human completion tests require a subagent coordinator");
   if (coordinator)
   {
     auto start_completed_job = [&](std::string title, std::string child_session_id, std::string subagent_type = "general") {
-      return coordinator->start_background(session->store.session_id(),
+      return coordinator->start_background(coordinator_session_id,
                                            ava::agent::BackgroundJobStartOptions{
                                                .title = std::move(title),
                                                .description = "SECRET_PROMPT_MUST_NOT_APPEAR_IN_COMPLETION",
@@ -939,13 +947,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
            started_twin ? "catalog completion twin job starts" : "catalog completion twin job starts: " + started_twin.error().format());
     if (started && started_twin)
     {
-      auto waited = coordinator->wait(session->store.session_id(), started->job.identity.job_id, std::chrono::seconds(2));
-      auto waited_twin = coordinator->wait(session->store.session_id(), started_twin->job.identity.job_id, std::chrono::seconds(2));
-      expect(waited && !waited->timed_out && waited_twin && !waited_twin->timed_out,
-             "catalog completion jobs reach terminal state");
+      CRITICAL_AREA_END_W(session);
+      auto waited = coordinator->wait(coordinator_session_id, started->job.identity.job_id, std::chrono::seconds(2));
+      auto waited_twin = coordinator->wait(coordinator_session_id, started_twin->job.identity.job_id, std::chrono::seconds(2));
+      CRITICAL_AREA_CONTINUE_W(session);
+      expect(waited && !waited->timed_out && waited_twin && !waited_twin->timed_out, "catalog completion jobs reach terminal state");
       auto const job_id = started->job.identity.job_id;
       auto const job_id_twin = started_twin->job.identity.job_id;
-      auto const slash_items_with_job = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
+      auto const slash_items_with_job = ava::app::command_catalog_slash_items_1(*session_w, custom_hotkeys);
       auto const* jobs_item = tui_test_support::find_slash_command_item(slash_items_with_job, "/jobs");
       auto const* job_show = find_argument_completion(jobs_item, 1, job_id, {"show"});
       auto const* job_show_twin = find_argument_completion(jobs_item, 1, job_id_twin, {"show"});
@@ -955,8 +964,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
       auto const job_matches = ava::tui::filter_slash_commands("/jobs show ", slash_items_with_job);
       auto const job_match = match_index_for_value(job_matches, job_id);
       auto const job_match_twin = match_index_for_value(job_matches, job_id_twin);
-      auto const job_selection =
-          job_match ? ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, *job_match) : std::string{};
+      auto const job_selection = job_match ? ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, *job_match) : std::string{};
       auto const job_selection_twin =
           job_match_twin ? ava::tui::slash_command_selection_text("/jobs show ", slash_items_with_job, *job_match_twin) : std::string{};
       auto const job_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -994,8 +1002,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
                                       }) &&
                  std::ranges::any_of(job_palette, [](std::string const& line) { return strip_sgr(line).find("Review pull request") != std::string::npos; }) &&
                  std::ranges::any_of(job_palette, [&](std::string const& line) { return strip_sgr(line).find("ref " + job_ref) != std::string::npos; }) &&
-                 std::ranges::any_of(job_palette,
-                                     [&](std::string const& line) { return strip_sgr(line).find("ref " + job_ref_twin) != std::string::npos; }),
+                 std::ranges::any_of(job_palette, [&](std::string const& line) { return strip_sgr(line).find("ref " + job_ref_twin) != std::string::npos; }),
              "same-title job completions keep exact job ids as values while rendering titles plus distinct short refs without prompts, summaries, raw ids, or "
              "[complete]");
 
@@ -1006,7 +1013,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
       if (untitled)
       {
         auto const untitled_id = untitled->job.identity.job_id;
-        auto const slash_items_untitled = ava::app::command_catalog_slash_items_1(*session, custom_hotkeys);
+        auto const slash_items_untitled = ava::app::command_catalog_slash_items_1(*session_w, custom_hotkeys);
         auto const* jobs_untitled_item = tui_test_support::find_slash_command_item(slash_items_untitled, "/jobs");
         auto const* untitled_show = find_argument_completion(jobs_untitled_item, 1, untitled_id, {"show"});
         auto const untitled_ref = untitled_show ? extract_completion_ref(untitled_show->description) : std::string{};
@@ -1018,24 +1025,24 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, av
       }
     }
   }
-  auto remove_permission_rule = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + permission_rule_id});
+  auto remove_permission_rule = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions remove " + permission_rule_id});
   expect(remove_permission_rule && remove_permission_rule->handled && !remove_permission_rule->output.empty() &&
              remove_permission_rule->output[0].find("removed permission rule") != std::string::npos &&
              remove_permission_rule->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
              remove_permission_rule->output[0].find("Rule ID: " + permission_rule_id) != std::string::npos,
          "command dispatcher /permissions remove deletes persistent rules by exact id with human receipt");
 
-  for (auto const& rule_id : {duplicate_permission_rule_id, explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id,
-                              path_explore_rule_id, forged_task_rule_id, typed_task_rule_id, explore_explore_rule_id, tool_only_explore_rule_id,
-                              freeform_explore_tool_rule_id, mixed_coder_explore_rule_id, mixed_explore_coder_rule_id, mcp_read_rule_id, plugin_bash_rule_id,
-                              forged_recipe_rule_id})
+  for (auto const& rule_id :
+       {duplicate_permission_rule_id, explore_rule_id, skill_rule_id, global_read_rule_id, exact_command_rule_id, path_command_rule_id, path_explore_rule_id,
+        forged_task_rule_id, typed_task_rule_id, explore_explore_rule_id, tool_only_explore_rule_id, freeform_explore_tool_rule_id, mixed_coder_explore_rule_id,
+        mixed_explore_coder_rule_id, mcp_read_rule_id, plugin_bash_rule_id, forged_recipe_rule_id})
   {
-    auto removed = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
+    auto removed = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions remove " + rule_id});
     expect(removed && removed->handled && !removed->output.empty() && removed->output[0].find("Rule ID: " + rule_id) != std::string::npos,
            "command dispatcher /permissions remove deletes remaining fixture rules by exact id");
   }
 
-  auto permissions_after_remove = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/permissions list"});
+  auto permissions_after_remove = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/permissions list"});
   expect(permissions_after_remove && permissions_after_remove->handled && !permissions_after_remove->output.empty() &&
              permissions_after_remove->output[0].find("No persistent permission rules") != std::string::npos,
          "command dispatcher /permissions list reflects removed persistent rules");

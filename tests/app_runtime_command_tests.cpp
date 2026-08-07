@@ -116,7 +116,8 @@ void test_app_command_dispatcher()
   expect(unlocked_session_result.has_value(), "command dispatcher test opens runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
   auto const plan_system_prompt = session_w->system_prompt();
   {
     std::ofstream file(workspace / "AGENTS.md", std::ios::binary | std::ios::trunc);
@@ -151,11 +152,12 @@ void test_app_command_dispatcher()
       ava::app::CommandHotkey{.action = "submit", .description = "Submit custom", .keys = "Ctrl+M"},
       ava::app::CommandHotkey{.action = "variant_cycle", .description = "Cycle variants", .keys = "Ctrl+T"}};
 
-  app_command_dispatcher_ui_part(&*session_w, paths, workspace, custom_hotkeys);
-  app_command_dispatcher_catalog_part(&*session_w, paths, workspace, custom_hotkeys);
-  app_command_dispatcher_auth_part(&*session_w, plan_system_prompt);
-  app_command_dispatcher_tool_part(&*session_w, workspace);
-  app_command_dispatcher_session_part(&*session_w, workspace);
+  CRITICAL_AREA_END_W(session);
+  app_command_dispatcher_ui_part(unlocked_session, paths, workspace, custom_hotkeys);
+  app_command_dispatcher_catalog_part(unlocked_session, paths, workspace, custom_hotkeys);
+  app_command_dispatcher_auth_part(unlocked_session, plan_system_prompt);
+  app_command_dispatcher_tool_part(unlocked_session, workspace);
+  app_command_dispatcher_session_part(unlocked_session, workspace);
 }
 
 }  // namespace ava::tests::app_runtime_tests

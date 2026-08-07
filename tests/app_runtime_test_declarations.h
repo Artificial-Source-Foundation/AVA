@@ -61,12 +61,27 @@ void test_app_runtime_reasoning_selection_persists_and_requests();
 void test_app_runtime_branch_construction_failure_rolls_back_created_file();
 void test_app_runtime_initial_reasoning_level_option();
 
-void app_command_dispatcher_ui_part(ava::app::runtime::Session* session, ava::config::XdgPaths const& paths, std::filesystem::path const& workspace,
+// Exercise UI command dispatch using unlocked_session and the supplied fixture paths, workspace, and custom hotkeys.
+//
+// The function acquires write access while commands inspect or update session-backed UI state.
+void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_session, ava::config::XdgPaths const& paths, std::filesystem::path const& workspace,
                                     std::vector<ava::app::CommandHotkey> const& custom_hotkeys);
-void app_command_dispatcher_catalog_part(ava::app::runtime::Session* session, ava::config::XdgPaths const& paths, std::filesystem::path const& workspace,
-                                         std::vector<ava::app::CommandHotkey> const& custom_hotkeys);
-void app_command_dispatcher_auth_part(ava::app::runtime::Session* session, std::string const& plan_system_prompt);
-void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::filesystem::path const& workspace);
-void app_command_dispatcher_session_part(ava::app::runtime::Session* session, std::filesystem::path const& workspace);
+// Exercise command catalog and dispatcher behavior using unlocked_session, paths, workspace, and custom_hotkeys.
+//
+// The function acquires session access only around state-dependent work and releases it before waits that can join background workers.
+void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked_session, ava::config::XdgPaths const& paths,
+                                         std::filesystem::path const& workspace, std::vector<ava::app::CommandHotkey> const& custom_hotkeys);
+// Exercise authentication command dispatch using unlocked_session and the original plan_system_prompt.
+//
+// The function acquires write access while commands update session mode, prompt, and credentials.
+void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_session, std::string const& plan_system_prompt);
+// Exercise tool command dispatch using unlocked_session and workspace.
+//
+// The function acquires write access while tool and compaction commands inspect or mutate session state.
+void app_command_dispatcher_tool_part(ava::app::runtime::session_ts& unlocked_session, std::filesystem::path const& workspace);
+// Exercise session command dispatch using unlocked_session and workspace.
+//
+// The function acquires write access while export, import, statistics, and lifecycle commands inspect or replace session state.
+void app_command_dispatcher_session_part(ava::app::runtime::session_ts& unlocked_session, std::filesystem::path const& workspace);
 
 }  // namespace ava::tests::app_runtime_tests

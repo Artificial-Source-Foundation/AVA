@@ -27,14 +27,19 @@ namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
 
-void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::filesystem::path const& workspace)
+// Exercise tool command dispatch while holding write access to the runtime session for synchronous callbacks.
+//
+// unlocked_session must be unlocked on entry and supplies session state; workspace identifies the fixture project.
+void app_command_dispatcher_tool_part(ava::app::runtime::session_ts& unlocked_session, std::filesystem::path const& workspace)
 {
+  CRITICAL_AREA_BEGIN_W(session);
+
   std::vector<ava::event::RuntimeEvent> command_tool_events;
   auto glob = ava::app::run_command(
-      *session, ava::app::CommandRequest{.command = "/glob **/*.cpp", .event_sink = [&command_tool_events](ava::event::RuntimeEvent const& event) {
-                                           command_tool_events.push_back(event);
-                                           return ava::core::VoidResult{};
-                                         }});
+      *session_w, ava::app::CommandRequest{.command = "/glob **/*.cpp", .event_sink = [&command_tool_events](ava::event::RuntimeEvent const& event) {
+                                             command_tool_events.push_back(event);
+                                             return ava::core::VoidResult{};
+                                           }});
   expect(glob && glob->handled && !glob->output.empty() && glob->output[0].find("src/main.cpp") != std::string::npos,
          "command dispatcher /glob runs existing safe file search command");
   expect(glob && glob->tool_timeline.size() == 2 && glob->tool_timeline[0].status == ava::agent::ToolTimelineStatus::Running &&
@@ -107,11 +112,11 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
          "separate");
 
   std::vector<ava::event::RuntimeEvent> write_tool_events;
-  auto write = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/write src/main.cpp int changed() { return 1; }",
-                                                                        .event_sink = [&write_tool_events](ava::event::RuntimeEvent const& event) {
-                                                                          write_tool_events.push_back(event);
-                                                                          return ava::core::VoidResult{};
-                                                                        }});
+  auto write = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/write src/main.cpp int changed() { return 1; }",
+                                                                          .event_sink = [&write_tool_events](ava::event::RuntimeEvent const& event) {
+                                                                            write_tool_events.push_back(event);
+                                                                            return ava::core::VoidResult{};
+                                                                          }});
   auto const* write_result = write_tool_events.size() == 2 ? ava::tests::runtime_event_as<ava::event::ToolResultEvent>(write_tool_events[1]) : nullptr;
   expect(write && write->handled && write->tool_timeline.size() == 2 && write->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              write->tool_timeline[1].diff.find("-int main()") != std::string::npos &&
@@ -169,20 +174,21 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
         "# Files Read or Modified\nsrc/main.cpp\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.");
   };
   auto compact =
-      ava::app::run_command(*session, ava::app::CommandRequest{.command = "/compact Keep key facts", .compaction_summary_generator = compact_generator});
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/compact Keep key facts", .compaction_summary_generator = compact_generator});
   expect(compact && compact->handled && !compact->output.empty() && compact->output[0].find("compaction summary recorded") != std::string::npos,
          "command dispatcher /compact records generated compaction summary");
-  auto compact_empty = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/compact", .compaction_summary_generator = compact_generator});
+  auto compact_empty = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/compact", .compaction_summary_generator = compact_generator});
   expect(compact_empty && compact_empty->handled && !compact_empty->output.empty() &&
              compact_empty->output[0].find("compaction summary recorded") != std::string::npos,
          "command dispatcher /compact without instructions records generated compaction summary");
-  auto compact_trailing = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/compact ", .compaction_summary_generator = compact_generator});
+  auto compact_trailing =
+      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/compact ", .compaction_summary_generator = compact_generator});
   expect(compact_trailing && compact_trailing->handled && !compact_trailing->output.empty() &&
              compact_trailing->output[0].find("compaction summary recorded") != std::string::npos,
          "command dispatcher /compact with trailing space records generated compaction summary");
   expect(compact_generator_calls == 3, "command dispatcher /compact invokes the summary generator once per command");
 
-  auto entries = session->store.load();
+  auto entries = session_w->store.load();
   expect(entries && std::ranges::any_of(*entries,
                                         [](ava::session::SessionEntry const& entry) {
                                           return entry.type == ava::session::EntryType::Compaction &&
@@ -196,26 +202,28 @@ void app_command_dispatcher_tool_part(ava::app::runtime::Session* session, std::
   bool introduced_manual_stale_snapshot = false;
   std::size_t manual_stale_generator_calls = 0;
   auto stale_compact = ava::app::run_command(
-      *session, ava::app::CommandRequest{
-                    .command = "/compact stale snapshot",
-                    .compaction_summary_generator = [&](std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&, std::string_view,
-                                                        std::size_t) -> ava::core::Result<std::string> {
-                      ++manual_stale_generator_calls;
-                      if (!introduced_manual_stale_snapshot)
-                      {
-                        introduced_manual_stale_snapshot = true;
-                        static_cast<void>(session->append_owned(ava::session::SessionEntry{.id = "entry_manual_compact_concurrent_change",
-                                                                                           .parent_id = "",
-                                                                                           .type = ava::session::EntryType::UserMessage,
-                                                                                           .timestamp = ava::session::now_timestamp(),
-                                                                                           .data_json = "{\"text\":\"manual compact concurrent change\"}"}));
-                      }
-                      return std::string(
-                          "# Goal\nStale\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
-                          "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.");
-                    },
-                    .session_mutex = &session_mutex});
-  entries = session->store.load();
+      *session_w,
+      ava::app::CommandRequest{.command = "/compact stale snapshot",
+                               .compaction_summary_generator = [&session_w, &manual_stale_generator_calls, &introduced_manual_stale_snapshot](
+                                                                   std::vector<ava::session::SessionEntry> const&, ava::session::CompactionConfig const&,
+                                                                   std::string_view, std::size_t) -> ava::core::Result<std::string> {
+                                 ++manual_stale_generator_calls;
+                                 if (!introduced_manual_stale_snapshot)
+                                 {
+                                   introduced_manual_stale_snapshot = true;
+                                   static_cast<void>(
+                                       session_w->append_owned(ava::session::SessionEntry{.id = "entry_manual_compact_concurrent_change",
+                                                                                          .parent_id = "",
+                                                                                          .type = ava::session::EntryType::UserMessage,
+                                                                                          .timestamp = ava::session::now_timestamp(),
+                                                                                          .data_json = "{\"text\":\"manual compact concurrent change\"}"}));
+                                 }
+                                 return std::string(
+                                     "# Goal\nStale\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
+                                     "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.");
+                               },
+                               .session_mutex = &session_mutex});
+  entries = session_w->store.load();
   expect(stale_compact && stale_compact->handled && !stale_compact->output.empty() &&
              stale_compact->output[0].find("compaction summary recorded") != std::string::npos,
          "command dispatcher /compact retries one stale snapshot and records a fresh summary");

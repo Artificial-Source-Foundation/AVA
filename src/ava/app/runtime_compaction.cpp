@@ -374,7 +374,7 @@ ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::
   return error;
 }
 
-ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::Session const& session, ava::session::CompactionConfig config)
+ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::session_ts const& unlocked_session, ava::session::CompactionConfig config)
 {
   if (!config.model_explicit)
   {
@@ -476,7 +476,7 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
   return prompt;
 }
 
-ava::core::Result<std::string> generate_compaction_summary(runtime::Session const& session, std::vector<ava::session::SessionEntry> const& entries,
+ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts const& unlocked_session, std::vector<ava::session::SessionEntry> const& entries,
                                                            ava::session::CompactionConfig const& config, std::string_view instructions,
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                            ava::http::Transport& transport, runtime::RunOptions const& options)

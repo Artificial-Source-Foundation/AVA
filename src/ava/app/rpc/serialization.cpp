@@ -653,7 +653,7 @@ std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoo
   return json;
 }
 
-std::string context_sources_json(runtime::Session const& session)
+std::string context_sources_json(runtime::session_ts const& unlocked_session)
 {
   std::string json = "[";
   for (std::size_t index = 0; index < session.context_sources().size(); ++index)

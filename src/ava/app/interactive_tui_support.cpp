@@ -311,7 +311,7 @@ ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
   return ava::tui::TodoStatus::Pending;
 }
 
-std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session)
+std::vector<ava::tui::TodoItem> todos_for_session(runtime::session_ts const& unlocked_session)
 {
   auto read_authority = session.read_authority_1();
   if (!read_authority)

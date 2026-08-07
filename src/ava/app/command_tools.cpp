@@ -188,7 +188,7 @@ ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session,
       .current_dir = session_r->current_dir()};
 }
 
-ava::core::VoidResult record_tool_start(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_tool_start(runtime::session_ts const& unlocked_session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
                                         std::string const& call_id, std::string name, std::string argument_summary)
 {
   return record_tool_event(
@@ -197,7 +197,7 @@ ava::core::VoidResult record_tool_start(runtime::Session const& session, ava::ev
           .status = ava::agent::ToolTimelineStatus::Running, .call_id = call_id, .name = std::move(name), .argument_summary = std::move(argument_summary)});
 }
 
-ava::core::VoidResult record_tool_result(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_tool_result(runtime::session_ts const& unlocked_session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
                                          std::string const& call_id, std::string name, ava::agent::ToolTimelineStatus status, std::string result_summary,
                                          std::string result_content, std::vector<std::string> permission_request_ids)
 {

@@ -40,7 +40,7 @@
 
 namespace ava::app {
 
-ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode)
+ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::session_ts const& unlocked_session, ava::agent::Mode mode)
 {
   return runtime::load_runtime_prompt_state(session.paths(), session.model(), mode, session.workspace_dir(), session.current_dir(),
                                             project_resources_trusted(session.project_trust()), session.prompt_overrides());

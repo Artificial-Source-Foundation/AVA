@@ -391,7 +391,7 @@ ava::core::Result<std::string> run_openai_headless_oauth(runtime::Session const&
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_connect_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_connect_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

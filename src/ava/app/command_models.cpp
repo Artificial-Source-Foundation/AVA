@@ -331,7 +331,7 @@ std::vector<std::string> model_configuration_diagnostics(ava::config::ModelInfo 
   return model_diagnostics(model, provider_registered);
 }
 
-ava::core::Result<CommandResult> run_models_command(runtime::Session& session, std::string_view query)
+ava::core::Result<CommandResult> run_models_command(runtime::session_ts& unlocked_session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -343,7 +343,7 @@ ava::core::Result<CommandResult> run_models_command(runtime::Session& session, s
   return result;
 }
 
-ava::core::Result<CommandResult> run_providers_command(runtime::Session& session, std::string_view query)
+ava::core::Result<CommandResult> run_providers_command(runtime::session_ts& unlocked_session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;

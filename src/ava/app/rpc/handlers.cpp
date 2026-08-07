@@ -44,7 +44,7 @@ ava::core::Result<ava::config::ModelInfo> previous_runtime_model(ava::app::runti
   return cycle_runtime_model(session_r, -1);
 }
 
-ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
+ava::core::Result<ProviderHandle> provider_for_session_model(runtime::session_ts const& unlocked_session, std::string_view injected_provider_id,
                                                              ava::provider::Provider const& injected_provider)
 {
   if (session.model().provider_id == injected_provider_id)

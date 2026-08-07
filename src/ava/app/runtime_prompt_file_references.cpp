@@ -109,7 +109,7 @@ ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session,
 
 }  // namespace
 
-ava::core::Result<std::string> expand_prompt_file_references(runtime::Session& session, std::string const& user_message, runtime::RunOptions const& options)
+ava::core::Result<std::string> expand_prompt_file_references(runtime::session_ts& unlocked_session, std::string const& user_message, runtime::RunOptions const& options)
 {
   auto references = prompt_file_references(user_message);
   if (references.empty())

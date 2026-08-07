@@ -147,7 +147,7 @@ ava::core::Result<std::vector<ava::session::TranscriptItem>> load_public_transcr
 
 }  // namespace
 
-ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::Session const& session, std::size_t max_items)
+ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::session_ts const& unlocked_session, std::size_t max_items)
 {
   if (max_items == 0)
   {
@@ -185,7 +185,7 @@ ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::Session 
   return listed;
 }
 
-ava::core::Result<std::string> read_session_user_turn_text(runtime::Session const& session, std::string_view entry_id)
+ava::core::Result<std::string> read_session_user_turn_text(runtime::session_ts const& unlocked_session, std::string_view entry_id)
 {
   if (entry_id.empty())
   {
@@ -211,7 +211,7 @@ ava::core::Result<std::string> read_session_user_turn_text(runtime::Session cons
   return std::unexpected(std::move(error));
 }
 
-ava::core::VoidResult require_persistent_session_for_fork_from(runtime::Session const& session)
+ava::core::VoidResult require_persistent_session_for_fork_from(runtime::session_ts const& unlocked_session)
 {
   if (!session.sessionless())
     return {};

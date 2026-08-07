@@ -70,7 +70,7 @@ void disambiguate_reasoning_labels(std::vector<tui::SelectListItemView>& items)
 
 }  // namespace
 
-std::optional<std::string> reasoning_status_for_session(runtime::Session const& session)
+std::optional<std::string> reasoning_status_for_session(runtime::session_ts const& unlocked_session)
 {
   auto const& model = session.model();
   if (!model.supports_reasoning.value_or(false) && ava::config::supported_reasoning_levels(model).size() <= 1)
@@ -151,7 +151,7 @@ std::optional<tui::SelectListView> reasoning_selector_view(ava::config::ModelInf
   return view;
 }
 
-std::optional<tui::SelectListView> reasoning_selector_view(runtime::Session const& session, std::string footer_hint)
+std::optional<tui::SelectListView> reasoning_selector_view(runtime::session_ts const& unlocked_session, std::string footer_hint)
 {
   return reasoning_selector_view(session.model(), session.reasoning(), std::move(footer_hint));
 }
@@ -197,7 +197,7 @@ ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava
   return runtime::ReasoningSelection{.level = std::move(level), .provider_level = resolved.provider_level, .budget_tokens = budget, .display = {}};
 }
 
-ava::core::Result<std::string> cycle_runtime_reasoning(runtime::Session& session)
+ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlocked_session)
 {
   auto const& model = session.model();
   if (!model.supports_reasoning.value_or(false))

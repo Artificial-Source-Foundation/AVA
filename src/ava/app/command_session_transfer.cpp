@@ -437,7 +437,7 @@ void set_after_session_import_open_for_test(std::function<void()> hook)
   after_session_import_open_for_test = std::move(hook);
 }
 
-ava::core::Result<CommandResult> run_import_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   CommandResult result;
   result.handled = true;
@@ -532,7 +532,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::Session& session, s
   return result;
 }
 
-ava::core::Result<CommandResult> run_recover_persistence_command(runtime::Session& session)
+ava::core::Result<CommandResult> run_recover_persistence_command(runtime::session_ts& unlocked_session)
 {
   CommandResult result;
   result.handled = true;
@@ -550,7 +550,7 @@ ava::core::Result<CommandResult> run_recover_persistence_command(runtime::Sessio
   return result;
 }
 
-ava::core::Result<CommandResult> run_export_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

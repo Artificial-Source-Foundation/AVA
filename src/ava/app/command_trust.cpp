@@ -55,7 +55,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& se
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_trust_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_trust_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   auto const action = args.empty() ? std::string("status") : args.front();

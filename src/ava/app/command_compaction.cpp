@@ -36,7 +36,7 @@ ava::core::Error command_canceled_error()
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_compact_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

@@ -1000,7 +1000,7 @@ std::vector<tui::SlashCommandItem> command_catalog_slash_items(std::vector<Comma
   return items;
 }
 
-void refresh_application_catalog_values(ApplicationCatalogCache& cache, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+void refresh_application_catalog_values(ApplicationCatalogCache& cache, runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto items = command_catalog_slash_items(hotkeys);
   add_backend_argument_completions(items, session, hotkeys, cache.workspace_path_candidates, cache.session_tree ? &*cache.session_tree : nullptr);
@@ -1009,7 +1009,7 @@ void refresh_application_catalog_values(ApplicationCatalogCache& cache, runtime:
   ++cache.operations.value_refreshes;
 }
 
-void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
+void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys,
                                            WorkspaceCatalogWalker workspace_walker)
 {
   auto candidates = workspace_walker ? workspace_walker(session) : walk_workspace_path_candidates(session);
@@ -1020,7 +1020,7 @@ void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runti
   refresh_application_catalog_values(cache, session, hotkeys);
 }
 
-void refresh_application_session_tree(ApplicationCatalogCache& cache, runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
+void refresh_application_session_tree(ApplicationCatalogCache& cache, runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys,
                                       SessionTreeIndexBuilder session_tree_builder)
 {
   auto tree = session_tree_builder ? session_tree_builder(session)
@@ -1045,7 +1045,7 @@ void retarget_application_session(ApplicationCatalogCache& cache, std::string_vi
     ava::session::retarget_session_tree(*cache.session_tree, current_session_id);
 }
 
-ApplicationCatalogCache build_application_catalog_cache(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
+ApplicationCatalogCache build_application_catalog_cache(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys,
                                                         WorkspaceCatalogWalker workspace_walker, SessionTreeIndexBuilder session_tree_builder)
 {
   ApplicationCatalogCache cache;
@@ -1100,18 +1100,18 @@ ApplicationCatalogDelivery ApplicationCatalogCoordinator::delivery_snapshot()
   return delivery;
 }
 
-void ApplicationCatalogCoordinator::refresh_values_during_operation(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+void ApplicationCatalogCoordinator::refresh_values_during_operation(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
 {
   refresh_application_catalog_values(cache_, session, hotkeys);
 }
 
-void ApplicationCatalogCoordinator::refresh_values(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+void ApplicationCatalogCoordinator::refresh_values(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
 {
   std::lock_guard lock(mutex_);
   refresh_values_during_operation(session, hotkeys);
 }
 
-void ApplicationCatalogCoordinator::refresh_workspace(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys,
+void ApplicationCatalogCoordinator::refresh_workspace(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys,
                                                       WorkspaceCatalogWalker workspace_walker)
 {
   std::lock_guard lock(mutex_);
@@ -1181,13 +1181,13 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
   return refreshed;
 }
 
-ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
 {
   std::lock_guard lock(mutex_);
   return refresh_current_session_during_operation(session, hotkeys);
 }
 
-ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_title_changes(runtime::Session const& session, SessionTitleCatalogChanges const& changes,
+ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_title_changes(runtime::session_ts const& unlocked_session, SessionTitleCatalogChanges const& changes,
                                                                              std::vector<CommandHotkey> const& hotkeys,
                                                                              SessionTreeIndexBuilder session_tree_builder)
 {
@@ -1263,13 +1263,13 @@ ava::core::Result<std::optional<std::string>> ApplicationCatalogCoordinator::chi
   return session_selector_child_target(*cache_.session_tree, session_id, sort, include_archived);
 }
 
-std::vector<tui::SlashCommandItem> command_catalog_slash_items_1(runtime::Session const& session, std::vector<CommandHotkey> const& hotkeys)
+std::vector<tui::SlashCommandItem> command_catalog_slash_items_1(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
 {
   auto cache = build_application_catalog_cache(session, hotkeys);
   return std::move(cache.slash_commands);
 }
 
-std::vector<tui::FileReferenceItem> file_reference_items(runtime::Session const& session)
+std::vector<tui::FileReferenceItem> file_reference_items(runtime::session_ts const& unlocked_session)
 {
   return file_reference_items_from_candidates(walk_workspace_path_candidates(session));
 }
@@ -1311,7 +1311,7 @@ tui::SelectListView model_selector_view(ava::config::ModelRegistry const& regist
   return view;
 }
 
-tui::SelectListView model_selector_view_1(runtime::Session const& session, std::string footer_hint)
+tui::SelectListView model_selector_view_1(runtime::session_ts const& unlocked_session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
@@ -1372,7 +1372,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
   return view;
 }
 
-tui::SelectListView scoped_model_selector_view_1(runtime::Session const& session, std::string footer_hint)
+tui::SelectListView scoped_model_selector_view_1(runtime::session_ts const& unlocked_session, std::string footer_hint)
 {
   auto registry = ava::config::load_model_registry(session.paths());
   if (registry)
@@ -1622,7 +1622,7 @@ tui::SelectListView user_turn_selector_view(std::vector<SessionUserTurn> turns, 
   return view;
 }
 
-ava::core::Result<tui::SelectListView> user_turn_selector_view(runtime::Session const& session, std::string title, std::string footer_hint,
+ava::core::Result<tui::SelectListView> user_turn_selector_view(runtime::session_ts const& unlocked_session, std::string title, std::string footer_hint,
                                                                std::string initial_query)
 {
   auto listed = list_session_user_turns(session);

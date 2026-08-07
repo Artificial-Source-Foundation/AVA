@@ -125,7 +125,7 @@ ava::event::EventEnvelopeContext rpc_event_context(std::string_view request_id)
   return context;
 }
 
-std::string session_id_snapshot(runtime::Session const& session, std::mutex& session_mutex)
+std::string session_id_snapshot(runtime::session_ts const& unlocked_session, std::mutex& session_mutex)
 {
   std::lock_guard lock(session_mutex);
   return session.store.session_id();
@@ -163,7 +163,7 @@ ava::event::EventEnvelope resolver_event_envelope(std::string name, std::string 
   return envelope;
 }
 
-ava::core::VoidResult write_queue_event(output_ts& output, runtime::Session const& session, std::mutex& session_mutex, std::string_view name,
+ava::core::VoidResult write_queue_event(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex, std::string_view name,
                                         QueuedRpcMessage const& queued, std::string_view reason)
 {
   auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id, session_id_snapshot(session, session_mutex),
@@ -171,7 +171,7 @@ ava::core::VoidResult write_queue_event(output_ts& output, runtime::Session cons
   return Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope));
 }
 
-ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::Session const& session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
+ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
                                                  std::string_view reason)
 {
   for (auto const& queued : cleared.steering_messages)

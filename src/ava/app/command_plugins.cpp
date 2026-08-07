@@ -495,7 +495,7 @@ ava::core::Result<PluginRunArguments> parse_plugin_run_arguments(std::string_vie
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;
@@ -876,7 +876,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::Session& session, 
   return usage();
 }
 
-ava::core::Result<CommandResult> run_plugin_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

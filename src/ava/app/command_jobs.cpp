@@ -252,7 +252,7 @@ std::optional<std::string_view> active_jobs_command_arguments(std::string_view s
   return arguments;
 }
 
-ava::core::Result<CommandResult> run_jobs_command_1(runtime::Session& session, std::string_view arguments)
+ava::core::Result<CommandResult> run_jobs_command_1(runtime::session_ts& unlocked_session, std::string_view arguments)
 {
   return run_jobs_command(session.subagent_coordinator(), session.store.session_id(), arguments, false);
 }

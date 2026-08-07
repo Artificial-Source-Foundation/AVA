@@ -326,7 +326,7 @@ std::string format_session_stats_text(runtime::Session const& session, ava::sess
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_context_command(runtime::Session& session, std::string_view query)
+ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlocked_session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -453,7 +453,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::Session& session, 
   return result;
 }
 
-ava::core::Result<CommandResult> run_stats_command(runtime::Session& session)
+ava::core::Result<CommandResult> run_stats_command(runtime::session_ts& unlocked_session)
 {
   CommandResult result;
   result.handled = true;

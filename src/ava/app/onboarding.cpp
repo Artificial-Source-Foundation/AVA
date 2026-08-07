@@ -70,7 +70,7 @@ std::string auth_setup_message(runtime::Session const& session, std::string_view
 
 }  // namespace
 
-std::optional<std::string> first_run_auth_onboarding_message(runtime::Session const& session)
+std::optional<std::string> first_run_auth_onboarding_message(runtime::session_ts const& unlocked_session)
 {
   auto credential = ava::config::provider_credential_for_startup(session.paths(), session.model().provider_id);
   auto const provider_id = session.model().provider_id.empty() ? std::string("openai") : session.model().provider_id;
@@ -82,7 +82,7 @@ std::optional<std::string> first_run_auth_onboarding_message(runtime::Session co
   return "! " + provider_display_name(provider_id) + " not connected · /connect";
 }
 
-std::string provider_auth_required_message(runtime::Session const& session, std::string_view offline_suffix)
+std::string provider_auth_required_message(runtime::session_ts const& unlocked_session, std::string_view offline_suffix)
 {
   auto const provider_id = session.model().provider_id.empty() ? std::string("openai") : session.model().provider_id;
   auto message = auth_setup_message(session, "Auth is required for provider `" + provider_id + "`.");

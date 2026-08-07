@@ -631,7 +631,7 @@ void SessionTitleCoordinator::start()
     workers_.emplace_back(ava::core::JoinThread::create("session_title", [this](std::stop_token token) { worker_loop(token); }));
 }
 
-void SessionTitleCoordinator::schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
+void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_session, std::string_view original_user_text, std::string_view committed_turn_id,
                                        runtime::RunOptions const& run_options) noexcept
 {
   if (!options_.config.enabled || session.sessionless() || !session.created || !session.run_controller() || !session.anchor_set() || committed_turn_id.empty())

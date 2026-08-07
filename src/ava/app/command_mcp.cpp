@@ -129,7 +129,7 @@ std::string format_mcp_tools_text(ava::mcp::McpServerConfig const& server, ava::
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_mcp_command(runtime::Session& session, CommandRequest const& request)
+ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;
   result.handled = true;

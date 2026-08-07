@@ -203,6 +203,15 @@ class Session : protected Session_aggregate_base
       bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
       std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
 
+#ifdef CWDEBUG
+ public:
+  ~Session()
+  {
+    // This destructs a SubagentDeliveryManager which can join a thread as a result.
+    AVA_ASSERT_NO_SESSION_LOCK_HELD("destructing a Session");
+  }
+#endif
+
  public:
   // Open a runtime session using stable `context` and the one-shot lifecycle
   // `request`.

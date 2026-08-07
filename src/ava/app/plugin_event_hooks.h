@@ -40,7 +40,7 @@ struct PluginEventObserverOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(runtime::Session& session,
+[[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(runtime::session_ts& unlocked_session,
                                                                        ava::permissions::PermissionResolver permission_resolver = nullptr,
                                                                        std::mutex* session_mutex = nullptr);
 

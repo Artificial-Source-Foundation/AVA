@@ -407,13 +407,13 @@ CommandResult handled_prompt(std::string command, std::string source, std::strin
   return result;
 }
 
-CommandResult run_keybindings_command(runtime::Session& session, std::string_view argument, std::vector<CommandHotkey> const& hotkeys)
+CommandResult run_keybindings_command(runtime::session_ts& unlocked_session, std::string_view argument, std::vector<CommandHotkey> const& hotkeys)
 {
   auto const args = split_command_arguments(argument);
   if (args.empty())
     return handled_text(command_hotkeys_text(hotkeys));
 
-  auto const keybinds_file = session.paths().ava_config_dir / "keybinds.json";
+  auto const keybinds_file = runtime::session_ts::rat(unlocked_session)->paths().ava_config_dir / "keybinds.json";
   if (args.front() == "set")
   {
     if (args.size() < 3)
@@ -612,7 +612,7 @@ CommandResult run_keybindings_command(runtime::Session& session, std::string_vie
 
     auto import_path = std::filesystem::path(args[1]);
     if (import_path.is_relative())
-      import_path = session.current_dir() / import_path;
+      import_path = runtime::session_ts::rat(unlocked_session)->current_dir() / import_path;
     import_path = import_path.lexically_normal();
 
     std::error_code source_error;
@@ -760,13 +760,17 @@ CommandResult run_keybindings_command(runtime::Session& session, std::string_vie
                       "\nEdit it, then run /reload keybindings inside the interactive TUI.");
 }
 
-ava::core::Result<CommandResult> run_theme_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_theme_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)
     return handled_text("unsupported theme options: " + std::string(argument) + "\n" + tui_theme_setting_usage());
 
-  auto settings = load_tui_display_settings(session.paths());
+  auto&& session_r = [&unlocked_session]() -> runtime::session_ts::crat {
+    return unlocked_session;
+  };
+
+  auto settings = load_tui_display_settings(session_r()->paths());
   if (!settings)
     return std::unexpected(std::move(settings.error()));
 
@@ -780,31 +784,31 @@ ava::core::Result<CommandResult> run_theme_command(runtime::Session& session, st
 
   if (is_tui_theme_reset_value(args.front()))
   {
-    auto stored = store_tui_theme_setting(session.paths(), std::nullopt);
+    auto stored = store_tui_theme_setting(session_r()->paths(), std::nullopt);
     if (!stored)
       return std::unexpected(std::move(stored.error()));
     ava::tui::set_tui_config_theme(std::nullopt);
-    return handled_text("Reset TUI theme to the built-in default.\n  config: " + tui_display_settings_file(session.paths()).string() +
+    return handled_text("Reset TUI theme to the built-in default.\n  config: " + tui_display_settings_file(session_r()->paths()).string() +
                         "\n  active: " + active_tui_theme_summary());
   }
 
   if (!normalize_tui_theme_setting(args.front()))
   {
-    auto custom_theme = load_tui_custom_theme(session.paths(), args.front());
+    auto custom_theme = load_tui_custom_theme(session_r()->paths(), args.front());
     if (!custom_theme && custom_theme.error().category() == ava::core::ErrorCategory::NotFound)
       return handled_text("unsupported theme: " + args.front() + "\n" + tui_theme_setting_usage());
     if (!custom_theme)
       return std::unexpected(std::move(custom_theme.error()));
   }
 
-  auto stored = store_tui_theme_setting(session.paths(), args.front());
+  auto stored = store_tui_theme_setting(session_r()->paths(), args.front());
   if (!stored)
     return std::unexpected(std::move(stored.error()));
-  auto settings_after_store = load_tui_display_settings(session.paths());
+  auto settings_after_store = load_tui_display_settings(session_r()->paths());
   if (!settings_after_store)
     return std::unexpected(std::move(settings_after_store.error()));
   ava::tui::set_tui_config_theme(settings_after_store->theme, settings_after_store->custom_theme);
-  return handled_text("Stored TUI theme " + *settings_after_store->theme + ".\n  config: " + tui_display_settings_file(session.paths()).string() +
+  return handled_text("Stored TUI theme " + *settings_after_store->theme + ".\n  config: " + tui_display_settings_file(session_r()->paths()).string() +
                       "\n  active: " + active_tui_theme_summary());
 }
 
@@ -832,18 +836,21 @@ std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(
   return files;
 }
 
-ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry)
+ava::core::Result<std::string> skill_prompt_message(runtime::session_ts& unlocked_session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  CRITICAL_AREA_BEGIN_R(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*session_r);
   auto plugin_diagnostics =
-      ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session.workspace_dir());
+      ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session_r->workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
-      .workspace_root = session.workspace_dir(),
+      .workspace_root = session_r->workspace_dir(),
       .global_skill_dirs = resource_policy.global_skill_dirs,
       .project_skill_dirs = resource_policy.project_skill_dirs,
       .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = resource_policy.include_project_resources,
   });
+  CRITICAL_AREA_END_R(session);
+
   auto const match = std::ranges::find_if(loaded.skills, [&](ava::context::LoadedSkill const& skill) { return skill.name == entry.skill_name; });
   if (match == loaded.skills.end())
   {
@@ -852,7 +859,7 @@ ava::core::Result<std::string> skill_prompt_message(runtime::Session& session, C
     return std::unexpected(std::move(error));
   }
 
-  auto context = make_tool_context(session, request.permission_resolver);
+  auto context = make_tool_context(unlocked_session, request.permission_resolver);
   context.permission_tool_name = "skill";
   context.current_tool_name = "skill";
   if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::SkillLoad, match->path, match->name, "skill",
@@ -897,10 +904,12 @@ ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext cons
   return {};
 }
 
-ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, CommandRequest const& request, CommandRegistryEntry const& entry,
+ava::core::Result<std::string> mcp_prompt_message(runtime::session_ts& unlocked_session, CommandRequest const& request, CommandRegistryEntry const& entry,
                                                   std::string_view argument_text)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  CRITICAL_AREA_BEGIN_R(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*session_r);
+  CRITICAL_AREA_END_R(session);
   auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
     return std::unexpected(std::move(config.error()));
@@ -916,7 +925,7 @@ ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, Com
   if (!arguments)
     return std::unexpected(std::move(arguments.error()));
 
-  auto context = make_tool_context(session, request.permission_resolver);
+  auto context = make_tool_context(unlocked_session, request.permission_resolver);
   context.permission_tool_name = "mcp_prompt";
   context.current_tool_name = "mcp_prompt";
   context.cancel_requested = request.cancel_requested;
@@ -925,7 +934,8 @@ ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, Com
     return std::unexpected(std::move(permission.error()));
   }
 
-  auto client = ava::mcp::McpStdioClient::start(*server, ava::mcp::McpStdioClientOptions{.workspace_dir = session.workspace_dir()}, request.cancel_requested);
+  std::filesystem::path workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
+  auto client = ava::mcp::McpStdioClient::start(*server, ava::mcp::McpStdioClientOptions{.workspace_dir = std::move(workspace_dir)}, request.cancel_requested);
   if (!client)
     return std::unexpected(std::move(client.error()));
   auto prompt = (*client)->get_prompt(entry.mcp_prompt_name, *arguments, request.cancel_requested);
@@ -944,7 +954,7 @@ ava::core::Result<std::string> mcp_prompt_message(runtime::Session& session, Com
   return std::move(prompt->content);
 }
 
-ava::core::Result<CommandResult> run_registry_command(runtime::Session& session, CommandRequest request, CommandRegistryEntry const& entry)
+ava::core::Result<CommandResult> run_registry_command(runtime::session_ts& unlocked_session, CommandRequest request, CommandRegistryEntry const& entry)
 {
   if (!entry.enabled)
     return handled_text(entry.command + " is disabled: " + entry.disabled_reason);
@@ -960,13 +970,13 @@ ava::core::Result<CommandResult> run_registry_command(runtime::Session& session,
       return handled_prompt(entry.command, to_string(entry.source), std::move(*prompt));
     }
     case UnifiedCommandKind::SkillPrompt: {
-      auto prompt = skill_prompt_message(session, request, entry);
+      auto prompt = skill_prompt_message(unlocked_session, request, entry);
       if (!prompt)
         return std::unexpected(std::move(prompt.error()));
       return handled_prompt(entry.command, to_string(entry.source), std::move(*prompt));
     }
     case UnifiedCommandKind::McpPrompt: {
-      auto prompt = mcp_prompt_message(session, request, entry, argument);
+      auto prompt = mcp_prompt_message(unlocked_session, request, entry, argument);
       if (!prompt)
         return std::unexpected(std::move(prompt.error()));
       return handled_prompt(entry.command, to_string(entry.source), std::move(*prompt));
@@ -975,7 +985,7 @@ ava::core::Result<CommandResult> run_registry_command(runtime::Session& session,
       auto delegated = request;
       auto args = argument.empty() ? std::string("{}") : argument;
       delegated.command = "/plugin run " + entry.plugin_id + " " + entry.plugin_command_name + " " + args;
-      return run_plugin_command(session, delegated);
+      return run_plugin_command(unlocked_session, delegated);
     }
   }
   return CommandResult{};
@@ -990,14 +1000,18 @@ bool is_backend_command(std::string_view line) noexcept
   return find_command_catalog_entry(line) != nullptr;
 }
 
-bool is_backend_command_1(std::string_view line, runtime::Session& session)
+bool is_backend_command_1(std::string_view line, runtime::session_ts& unlocked_session)
 {
   if (is_backend_command(line))
     return true;
-  return command_registry_contains(session, line);
+  return command_registry_contains(unlocked_session, line);
 }
 
-ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandRequest request)
+// Dispatch a normalized backend command against unlocked_session and return its frontend-facing result.
+//
+// Session state remains write-locked while invoking legacy command handlers. The lock is released before
+// invoking a session-aware handler that acquires its own access guard.
+ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_session, CommandRequest request)
 {
   CommandResult result;
   if (request.command.empty())
@@ -1014,32 +1028,39 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   auto const* entry = find_command_catalog_entry(request.command);
   if (!entry)
   {
+    CRITICAL_AREA_BEGIN_W(session);
+
     auto const token = command_token(request.command);
-    auto registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                         .include_prompt_commands = true,
-                                                                         .include_skills = true,
-                                                                         .include_plugin_commands = true,
-                                                                         .include_mcp_prompts = token.starts_with("/mcp:"),
-                                                                         .permission_resolver = request.permission_resolver,
-                                                                         .cancel_requested = request.cancel_requested});
+    auto registry = session_w->load_command_registry(CommandRegistryOptions{.include_builtins = false,
+                                                                             .include_prompt_commands = true,
+                                                                             .include_skills = true,
+                                                                             .include_plugin_commands = true,
+                                                                             .include_mcp_prompts = token.starts_with("/mcp:"),
+                                                                             .permission_resolver = request.permission_resolver,
+                                                                             .cancel_requested = request.cancel_requested});
     if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
     {
-      return run_registry_command(session, std::move(request), *registry_entry);
+      CRITICAL_AREA_END_W(session);
+      return run_registry_command(unlocked_session, std::move(request), *registry_entry);
     }
     if (!token.starts_with("/skill:") && !token.starts_with("/mcp:") && !token.starts_with("/plugin:"))
     {
-      registry = session.load_command_registry(CommandRegistryOptions{.include_builtins = false,
-                                                                      .include_prompt_commands = false,
-                                                                      .include_skills = false,
-                                                                      .include_plugin_commands = false,
-                                                                      .include_mcp_prompts = true,
-                                                                      .permission_resolver = request.permission_resolver,
-                                                                      .cancel_requested = request.cancel_requested});
+      registry = session_w->load_command_registry(CommandRegistryOptions{.include_builtins = false,
+                                                                         .include_prompt_commands = false,
+                                                                         .include_skills = false,
+                                                                         .include_plugin_commands = false,
+                                                                         .include_mcp_prompts = true,
+                                                                         .permission_resolver = request.permission_resolver,
+                                                                         .cancel_requested = request.cancel_requested});
       if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
       {
-        return run_registry_command(session, std::move(request), *registry_entry);
+        CRITICAL_AREA_END_W(session);
+        return run_registry_command(unlocked_session, std::move(request), *registry_entry);
       }
     }
+
+    CRITICAL_AREA_END_W(session);
+
     if (token.starts_with("/skill:") || token.starts_with("/mcp:") || token.starts_with("/plugin:"))
     {
       if (!registry.diagnostics.empty())
@@ -1055,9 +1076,7 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     return handled_text(entry->command + " is disabled: " + entry->disabled_reason);
   }
 
-  // RPC command execution already serializes session-store access around run_command; reacquiring
-  // the same mutex from event-hook permission audits would deadlock nested command events.
-  auto plugin_observer_options = plugin_event_observer_options(session, request.permission_resolver, nullptr);
+  auto plugin_observer_options = plugin_event_observer_options(unlocked_session, request.permission_resolver, nullptr);
   plugin_observer_options.cancel_requested = request.cancel_requested;
   request.event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), std::move(request.event_sink));
 
@@ -1073,11 +1092,11 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   }
   if (starts_with_command(request.command, "/hotkeys"))
   {
-    return run_keybindings_command(session, command_argument(request.command, "/hotkeys"), request.hotkeys);
+    return run_keybindings_command(unlocked_session, command_argument(request.command, "/hotkeys"), request.hotkeys);
   }
   if (starts_with_command(request.command, "/theme"))
   {
-    return run_theme_command(session, command_argument(request.command, "/theme"));
+    return run_theme_command(unlocked_session, command_argument(request.command, "/theme"));
   }
   if (request.command == "/settings")
   {
@@ -1144,15 +1163,15 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   }
   if (starts_with_command(request.command, "/reload"))
   {
-    return run_reload_command(session, command_argument(request.command, "/reload"));
+    return run_reload_command(unlocked_session, command_argument(request.command, "/reload"));
   }
   if (starts_with_command(request.command, "/models"))
   {
-    return run_models_command(session, command_argument(request.command, "/models"));
+    return run_models_command(unlocked_session, command_argument(request.command, "/models"));
   }
   if (starts_with_command(request.command, "/providers"))
   {
-    return run_providers_command(session, command_argument(request.command, "/providers"));
+    return run_providers_command(unlocked_session, command_argument(request.command, "/providers"));
   }
   if (request.command == "/scoped-models")
   {
@@ -1160,39 +1179,39 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   }
   if (starts_with_command(request.command, "/connect"))
   {
-    return run_connect_command(session, request);
+    return run_connect_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/mcp"))
   {
-    return run_mcp_command(session, request);
+    return run_mcp_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/plugins"))
   {
-    return run_plugins_command(session, request);
+    return run_plugins_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/plugin"))
   {
-    return run_plugin_command(session, request);
+    return run_plugin_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/trust"))
   {
-    return run_trust_command(session, command_argument(request.command, "/trust"));
+    return run_trust_command(unlocked_session, command_argument(request.command, "/trust"));
   }
   if (starts_with_command(request.command, "/permissions"))
   {
-    return run_permissions_command(session, request);
+    return run_permissions_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/sessions"))
   {
-    return run_sessions_command(session, command_argument(request.command, "/sessions"));
+    return run_sessions_command(unlocked_session, command_argument(request.command, "/sessions"));
   }
   if (starts_with_command(request.command, "/jobs"))
   {
-    return run_jobs_command_1(session, command_argument(request.command, "/jobs"));
+    return run_jobs_command_1(unlocked_session, command_argument(request.command, "/jobs"));
   }
   if (request.command == "/recover-persistence")
   {
-    return run_recover_persistence_command(session);
+    return run_recover_persistence_command(unlocked_session);
   }
   if (request.command == "/fork-from" || starts_with_command(request.command, "/fork-from"))
   {
@@ -1201,51 +1220,51 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
   }
   if (starts_with_command(request.command, "/fork"))
   {
-    return run_fork_command(session, command_argument(request.command, "/fork"));
+    return run_fork_command(unlocked_session, command_argument(request.command, "/fork"));
   }
   if (starts_with_command(request.command, "/clone"))
   {
-    return run_clone_command(session, command_argument(request.command, "/clone"));
+    return run_clone_command(unlocked_session, command_argument(request.command, "/clone"));
   }
   if (starts_with_command(request.command, "/new"))
   {
-    return run_new_session_command(session, command_argument(request.command, "/new"));
+    return run_new_session_command(unlocked_session, command_argument(request.command, "/new"));
   }
   if (starts_with_command(request.command, "/resume"))
   {
-    return run_resume_command(session, command_argument(request.command, "/resume"));
+    return run_resume_command(unlocked_session, command_argument(request.command, "/resume"));
   }
   if (starts_with_command(request.command, "/name"))
   {
-    return run_name_command(session, command_argument(request.command, "/name"));
+    return run_name_command(unlocked_session, command_argument(request.command, "/name"));
   }
   if (starts_with_command(request.command, "/labels"))
   {
-    return run_labels_command(session, command_argument(request.command, "/labels"));
+    return run_labels_command(unlocked_session, command_argument(request.command, "/labels"));
   }
   if (request.command == "/mode")
   {
-    return run_mode_command(session);
+    return run_mode_command(unlocked_session);
   }
   if (starts_with_command(request.command, "/context"))
   {
-    return run_context_command(session, command_argument(request.command, "/context"));
+    return run_context_command(unlocked_session, command_argument(request.command, "/context"));
   }
   if (request.command == "/stats" || request.command == "/status")
   {
-    return run_stats_command(session);
+    return run_stats_command(unlocked_session);
   }
   if (starts_with_command(request.command, "/compact"))
   {
-    return run_compact_command(session, request);
+    return run_compact_command(unlocked_session, request);
   }
   if (starts_with_command(request.command, "/import"))
   {
-    return run_import_command(session, command_argument(request.command, "/import"));
+    return run_import_command(unlocked_session, command_argument(request.command, "/import"));
   }
   if (starts_with_command(request.command, "/export"))
   {
-    return run_export_command(session, request);
+    return run_export_command(unlocked_session, request);
   }
 
   if (entry->hint.empty() && starts_with_command(request.command, entry->command))
@@ -1278,7 +1297,7 @@ ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandR
     return handled_text(missing_argument("/bash <command>"));
   }
 
-  return run_tool_command(session, request);
+  return run_tool_command(unlocked_session, request);
 }
 
 }  // namespace ava::app

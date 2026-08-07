@@ -6,6 +6,7 @@
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
+#include "ava/app/runtime/session_ts.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -900,6 +901,8 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::snapshot(
 ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::wait(std::string_view parent_session_id, std::string_view job_id,
                                                                             std::chrono::milliseconds timeout, SubagentWaitMode mode)
 {
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentCoordinator::wait");
+
   std::shared_ptr<JobState> state;
   {
     std::lock_guard lock(mutex_);
@@ -1359,6 +1362,8 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::exhaust_d
 
 void SubagentCoordinator::shutdown()
 {
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentCoordinator::shutdown");
+
   std::vector<std::string> jobs;
   {
     std::unique_lock lock(mutex_);

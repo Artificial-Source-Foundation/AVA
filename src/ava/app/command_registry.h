@@ -112,7 +112,7 @@ class Session;
 [[nodiscard]] std::string to_string(UnifiedCommandSource source);
 [[nodiscard]] std::string to_string(UnifiedCommandKind kind);
 [[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
-[[nodiscard]] bool command_registry_contains(runtime::Session& session, std::string_view line);
+[[nodiscard]] bool command_registry_contains(runtime::session_ts& unlocked_session, std::string_view line);
 [[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text, std::string_view argument_text);
 [[nodiscard]] ava::core::Result<std::string> mcp_prompt_arguments_json(CommandRegistryEntry const& entry, std::string_view argument_text);
 

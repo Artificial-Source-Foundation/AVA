@@ -45,9 +45,9 @@ struct CommandResult
 };
 
 [[nodiscard]] bool is_backend_command(std::string_view line) noexcept;
-[[nodiscard]] bool is_backend_command_1(std::string_view line, runtime::Session& session);
+[[nodiscard]] bool is_backend_command_1(std::string_view line, runtime::session_ts& unlocked_session);
 [[nodiscard]] std::string command_help_text(std::vector<CommandHotkey> const& hotkeys = {});
 [[nodiscard]] std::string command_hotkeys_text(std::vector<CommandHotkey> const& hotkeys = {});
-[[nodiscard]] ava::core::Result<CommandResult> run_command(runtime::Session& session, CommandRequest request);
+[[nodiscard]] ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_session, CommandRequest request);
 
 }  // namespace ava::app

@@ -28,6 +28,7 @@ struct ExtensionResourcePolicy
 
 [[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
                                                                      bool include_project_resources);
+// Called from Session::load_command_registry that passes *this: session is already locked.
 [[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy_1(Session const& session);
 
 }  // namespace ava::app::runtime

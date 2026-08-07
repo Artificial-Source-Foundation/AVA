@@ -145,33 +145,34 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 
 }  // namespace
 
-ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permissions::PermissionResolver permission_resolver)
+ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session, ava::permissions::PermissionResolver permission_resolver)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = resource_policy.global_lsp_config_file,
       .project_config_file = resource_policy.project_lsp_config_file,
-      .workspace_root = session.workspace_dir(),
-      .anchor_set = session.anchor_set(),
-      .mode = session.mode(),
+      .workspace_root = session_r->workspace_dir(),
+      .anchor_set = session_r->anchor_set(),
+      .mode = session_r->mode(),
       .permission_resolver = permission_resolver,
   });
   return ava::tools::ToolContext{
-      .workspace_dir = session.workspace_dir(),
-      .spill_dir = session.store.session_path().parent_path() / "spill",
-      .mode = session.mode(),
+      .workspace_dir = session_r->workspace_dir(),
+      .spill_dir = session_r->store.session_path().parent_path() / "spill",
+      .mode = session_r->mode(),
       .permission_resolver = std::move(permission_resolver),
-      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session_r->permission_rule_store()),
       .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
                                                 .parent_id = "",
                                                 .type = ava::session::EntryType::PermissionDecision,
                                                 .timestamp = ava::session::now_timestamp(),
                                                 .data_json = ava::tools::permission_audit_data_json(event)};
-        return session.append_owned(std::move(entry));
+        return session_r->append_owned(std::move(entry));
       },
-      .anchor_set = session.anchor_set(),
-      .ava_authority_roots = session.ava_authority_roots_1(),
+      .anchor_set = session_r->anchor_set(),
+      .ava_authority_roots = session_r->ava_authority_roots_1(),
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
       .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,
@@ -181,10 +182,10 @@ ava::tools::ToolContext make_tool_context(runtime::Session& session, ava::permis
       .mcp_project_config_file = resource_policy.mcp_config.project_config_file,
       .include_project_mcp_config = resource_policy.include_project_resources,
       .include_project_skills = resource_policy.include_project_resources,
-      .session_id = session.store.session_id(),
-      .provider_id = session.model().provider_id,
-      .model_id = session.model().model_id,
-      .current_dir = session.current_dir()};
+      .session_id = session_r->store.session_id(),
+      .provider_id = session_r->model().provider_id,
+      .model_id = session_r->model().model_id,
+      .current_dir = session_r->current_dir()};
 }
 
 ava::core::VoidResult record_tool_start(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
@@ -205,7 +206,7 @@ ava::core::VoidResult record_tool_result(runtime::Session const& session, ava::e
   return record_tool_event(session, sink, result, std::move(entry));
 }
 
-ava::core::Result<CommandResult> run_tool_command(runtime::Session& session, CommandRequest& request)
+ava::core::Result<CommandResult> run_tool_command(runtime::session_ts& unlocked_session, CommandRequest& request)
 {
   CommandResult result;
   result.handled = true;

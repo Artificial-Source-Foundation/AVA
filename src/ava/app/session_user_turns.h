@@ -41,16 +41,16 @@ struct SessionUserTurnList
 // shared public transcript projection. Assistant, tool, provider-private, and
 // internal-replay records are excluded. When max_items is exceeded, only the
 // newest turns are retained and truncated_before is set.
-[[nodiscard]] ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::Session const& session,
+[[nodiscard]] ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::session_ts const& unlocked_session,
                                                                              std::size_t max_items = kDefaultSessionUserTurnListLimit);
 
 // Returns the exact public transcript text for one user entry id. Missing,
 // assistant, internal-replay, and non-user ids fail closed as NotFound.
-[[nodiscard]] ava::core::Result<std::string> read_session_user_turn_text(runtime::Session const& session, std::string_view entry_id);
+[[nodiscard]] ava::core::Result<std::string> read_session_user_turn_text(runtime::session_ts const& unlocked_session, std::string_view entry_id);
 
 // /fork-from requires a persistent (non-sessionless) session. Ephemeral
 // sessions keep /copy user; this guard fails closed with an actionable error
 // before the picker opens or a selection mutates presentation.
-[[nodiscard]] ava::core::VoidResult require_persistent_session_for_fork_from(runtime::Session const& session);
+[[nodiscard]] ava::core::VoidResult require_persistent_session_for_fork_from(runtime::session_ts const& unlocked_session);
 
 }  // namespace ava::app

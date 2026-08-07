@@ -82,7 +82,7 @@ std::string format_session_tree_line(ava::session::SessionTreeNode const& node, 
   return output;
 }
 
-ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& session, std::string_view arguments)
+ava::core::Result<CommandResult> run_sessions_rename_command(runtime::session_ts& unlocked_session, std::string_view arguments)
 {
   CommandResult result;
   result.handled = true;
@@ -115,17 +115,21 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   std::string target_id;
   ava::core::Result<ava::session::SessionMetadataView> metadata =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session rename target was not resolved"));
-  if (requested_session_id == session.store.session_id())
+
+  CRITICAL_AREA_BEGIN_W(session);
+  if (requested_session_id == session_w->store.session_id())
   {
-    target_id = session.store.session_id();
-    metadata = session.append_metadata_1(std::move(update));
+    target_id = session_w->store.session_id();
+    metadata = session_w->append_metadata_1(std::move(update));
+    CRITICAL_AREA_END_W(session);
   }
   else
   {
-    auto unlocked_target_result = reopen_session(session, requested_session_id);
+    CRITICAL_AREA_END_W(session);
+    auto unlocked_target_result = reopen_session(unlocked_session, requested_session_id);
     if (!unlocked_target_result)
       return std::unexpected(std::move(unlocked_target_result.error()));
-    runtime::session_ts::wat target_w(*unlocked_target_result);
+    SCOPED_CRITICAL_AREA_W(target_w, *unlocked_target_result);
     target_id = target_w->store.session_id();
     metadata = target_w->append_metadata_1(std::move(update));
   }
@@ -140,7 +144,7 @@ ava::core::Result<CommandResult> run_sessions_rename_command(runtime::Session& s
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& session, std::string_view arguments)
+ava::core::Result<CommandResult> run_sessions_labels_command(runtime::session_ts& unlocked_session, std::string_view arguments)
 {
   CommandResult result;
   result.handled = true;
@@ -159,10 +163,11 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   }
 
   auto const requested_session_id = parts.front();
-  auto unlocked_target_result = reopen_session(session, requested_session_id);
+  auto unlocked_target_result = reopen_session(unlocked_session, requested_session_id);
   if (!unlocked_target_result)
     return std::unexpected(std::move(unlocked_target_result.error()));
-  runtime::session_ts::wat target_w(*unlocked_target_result);
+
+  SCOPED_CRITICAL_AREA_W(target_w, *unlocked_target_result);
 
   if (parts.size() == 1)
   {
@@ -200,7 +205,7 @@ ava::core::Result<CommandResult> run_sessions_labels_command(runtime::Session& s
   return result;
 }
 
-ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& session, std::string_view arguments, bool archived)
+ava::core::Result<CommandResult> run_sessions_archive_command(runtime::session_ts& unlocked_session, std::string_view arguments, bool archived)
 {
   CommandResult result;
   result.handled = true;
@@ -216,7 +221,7 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
     return result;
   }
   auto const requested_session_id = parts.front();
-  if (requested_session_id == session.store.session_id())
+  if (requested_session_id == runtime::session_ts::rat(unlocked_session)->store.session_id())
   {
     add_output(result, "Cannot archive the active session. Switch sessions first.");
     return result;
@@ -230,10 +235,11 @@ ava::core::Result<CommandResult> run_sessions_archive_command(runtime::Session& 
     return result;
   }
 
-  auto unlocked_target_result = reopen_session(session, requested_session_id);
+  auto unlocked_target_result = reopen_session(unlocked_session, requested_session_id);
   if (!unlocked_target_result)
     return std::unexpected(std::move(unlocked_target_result.error()));
-  runtime::session_ts::wat target_w(*unlocked_target_result);
+
+  SCOPED_CRITICAL_AREA_W(target_w, *unlocked_target_result);
 
   auto current_metadata = target_w->load_metadata();
   if (!current_metadata)
@@ -281,7 +287,7 @@ void append_session_tree_lines(std::string& output, std::vector<ava::session::Se
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session, std::string_view query)
+ava::core::Result<CommandResult> run_sessions_command(runtime::session_ts& unlocked_session, std::string_view query)
 {
   CommandResult result;
   result.handled = true;
@@ -289,19 +295,19 @@ ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session,
   auto const query_parts = split_command_arguments(trimmed_query);
   if (!query_parts.empty() && query_parts.front() == "rename")
   {
-    return run_sessions_rename_command(session, trimmed_query);
+    return run_sessions_rename_command(unlocked_session, trimmed_query);
   }
   if (!query_parts.empty() && (query_parts.front() == "labels" || query_parts.front() == "label"))
   {
-    return run_sessions_labels_command(session, trimmed_query);
+    return run_sessions_labels_command(unlocked_session, trimmed_query);
   }
   if (!query_parts.empty() && query_parts.front() == "archive")
   {
-    return run_sessions_archive_command(session, trimmed_query, true);
+    return run_sessions_archive_command(unlocked_session, trimmed_query, true);
   }
   if (!query_parts.empty() && query_parts.front() == "unarchive")
   {
-    return run_sessions_archive_command(session, trimmed_query, false);
+    return run_sessions_archive_command(unlocked_session, trimmed_query, false);
   }
   auto list_query = trimmed_query;
   bool include_archived = false;
@@ -311,7 +317,14 @@ ava::core::Result<CommandResult> run_sessions_command(runtime::Session& session,
     list_query = trimmed_query.substr(std::string_view("--archived").size());
     list_query = trim_ascii(list_query);
   }
-  auto tree = ava::session::build_session_tree(session.workspace_dir(), session.paths().sessions_dir, session.store.session_id());
+
+  CRITICAL_AREA_BEGIN_W(session);
+  auto const workspace_dir_copy = session_w->workspace_dir();
+  auto const sessions_dir_copy = session_w->paths().sessions_dir;
+  auto const session_id_copy = session_w->store.session_id();
+  CRITICAL_AREA_END_W(session);
+
+  auto tree = ava::session::build_session_tree(workspace_dir_copy, sessions_dir_copy, session_id_copy);
   if (!tree)
   {
     add_output(result, tree.error().format());

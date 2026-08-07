@@ -29,15 +29,15 @@ struct ResolverEventPayload
 
 void subscribe_event_envelope_writer(ava::event::EventBus& bus, output_ts& output);
 [[nodiscard]] ava::event::EventEnvelopeContext rpc_event_context(std::string_view request_id);
-[[nodiscard]] std::string session_id_snapshot(runtime::Session const& session, std::mutex& session_mutex);
+[[nodiscard]] std::string session_id_snapshot(runtime::session_ts const& unlocked_session, std::mutex& session_mutex);
 [[nodiscard]] ava::event::EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id, std::string session_id,
                                                                std::string payload_json);
 [[nodiscard]] ava::event::EventEnvelope resolver_event_envelope(std::string name, std::string request_id, std::string correlation_id, std::string session_id,
                                                                ResolverEventPayload payload);
 
-[[nodiscard]] ava::core::VoidResult write_queue_event(output_ts& output, runtime::Session const& session, std::mutex& session_mutex, std::string_view name,
+[[nodiscard]] ava::core::VoidResult write_queue_event(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex, std::string_view name,
                                                       QueuedRpcMessage const& queued, std::string_view reason = {});
-[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::Session const& session, std::mutex& session_mutex,
+[[nodiscard]] ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex,
                                                                ClearedRpcQueues const& cleared, std::string_view reason);
 [[nodiscard]] ava::core::VoidResult write_follow_up_errors(output_ts& output, RpcRunState& run_state, std::vector<QueuedRpcMessage> const& follow_ups,
                                                            std::string_view reason);

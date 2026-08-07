@@ -54,6 +54,9 @@ Use:
 - `CRITICAL_AREA_BEGIN_CR(PATTERN)` for a `session_ts const&` that needs read access.
 - `CRITICAL_AREA_BEGIN_W(PATTERN)` only for write access.
 - `CRITICAL_AREA_CONTINUE_R/W(PATTERN)` only to relock a guard previously released by the matching `END` macro.
+- `SCOPED_CRITICAL_AREA_R(PATTERN_r, source)` for a mutable source of type `session_ts&` (eg `*unlocked_session_result`) that only needs read access, where the critical area runs till the end of the scope.
+- `SCOPED_CRITICAL_AREA_RC(PATTERN_r, source)` likewise, if the source has type `session_ts const&`.
+- `SCOPED_CRITICAL_AREA_W(PATTERN_w, source)` likewise, if we need write access.
 
 ## Conversion Workflow
 
@@ -158,16 +161,6 @@ Then update construction and access:
 
 Do not add such an accessor for a single use.
 
-### 6. Trace signature cascades cautiously
-
-If the struct is initialized where only a locked `Session&` exists, the enclosing function may also need to accept `session_ts&`. Follow callers upward one step at a time.
-
-Use `session_dag.txt` to understand functions under `src/ava` that accept or own sessions, but remember its blind spots:
-
-- tests are not represented;
-- callers that own a `Session` member but do not accept one may be absent;
-- factories, callbacks, and lambdas may require separate searches.
-
 Do not perform a broad cascade preemptively. Compile and review one translation unit before proceeding.
 
 ## Review Checklist
@@ -183,3 +176,4 @@ Do not perform a broad cascade preemptively. Compile and review one translation 
 - [ ] No broader build or tests were run without permission.
 - [ ] After creating an unlocked alias, for the sake of macros, the code below it no longer uses the source (e.g. `*unlocked_session_result`) - but only uses the alias.
 - [ ] Every `CRITICAL_AREA_BEGIN_*` is followed by a `CRITICAL_AREA_END_*` followed by usage of the unlocked wrapper.
+- [ ] All scoped instances of type `crat`, `rat` or `wat` use one of the `SCOPED_CRITICAL_AREA_*` macros.

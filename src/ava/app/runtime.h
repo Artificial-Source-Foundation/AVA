@@ -44,7 +44,7 @@ struct PreparedCompactionContext
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::Session const& session, ava::agent::Mode mode);
+[[nodiscard]] ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::session_ts const& unlocked_session, ava::agent::Mode mode);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_runtime_model(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                               std::string_view model_id);
@@ -64,7 +64,7 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries);
 
-[[nodiscard]] ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::Session const& session,
+[[nodiscard]] ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::session_ts const& unlocked_session,
                                                                                           ava::session::CompactionConfig config);
 
 [[nodiscard]] ava::core::Result<PreparedCompactionContext> prepare_compaction_context(std::vector<ava::session::SessionEntry> const& entries,
@@ -75,7 +75,7 @@ struct PreparedCompactionContext
                                                                              ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                              std::size_t estimated_tokens);
 
-[[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(runtime::Session const& session,
+[[nodiscard]] ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts const& unlocked_session,
                                                                          std::vector<ava::session::SessionEntry> const& entries,
                                                                          ava::session::CompactionConfig const& config, std::string_view instructions,
                                                                          std::size_t estimated_tokens, ava::provider::Provider const& provider,

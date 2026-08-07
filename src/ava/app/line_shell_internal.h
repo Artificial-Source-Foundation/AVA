@@ -53,25 +53,25 @@ void append_status_line(std::string& target, std::string line);
 [[nodiscard]] ava::core::Result<std::optional<std::string>> edit_text_with_external_editor(std::string_view initial_text);
 
 [[nodiscard]] std::vector<ava::tui::ToolTimelineItem> tui_tool_timeline(std::vector<ava::agent::ToolTimelineEntry> const& entries);
-[[nodiscard]] std::optional<std::string> token_status_for_session(runtime::Session const& session);
+[[nodiscard]] std::optional<std::string> token_status_for_session(runtime::session_ts const& unlocked_session);
 // Fail-closed presentation hydration from the latest successful committed todowrite.
-[[nodiscard]] std::vector<ava::tui::TodoItem> todos_for_session(runtime::Session const& session);
+[[nodiscard]] std::vector<ava::tui::TodoItem> todos_for_session(runtime::session_ts const& unlocked_session);
 [[nodiscard]] std::string format_active_context_status_value(long long tokens, std::optional<long long> context_window_tokens);
-[[nodiscard]] std::optional<std::string> active_context_status_for_session(runtime::Session const& session);
+[[nodiscard]] std::optional<std::string> active_context_status_for_session(runtime::session_ts const& unlocked_session);
 [[nodiscard]] std::string session_selector_footer_hint(SessionSelectorSort sort, bool named_only, bool show_paths, bool show_archived, bool show_label_time);
 [[nodiscard]] std::string scoped_model_selector_footer_hint();
-[[nodiscard]] ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(runtime::Session& session, ava::tui::SelectListView const& previous,
+[[nodiscard]] ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                               std::string_view value);
-[[nodiscard]] ava::core::Result<ava::tui::SelectListView> enable_scoped_models(runtime::Session& session, ava::tui::SelectListView const& previous,
+[[nodiscard]] ava::core::Result<ava::tui::SelectListView> enable_scoped_models(runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                                std::vector<std::string> targets);
-[[nodiscard]] ava::core::Result<ava::tui::SelectListView> clear_scoped_models(runtime::Session& session, ava::tui::SelectListView const& previous,
+[[nodiscard]] ava::core::Result<ava::tui::SelectListView> clear_scoped_models(runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                               std::vector<std::string> targets);
-[[nodiscard]] ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(runtime::Session& session, ava::tui::SelectListView const& previous,
+[[nodiscard]] ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                                        std::string_view selected_value);
-[[nodiscard]] ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(runtime::Session& session, ava::tui::SelectListView const& previous,
+[[nodiscard]] ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                                std::string_view selected_value, bool up);
-[[nodiscard]] ava::core::Result<std::string> save_scoped_model_cycle(runtime::Session& session);
-[[nodiscard]] ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(runtime::Session const& session,
+[[nodiscard]] ava::core::Result<std::string> save_scoped_model_cycle(runtime::session_ts& unlocked_session);
+[[nodiscard]] ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(runtime::session_ts const& unlocked_session,
                                                                                                            ava::permissions::PermissionPrompt const& prompt,
                                                                                                            ava::permissions::PermissionAction action);
 

@@ -29,7 +29,7 @@ struct ProviderHandle
                                                                                    std::string_view purpose);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::session_ts::rat const& session_r, RpcCommand const& command);
-[[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::Session const& session, std::string_view injected_provider_id,
+[[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::session_ts const& unlocked_session, std::string_view injected_provider_id,
                                                                            ava::provider::Provider const& injected_provider);
 [[nodiscard]] bool is_plugin_rpc_command(std::string_view type);
 [[nodiscard]] bool is_mcp_rpc_command(std::string_view type);

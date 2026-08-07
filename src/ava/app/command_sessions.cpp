@@ -143,7 +143,7 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::Session& sessi
   return result;
 }
 
-ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, std::string_view session_id)
+ava::core::Result<CommandResult> run_resume_command(runtime::session_ts& unlocked_session, std::string_view session_id)
 {
   CommandResult result;
   result.handled = true;
@@ -155,16 +155,17 @@ ava::core::Result<CommandResult> run_resume_command(runtime::Session& session, s
     return result;
   }
 
-  auto unlocked_opened_result = reopen_session(session, trimmed_session_id);
+  auto unlocked_opened_result = reopen_session(unlocked_session, trimmed_session_id);
   if (!unlocked_opened_result)
     return std::unexpected(std::move(unlocked_opened_result.error()));
 
   {
-    runtime::session_ts::wat opened_w(*unlocked_opened_result);
-    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
+    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
       return std::unexpected(std::move(replaced.error()));
   }
-  add_output(result, "resumed session " + session.store.session_id());
+  add_output(result, "resumed session " + runtime::session_ts::rat(unlocked_session)->store.session_id());
   return result;
 }
 

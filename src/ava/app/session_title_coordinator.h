@@ -91,7 +91,7 @@ class SessionTitleCoordinator final
   // Admission completion calls this only after a durable ordinary turn. The
   // deterministic fallback is appended synchronously; provider refinement is
   // best-effort and can never alter that turn's result.
-  void schedule(runtime::Session const& session, std::string_view original_user_text, std::string_view committed_turn_id,
+  void schedule(runtime::session_ts const& unlocked_session, std::string_view original_user_text, std::string_view committed_turn_id,
                 runtime::RunOptions const& run_options) noexcept;
   [[nodiscard]] bool wait_until_idle(std::chrono::milliseconds timeout);
   // Automatic fallback and refined-title persistence each publish the exact

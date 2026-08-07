@@ -243,7 +243,7 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::Session& ses
 
 }  // namespace
 
-ava::core::Result<CommandResult> run_reload_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_reload_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)

@@ -58,12 +58,12 @@ std::string shorten_middle(std::string text, std::size_t max_columns)
   return text.substr(0, front) + "..." + text.substr(text.size() - back);
 }
 
-ava::core::Result<runtime::session_ts> reopen_session(runtime::Session const& current, std::string_view session_id)
+ava::core::Result<runtime::session_ts> reopen_session(runtime::session_ts const& unlocked_current, std::string_view session_id)
 {
-  auto context = current.replacement_open_context({});
+  auto current_context = runtime::session_ts::crat(unlocked_current)->replacement_open_context({});
   runtime::SessionLifecycleRequest request;
   request.requested_session_id = std::string(session_id);
-  return runtime::Session::open(context, request);
+  return runtime::Session::open(current_context, request);
 }
 
 }  // namespace ava::app::session_command_support

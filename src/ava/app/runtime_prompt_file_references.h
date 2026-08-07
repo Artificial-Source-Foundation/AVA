@@ -11,7 +11,7 @@ struct RunOptions;
 
 namespace ava::app {
 
-[[nodiscard]] ava::core::Result<std::string> expand_prompt_file_references(runtime::Session& session, std::string const& user_message,
+[[nodiscard]] ava::core::Result<std::string> expand_prompt_file_references(runtime::session_ts& unlocked_session, std::string const& user_message,
                                                                            runtime::RunOptions const& options);
 
 }  // namespace ava::app

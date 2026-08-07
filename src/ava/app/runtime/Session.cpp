@@ -549,6 +549,9 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                                                  bool append_initial_session_name, std::shared_ptr<SubagentDeliveryManager> delivery_manager,
                                                  std::shared_ptr<SessionTitleCoordinator> title_coordinator)
 {
+  // This function ends with a move of the newly created Session, after which that moved Session is destructed.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::construct");
+
   auto directories = resolve_runtime_directories(context);
   if (!directories)
     return std::unexpected(std::move(directories.error()));

@@ -12,6 +12,6 @@ class Session;
 
 namespace ava::app::rpc {
 
-[[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::Session const& session, bool configured);
+[[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::session_ts const& unlocked_session, bool configured);
 
 } // namespace ava::app::rpc

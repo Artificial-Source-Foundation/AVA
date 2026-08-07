@@ -230,19 +230,21 @@ CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& r
   return nullptr;
 }
 
-bool command_registry_contains(runtime::Session& session, std::string_view line)
+bool command_registry_contains(runtime::session_ts& unlocked_session, std::string_view line)
 {
   if (!line.starts_with('/'))
     return false;
   auto const token = command_token(line);
   if (token.starts_with("/skill:") || token.starts_with("/mcp:") || token.starts_with("/plugin:"))
     return true;
-  auto registry = session.load_command_registry(
+
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+  auto registry = session_w->load_command_registry(
       CommandRegistryOptions{
           .include_builtins = true, .include_prompt_commands = true, .include_skills = true, .include_plugin_commands = true, .include_mcp_prompts = false});
   if (find_command_registry_entry(registry, line) != nullptr)
     return true;
-  registry = session.load_command_registry(
+  registry = session_w->load_command_registry(
       CommandRegistryOptions{
           .include_builtins = false, .include_prompt_commands = false, .include_skills = false, .include_plugin_commands = false, .include_mcp_prompts = true});
   return find_command_registry_entry(registry, line) != nullptr;

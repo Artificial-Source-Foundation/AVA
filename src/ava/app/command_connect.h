@@ -4,6 +4,6 @@
 
 namespace ava::app {
 
-[[nodiscard]] ava::core::Result<CommandResult> run_connect_command(runtime::Session& session, CommandRequest const& request);
+[[nodiscard]] ava::core::Result<CommandResult> run_connect_command(runtime::session_ts& session, CommandRequest const& request);
 
 }  // namespace ava::app

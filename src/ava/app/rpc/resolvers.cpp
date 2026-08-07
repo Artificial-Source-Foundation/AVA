@@ -3,6 +3,7 @@
 #include "resolvers.h"
 #include "serialization.h"
 #include "serialization_json.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/event/events.h"
 #include "ava/core/ids.h"
 
@@ -207,10 +208,10 @@ std::string permission_session_grants_clear_result_json(PendingResolverState& pe
 }
 
 ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
-                                                                  runtime::Session const& session, std::mutex& session_mutex,
-                                                                  ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
+                                                                   runtime::session_ts const& unlocked_session, std::mutex& session_mutex,
+                                                                   ava::permissions::PermissionResolver policy_resolver, std::string prompt_request_id)
 {
-  return [&pending_state, &output, &run_state, &session, &session_mutex, policy_resolver = std::move(policy_resolver),
+  return [&pending_state, &output, &run_state, &unlocked_session, &session_mutex, policy_resolver = std::move(policy_resolver),
           prompt_request_id = std::move(prompt_request_id)](
              ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     if (cancel_requested(run_state))
@@ -218,7 +219,7 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
     if (input_closed(run_state))
       return std::unexpected(canceled_error());
 
-    auto const session_id = session_id_snapshot(session, session_mutex);
+    auto const session_id = session_id_snapshot(unlocked_session, session_mutex);
     if (policy_resolver)
     {
       auto policy_result = policy_resolver(prompt);
@@ -272,8 +273,9 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
 
     // Build the complete record before taking either publication lock. write_record_if then takes
     // output first and briefly checks the exact map entry under pending_state before stream I/O.
-    auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
-                                            permission_request_payload_json(request_id, prompt));
+    auto envelope = resolver_event_envelope("permission_requested", prompt_request_id, prompt_request_id,
+                                            session_id_snapshot(unlocked_session, session_mutex),
+                                             permission_request_payload_json(request_id, prompt));
     auto const record = ava::event::serialize_event_envelope_jsonl(envelope);
     auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
       std::lock_guard lock(pending_state.mutex);
@@ -299,9 +301,10 @@ ava::permissions::PermissionResolver make_rpc_permission_resolver(PendingResolve
 }
 
 ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pending_state, output_ts& output, RpcRunState& run_state,
-                                                        runtime::Session const& session, std::mutex& session_mutex, std::string prompt_request_id)
+                                                         runtime::session_ts const& unlocked_session, std::mutex& session_mutex,
+                                                         std::string prompt_request_id)
 {
-  return [&pending_state, &output, &run_state, &session, &session_mutex,
+  return [&pending_state, &output, &run_state, &unlocked_session, &session_mutex,
           prompt_request_id = std::move(prompt_request_id)](ava::agent::QuestionPrompt const& prompt) -> ava::core::Result<ava::agent::QuestionAnswer> {
     if (cancel_requested(run_state))
       return std::unexpected(canceled_error());
@@ -328,8 +331,9 @@ ava::agent::QuestionResolver make_rpc_question_resolver(PendingResolverState& pe
     }
 
     // Serialize before locking. The gate establishes whether publication or cancellation won.
-    auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id, session_id_snapshot(session, session_mutex),
-                                            question_request_payload_json(request_id, prompt));
+    auto envelope = resolver_event_envelope("question_requested", prompt_request_id, prompt_request_id,
+                                            session_id_snapshot(unlocked_session, session_mutex),
+                                             question_request_payload_json(request_id, prompt));
     auto const record = ava::event::serialize_event_envelope_jsonl(envelope);
     auto written = Output::write_record_if(output, record, [&pending_state, &request_id, &pending] {
       std::lock_guard lock(pending_state.mutex);

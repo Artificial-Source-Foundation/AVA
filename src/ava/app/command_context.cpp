@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -87,14 +88,15 @@ std::string context_file_status(std::filesystem::path const& path, std::size_t l
   return "status=changed current_bytes=" + std::to_string(current_bytes);
 }
 
-bool prompt_matches_query(runtime::Session const& session, std::string_view query)
+bool prompt_matches_query(runtime::session_ts const& unlocked_session, std::string_view query)
 {
   if (query.empty())
     return true;
   if (contains_ascii_case_insensitive("prompt", query) || contains_ascii_case_insensitive("base_prompt", query) ||
       contains_ascii_case_insensitive("builtin", query) || contains_ascii_case_insensitive("override", query))
     return true;
-  return session.base_prompt().source_path && contains_ascii_case_insensitive(session.base_prompt().source_path->generic_string(), query);
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  return session_r->base_prompt().source_path && contains_ascii_case_insensitive(session_r->base_prompt().source_path->generic_string(), query);
 }
 
 std::string_view freshness_source_kind_text(runtime::FreshnessSourceKind kind)
@@ -294,14 +296,16 @@ std::string cost_text(ava::session::SessionStats const& stats)
   return "incomplete (" + std::to_string(stats.unknown_cost_entries) + " unknown)";
 }
 
-std::string format_session_stats_text(runtime::Session const& session, ava::session::SessionStats const& stats)
+std::string format_session_stats_text(runtime::session_ts const& unlocked_session, ava::session::SessionStats const& stats)
 {
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
   std::ostringstream output;
   output << "Session stats\n";
-  output << "  session: " << shorten_middle(session.store.session_id(), 32) << "   entries: " << stats.entry_count << '\n';
-  output << "  model: " << session.model().provider_id << '/' << session.model().model_id << "   mode: " << ava::agent::to_string(session.mode()) << '\n';
-  output << "  workspace: " << compact_workspace_label(session.workspace_dir()) << "   cwd: " << compact_cwd_label(session.current_dir(), session.workspace_dir())
+  output << "  session: " << shorten_middle(session_r->store.session_id(), 32) << "   entries: " << stats.entry_count << '\n';
+  output << "  model: " << session_r->model().provider_id << '/' << session_r->model().model_id << "   mode: " << ava::agent::to_string(session_r->mode())
          << '\n';
+  output << "  workspace: " << compact_workspace_label(session_r->workspace_dir()) << "   cwd: "
+         << compact_cwd_label(session_r->current_dir(), session_r->workspace_dir()) << '\n';
   if (!stats.first_timestamp.empty() || !stats.last_timestamp.empty())
   {
     output << "  time: " << (stats.first_timestamp.empty() ? "unknown" : stats.first_timestamp) << " -> "
@@ -320,7 +324,7 @@ std::string format_session_stats_text(runtime::Session const& session, ava::sess
   output << "  cost: " << cost_text(stats) << "   usage entries exact/estimated " << stats.exact_usage_entries << '/' << stats.estimated_usage_entries << '\n';
 
   output << "\nHints:\n";
-  output << "  export: /export   resume: ava --session " << session.store.session_id();
+  output << "  export: /export   resume: ava --session " << session_r->store.session_id();
   return output.str();
 }
 
@@ -331,47 +335,54 @@ ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlock
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
-  auto const project_lsp_config = session.workspace_dir() / ".ava" / "lsp.json";
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto snapshot = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::tuple{session_r->workspace_dir(), session_r->anchor_set(), session_r->mode(), session_r->model(), session_r->project_trust().decision,
+                      session_r->base_prompt(), session_r->context_sources(), session_r->freshness_sources()};
+  }();
+  auto const& [workspace_dir, anchor_set, mode, model, project_trust, base_prompt, context_sources, freshness_sources] = snapshot;
+  auto const prompt_matches = prompt_matches_query(unlocked_session, trimmed_query);
+  auto const project_lsp_config = workspace_dir / ".ava" / "lsp.json";
   auto const lsp_inspection = ava::lsp::inspect_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = resource_policy.global_lsp_config_file,
       .project_config_file = resource_policy.project_lsp_config_file,
-      .workspace_root = session.workspace_dir(),
-      .anchor_set = session.anchor_set(),
-      .mode = session.mode(),
+      .workspace_root = workspace_dir,
+      .anchor_set = anchor_set,
+      .mode = mode,
   });
   std::string output = "Context freshness:\n";
-  output += "  mode=" + ava::agent::to_string(session.mode()) + "\n";
-  output += "  model=" + session.model().provider_id + "/" + session.model().model_id + "\n";
-  output += "  project_trust=" + std::string(to_string(session.project_trust().decision)) +
-            " project_resources=" + (resource_policy.include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
-  if (prompt_matches_query(session, trimmed_query))
+  output += "  mode=" + ava::agent::to_string(mode) + "\n";
+  output += "  model=" + model.provider_id + "/" + model.model_id + "\n";
+  output += "  project_trust=" + std::string(to_string(project_trust)) +
+             " project_resources=" + (resource_policy.include_project_resources ? std::string("enabled") : std::string("skipped")) + "\n";
+  if (prompt_matches)
   {
     output += "  base_prompt=";
-    if (session.base_prompt().from_override)
+    if (base_prompt.from_override)
     {
       output += "override";
-      if (session.base_prompt().source_path)
-        output += " path=" + session.base_prompt().source_path->string() + " " +
-                  context_file_status(*session.base_prompt().source_path, session.base_prompt().byte_count, session.base_prompt().content_fingerprint);
+      if (base_prompt.source_path)
+        output += " path=" + base_prompt.source_path->string() + " " +
+                  context_file_status(*base_prompt.source_path, base_prompt.byte_count, base_prompt.content_fingerprint);
     }
     else
     {
       output += "builtin";
     }
-    output += " bytes=" + std::to_string(session.base_prompt().byte_count) + "\n";
+    output += " bytes=" + std::to_string(base_prompt.byte_count) + "\n";
   }
-  output += "  context_sources=" + std::to_string(session.context_sources().size()) + "\n";
-  auto const system_prompt_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::SystemPrompt) +
-                                     freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::AppendSystemPrompt);
+  output += "  context_sources=" + std::to_string(context_sources.size()) + "\n";
+  auto const system_prompt_sources = freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::SystemPrompt) +
+                                     freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::AppendSystemPrompt);
   output += "  system_prompt_sources=" + std::to_string(system_prompt_sources) + "\n";
-  auto const prompt_command_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PromptCommand);
+  auto const prompt_command_sources = freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::PromptCommand);
   output += "  prompt_commands=" + std::to_string(prompt_command_sources) + "\n";
-  auto const skill_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::Skill);
+  auto const skill_sources = freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::Skill);
   output += "  skills=" + std::to_string(skill_sources) + "\n";
-  auto const plugin_sources = freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginManifest) +
-                              freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginPrompt) +
-                              freshness_source_count(session.freshness_sources(), runtime::FreshnessSourceKind::PluginSkill);
+  auto const plugin_sources = freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::PluginManifest) +
+                              freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::PluginPrompt) +
+                              freshness_source_count(freshness_sources, runtime::FreshnessSourceKind::PluginSkill);
   output += "  plugin_sources=" + std::to_string(plugin_sources) + "\n";
   output += "  lsp_status=" + lsp_provider_status_text(lsp_inspection) + " lsp_configs=" + std::to_string(configured_lsp_config_count(lsp_inspection.configs)) +
             " lsp_servers=" + std::to_string(lsp_inspection.server_count) + " lsp_errors=" + std::to_string(lsp_inspection.error_count) +
@@ -379,7 +390,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlock
             " lsp_builtins_available=" + std::to_string(available_builtin_lsp_count(lsp_inspection)) + "\n";
 
   bool matched_source = false;
-  for (auto const& source : session.context_sources())
+  for (auto const& source : context_sources)
   {
     if (!context_source_matches_query(source, trimmed_query))
       continue;
@@ -388,7 +399,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlock
               context_file_status(source.path, source.byte_count, source.content_fingerprint) + '\n';
   }
   bool matched_freshness_source = false;
-  for (auto const& source : session.freshness_sources())
+  for (auto const& source : freshness_sources)
   {
     if (!freshness_source_matches_query(source, trimmed_query))
       continue;
@@ -443,8 +454,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlock
       output += "  lsp_config  project  " + project_lsp_config.string() + "  status=skipped reason=project_resources_skipped\n";
     }
   }
-  if (!matched_source && !matched_freshness_source && !matched_lsp_config && !matched_lsp_builtin && !prompt_matches_query(session, trimmed_query) &&
-      !trimmed_query.empty())
+  if (!matched_source && !matched_freshness_source && !matched_lsp_config && !matched_lsp_builtin && !prompt_matches && !trimmed_query.empty())
   {
     add_output(result, "No context sources matching: " + sanitize_inline_text(trimmed_query));
     return result;
@@ -457,7 +467,7 @@ ava::core::Result<CommandResult> run_stats_command(runtime::session_ts& unlocked
 {
   CommandResult result;
   result.handled = true;
-  auto entries = load_runtime_entries(session);
+  auto entries = load_runtime_entries(unlocked_session);
   if (!entries)
   {
     add_output(result, entries.error().format());
@@ -469,7 +479,7 @@ ava::core::Result<CommandResult> run_stats_command(runtime::session_ts& unlocked
     add_output(result, stats.error().format());
     return result;
   }
-  add_output(result, format_session_stats_text(session, *stats));
+  add_output(result, format_session_stats_text(unlocked_session, *stats));
   return result;
 }
 

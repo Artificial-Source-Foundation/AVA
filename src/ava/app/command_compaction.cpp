@@ -8,7 +8,6 @@
 #include "ava/session/record.h"
 
 #include <cstddef>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,11 +15,12 @@
 namespace ava::app {
 namespace {
 
-ava::event::RuntimeEventMetadata command_event_metadata(runtime::Session const& session)
+ava::event::RuntimeEventMetadata command_event_metadata(runtime::session_ts const& unlocked_session)
 {
+  auto const session_id = runtime::session_ts::crat(unlocked_session)->store.session_id();
   return ava::event::RuntimeEventMetadata{
       .timestamp = ava::session::now_timestamp(),
-      .session_id = session.store.session_id(),
+      .session_id = session_id,
   };
 }
 
@@ -51,19 +51,21 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
   {
     return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "/compact requires provider-backed summary generation"));
   }
-  auto loaded_config = ava::session::load_compaction_config(session.paths());
+  auto const paths = runtime::session_ts::rat(unlocked_session)->paths();
+  auto loaded_config = ava::session::load_compaction_config(paths);
   if (!loaded_config)
   {
     return fail_compaction(std::move(loaded_config.error()));
   }
-  auto config = resolve_compaction_config(session, std::move(*loaded_config));
+  auto config = resolve_compaction_config(unlocked_session, std::move(*loaded_config));
   if (!config)
   {
     return fail_compaction(std::move(config.error()));
   }
-  auto read_authority = session.read_authority_1();
+  auto read_authority = runtime::session_ts::rat(unlocked_session)->read_authority_1();
   if (!read_authority)
     return fail_compaction(std::move(read_authority.error()));
+  auto const context_window_tokens = runtime::session_ts::rat(unlocked_session)->model().context_window_tokens;
 
   constexpr std::size_t max_compaction_attempts = 2;
   std::size_t last_snapshot_entries = 0;
@@ -74,13 +76,8 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
       return fail_compaction(command_canceled_error());
     ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
-    if (request.session_mutex)
     {
-      std::lock_guard lock(*request.session_mutex);
-      entries = read_authority->load();
-    }
-    else
-    {
+      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
       entries = read_authority->load();
     }
     if (!entries)
@@ -99,12 +96,12 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
         .attempt = attempt + 1,
         .max_attempts = max_compaction_attempts,
         .estimated_tokens = prepared->estimated_tokens,
-        .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+        .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, context_window_tokens),
         .retained_tokens = prepared->retained_tokens,
     };
     if (auto emitted = ava::event::emit_event(
             request.event_sink,
-            ava::event::RuntimeEvent{command_event_metadata(session), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
+            ava::event::RuntimeEvent{command_event_metadata(unlocked_session), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
         !emitted)
     {
       return fail_compaction(std::move(emitted.error()));
@@ -130,6 +127,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
 
     bool snapshot_stale = false;
     auto validate_and_append = [&]() -> ava::core::VoidResult {
+      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
       auto current_entries = read_authority->load();
       if (!current_entries)
         return std::unexpected(std::move(current_entries.error()));
@@ -147,25 +145,16 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
           .instructions = instructions,
           .config = *config,
           .estimated_tokens = prepared->estimated_tokens,
-          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, context_window_tokens),
           .retained_tokens = prepared->retained_tokens,
           .trigger = "manual",
           .recent_context = prepared->recent_context,
           .recent_context_omitted = prepared->recent_context_omitted});
       if (!entry)
         return std::unexpected(std::move(entry.error()));
-      return session.append_owned(std::move(*entry));
+      return session_w->append_owned(std::move(*entry));
     };
-    ava::core::VoidResult appended;
-    if (request.session_mutex)
-    {
-      std::lock_guard lock(*request.session_mutex);
-      appended = validate_and_append();
-    }
-    else
-    {
-      appended = validate_and_append();
-    }
+    auto appended = validate_and_append();
     if (!appended)
     {
       return fail_compaction(std::move(appended.error()));
@@ -181,13 +170,14 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
           .attempt = attempt + 1,
           .max_attempts = max_compaction_attempts,
           .estimated_tokens = prepared->estimated_tokens,
-          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens),
+          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, context_window_tokens),
           .retained_tokens = prepared->retained_tokens,
           .post_compaction_tokens = ava::session::estimate_tokens(*summary) + ava::session::estimate_tokens(instructions) + prepared->retained_tokens,
           .summary_bytes = summary->size(),
       };
       if (auto emitted = ava::event::emit_event(
-              request.event_sink, ava::event::RuntimeEvent{command_event_metadata(session), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
+              request.event_sink,
+              ava::event::RuntimeEvent{command_event_metadata(unlocked_session), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
           !emitted)
       {
         return fail_compaction(std::move(emitted.error()));
@@ -208,7 +198,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
       retry_diagnostics.current_entries = last_current_entries;
       if (auto emitted = ava::event::emit_event(
               request.event_sink,
-              ava::event::RuntimeEvent{command_event_metadata(session),
+              ava::event::RuntimeEvent{command_event_metadata(unlocked_session),
                                        ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
           !emitted)
       {

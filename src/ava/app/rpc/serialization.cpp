@@ -18,6 +18,9 @@
 #include <vector>
 
 namespace ava::app::rpc {
+
+// Session-owned serializers are invoked with *this while the owning session is already protected.
+std::string model_info_json(ava::config::ModelInfo const& model, runtime::Session const& session, bool configured);
 namespace {
 
 std::string joined_output(std::vector<std::string> const& output)
@@ -653,12 +656,12 @@ std::string prompt_result_json(std::string_view session_id, ava::agent::AgentLoo
   return json;
 }
 
-std::string context_sources_json(runtime::session_ts const& unlocked_session)
+std::string context_sources_json_value(std::vector<runtime::ContextSourceMetadata> const& context_sources)
 {
   std::string json = "[";
-  for (std::size_t index = 0; index < session.context_sources().size(); ++index)
+  for (std::size_t index = 0; index < context_sources.size(); ++index)
   {
-    auto const& source = session.context_sources()[index];
+    auto const& source = context_sources[index];
     if (index > 0)
       json += ',';
     json += '{';
@@ -671,6 +674,12 @@ std::string context_sources_json(runtime::session_ts const& unlocked_session)
   }
   json += ']';
   return json;
+}
+
+std::string context_sources_json(runtime::session_ts const& unlocked_session)
+{
+  auto const context_sources = runtime::session_ts::crat(unlocked_session)->context_sources();
+  return context_sources_json_value(context_sources);
 }
 
 namespace detail {
@@ -696,7 +705,10 @@ ava::core::Result<std::string> MessagesResultSerializer::run() &&
 // hold pointers into it for the rest of the pipeline.
 ava::core::VoidResult MessagesResultSerializer::load_and_project()
 {
-  auto entries = session_command_support::load_runtime_entries(session_);
+  auto read_authority = session_.read_authority_1();
+  if (!read_authority)
+    return std::unexpected(std::move(read_authority.error()));
+  auto entries = read_authority->load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
   auto projected = ava::session::project_logical_session_history(*entries);
@@ -874,7 +886,7 @@ std::string SessionResultSerializer::state_result_json(bool cancel_requested) co
   json += ',';
   json += number_field_json("context_source_count", session_.context_sources().size());
   json += ",\"context_sources\":";
-  json += context_sources_json(session_);
+  json += context_sources_json_value(session_.context_sources());
   json += '}';
   return json;
 }
@@ -1003,7 +1015,10 @@ ava::core::Result<std::string> SessionResultSerializer::list_models_result_json(
 
 ava::core::Result<std::string> SessionResultSerializer::session_stats_result_json() const
 {
-  auto entries = session_command_support::load_runtime_entries(session_);
+  auto read_authority = session_.read_authority_1();
+  if (!read_authority)
+    return std::unexpected(read_authority.error());
+  auto entries = read_authority->load();
   if (!entries)
     return std::unexpected(entries.error());
   auto stats_result = ava::session::compute_session_stats(*entries);
@@ -1120,7 +1135,10 @@ ava::core::Result<std::string> SessionResultSerializer::session_stats_result_jso
 
 ava::core::Result<std::string> SessionResultSerializer::session_validation_result_json() const
 {
-  auto entries = session_command_support::load_runtime_entries(session_);
+  auto read_authority = session_.read_authority_1();
+  if (!read_authority)
+    return std::unexpected(read_authority.error());
+  auto entries = read_authority->load();
   if (!entries)
     return std::unexpected(entries.error());
   auto const validation = ava::session::validate_session_replay(*entries);

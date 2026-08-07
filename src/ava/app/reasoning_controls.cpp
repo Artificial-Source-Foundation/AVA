@@ -72,12 +72,13 @@ void disambiguate_reasoning_labels(std::vector<tui::SelectListItemView>& items)
 
 std::optional<std::string> reasoning_status_for_session(runtime::session_ts const& unlocked_session)
 {
-  auto const& model = session.model();
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  auto const& model = session_r->model();
   if (!model.supports_reasoning.value_or(false) && ava::config::supported_reasoning_levels(model).size() <= 1)
     return std::nullopt;
-  if (!session.reasoning() || session.reasoning()->level.empty())
+  if (!session_r->reasoning() || session_r->reasoning()->level.empty())
     return std::nullopt;
-  return session.reasoning()->level;
+  return session_r->reasoning()->level;
 }
 
 std::string reasoning_level_label(std::string_view level)
@@ -153,7 +154,8 @@ std::optional<tui::SelectListView> reasoning_selector_view(ava::config::ModelInf
 
 std::optional<tui::SelectListView> reasoning_selector_view(runtime::session_ts const& unlocked_session, std::string footer_hint)
 {
-  return reasoning_selector_view(session.model(), session.reasoning(), std::move(footer_hint));
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  return reasoning_selector_view(session_r->model(), session_r->reasoning(), std::move(footer_hint));
 }
 
 ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava::config::ModelInfo const& model, std::string level)
@@ -199,7 +201,13 @@ ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava
 
 ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlocked_session)
 {
-  auto const& model = session.model();
+  ava::config::ModelInfo model;
+  std::optional<runtime::ReasoningSelection> current_reasoning;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    model = session_r->model();
+    current_reasoning = session_r->reasoning();
+  }
   if (!model.supports_reasoning.value_or(false))
   {
     return std::string("reasoning unavailable: current model does not declare reasoning support");
@@ -217,11 +225,11 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlo
   }
 
   std::optional<std::size_t> current_index;
-  if (session.reasoning())
+  if (current_reasoning)
   {
     for (std::size_t index = 0; index < active_levels.size(); ++index)
     {
-      if (active_levels[index] == session.reasoning()->level)
+      if (active_levels[index] == current_reasoning->level)
       {
         current_index = index;
         break;
@@ -231,7 +239,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlo
 
   if (current_index && *current_index + 1 >= active_levels.size())
   {
-    auto cleared = session.set_reasoning(std::nullopt);
+    auto cleared = runtime::session_ts::wat(unlocked_session)->set_reasoning(std::nullopt);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
     return *cleared ? std::string("reasoning cleared") : std::string("reasoning already cleared");
@@ -240,7 +248,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlo
   auto const next_index = current_index ? *current_index + 1 : std::size_t{0};
   if (active_levels[next_index] == "disabled")
   {
-    auto cleared = session.set_reasoning(std::nullopt);
+    auto cleared = runtime::session_ts::wat(unlocked_session)->set_reasoning(std::nullopt);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
     return *cleared ? std::string("reasoning cleared") : std::string("reasoning already cleared");
@@ -249,7 +257,7 @@ ava::core::Result<std::string> cycle_runtime_reasoning(runtime::session_ts& unlo
   auto selection = reasoning_selection_for_level(model, active_levels[next_index]);
   if (!selection)
     return std::unexpected(std::move(selection.error()));
-  auto selected = session.set_reasoning(*selection);
+  auto selected = runtime::session_ts::wat(unlocked_session)->set_reasoning(*selection);
   if (!selected)
     return std::unexpected(std::move(selected.error()));
   return *selected ? reasoning_selected_status(*selection) : "reasoning already " + selection->level;

@@ -154,7 +154,7 @@ bool is_direct_run_command_type(std::string_view type)
 
 struct RpcDirectCommandWorkerOptions
 {
-  runtime::Session& session;
+  runtime::session_ts& unlocked_session;
   std::mutex& session_mutex;
   rpc::output_ts& output;
   rpc::RpcRunState& run_state;
@@ -166,7 +166,7 @@ struct RpcDirectCommandWorkerOptions
 
 struct RpcCompactionWorkerOptions
 {
-  runtime::Session& session;
+  runtime::session_ts& unlocked_session;
   std::mutex& session_mutex;
   rpc::output_ts& output;
   rpc::RpcRunState& run_state;
@@ -192,7 +192,7 @@ ava::core::JoinThread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptio
       else
         written = rpc::write_error(options.output, options.request_id, result.error());
       if (written)
-        written = rpc::write_skipped_queue_events(options.output, options.session, options.session_mutex, cleared, reason);
+        written = rpc::write_skipped_queue_events(options.output, options.unlocked_session, options.session_mutex, cleared, reason);
       if (written)
         written = rpc::write_follow_up_errors(options.output, options.run_state, cleared.follow_up_messages, reason);
       rpc::complete_terminal_publication(options.run_state, options.request_id);
@@ -206,12 +206,12 @@ ava::core::JoinThread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptio
       return stop_token.stop_requested() || rpc::cancel_requested(run_state) || (base_cancel_requested && base_cancel_requested());
     };
 
-    auto permission_resolver = rpc::make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, options.session,
+    auto permission_resolver = rpc::make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, options.unlocked_session,
                                                                  options.session_mutex, std::move(policy_permission_resolver), options.request_id);
 
     ava::event::EventBus event_bus;
     rpc::subscribe_event_envelope_writer(event_bus, options.output);
-    auto result = run_command(options.session,
+    auto result = run_command(options.unlocked_session,
                               CommandRequest{.command = "/bash " + options.command,
                                              .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
                                              .permission_resolver = std::move(permission_resolver),
@@ -255,8 +255,8 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
     ava::core::VoidResult config_valid = {};
     {
       std::lock_guard lock(options.session_mutex);
-      paths = options.session.paths();
-      session_offline = options.session.is_offline();
+      paths = runtime::session_ts::rat(options.unlocked_session)->paths();
+      session_offline = runtime::session_ts::rat(options.unlocked_session)->is_offline();
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
       {
@@ -264,7 +264,7 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
       }
       else
       {
-        auto config = resolve_compaction_config(options.session, std::move(*loaded_config));
+        auto config = resolve_compaction_config(options.unlocked_session, std::move(*loaded_config));
         if (!config)
         {
           config_valid = std::unexpected(std::move(config.error()));
@@ -272,9 +272,9 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
         else
         {
           provider_id = config->provider_id;
-          if (provider_id == options.session.model().provider_id)
+          if (provider_id == runtime::session_ts::rat(options.unlocked_session)->model().provider_id)
           {
-            selected_provider = rpc::provider_for_session_model(options.session, options.injected_provider_id, options.injected_provider);
+            selected_provider = rpc::provider_for_session_model(options.unlocked_session, options.injected_provider_id, options.injected_provider);
           }
           else
           {
@@ -322,14 +322,14 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
     auto summary_generator =
         CompactionSummaryGenerator([&](std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config,
                                        std::string_view instructions, std::size_t estimated_tokens) {
-          return generate_compaction_summary(options.session, entries, config, instructions, estimated_tokens, selected_provider->get(), options.transport,
+          return generate_compaction_summary(options.unlocked_session, entries, config, instructions, estimated_tokens, selected_provider->get(), options.transport,
                                              *compact_runtime_options);
         });
     std::string slash_command = "/compact";
     if (options.instructions)
       slash_command += " " + *options.instructions;
     auto command_result =
-        run_command(options.session, CommandRequest{
+        run_command(options.unlocked_session, CommandRequest{
                                          .command = std::move(slash_command),
                                          .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
                                          .permission_resolver = compact_runtime_options->permission_resolver,
@@ -494,10 +494,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
           return written;
         continue;
       }
-      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);  // FIXME: should NOT lock session here.
-      runtime::Session& session(*session_w);
       auto envelope =
-          rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), *revoked);
+          rpc::resolver_event_envelope("permission_grant_revoked", command->id, command->id,
+                                       rpc::session_id_snapshot(unlocked_session, session_mutex), *revoked);
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, *revoked); !written)
@@ -508,10 +507,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     if (command->type == "permission_grants_clear")
     {
       auto const cleared = rpc::permission_session_grants_clear_result_json(pending_state);
-      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);  // FIXME: should NOT lock session here.
-      runtime::Session& session(*session_w);
       auto envelope =
-          rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id, rpc::session_id_snapshot(session, session_mutex), cleared);
+          rpc::resolver_event_envelope("permission_grants_cleared", command->id, command->id,
+                                       rpc::session_id_snapshot(unlocked_session, session_mutex), cleared);
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
         return written;
       if (auto written = rpc::write_success(output, command->id, cleared); !written)
@@ -530,8 +528,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       std::lock_guard lock(session_mutex);      // FIXME: remove this once all session_mutex have been replaced by the mutex in unlocked_session.
-      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-      auto registry = session_w->load_command_registry(
+      auto registry = runtime::session_ts::wat(unlocked_session)->load_command_registry(
           CommandRegistryOptions{.include_builtins = true,
                                  .include_prompt_commands = true,
                                  .include_skills = true,
@@ -577,11 +574,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       ava::config::XdgPaths paths;
       {
         std::lock_guard lock(session_mutex);
-        SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);        // FIXME: use session_r here instead and don't pass session_mutex...
-        runtime::Session& session(*session_w);
-        paths = session.paths();
+        paths = runtime::session_ts::rat(unlocked_session)->paths();
         auto result =
-            run_command(session, CommandRequest{.command = std::move(slash_command),
+            run_command(unlocked_session, CommandRequest{.command = std::move(slash_command),
                                                 .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
                                                 .permission_resolver = runtime_options.permission_resolver,
                                                 .session_mutex = &session_mutex});
@@ -632,9 +627,6 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       continue;
     }
 
-    // FIXME: should NOT lock session here.
-    CRITICAL_AREA_BEGIN_W(session);
-
     if (is_direct_run_command_type(command->type))
     {
       if (!command->command || command->command->empty())
@@ -656,7 +648,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 
       reap_finished_prompt();
       rpc::set_active_run(run_state, rpc::RpcRunKind::DirectCommand, command->id);
-      prompt_worker.emplace(make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions{.session = *session_w,
+      prompt_worker.emplace(make_rpc_direct_command_worker(RpcDirectCommandWorkerOptions{.unlocked_session = unlocked_session,
                                                                                          .session_mutex = session_mutex,
                                                                                          .output = output,
                                                                                          .run_state = run_state,
@@ -701,7 +693,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       auto envelope = rpc::resolver_event_envelope("permission_replied", *command->correlation_id, *command->correlation_id,
-                                                   rpc::session_id_snapshot(*session_w, session_mutex),
+                                                   rpc::session_id_snapshot(unlocked_session, session_mutex),
                                                    rpc::permission_reply_payload_json(*command->request_id, *command->decision, command->reason));
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
         return written;
@@ -737,7 +729,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       auto envelope = rpc::resolver_event_envelope(
-          "question_replied", *command->correlation_id, *command->correlation_id, rpc::session_id_snapshot(*session_w, session_mutex),
+          "question_replied", *command->correlation_id, *command->correlation_id, rpc::session_id_snapshot(unlocked_session, session_mutex),
           rpc::question_reply_payload_json(*command->request_id, command->answer, command->selected, command->selected_options));
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope)); !written)
         return written;
@@ -763,7 +755,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
           return written;
         continue;
       }
-      if (auto written = rpc::write_queue_event(output, *session_w, session_mutex, "steer_queued", *queued); !written)
+      if (auto written = rpc::write_queue_event(output, unlocked_session, session_mutex, "steer_queued", *queued); !written)
       {
         return written;
       }
@@ -794,7 +786,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
           return written;
         continue;
       }
-      if (auto written = rpc::write_queue_event(output, *session_w, session_mutex, "follow_up_queued", *queued); !written)
+      if (auto written = rpc::write_queue_event(output, unlocked_session, session_mutex, "follow_up_queued", *queued); !written)
       {
         return written;
       }
@@ -805,15 +797,15 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
     {
       auto cancellation = rpc::begin_cancellation(run_state);
       static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
-      if (session_w->run_controller())
-        static_cast<void>(session_w->run_controller()->request_stop(StopReason::UserCanceled));
+      if (auto run_controller = runtime::session_ts::wat(unlocked_session)->run_controller())
+        static_cast<void>(run_controller->request_stop(StopReason::UserCanceled));
       if (cancellation.deferred_to_terminal_publication)
       {
         rpc::wait_for_terminal_publication(run_state);
       }
       else
       {
-        if (auto written = rpc::write_skipped_queue_events(output, *session_w, session_mutex, cancellation.cleared, "canceled"); !written)
+        if (auto written = rpc::write_skipped_queue_events(output, unlocked_session, session_mutex, cancellation.cleared, "canceled"); !written)
           return written;
       }
 
@@ -821,7 +813,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       auto const cleared_follow_up_count = cancellation.cleared.follow_up_messages.size() + cancellation.deferred_follow_up_count;
       auto cancel_event = rpc::resolver_event_envelope(
           "cancel_requested", command->id, cancellation.active_request_id.empty() ? command->id : cancellation.active_request_id,
-          rpc::session_id_snapshot(*session_w, session_mutex),
+          rpc::session_id_snapshot(unlocked_session, session_mutex),
           rpc::cancel_requested_payload_json(cancellation.active_run, cleared_steering_count, cleared_follow_up_count, cancellation.active_request_id));
       if (auto written = rpc::Output::write_record(output, ava::event::serialize_event_envelope_jsonl(cancel_event)); !written)
         return written;
@@ -867,7 +859,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       prompt_worker.emplace(make_rpc_compaction_worker(RpcCompactionWorkerOptions{
-          .session = *session_w,
+          .unlocked_session = unlocked_session,
           .session_mutex = session_mutex,
           .output = output,
           .run_state = run_state,
@@ -934,7 +926,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       rpc::subscribe_event_envelope_writer(event_bus, output);
       std::lock_guard lock(session_mutex);
       auto result =
-          run_command(*session_w, CommandRequest{.command = std::move(slash_command),
+          run_command(unlocked_session, CommandRequest{.command = std::move(slash_command),
                                                  .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
                                                  .permission_resolver = runtime_options.permission_resolver,
                                                  .session_mutex = &session_mutex});
@@ -976,6 +968,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       std::filesystem::path current_dir;
       {
         std::lock_guard lock(session_mutex);
+        SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
         paths = session_w->paths();
         current_dir = session_w->current_dir().empty() ? session_w->workspace_dir() : session_w->current_dir();
         image_attachments.reserve((command->attachments ? command->attachments->size() : 0U) + (command->images ? command->images->size() : 0U));
@@ -1032,8 +1025,6 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       prompt_runtime_options.image_attachments.clear();
       rpc::set_active_run(run_state, rpc::RpcRunKind::Prompt, command->id);
 
-      CRITICAL_AREA_END_W(session);
-
       prompt_worker.emplace(rpc::make_rpc_prompt_worker(rpc::RpcPromptWorkerOptions{
           .unlocked_session = unlocked_session,
           .output = output,
@@ -1060,12 +1051,9 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 
   if (prompt_worker)
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);    // FIXME: should NOT lock session here.
-    runtime::Session& session(*session_w);
-
     auto cleared = rpc::close_input_and_cancel(run_state);
     static_cast<void>(rpc::cancel_pending_resolvers(output, pending_state));
-    if (auto written = rpc::write_skipped_queue_events(output, session, session_mutex, cleared, "canceled"); !written)
+    if (auto written = rpc::write_skipped_queue_events(output, unlocked_session, session_mutex, cleared, "canceled"); !written)
     {
       return written;
     }
@@ -1083,32 +1071,32 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
   return {};
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in,
                                    std::ostream& out, rpc::RpcInputWake wake)
 {
   rpc::StreamRpcLineReader input(in, std::move(wake));
-  return run_rpc_loop(session, open_context, provider, transport, auth_transport, std::move(runtime_options), input, out);
+  return run_rpc_loop(unlocked_session, open_context, provider, transport, auth_transport, std::move(runtime_options), input, out);
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out,
                                    rpc::RpcInputWake wake)
 {
-  return run_rpc_loop(session, open_context, provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
+  return run_rpc_loop(unlocked_session, open_context, provider, transport, transport, std::move(runtime_options), in, out, std::move(wake));
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options, std::istream& in,
                                    std::ostream& out)
 {
-  return run_rpc_loop(session, open_context, provider, transport, auth_transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
+  return run_rpc_loop(unlocked_session, open_context, provider, transport, auth_transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
                                    ava::http::Transport& transport, runtime::RunOptions runtime_options, std::istream& in, std::ostream& out)
 {
-  return run_rpc_loop(session, open_context, provider, transport, transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
+  return run_rpc_loop(unlocked_session, open_context, provider, transport, transport, std::move(runtime_options), in, out, rpc::RpcInputWake{});
 }
 
 int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err, rpc::RpcInputWake wake)

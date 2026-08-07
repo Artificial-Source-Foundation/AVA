@@ -85,26 +85,40 @@ std::vector<PromptFileReference> prompt_file_references(std::string_view text)
   return references;
 }
 
-ava::tools::ToolContext prompt_file_reference_context(runtime::Session& session, runtime::RunOptions const& options)
+ava::tools::ToolContext prompt_file_reference_context(runtime::session_ts& unlocked_session, runtime::RunOptions const& options)
 {
-  return ava::tools::ToolContext{.workspace_dir = session.workspace_dir(),
-                                 .spill_dir = session.store.session_path().parent_path() / "spill",
-                                 .mode = session.mode(),
+  auto snapshot = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::tuple{session_r->workspace_dir(),
+                      session_r->store.session_path().parent_path() / "spill",
+                      session_r->mode(),
+                      session_r->anchor_set(),
+                      session_r->ava_authority_roots_1(),
+                      session_r->store.session_id(),
+                      session_r->model().provider_id,
+                      session_r->model().model_id,
+                      session_r->current_dir()};
+  }();
+  auto& [workspace_dir, spill_dir, mode, anchor_set, authority_roots, session_id, provider_id, model_id, current_dir] = snapshot;
+  return ava::tools::ToolContext{.workspace_dir = workspace_dir,
+                                 .spill_dir = spill_dir,
+                                 .mode = mode,
                                  .permission_resolver = options.permission_resolver,
-                                 .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-                                   return ava::agent::append_permission_decision(session.owner_append_route_1(), event);
+                                 .permission_audit_sink = [&unlocked_session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                   auto append_route = runtime::session_ts::rat(unlocked_session)->owner_append_route_1();
+                                   return ava::agent::append_permission_decision(append_route, event);
                                  },
                                  .cancel_requested = options.cancel_requested,
                                  .permission_tool_name = "file_reference",
                                  .permission_actor = "user",
-                                 .anchor_set = session.anchor_set(),
-                                 .ava_authority_roots = session.ava_authority_roots_1(),
+                                 .anchor_set = anchor_set,
+                                 .ava_authority_roots = authority_roots,
                                  .exact_file_access = options.exact_file_access,
                                  .command_executor = options.command_executor,
-                                 .session_id = session.store.session_id(),
-                                 .provider_id = session.model().provider_id,
-                                 .model_id = session.model().model_id,
-                                 .current_dir = session.current_dir()};
+                                 .session_id = session_id,
+                                 .provider_id = provider_id,
+                                 .model_id = model_id,
+                                 .current_dir = current_dir};
 }
 
 }  // namespace
@@ -122,12 +136,12 @@ ava::core::Result<std::string> expand_prompt_file_references(runtime::session_ts
     return std::unexpected(std::move(error));
   }
 
-  auto context = prompt_file_reference_context(session, options);
+  auto context = prompt_file_reference_context(unlocked_session, options);
   std::string expanded = user_message;
   expanded += "\n\nReferenced files:";
   for (auto const& reference : references)
   {
-    auto read = ava::tools::read_file(context, session.current_dir() / reference.path,
+    auto read = ava::tools::read_file(context, context.current_dir / reference.path,
                                       ava::tools::ReadOptions{.max_bytes = kPromptReferenceMaxBytes, .offset_line = 1, .max_lines = kPromptReferenceMaxLines});
     if (!read)
     {

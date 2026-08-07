@@ -259,11 +259,14 @@ ava::core::Result<ExportCommandArguments> parse_export_command_arguments(std::st
   return parsed;
 }
 
-std::filesystem::path resolve_export_path(runtime::Session const& session, std::string_view path)
+std::filesystem::path resolve_export_path(runtime::session_ts const& unlocked_session, std::string_view path)
 {
   auto resolved = std::filesystem::path(std::string(path));
   if (resolved.is_relative())
-    resolved = session.current_dir() / resolved;
+  {
+    auto const current_dir = runtime::session_ts::crat(unlocked_session)->current_dir();
+    resolved = current_dir / resolved;
+  }
   return resolved.lexically_normal();
 }
 
@@ -473,7 +476,7 @@ ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocke
 
   auto import_path = std::filesystem::path(*path_arg);
   if (import_path.is_relative())
-    import_path = session.current_dir() / import_path;
+    import_path = runtime::session_ts::rat(unlocked_session)->current_dir() / import_path;
   import_path = import_path.lexically_normal();
 
   auto entries = load_import_session_entries(import_path);
@@ -489,7 +492,16 @@ ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocke
     return result;
   }
 
-  auto imported_store = ava::session::SessionStore::create(session.workspace_dir(), session.paths().sessions_dir);
+  std::filesystem::path workspace_dir;
+  std::filesystem::path sessions_dir;
+  runtime::OpenContext owned_options;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    workspace_dir = session_r->workspace_dir();
+    sessions_dir = session_r->paths().sessions_dir;
+    owned_options = session_r->replacement_open_context({});
+  }
+  auto imported_store = ava::session::SessionStore::create(workspace_dir, sessions_dir);
   if (!imported_store)
   {
     add_output(result, imported_store.error().format());
@@ -512,7 +524,6 @@ ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocke
     return result;
   }
 
-  auto owned_options = session.replacement_open_context({});
   auto unlocked_opened_result = runtime::Session::open_owned(owned_options, *imported_store, *imported_lease, true);
   if (!unlocked_opened_result)
   {
@@ -521,14 +532,17 @@ ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocke
     add_output(result, error.format());
     return result;
   }
+  std::string imported_session_id;
   {
-    runtime::session_ts::wat opened_w(*unlocked_opened_result);
-    if (auto replaced = session.replace_with(std::move(*opened_w)); !replaced)
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
+    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
       return std::unexpected(std::move(replaced.error()));
+    imported_session_id = session_w->store.session_id();
   }
   result.session_tree_changed = true;
-  add_output(result, "imported session " + session.store.session_id() + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
-                         "\n  switched to " + session.store.session_id());
+  add_output(result, "imported session " + imported_session_id + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
+                         "\n  switched to " + imported_session_id);
   return result;
 }
 
@@ -536,12 +550,13 @@ ava::core::Result<CommandResult> run_recover_persistence_command(runtime::sessio
 {
   CommandResult result;
   result.handled = true;
-  if (!session.run_controller())
+  auto run_controller = runtime::session_ts::rat(unlocked_session)->run_controller();
+  if (!run_controller)
   {
     add_output(result, "session append controller is unavailable");
     return result;
   }
-  if (auto recovered = session.run_controller()->reset_persistence_failure(); !recovered)
+  if (auto recovered = run_controller->reset_persistence_failure(); !recovered)
   {
     add_output(result, recovered.error().format());
     return result;
@@ -560,7 +575,7 @@ ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocke
     add_output(result, parsed.error().format());
     return result;
   }
-  auto entries = load_runtime_entries(session);
+  auto entries = load_runtime_entries(unlocked_session);
   if (!entries)
   {
     add_output(result, entries.error().format());
@@ -605,23 +620,24 @@ ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocke
     return result;
   }
 
-  auto const target_path = resolve_export_path(session, parsed->path);
-  auto context = make_tool_context(session, request.permission_resolver);
+  auto const target_path = resolve_export_path(unlocked_session, parsed->path);
+  auto context = make_tool_context(unlocked_session, request.permission_resolver);
   context.permission_request_ids = std::make_shared<std::vector<std::string>>();
   auto linked_permission_ids = [&]() -> std::vector<std::string> {
     return context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
   };
 
   auto const call_id = ava::core::make_id("cmd");
-  auto const path_text = display_path(target_path, session.current_dir());
-  if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "export", path_text); !recorded)
+  auto const current_dir = runtime::session_ts::rat(unlocked_session)->current_dir();
+  auto const path_text = display_path(target_path, current_dir);
+  if (auto recorded = record_tool_start(unlocked_session, request.event_sink, result, call_id, "export", path_text); !recorded)
     return std::unexpected(std::move(recorded.error()));
 
   auto written = ava::tools::write_file(context, target_path, content);
   if (!written)
   {
     auto const text = written.error().format();
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Error, text, {},
+    if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Error, text, {},
                                            linked_permission_ids());
         !recorded)
       return std::unexpected(std::move(recorded.error()));
@@ -632,7 +648,7 @@ ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocke
   auto result_json = std::string("{\"tool\":\"export\",\"ok\":true,\"format\":\"") + export_format_text(format) + "\",\"path\":\"" +
                      ava::core::json::escape(target_path.string()) + "\",\"bytes_written\":" + std::to_string(written->bytes_written);
   result_json += "}";
-  if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Success,
+  if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "export", ava::agent::ToolTimelineStatus::Success,
                                          "wrote " + std::to_string(written->bytes_written) + " bytes", result_json, linked_permission_ids());
       !recorded)
     return std::unexpected(std::move(recorded.error()));

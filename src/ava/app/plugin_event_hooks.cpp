@@ -237,27 +237,28 @@ class PluginEventObserverState final
 }  // namespace
 
 PluginEventObserverOptions plugin_event_observer_options(runtime::session_ts& unlocked_session, ava::permissions::PermissionResolver permission_resolver,
-                                                         std::mutex* /*session_mutex*/)
+                                                          std::mutex* /*session_mutex*/)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*session_r);
   return PluginEventObserverOptions{
-      .workspace_dir = session.workspace_dir(),
+      .workspace_dir = session_r->workspace_dir(),
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
       .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,
       .plugin_enablement_file = resource_policy.plugin_enablement_file,
       .include_project_plugins = resource_policy.include_project_resources,
-      .mode = session.mode(),
+      .mode = session_r->mode(),
       .permission_resolver = std::move(permission_resolver),
       // Permission audits are owner-routed outside active runs and replaced by
       // run_prompt's immutable generation route during one.
-      .permission_audit_sink = [sink = session.owner_append_route_1()](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+      .permission_audit_sink = [sink = session_r->owner_append_route_1()](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
         return ava::agent::append_permission_decision(sink, event);
       },
       .cancel_requested = nullptr,
-      .session_id = session.store.session_id(),
-      .provider_id = session.model().provider_id,
-      .model_id = session.model().model_id,
-      .current_dir = session.current_dir()};
+      .session_id = session_r->store.session_id(),
+      .provider_id = session_r->model().provider_id,
+      .model_id = session_r->model().model_id,
+      .current_dir = session_r->current_dir()};
 }
 
 ava::event::RuntimeEventSink make_plugin_event_observer_sink(PluginEventObserverOptions options, ava::event::RuntimeEventSink next)

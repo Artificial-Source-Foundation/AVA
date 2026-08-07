@@ -42,16 +42,17 @@ std::string mcp_command_text(ava::mcp::McpServerConfig const& server)
   return text;
 }
 
-std::string mcp_display_path(std::filesystem::path const& path, runtime::Session const& session)
+std::string mcp_display_path(std::filesystem::path const& path, runtime::session_ts const& unlocked_session)
 {
-  return sanitize_inline_text(display_path(path, session.current_dir()));
+  auto const current_dir = runtime::session_ts::crat(unlocked_session)->current_dir();
+  return sanitize_inline_text(display_path(path, current_dir));
 }
 
-std::string mcp_config_path_text(std::filesystem::path const& path, runtime::Session const& session)
+std::string mcp_config_path_text(std::filesystem::path const& path, runtime::session_ts const& unlocked_session)
 {
   if (path.empty())
     return "none";
-  return mcp_display_path(path, session);
+  return mcp_display_path(path, unlocked_session);
 }
 
 std::string format_mcp_server_not_found_text(ava::mcp::McpConfig const& config, std::string_view server_id)
@@ -65,12 +66,12 @@ std::string format_mcp_server_not_found_text(ava::mcp::McpConfig const& config, 
   return output;
 }
 
-std::string format_mcp_list_text(ava::mcp::McpConfig const& config, runtime::Session const& session)
+std::string format_mcp_list_text(ava::mcp::McpConfig const& config, runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "MCP servers:\n";
-  output << "  global config: " << mcp_config_path_text(config.global_config_file, session) << "\n";
-  output << "  project config: " << mcp_config_path_text(config.project_config_file, session) << "\n";
+  output << "  global config: " << mcp_config_path_text(config.global_config_file, unlocked_session) << "\n";
+  output << "  project config: " << mcp_config_path_text(config.project_config_file, unlocked_session) << "\n";
   if (config.servers.empty())
   {
     output << "  none";
@@ -87,14 +88,14 @@ std::string format_mcp_list_text(ava::mcp::McpConfig const& config, runtime::Ses
   return text;
 }
 
-std::string format_mcp_inspect_text(ava::mcp::McpServerConfig const& server, runtime::Session const& session)
+std::string format_mcp_inspect_text(ava::mcp::McpServerConfig const& server, runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "MCP server " << sanitize_inline_text(server.id) << "\n";
   output << "  name: " << sanitize_inline_text(server.name) << "\n";
   output << "  status: " << mcp_status_text(server.enabled) << "\n";
   output << "  scope: " << mcp_scope_text(server.scope) << "\n";
-  output << "  config: " << mcp_config_path_text(server.source_path, session) << "\n";
+  output << "  config: " << mcp_config_path_text(server.source_path, unlocked_session) << "\n";
   output << "  command: " << mcp_command_text(server) << "\n";
   output << "  note: stdio MCP servers are launched per discovery or tool call and are not kept resident.";
   return output.str();
@@ -143,7 +144,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
   if (args.empty())
     return usage();
 
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
   auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
   if (!config)
   {
@@ -156,7 +157,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
   {
     if (args.size() != 1)
       return usage();
-    add_output(result, format_mcp_list_text(*config, session));
+    add_output(result, format_mcp_list_text(*config, unlocked_session));
     return result;
   }
 
@@ -173,7 +174,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
       add_output(result, format_mcp_server_not_found_text(*config, args[1]));
       return result;
     }
-    add_output(result, format_mcp_inspect_text(*server, session));
+    add_output(result, format_mcp_inspect_text(*server, unlocked_session));
     return result;
   }
 
@@ -205,17 +206,18 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
       return result;
     }
 
-    auto context = make_tool_context(session, request.permission_resolver);
+    auto context = make_tool_context(unlocked_session, request.permission_resolver);
     context.permission_tool_name = "mcp_tools";
     auto const call_id = ava::core::make_id("cmd");
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "mcp_tools", server->id); !recorded)
+    if (auto recorded = record_tool_start(unlocked_session, request.event_sink, result, call_id, "mcp_tools", server->id); !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
     }
 
     auto fail = [&](ava::core::Error const& error) -> ava::core::Result<CommandResult> {
       auto const text = error.format();
-      if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "mcp_tools", ava::agent::ToolTimelineStatus::Error, text); !recorded)
+      if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "mcp_tools", ava::agent::ToolTimelineStatus::Error, text);
+          !recorded)
       {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -237,7 +239,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
     }
 
     ava::mcp::McpStdioClientOptions options;
-    options.workspace_dir = session.workspace_dir();
+    options.workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
     auto client = ava::mcp::McpStdioClient::start(*server, options);
     if (!client)
       return fail(client.error());
@@ -249,7 +251,7 @@ ava::core::Result<CommandResult> run_mcp_command(runtime::session_ts& unlocked_s
     if (!shutdown)
       return fail(shutdown.error());
 
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "mcp_tools", ava::agent::ToolTimelineStatus::Success,
+    if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "mcp_tools", ava::agent::ToolTimelineStatus::Success,
                                            std::to_string(tools->size()) + " tools");
         !recorded)
     {

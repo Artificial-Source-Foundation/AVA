@@ -305,7 +305,23 @@ void load_mcp_prompt_commands(RegistryBuilder& builder, Session& session, Comman
     return;
   }
 
-  auto context = make_tool_context(session, options.permission_resolver);
+  auto context = ava::tools::ToolContext{
+      .workspace_dir = session.workspace_dir(),
+      .mode = session.mode(),
+      .permission_resolver = options.permission_resolver,
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
+      .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                .parent_id = "",
+                                                .type = ava::session::EntryType::PermissionDecision,
+                                                .timestamp = ava::session::now_timestamp(),
+                                                .data_json = ava::tools::permission_audit_data_json(event)};
+        return session.append_owned(std::move(entry));
+      },
+      .session_id = session.store.session_id(),
+      .provider_id = session.model().provider_id,
+      .model_id = session.model().model_id,
+      .current_dir = session.current_dir()};
   context.permission_tool_name = "mcp_prompts";
   context.current_tool_name = "mcp_prompts";
   context.cancel_requested = options.cancel_requested;

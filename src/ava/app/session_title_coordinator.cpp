@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -632,17 +633,36 @@ void SessionTitleCoordinator::start()
 }
 
 void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_session, std::string_view original_user_text, std::string_view committed_turn_id,
-                                       runtime::RunOptions const& run_options) noexcept
+                                        runtime::RunOptions const& run_options) noexcept
 {
-  if (!options_.config.enabled || session.sessionless() || !session.created || !session.run_controller() || !session.anchor_set() || committed_turn_id.empty())
+  if (!options_.config.enabled || committed_turn_id.empty())
     return;
   try
   {
-    auto read_authority = session.read_authority_1();
-    auto append_route = session.owner_append_route_1();
-    if (!read_authority || !append_route)
+    auto session_snapshot = [&]() {
+      SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+      if (session_r->sessionless() || !session_r->created || !session_r->run_controller() || !session_r->anchor_set())
+      {
+        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
+                                        std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
+                                        std::shared_ptr<ava::core::AnchorSet>, bool>>{};
+      }
+      auto read_authority = session_r->read_authority_1();
+      auto append_route = session_r->owner_append_route_1();
+      if (!read_authority || !append_route)
+      {
+        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
+                                        std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
+                                        std::shared_ptr<ava::core::AnchorSet>, bool>>{};
+      }
+      return std::optional{std::tuple{std::move(*read_authority), std::move(append_route), session_r->run_controller(),
+                                      std::string(session_r->store.session_id()), session_r->paths(), session_r->model(), session_r->anchor_set(),
+                                      session_r->is_offline()}};
+    }();
+    if (!session_snapshot)
       return;
-    auto const session_id = session.store.session_id();
+    auto [read_authority, append_route, run_controller, session_id, paths, active_model, anchor_set, session_offline] =
+        std::move(*session_snapshot);
     {
       std::lock_guard lock(mutex_);
       if (!admitted_session_ids_.insert(session_id).second)
@@ -651,7 +671,7 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
 
     auto const source_text = normalize_session_title_source(original_user_text);
     auto const fallback_title = fallback_session_title(source_text);
-    auto const fallback = append_automatic_title(*read_authority, append_route, committed_turn_id, fallback_title, metadata_allows_fallback);
+    auto const fallback = append_automatic_title(read_authority, append_route, committed_turn_id, fallback_title, metadata_allows_fallback);
     if (fallback != AutomaticTitleAppendOutcome::Persisted)
       return;
     publish_catalog_change(session_id);
@@ -659,19 +679,19 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
     Work work{.session_id = session_id,
               .committed_turn_id = std::string(committed_turn_id),
               .fallback_title = fallback_title,
-              .read_authority = std::move(*read_authority),
-              .append_controller = session.run_controller(),
+              .read_authority = std::move(read_authority),
+              .append_controller = std::move(run_controller),
               .append_route = std::move(append_route),
-              .request = SessionTitleGenerationRequest{.paths = session.paths(),
-                                                       .active_model = session.model(),
+              .request = SessionTitleGenerationRequest{.paths = std::move(paths),
+                                                       .active_model = std::move(active_model),
                                                        .config = options_.config,
-                                                       .anchor_set = session.anchor_set(),
+                                                       .anchor_set = std::move(anchor_set),
                                                        .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,
                                                        .account_id = run_options.openai_account_id,
                                                        .openai_oauth = run_options.openai_oauth,
-                                                       .offline = session.is_offline() || run_options.offline}};
+                                                       .offline = session_offline || run_options.offline}};
     std::lock_guard lock(mutex_);
     if (!accepting_ || queue_.size() >= options_.max_queued)
     {

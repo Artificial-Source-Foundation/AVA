@@ -283,9 +283,13 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
   return output.str();
 }
 
-std::optional<std::string> token_status_for_session(ava::app::runtime::Session const& session)
+std::optional<std::string> token_status_for_session(ava::app::runtime::session_ts const& unlocked_session)
 {
-  auto read_authority = session.read_authority_1();
+  auto snapshot = [&] {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    return std::pair{session_r->read_authority_1(), session_r->model().context_window_tokens};
+  }();
+  auto& [read_authority, context_window_tokens] = snapshot;
   if (!read_authority)
     return std::nullopt;
   auto entries = read_authority->load();
@@ -294,7 +298,7 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::Session c
   auto stats = ava::session::compute_session_stats(*entries);
   if (!stats)
     return std::nullopt;
-  return compact_token_status(*stats, session.model().context_window_tokens);
+  return compact_token_status(*stats, context_window_tokens);
 }
 
 ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
@@ -313,7 +317,7 @@ ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
 
 std::vector<ava::tui::TodoItem> todos_for_session(runtime::session_ts const& unlocked_session)
 {
-  auto read_authority = session.read_authority_1();
+  auto read_authority = runtime::session_ts::crat(unlocked_session)->read_authority_1();
   if (!read_authority)
     return {};
   auto entries = read_authority->load();
@@ -331,9 +335,13 @@ std::vector<ava::tui::TodoItem> todos_for_session(runtime::session_ts const& unl
   return todos;
 }
 
-ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::Session const& session)
+ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime::session_ts const& unlocked_session)
 {
-  auto read_authority = session.read_authority_1();
+  auto snapshot = [&] {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    return std::tuple{session_r->read_authority_1(), session_r->system_prompt(), session_r->model().context_window_tokens};
+  }();
+  auto& [read_authority, system_prompt, context_window_tokens] = snapshot;
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   auto entries = read_authority->load();
@@ -343,17 +351,17 @@ ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime
   if (!active_tokens)
     return std::unexpected(std::move(active_tokens.error()));
 
-  auto const system_prompt_tokens = ava::session::estimate_tokens(session.system_prompt());
+  auto const system_prompt_tokens = ava::session::estimate_tokens(system_prompt);
   auto const maximum = std::numeric_limits<std::size_t>::max();
   auto const total_tokens = *active_tokens > maximum - system_prompt_tokens ? maximum : *active_tokens + system_prompt_tokens;
   auto const display_tokens = total_tokens > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max()
                                                                                                              : static_cast<long long>(total_tokens);
-  return format_active_context_status_value(display_tokens, session.model().context_window_tokens);
+  return format_active_context_status_value(display_tokens, context_window_tokens);
 }
 
-std::optional<std::string> active_context_status_for_session(ava::app::runtime::Session const& session)
+std::optional<std::string> active_context_status_for_session(ava::app::runtime::session_ts const& unlocked_session)
 {
-  auto status = formatted_active_context_status(session);
+  auto status = formatted_active_context_status(unlocked_session);
   if (!status)
     return std::nullopt;
   return std::move(*status);
@@ -379,9 +387,9 @@ bool contains_value(std::vector<std::string> const& values, std::string_view val
   return std::ranges::find_if(values, [&](auto const& existing) { return existing == value; }) != values.end();
 }
 
-std::vector<std::string> registered_model_cycle_values(ava::app::runtime::Session const& session)
+std::vector<std::string> registered_model_cycle_values(ava::app::runtime::session_ts const& unlocked_session)
 {
-  auto view = ava::app::scoped_model_selector_view_1(session, {});
+  auto view = ava::app::scoped_model_selector_view_1(unlocked_session, {});
   std::vector<std::string> values;
   for (auto const& item : view.items)
   {
@@ -403,22 +411,26 @@ std::vector<std::string> normalized_model_scope(std::vector<std::string> const& 
   return normalized;
 }
 
-void store_model_scope(ava::app::runtime::Session& session, std::vector<std::string> candidate, std::vector<std::string> const& all_values,
+void store_model_scope(ava::app::runtime::session_ts& unlocked_session, std::vector<std::string> candidate,
+                       std::vector<std::string> const& all_values,
                        bool reset_full_scope_to_all)
 {
   auto normalized = normalized_model_scope(candidate, all_values);
+  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   if (reset_full_scope_to_all && normalized.size() == all_values.size())
   {
-    session.model_selection().scoped_model_cycle = std::nullopt;
+    session_w->model_selection().scoped_model_cycle = std::nullopt;
     return;
   }
-  session.model_selection().scoped_model_cycle = std::move(normalized);
+  session_w->model_selection().scoped_model_cycle = std::move(normalized);
 }
 
-std::vector<std::string> active_model_scope_or_all(ava::app::runtime::Session const& session, std::vector<std::string> const& all_values)
+std::vector<std::string> active_model_scope_or_all(ava::app::runtime::session_ts const& unlocked_session,
+                                                   std::vector<std::string> const& all_values)
 {
-  if (session.scoped_model_cycle())
-    return normalized_model_scope(*session.scoped_model_cycle(), all_values);
+  auto const scoped_cycle = runtime::session_ts::crat(unlocked_session)->scoped_model_cycle();
+  if (scoped_cycle)
+    return normalized_model_scope(*scoped_cycle, all_values);
   return all_values;
 }
 
@@ -451,72 +463,78 @@ ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectLi
   return view;
 }
 
-ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::Session const& session, ava::tui::SelectListView const& previous)
+ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::session_ts const& unlocked_session,
+                                                         ava::tui::SelectListView const& previous)
 {
-  return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view_1(session, scoped_model_selector_footer_hint()), previous);
+  return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view_1(unlocked_session, scoped_model_selector_footer_hint()), previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::session_ts& unlocked_session,
+                                                                ava::tui::SelectListView const& previous,
                                                                 std::string_view value)
 {
-  auto const all_values = registered_model_cycle_values(session);
+  auto const all_values = registered_model_cycle_values(unlocked_session);
   if (!contains_value(all_values, value))
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model is not available for scoped cycling"));
-  if (!session.scoped_model_cycle())
+  auto const scoped_cycle = runtime::session_ts::rat(unlocked_session)->scoped_model_cycle();
+  if (!scoped_cycle)
   {
-    session.model_selection().scoped_model_cycle = std::vector<std::string>{std::string(value)};
-    return refreshed_scoped_model_selector(session, previous);
+    runtime::session_ts::wat(unlocked_session)->model_selection().scoped_model_cycle = std::vector<std::string>{std::string(value)};
+    return refreshed_scoped_model_selector(unlocked_session, previous);
   }
-  auto next = normalized_model_scope(*session.scoped_model_cycle(), all_values);
+  auto next = normalized_model_scope(*scoped_cycle, all_values);
   if (contains_value(next, value))
     std::erase(next, std::string(value));
   else
     next.push_back(std::string(value));
-  store_model_scope(session, std::move(next), all_values, true);
-  return refreshed_scoped_model_selector(session, previous);
+  store_model_scope(unlocked_session, std::move(next), all_values, true);
+  return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::session_ts& unlocked_session,
+                                                                 ava::tui::SelectListView const& previous,
                                                                  std::vector<std::string> targets)
 {
-  auto const all_values = registered_model_cycle_values(session);
-  auto next = active_model_scope_or_all(session, all_values);
+  auto const all_values = registered_model_cycle_values(unlocked_session);
+  auto next = active_model_scope_or_all(unlocked_session, all_values);
   for (auto const& target : targets)
   {
     if (contains_value(all_values, target) && !contains_value(next, target))
       next.push_back(target);
   }
-  store_model_scope(session, std::move(next), all_values, true);
-  return refreshed_scoped_model_selector(session, previous);
+  store_model_scope(unlocked_session, std::move(next), all_values, true);
+  return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::session_ts& unlocked_session,
+                                                                ava::tui::SelectListView const& previous,
                                                                 std::vector<std::string> targets)
 {
-  auto const all_values = registered_model_cycle_values(session);
-  auto next = active_model_scope_or_all(session, all_values);
+  auto const all_values = registered_model_cycle_values(unlocked_session);
+  auto next = active_model_scope_or_all(unlocked_session, all_values);
   for (auto const& target : targets)
   {
     std::erase(next, target);
   }
-  store_model_scope(session, std::move(next), all_values, true);
-  return refreshed_scoped_model_selector(session, previous);
+  store_model_scope(unlocked_session, std::move(next), all_values, true);
+  return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::session_ts& unlocked_session,
+                                                                         ava::tui::SelectListView const& previous,
                                                                          std::string_view selected_value)
 {
   auto const provider = provider_from_model_value(selected_value);
   if (provider.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model selection is missing provider"));
-  auto const all_values = registered_model_cycle_values(session);
+  auto const all_values = registered_model_cycle_values(unlocked_session);
   std::vector<std::string> provider_values;
   for (auto const& value : all_values)
   {
     if (provider_from_model_value(value) == provider)
       provider_values.push_back(value);
   }
-  auto next = active_model_scope_or_all(session, all_values);
+  auto next = active_model_scope_or_all(unlocked_session, all_values);
   bool const provider_enabled =
       !provider_values.empty() && std::ranges::all_of(provider_values, [&](auto const& value) { return contains_value(next, value); });
   if (provider_enabled)
@@ -531,39 +549,41 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::ap
         next.push_back(value);
     }
   }
-  store_model_scope(session, std::move(next), all_values, true);
-  return refreshed_scoped_model_selector(session, previous);
+  store_model_scope(unlocked_session, std::move(next), all_values, true);
+  return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::Session& session, ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::session_ts& unlocked_session,
+                                                                 ava::tui::SelectListView const& previous,
                                                                  std::string_view selected_value, bool up)
 {
-  auto const all_values = registered_model_cycle_values(session);
-  auto next = active_model_scope_or_all(session, all_values);
+  auto const all_values = registered_model_cycle_values(unlocked_session);
+  auto next = active_model_scope_or_all(unlocked_session, all_values);
   auto const selected = std::string(selected_value);
   auto const found = std::ranges::find(next, selected);
   if (found == next.end())
-    return refreshed_scoped_model_selector(session, previous);
+    return refreshed_scoped_model_selector(unlocked_session, previous);
   auto const index = static_cast<std::size_t>(found - next.begin());
   if ((up && index == 0) || (!up && index + 1 >= next.size()))
-    return refreshed_scoped_model_selector(session, previous);
+    return refreshed_scoped_model_selector(unlocked_session, previous);
   auto const other = up ? index - 1 : index + 1;
   std::swap(next[index], next[other]);
-  store_model_scope(session, std::move(next), all_values, false);
-  return refreshed_scoped_model_selector(session, previous);
+  store_model_scope(unlocked_session, std::move(next), all_values, false);
+  return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::Session& session)
+ava::core::Result<std::string> save_scoped_model_cycle(ava::app::runtime::session_ts& unlocked_session)
 {
-  std::optional<std::vector<std::string>> scope_to_save = std::nullopt;
-  if (session.scoped_model_cycle())
+  auto scope_to_save = runtime::session_ts::rat(unlocked_session)->scoped_model_cycle();
+  if (scope_to_save)
   {
-    auto const all_values = registered_model_cycle_values(session);
-    scope_to_save = normalized_model_scope(*session.scoped_model_cycle(), all_values);
-    session.model_selection().scoped_model_cycle = scope_to_save;
+    auto const all_values = registered_model_cycle_values(unlocked_session);
+    scope_to_save = normalized_model_scope(*scope_to_save, all_values);
+    runtime::session_ts::wat(unlocked_session)->model_selection().scoped_model_cycle = scope_to_save;
   }
 
-  auto saved = ava::config::store_scoped_model_cycle(session.paths(), scope_to_save);
+  auto const paths = runtime::session_ts::rat(unlocked_session)->paths();
+  auto saved = ava::config::store_scoped_model_cycle(paths, scope_to_save);
   if (!saved)
     return std::unexpected(std::move(saved.error()));
 
@@ -586,8 +606,9 @@ ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::co
   return ava::permissions::PermissionRuleMode::Any;
 }
 
-ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(ava::app::runtime::Session const& session,
-                                                                                             ava::permissions::PermissionPrompt const& prompt,
+ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(
+    ava::app::runtime::session_ts const& unlocked_session,
+                                                                                              ava::permissions::PermissionPrompt const& prompt,
                                                                                              ava::permissions::PermissionAction action)
 {
   auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
@@ -607,8 +628,9 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
       recipe_display = prompt.command_metadata->recipe_display;
     }
   }
+  auto const rule_store = runtime::session_ts::crat(unlocked_session)->permission_rule_store();
   auto added = ava::permissions::add_persistent_permission_rule(
-      session.permission_rule_store(),
+      rule_store,
       ava::permissions::PermissionRuleDraft{
           .scope = ava::permissions::PermissionRuleScope::Workspace,
           .action = action,

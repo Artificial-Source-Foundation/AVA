@@ -42,8 +42,22 @@ namespace ava::app {
 
 ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::session_ts const& unlocked_session, ava::agent::Mode mode)
 {
-  return runtime::load_runtime_prompt_state(session.paths(), session.model(), mode, session.workspace_dir(), session.current_dir(),
-                                            project_resources_trusted(session.project_trust()), session.prompt_overrides());
+  ava::config::XdgPaths paths;
+  ava::config::ModelInfo model;
+  std::filesystem::path workspace_dir;
+  std::filesystem::path current_dir;
+  bool include_project_resources;
+  runtime::PromptOverrides prompt_overrides;
+  {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    paths = session_r->paths();
+    model = session_r->model();
+    workspace_dir = session_r->workspace_dir();
+    current_dir = session_r->current_dir();
+    include_project_resources = project_resources_trusted(session_r->project_trust());
+    prompt_overrides = session_r->prompt_overrides();
+  }
+  return runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, include_project_resources, prompt_overrides);
 }
 
 ava::core::Error offline_provider_error(std::string_view action)
@@ -196,8 +210,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::event::RuntimeEventSink event_sink = options.event_sink;
   if (!options.isolate_ambient_extensions)
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    auto plugin_observer_options = plugin_event_observer_options(*session_w, options.permission_resolver, options.session_mutex);
+    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver, options.session_mutex);
     plugin_observer_options.permission_audit_sink = [&append_route](ava::tools::PermissionAuditEvent const& event) {
       return ava::agent::append_permission_decision(append_route, event);
     };
@@ -275,8 +288,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::core::Result<std::string> expanded_user_message = user_message;
   if (runtime_options.expand_prompt_file_references)
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    expanded_user_message = expand_prompt_file_references(*session_w, user_message, runtime_options);
+    expanded_user_message = expand_prompt_file_references(unlocked_session, user_message, runtime_options);
   }
   if (!expanded_user_message)
     return fail_run(std::move(expanded_user_message.error()));
@@ -454,10 +466,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                              &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
         .take_steering_messages = runtime_options.take_steering_messages,
         .compact_context = runtime_options.access_token.empty() ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
-                                                                : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                                      std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
-          SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-          return runtime::compact_runtime_context(*session_w, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
+                                                                 : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
+                                                                       std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
+          return runtime::compact_runtime_context(unlocked_session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
                                                   replayed_user_messages);
         },
         .background_provider_factory = [&provider_id = provider_id_copy]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
@@ -564,9 +575,9 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   // already committed ordinary user turn.
   if (result->committed_turn_id && !options.synthetic_subagent_delivery)
   {
-    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    if (!session_r->sessionless() && session_r->session_title_coordinator())
-      session_r->session_title_coordinator()->schedule(*session_r, user_message, *result->committed_turn_id, options);
+    auto title_coordinator = runtime::session_ts::rat(unlocked_session)->session_title_coordinator();
+    if (title_coordinator)
+      title_coordinator->schedule(unlocked_session, user_message, *result->committed_turn_id, options);
   }
 
   return result;

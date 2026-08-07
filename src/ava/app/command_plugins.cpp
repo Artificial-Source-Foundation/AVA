@@ -26,14 +26,16 @@
 namespace ava::app {
 namespace {
 
-std::string plugin_display_path(std::filesystem::path const& path, runtime::Session const& session)
+std::string plugin_display_path(std::filesystem::path const& path, runtime::session_ts const& unlocked_session)
 {
-  return sanitize_inline_text(display_path(path, session.current_dir()));
+  auto const current_dir = runtime::session_ts::crat(unlocked_session)->current_dir();
+  return sanitize_inline_text(display_path(path, current_dir));
 }
 
-ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::ExtensionResourcePolicy const& policy, runtime::Session const& session)
+ava::plugin::PluginDiagnostics plugin_diagnostics(runtime::ExtensionResourcePolicy const& policy, runtime::session_ts const& unlocked_session)
 {
-  return ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, session.workspace_dir());
+  auto const workspace_dir = runtime::session_ts::crat(unlocked_session)->workspace_dir();
+  return ava::plugin::collect_plugin_diagnostics(policy.plugin_discovery, policy.plugin_enablement_file, workspace_dir);
 }
 
 std::string plugin_scope_text(ava::plugin::PluginScope scope)
@@ -92,7 +94,8 @@ ava::core::Result<std::string> read_plugin_resource(ava::plugin::PluginManifest 
   return std::move(loaded->content);
 }
 
-std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::Session const& session, std::string_view label,
+std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& status, runtime::session_ts const& unlocked_session,
+                                             std::string_view label,
                                              std::vector<ava::plugin::PluginResourceContribution> const& resources)
 {
   std::ostringstream output;
@@ -109,7 +112,7 @@ std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& st
     output << "  " << sanitize_inline_text(resource.name);
     if (!resource.description.empty())
       output << " - " << sanitize_inline_text(resource.description);
-    output << "  " << plugin_display_path(status.plugin.manifest.directory / resource.path, session) << "\n";
+    output << "  " << plugin_display_path(status.plugin.manifest.directory / resource.path, unlocked_session) << "\n";
   }
   auto text = output.str();
   if (!text.empty() && text.back() == '\n')
@@ -118,11 +121,11 @@ std::string format_plugin_resource_list_text(ava::plugin::PluginStatus const& st
 }
 
 std::string format_plugin_resource_text(ava::plugin::PluginManifest const& manifest, ava::plugin::PluginResourceContribution const& resource,
-                                        std::string_view label, runtime::Session const& session, std::string content)
+                                        std::string_view label, runtime::session_ts const& unlocked_session, std::string content)
 {
   std::ostringstream output;
   output << "Plugin " << label << " " << sanitize_inline_text(manifest.id) << "/" << sanitize_inline_text(resource.name) << "\n";
-  output << "  path: " << plugin_display_path(manifest.directory / resource.path, session) << "\n\n";
+  output << "  path: " << plugin_display_path(manifest.directory / resource.path, unlocked_session) << "\n\n";
   output << content;
   return output.str();
 }
@@ -215,12 +218,14 @@ std::string format_dynamic_resource_text(ava::plugin::PluginManifest const& mani
   return output.str();
 }
 
-ava::core::VoidResult record_dynamic_resource_result(runtime::Session const& session, ava::event::RuntimeEventSink const& sink, CommandResult& result,
+ava::core::VoidResult record_dynamic_resource_result(runtime::session_ts const& unlocked_session, ava::event::RuntimeEventSink const& sink,
+                                                     CommandResult& result,
                                                      std::string const& call_id, ava::agent::ToolTimelineStatus status, std::string result_summary,
                                                      std::string result_content, ava::tools::ToolContext const& context)
 {
   auto const permission_ids = context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
-  return record_tool_result(session, sink, result, call_id, "plugin_resource", status, std::move(result_summary), std::move(result_content), permission_ids);
+  return record_tool_result(unlocked_session, sink, result, call_id, "plugin_resource", status, std::move(result_summary), std::move(result_content),
+                            permission_ids);
 }
 
 ava::plugin::PluginStatus const* find_plugin_status(ava::plugin::PluginDiagnostics const& diagnostics, std::string_view plugin_id)
@@ -260,7 +265,7 @@ bool plugin_command_error_is_canceled(ava::core::Error const& error)
   return error.message().find("canceled") != std::string::npos;
 }
 
-std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::Session const& session)
+std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "Plugins:\n";
@@ -278,9 +283,9 @@ std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagno
     }
   }
   output << "\nDiscovery paths:\n";
-  output << "  global: " << plugin_display_path(diagnostics.discovery_options.global_plugins_dir, session) << "\n";
-  output << "  project: " << plugin_display_path(diagnostics.discovery_options.project_plugins_dir, session) << "\n";
-  output << "Enablement: " << plugin_display_path(diagnostics.enablement_file, session);
+  output << "  global: " << plugin_display_path(diagnostics.discovery_options.global_plugins_dir, unlocked_session) << "\n";
+  output << "  project: " << plugin_display_path(diagnostics.discovery_options.project_plugins_dir, unlocked_session) << "\n";
+  output << "Enablement: " << plugin_display_path(diagnostics.enablement_file, unlocked_session);
   if (!diagnostics.failures.empty())
   {
     output << "\nFailures: " << diagnostics.failures.size() << " (use /plugins failures)";
@@ -288,27 +293,27 @@ std::string format_plugin_list_text(ava::plugin::PluginDiagnostics const& diagno
   return output.str();
 }
 
-std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, runtime::Session const& session)
+std::string format_plugin_failure_text(ava::plugin::PluginFailure const& failure, runtime::session_ts const& unlocked_session)
 {
   std::string text =
-      "  " + plugin_scope_text(failure.scope) + "  " + plugin_display_path(failure.path, session) + "\n    " + sanitize_inline_text(failure.message);
+      "  " + plugin_scope_text(failure.scope) + "  " + plugin_display_path(failure.path, unlocked_session) + "\n    " + sanitize_inline_text(failure.message);
   if (!failure.details.empty())
     text += "\n    " + sanitize_inline_text(failure.details);
   return text;
 }
 
-std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::Session const& session)
+std::string format_plugin_failures_text(ava::plugin::PluginDiagnostics const& diagnostics, runtime::session_ts const& unlocked_session)
 {
   if (diagnostics.failures.empty())
     return "No plugin discovery or enablement failures.";
   std::string output = "Plugin failures:\n";
-  for (auto const& failure : diagnostics.failures) output += format_plugin_failure_text(failure, session) + "\n";
+  for (auto const& failure : diagnostics.failures) output += format_plugin_failure_text(failure, unlocked_session) + "\n";
   if (!output.empty() && output.back() == '\n')
     output.pop_back();
   return output;
 }
 
-std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, runtime::Session const& session)
+std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, runtime::session_ts const& unlocked_session)
 {
   auto const& manifest = status.plugin.manifest;
   std::ostringstream output;
@@ -317,7 +322,7 @@ std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, 
   output << "  version: " << sanitize_inline_text(manifest.version) << "\n";
   output << "  scope: " << plugin_scope_text(status.plugin.scope) << "\n";
   output << "  status: " << plugin_status_text(status.enabled) << "\n";
-  output << "  manifest: " << plugin_display_path(manifest.path, session) << "\n";
+  output << "  manifest: " << plugin_display_path(manifest.path, unlocked_session) << "\n";
   output << "  entrypoint: " << plugin_entrypoint_text(manifest.entrypoint) << " (not executed)\n";
   output << "  capabilities: " << plugin_capabilities_text(manifest) << "\n";
   output << "  tools: " << (manifest.contributes.tools.empty() ? "none" : std::to_string(manifest.contributes.tools.size())) << "\n";
@@ -357,7 +362,7 @@ std::string format_plugin_inspect_text(ava::plugin::PluginStatus const& status, 
   return output.str();
 }
 
-std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest, runtime::Session const& session)
+std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const& manifest, runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "Valid plugin manifest\n";
@@ -365,7 +370,7 @@ std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const&
   output << "  name: " << sanitize_inline_text(manifest.name) << "\n";
   output << "  version: " << sanitize_inline_text(manifest.version) << "\n";
   output << "  api_version: " << sanitize_inline_text(manifest.api_version) << "\n";
-  output << "  manifest: " << plugin_display_path(manifest.path, session) << "\n";
+  output << "  manifest: " << plugin_display_path(manifest.path, unlocked_session) << "\n";
   output << "  capabilities: " << plugin_capabilities_text(manifest) << "\n";
   output << "  tools: " << manifest.contributes.tools.size() << "\n";
   output << "  commands: " << manifest.contributes.commands.size() << "\n";
@@ -377,31 +382,32 @@ std::string format_valid_plugin_manifest_text(ava::plugin::PluginManifest const&
 }
 
 std::string format_plugin_installed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& source_dir,
-                                         std::filesystem::path const& destination_dir, runtime::Session const& session)
+                                         std::filesystem::path const& destination_dir, runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "Installed global plugin " << sanitize_inline_text(manifest.id) << "\n";
-  output << "  source: " << plugin_display_path(source_dir, session) << "\n";
-  output << "  target: " << plugin_display_path(destination_dir, session) << "\n";
+  output << "  source: " << plugin_display_path(source_dir, unlocked_session) << "\n";
+  output << "  target: " << plugin_display_path(destination_dir, unlocked_session) << "\n";
   output << "  status: disabled\n";
   output << "  note: no plugin process was started; use /plugins enable " << sanitize_inline_text(manifest.id) << " to enable it.";
   return output.str();
 }
 
-std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& removed_dir, runtime::Session const& session)
+std::string format_plugin_removed_text(ava::plugin::PluginManifest const& manifest, std::filesystem::path const& removed_dir,
+                                       runtime::session_ts const& unlocked_session)
 {
   std::ostringstream output;
   output << "Removed global plugin " << sanitize_inline_text(manifest.id) << "\n";
-  output << "  path: " << plugin_display_path(removed_dir, session) << "\n";
+  output << "  path: " << plugin_display_path(removed_dir, unlocked_session) << "\n";
   output << "  note: no plugin process was stopped.";
   return output.str();
 }
 
-std::filesystem::path plugin_validate_path(runtime::Session const& session, std::string_view path_text)
+std::filesystem::path plugin_validate_path(runtime::session_ts const& unlocked_session, std::string_view path_text)
 {
   auto path = std::filesystem::path(std::string(path_text));
   if (path.is_relative())
-    path = session.current_dir() / path;
+    path = runtime::session_ts::crat(unlocked_session)->current_dir() / path;
   return path.lexically_normal();
 }
 
@@ -428,14 +434,15 @@ std::string plugin_validate_argument(std::string_view plugins_argument)
   return trim_ascii_whitespace(plugins_argument.substr(index));
 }
 
-ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& session, runtime::ExtensionResourcePolicy const& policy,
+ava::core::Result<std::string> install_plugin_from_path(runtime::session_ts const& unlocked_session,
+                                                        runtime::ExtensionResourcePolicy const& policy,
                                                         std::string_view path_text)
 {
-  auto source = ava::plugin::inspect_plugin_install_source(plugin_validate_path(session, path_text));
+  auto source = ava::plugin::inspect_plugin_install_source(plugin_validate_path(unlocked_session, path_text));
   if (!source)
     return std::unexpected(std::move(source.error()));
 
-  auto const diagnostics = plugin_diagnostics(policy, session);
+  auto const diagnostics = plugin_diagnostics(policy, unlocked_session);
   if (find_plugin_status(diagnostics, source->manifest().id) || has_duplicate_plugin_failure(diagnostics, source->manifest().id))
   {
     return std::unexpected(
@@ -445,16 +452,16 @@ ava::core::Result<std::string> install_plugin_from_path(runtime::Session const& 
   auto installed = ava::plugin::install_global_plugin(std::move(*source), policy.plugin_discovery.global_plugins_dir);
   if (!installed)
     return std::unexpected(std::move(installed.error()));
-  return format_plugin_installed_text(installed->manifest, installed->source_directory, installed->destination_directory, session);
+  return format_plugin_installed_text(installed->manifest, installed->source_directory, installed->destination_directory, unlocked_session);
 }
 
-ava::core::Result<std::string> remove_plugin_by_id(runtime::Session const& session, runtime::ExtensionResourcePolicy const& policy,
+ava::core::Result<std::string> remove_plugin_by_id(runtime::session_ts const& unlocked_session, runtime::ExtensionResourcePolicy const& policy,
                                                    ava::plugin::PluginStatus const& status)
 {
   auto removed = ava::plugin::remove_global_plugin(status, policy.plugin_discovery.global_plugins_dir);
   if (!removed)
     return std::unexpected(std::move(removed.error()));
-  return format_plugin_removed_text(removed->manifest, removed->removed_directory, session);
+  return format_plugin_removed_text(removed->manifest, removed->removed_directory, unlocked_session);
 }
 
 struct PluginRunArguments
@@ -499,7 +506,8 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
   auto const usage = [&]() {
     add_output(result, missing_argument("/plugins "
                                         "<list|inspect|install|remove|enable|disable|validate|failures|prompts|prompt|skills|skill|dynamic-prompts|dynamic-"
@@ -518,7 +526,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 1)
       return usage();
-    add_output(result, format_plugin_list_text(plugin_diagnostics(resource_policy, session), session));
+    add_output(result, format_plugin_list_text(plugin_diagnostics(resource_policy, unlocked_session), unlocked_session));
     return result;
   }
 
@@ -526,7 +534,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 1)
       return usage();
-    add_output(result, format_plugin_failures_text(plugin_diagnostics(resource_policy, session), session));
+    add_output(result, format_plugin_failures_text(plugin_diagnostics(resource_policy, unlocked_session), unlocked_session));
     return result;
   }
 
@@ -534,14 +542,14 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    add_output(result, format_plugin_inspect_text(*status, session));
+    add_output(result, format_plugin_inspect_text(*status, unlocked_session));
     return result;
   }
 
@@ -549,7 +557,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -557,7 +565,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       return result;
     }
     auto const& resources = subcommand == "prompts" ? status->plugin.manifest.contributes.prompts : status->plugin.manifest.contributes.skills;
-    add_output(result, format_plugin_resource_list_text(*status, session, subcommand, resources));
+    add_output(result, format_plugin_resource_list_text(*status, unlocked_session, subcommand, resources));
     return result;
   }
 
@@ -565,7 +573,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 3)
       return usage();
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -585,7 +593,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       add_output(result, content.error().format());
       return result;
     }
-    add_output(result, format_plugin_resource_text(status->plugin.manifest, *resource, subcommand, session, std::move(*content)));
+    add_output(result, format_plugin_resource_text(status->plugin.manifest, *resource, subcommand, unlocked_session, std::move(*content)));
     return result;
   }
 
@@ -595,7 +603,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       return usage();
     auto const kind = subcommand == "dynamic-prompts" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
     auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     std::vector<DynamicResourceListEntry> entries;
     std::vector<DynamicResourceFailure> failures;
 
@@ -607,19 +615,19 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
         continue;
       auto const call_id = ava::core::make_id("dynres");
       auto const call_label = status.plugin.manifest.id + ":" + kind_name + ":list";
-      if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
+      if (auto recorded = record_tool_start(unlocked_session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
       {
         return std::unexpected(std::move(recorded.error()));
       }
 
-      auto context = make_tool_context(session, request.permission_resolver);
+      auto context = make_tool_context(unlocked_session, request.permission_resolver);
       context.permission_tool_name = "plugin_resource";
       context.cancel_requested = request.cancel_requested;
       context.permission_request_ids = std::make_shared<std::vector<std::string>>();
 
       auto fail = [&](std::string text, ava::agent::ToolTimelineStatus timeline_status = ava::agent::ToolTimelineStatus::Error) -> ava::core::VoidResult {
         failures.push_back(DynamicResourceFailure{.plugin_id = status.plugin.manifest.id, .message = text});
-        return record_dynamic_resource_result(session, request.event_sink, result, call_id, timeline_status, std::move(text), {}, context);
+        return record_dynamic_resource_result(unlocked_session, request.event_sink, result, call_id, timeline_status, std::move(text), {}, context);
       };
 
       if (request.cancel_requested && request.cancel_requested())
@@ -643,7 +651,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       }
 
       ava::plugin::PluginRunnerOptions options;
-      options.workspace_dir = session.workspace_dir();
+      options.workspace_dir = workspace_dir;
       auto process = ava::plugin::PluginProcess::start(status.plugin.manifest, options, request.cancel_requested);
       if (!process)
       {
@@ -691,7 +699,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       {
         entries.push_back(DynamicResourceListEntry{.plugin_id = status.plugin.manifest.id, .resource = resource});
       }
-      if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success,
+      if (auto recorded = record_dynamic_resource_result(unlocked_session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success,
                                                          std::to_string(listed->resources.size()) + " dynamic " + dynamic_resource_plural(kind), {}, context);
           !recorded)
       {
@@ -709,7 +717,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       return usage();
     auto const kind = subcommand == "dynamic-prompt" ? ava::plugin::PluginDynamicResourceKind::Prompt : ava::plugin::PluginDynamicResourceKind::Skill;
     auto const kind_name = std::string(ava::plugin::plugin_dynamic_resource_kind_name(kind));
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
@@ -734,18 +742,18 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 
     auto const call_id = ava::core::make_id("dynres");
     auto const call_label = status->plugin.manifest.id + ":" + kind_name + ":" + args[2];
-    if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
+    if (auto recorded = record_tool_start(unlocked_session, request.event_sink, result, call_id, "plugin_resource", call_label); !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
     }
 
-    auto context = make_tool_context(session, request.permission_resolver);
+    auto context = make_tool_context(unlocked_session, request.permission_resolver);
     context.permission_tool_name = "plugin_resource";
     context.cancel_requested = request.cancel_requested;
     context.permission_request_ids = std::make_shared<std::vector<std::string>>();
 
     auto fail = [&](std::string text, ava::agent::ToolTimelineStatus status = ava::agent::ToolTimelineStatus::Error) -> ava::core::Result<CommandResult> {
-      if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, status, text, {}, context); !recorded)
+      if (auto recorded = record_dynamic_resource_result(unlocked_session, request.event_sink, result, call_id, status, text, {}, context); !recorded)
       {
         return std::unexpected(std::move(recorded.error()));
       }
@@ -766,7 +774,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
     }
 
     ava::plugin::PluginRunnerOptions options;
-    options.workspace_dir = session.workspace_dir();
+    options.workspace_dir = workspace_dir;
     auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
     if (!process)
     {
@@ -789,7 +797,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
       return fail("plugin dynamic " + kind_name + " " + status->plugin.manifest.id + "/" + args[2] + " failed: " + content->content);
     }
 
-    if (auto recorded = record_dynamic_resource_result(session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success, "ok",
+    if (auto recorded = record_dynamic_resource_result(unlocked_session, request.event_sink, result, call_id, ava::agent::ToolTimelineStatus::Success, "ok",
                                                        content->content, context);
         !recorded)
     {
@@ -804,7 +812,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
     auto const path_text = plugin_validate_argument(argument);
     if (path_text.empty())
       return usage();
-    auto installed = install_plugin_from_path(session, resource_policy, path_text);
+    auto installed = install_plugin_from_path(unlocked_session, resource_policy, path_text);
     if (!installed)
     {
       add_output(result, installed.error().format());
@@ -818,14 +826,14 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   {
     if (args.size() != 2)
       return usage();
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    auto removed = remove_plugin_by_id(session, resource_policy, *status);
+    auto removed = remove_plugin_by_id(unlocked_session, resource_policy, *status);
     if (!removed)
     {
       add_output(result, removed.error().format());
@@ -840,14 +848,14 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
     if (args.size() != 2)
       return usage();
     bool const enabled = subcommand == "enable";
-    auto const diagnostics = plugin_diagnostics(resource_policy, session);
+    auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
     auto const* status = find_plugin_status(diagnostics, args[1]);
     if (!status)
     {
       add_output(result, plugin_not_found_text(diagnostics, args[1]));
       return result;
     }
-    auto stored = ava::plugin::set_plugin_enabled(resource_policy.plugin_enablement_file, session.workspace_dir(), args[1], enabled, status->plugin.scope);
+    auto stored = ava::plugin::set_plugin_enabled(resource_policy.plugin_enablement_file, workspace_dir, args[1], enabled, status->plugin.scope);
     if (!stored)
     {
       add_output(result, stored.error().format());
@@ -863,13 +871,13 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
     auto const path_text = plugin_validate_argument(argument);
     if (path_text.empty())
       return usage();
-    auto manifest = ava::plugin::load_plugin_manifest(plugin_validate_path(session, path_text));
+    auto manifest = ava::plugin::load_plugin_manifest(plugin_validate_path(unlocked_session, path_text));
     if (!manifest)
     {
       add_output(result, manifest.error().format());
       return result;
     }
-    add_output(result, format_valid_plugin_manifest_text(*manifest, session));
+    add_output(result, format_valid_plugin_manifest_text(*manifest, unlocked_session));
     return result;
   }
 
@@ -880,7 +888,8 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy_1(session);
+  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));
   if (!run_args)
   {
@@ -888,7 +897,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
     return result;
   }
 
-  auto const diagnostics = plugin_diagnostics(resource_policy, session);
+  auto const diagnostics = plugin_diagnostics(resource_policy, unlocked_session);
   auto const* status = find_plugin_status(diagnostics, run_args->plugin_id);
   if (!status)
   {
@@ -907,19 +916,20 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
     return result;
   }
 
-  auto context = make_tool_context(session, request.permission_resolver);
+  auto context = make_tool_context(unlocked_session, request.permission_resolver);
   context.permission_tool_name = "plugin_command";
   context.cancel_requested = request.cancel_requested;
   auto const call_id = ava::core::make_id("cmd");
   auto const command_label = status->plugin.manifest.id + ":" + command->name;
-  if (auto recorded = record_tool_start(session, request.event_sink, result, call_id, "plugin_command", command_label); !recorded)
+  if (auto recorded = record_tool_start(unlocked_session, request.event_sink, result, call_id, "plugin_command", command_label); !recorded)
   {
     return std::unexpected(std::move(recorded.error()));
   }
 
   auto fail = [&](ava::core::Error const& error) -> ava::core::Result<CommandResult> {
     auto const text = error.format();
-    if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "plugin_command", ava::agent::ToolTimelineStatus::Error, text);
+    if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "plugin_command", ava::agent::ToolTimelineStatus::Error,
+                                           text);
         !recorded)
     {
       return std::unexpected(std::move(recorded.error()));
@@ -942,7 +952,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
   }
 
   ava::plugin::PluginRunnerOptions options;
-  options.workspace_dir = session.workspace_dir();
+  options.workspace_dir = workspace_dir;
   auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
   if (!process)
     return fail(process.error());
@@ -954,7 +964,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
   if (!shutdown)
     return fail(shutdown.error());
 
-  if (auto recorded = record_tool_result(session, request.event_sink, result, call_id, "plugin_command",
+  if (auto recorded = record_tool_result(unlocked_session, request.event_sink, result, call_id, "plugin_command",
                                          command_result->ok ? ava::agent::ToolTimelineStatus::Success : ava::agent::ToolTimelineStatus::Error,
                                          command_result->ok ? "ok" : "plugin command returned error", command_result->content);
       !recorded)

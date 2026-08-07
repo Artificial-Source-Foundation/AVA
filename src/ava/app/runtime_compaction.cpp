@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <mutex>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 namespace ava::app {
@@ -23,18 +24,44 @@ namespace {
 
 constexpr std::size_t kMaxCompactionPromptEntryBytes = 8192;
 
-ava::event::RuntimeEventMetadata runtime_event_metadata_1(runtime::Session const& session, runtime::RunOptions const& options)
+ava::event::RuntimeEventMetadata runtime_event_metadata_1(std::string_view session_id)
 {
-  auto build = [&] {
-    return ava::event::RuntimeEventMetadata{
-        .timestamp = ava::session::now_timestamp(),
-        .session_id = session.store.session_id(),
-    };
+  return ava::event::RuntimeEventMetadata{
+      .timestamp = ava::session::now_timestamp(),
+      .session_id = std::string(session_id),
   };
-  if (!options.session_mutex)
-    return build();
-  std::lock_guard lock(*options.session_mutex);
-  return build();
+}
+
+// Build retry policy for a compaction provider request using an owned session id.
+//
+// Retry callbacks can outlive any session access guard and therefore capture no Session reference.
+ava::http::RetryOptions compaction_retry_options(std::string session_id, runtime::RunOptions const& options)
+{
+  ava::http::RetryOptions retry_options;
+  retry_options.cancel_requested = options.cancel_requested;
+  retry_options.observation = {.observation = options.observation, .context = options.trace_context};
+  retry_options.response_retry_decision = ava::provider::provider_retry_decision;
+  retry_options.on_retry = [session_id = std::move(session_id), &options](ava::http::RetryOptions::Event const& retry) {
+    ava::event::RetryPayload payload;
+    if (retry.status_code > 0)
+      payload.text = "HTTP status " + std::to_string(retry.status_code);
+    payload.status = retry.streaming ? "streaming" : "request";
+    payload.trigger = "provider_transport";
+    payload.reason = retry.reason;
+    payload.attempt = retry.attempt;
+    payload.max_attempts = retry.max_attempts;
+    payload.delay_ms = retry.delay_ms;
+    payload.remaining_ms = retry.remaining_ms;
+    auto metadata = runtime_event_metadata_1(session_id);
+    if (retry.countdown_tick)
+    {
+      return ava::event::emit_event(
+          options.event_sink, ava::event::RuntimeEvent{std::move(metadata), ava::event::RetryTickEvent{.payload = std::move(payload), .diagnostics = {}}});
+    }
+    return ava::event::emit_event(options.event_sink,
+                                  ava::event::RuntimeEvent{std::move(metadata), ava::event::RetryEvent{.payload = std::move(payload), .diagnostics = {}}});
+  };
+  return retry_options;
 }
 
 ava::core::Error agent_loop_canceled_error()
@@ -374,17 +401,19 @@ ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::
   return error;
 }
 
-ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::session_ts const& unlocked_session, ava::session::CompactionConfig config)
+ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config_impl(ava::config::XdgPaths const& paths,
+                                                                                ava::config::ModelInfo const& current_model,
+                                                                                ava::session::CompactionConfig config)
 {
   if (!config.model_explicit)
   {
-    config.provider_id = session.model().provider_id;
-    config.model_id = session.model().model_id;
+    config.provider_id = current_model.provider_id;
+    config.model_id = current_model.model_id;
     return config;
   }
-  auto const provider_id = config.provider_explicit ? config.provider_id : session.model().provider_id;
+  auto const provider_id = config.provider_explicit ? config.provider_id : current_model.provider_id;
   auto const model_id = config.model_id;
-  auto model = resolve_runtime_model(session.paths(), provider_id, model_id);
+  auto model = resolve_runtime_model(paths, provider_id, model_id);
   if (!model)
   {
     model.error().with_context("compaction_provider", provider_id).with_context("compaction_model", model_id);
@@ -393,6 +422,15 @@ ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runt
   config.provider_id = model->provider_id;
   config.model_id = model->model_id;
   return config;
+}
+
+ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::session_ts const& unlocked_session, ava::session::CompactionConfig config)
+{
+  auto [paths, current_model] = [&] {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    return std::tuple{session_r->paths(), session_r->model()};
+  }();
+  return resolve_compaction_config_impl(paths, current_model, std::move(config));
 }
 
 ava::core::Result<PreparedCompactionContext> prepare_compaction_context(std::vector<ava::session::SessionEntry> const& entries,
@@ -476,34 +514,36 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
   return prompt;
 }
 
-ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts const& unlocked_session, std::vector<ava::session::SessionEntry> const& entries,
-                                                           ava::session::CompactionConfig const& config, std::string_view instructions,
-                                                           std::size_t estimated_tokens, ava::provider::Provider const& provider,
-                                                           ava::http::Transport& transport, runtime::RunOptions const& options)
+ava::core::Result<std::string> generate_compaction_summary_impl(ava::config::XdgPaths const& paths, ava::config::ModelInfo const& current_model,
+                                                                bool offline, std::string session_id,
+                                                                std::vector<ava::session::SessionEntry> const& entries,
+                                                                ava::session::CompactionConfig const& config, std::string_view instructions,
+                                                                std::size_t estimated_tokens, ava::provider::Provider const& provider,
+                                                                ava::http::Transport& transport, runtime::RunOptions const& options)
 {
-  if (session.is_offline() || options.offline)
+  if (offline || options.offline)
   {
     return std::unexpected(offline_provider_error("compact"));
   }
-  auto effective_config = resolve_compaction_config(session, config);
+  auto effective_config = resolve_compaction_config_impl(paths, current_model, config);
   if (!effective_config)
     return std::unexpected(std::move(effective_config.error()));
   ava::core::Result<ava::config::ModelInfo> summary_model =
-      effective_config->model_explicit ? resolve_runtime_model(session.paths(), effective_config->provider_id, effective_config->model_id) : session.model();
+      effective_config->model_explicit ? resolve_runtime_model(paths, effective_config->provider_id, effective_config->model_id) : current_model;
   if (!summary_model)
     return std::unexpected(std::move(summary_model.error()));
 
   auto summary_options = options;
   std::unique_ptr<ava::provider::Provider> owned_provider;
   ava::provider::Provider const* summary_provider = &provider;
-  if (effective_config->provider_id != session.model().provider_id)
+  if (effective_config->provider_id != current_model.provider_id)
   {
     summary_options.access_token.clear();
     summary_options.credential_type = "bearer";
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
     ava::http::CurlCliTransport auth_transport;
-    auto prepared = prepare_runtime_credentials(session.paths(), effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
+    auto prepared = prepare_runtime_credentials(paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction");
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);
@@ -524,7 +564,7 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts c
   ava::http::Transport* summary_transport = &transport;
   if (summary_options.enable_transport_retries)
   {
-    retry_transport.emplace(transport, runtime::runtime_retry_options(session, summary_options));
+    retry_transport.emplace(transport, compaction_retry_options(session_id, summary_options));
     summary_transport = &*retry_transport;
     summary_options.enable_transport_retries = false;
   }
@@ -598,23 +638,42 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts c
   return *summary;
 }
 
+ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts const& unlocked_session,
+                                                           std::vector<ava::session::SessionEntry> const& entries,
+                                                           ava::session::CompactionConfig const& config, std::string_view instructions,
+                                                           std::size_t estimated_tokens, ava::provider::Provider const& provider,
+                                                           ava::http::Transport& transport, runtime::RunOptions const& options)
+{
+  auto [paths, current_model, offline, session_id] = [&] {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    return std::tuple{session_r->paths(), session_r->model(), session_r->is_offline(), session_r->store.session_id()};
+  }();
+  return generate_compaction_summary_impl(paths, current_model, offline, std::move(session_id), entries, config, instructions, estimated_tokens, provider,
+                                          transport, options);
+}
+
 }  // namespace ava::app
 
 namespace ava::app::runtime {
 
-ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                ava::provider::Provider const& provider, ava::http::Transport& transport, RunOptions const& options,
-                                                std::vector<std::string> const& replayed_user_messages)
+ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
+                                                 ava::provider::Provider const& provider, ava::http::Transport& transport, RunOptions const& options,
+                                                 std::vector<std::string> const& replayed_user_messages)
 {
   if (options.access_token.empty())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
   }
 
-  auto loaded_config = ava::session::load_compaction_config(session.paths());
+  auto [paths, current_model, offline, session_id] = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::tuple{session_r->paths(), session_r->model(), session_r->is_offline(), session_r->store.session_id()};
+  }();
+
+  auto loaded_config = ava::session::load_compaction_config(paths);
   if (!loaded_config)
     return std::unexpected(std::move(loaded_config.error()));
-  auto config = resolve_compaction_config(session, std::move(*loaded_config));
+  auto config = resolve_compaction_config_impl(paths, current_model, std::move(*loaded_config));
   if (!config)
     return std::unexpected(std::move(config.error()));
 
@@ -647,12 +706,12 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     auto prepared = prepare_compaction_context(*entries, *config, replayed_user_messages);
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
-    auto const threshold = ava::session::effective_auto_threshold_tokens(*config, session.model().context_window_tokens);
+    auto const threshold = ava::session::effective_auto_threshold_tokens(*config, current_model.context_window_tokens);
     std::size_t estimated_tokens = prepared->estimated_tokens;
     std::size_t threshold_tokens = threshold;
     if (trigger == "auto")
     {
-      auto decision = ava::session::should_auto_compact(*entries, *config, session.model().context_window_tokens);
+      auto decision = ava::session::should_auto_compact(*entries, *config, current_model.context_window_tokens);
       if (!decision)
         return std::unexpected(std::move(decision.error()));
       if (!decision->should_compact)
@@ -674,7 +733,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       retry_diagnostics.threshold_tokens = threshold_tokens;
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options),
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session_id),
                                        ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
           !emitted)
       {
@@ -696,13 +755,14 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
     start_payload.retained_tokens = prepared->retained_tokens;
     if (auto emitted = ava::event::emit_event(
             options.event_sink,
-            ava::event::RuntimeEvent{runtime_event_metadata_1(session, options), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
+            ava::event::RuntimeEvent{runtime_event_metadata_1(session_id), ava::event::CompactionStartEvent{.payload = std::move(start_payload)}});
         !emitted)
     {
       return std::unexpected(std::move(emitted.error()));
     }
 
-    auto summary = generate_compaction_summary(session, prepared->active_entries, *config, "", estimated_tokens, provider, transport, options);
+    auto summary = generate_compaction_summary_impl(paths, current_model, offline, session_id, prepared->active_entries, *config, "", estimated_tokens,
+                                                    provider, transport, options);
     if (!summary)
       return std::unexpected(std::move(summary.error()));
     if (options.cancel_requested && options.cancel_requested())
@@ -738,7 +798,8 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
                                                                                            .recent_context_omitted = prepared->recent_context_omitted});
       if (!entry)
         return std::unexpected(std::move(entry.error()));
-      auto appended = options.active_append_route ? options.active_append_route(std::move(*entry)) : session.append_owned(std::move(*entry));
+      auto appended = options.active_append_route ? options.active_append_route(std::move(*entry))
+                                                  : session_ts::wat(unlocked_session)->append_owned(std::move(*entry));
       if (!appended)
         return std::unexpected(std::move(appended.error()));
       return true;
@@ -772,7 +833,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       end_payload.summary_bytes = summary->size();
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session_id), ava::event::CompactionEndEvent{.payload = std::move(end_payload)}});
           !emitted)
       {
         return std::unexpected(std::move(emitted.error()));
@@ -792,7 +853,7 @@ ava::core::Result<bool> compact_runtime_context(Session& session, ava::session::
       retry_diagnostics.current_entries = last_current_entries;
       if (auto emitted = ava::event::emit_event(
               options.event_sink,
-              ava::event::RuntimeEvent{runtime_event_metadata_1(session, options),
+              ava::event::RuntimeEvent{runtime_event_metadata_1(session_id),
                                        ava::event::RetryEvent{.payload = std::move(retry_payload), .diagnostics = std::move(retry_diagnostics)}});
           !emitted)
       {

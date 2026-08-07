@@ -40,17 +40,36 @@ std::string project_trust_summary(ProjectTrustState const& state)
   return output;
 }
 
-ava::core::Result<CommandResult> reload_project_trust_state(runtime::Session& session, std::string prefix)
+ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts& unlocked_session, std::string prefix)
 {
-  auto next_trust = load_project_trust_state(session.paths(), session.workspace_dir());
-  auto prompt_state = runtime::load_runtime_prompt_state(session.paths(), session.model(), session.mode(), session.workspace_dir(), session.current_dir(),
-                                                         project_resources_trusted(next_trust), session.prompt_overrides());
+  ava::config::XdgPaths paths;
+  ava::config::ModelInfo model;
+  ava::agent::Mode mode;
+  std::filesystem::path workspace_dir;
+  std::filesystem::path current_dir;
+  runtime::PromptOverrides prompt_overrides;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    paths = session_r->paths();
+    model = session_r->model();
+    mode = session_r->mode();
+    workspace_dir = session_r->workspace_dir();
+    current_dir = session_r->current_dir();
+    prompt_overrides = session_r->prompt_overrides();
+  }
+  auto next_trust = load_project_trust_state(paths, workspace_dir);
+  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust), prompt_overrides);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
-  session.trust_state().project_trust = std::move(next_trust);
-  if (auto refreshed = session.apply_prompt_state(std::move(*prompt_state)); !refreshed)
-    return std::unexpected(std::move(refreshed.error()));
-  return handled_text(std::move(prefix) + "\n" + project_trust_summary(session.project_trust()));
+  ProjectTrustState applied_trust;
+  {
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    session_w->trust_state().project_trust = std::move(next_trust);
+    if (auto refreshed = session_w->apply_prompt_state(std::move(*prompt_state)); !refreshed)
+      return std::unexpected(std::move(refreshed.error()));
+    applied_trust = session_w->project_trust();
+  }
+  return handled_text(std::move(prefix) + "\n" + project_trust_summary(applied_trust));
 }
 
 }  // namespace
@@ -60,27 +79,35 @@ ava::core::Result<CommandResult> run_trust_command(runtime::session_ts& unlocked
   auto const args = split_command_arguments(argument);
   auto const action = args.empty() ? std::string("status") : args.front();
   if (action == "status")
-    return handled_text(project_trust_summary(session.project_trust()));
+    return handled_text(project_trust_summary(runtime::session_ts::rat(unlocked_session)->project_trust()));
+
+  ava::config::XdgPaths paths;
+  std::filesystem::path workspace_dir;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    paths = session_r->paths();
+    workspace_dir = session_r->workspace_dir();
+  }
   if (action == "project" || action == "trust" || action == "approve")
   {
-    auto saved = set_project_trust_decision(session.paths(), session.workspace_dir(), true);
+    auto saved = set_project_trust_decision(paths, workspace_dir, true);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
-    return reload_project_trust_state(session, "trusted project resources");
+    return reload_project_trust_state(unlocked_session, "trusted project resources");
   }
   if (action == "deny" || action == "untrust")
   {
-    auto saved = set_project_trust_decision(session.paths(), session.workspace_dir(), false);
+    auto saved = set_project_trust_decision(paths, workspace_dir, false);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
-    return reload_project_trust_state(session, "denied project resources");
+    return reload_project_trust_state(unlocked_session, "denied project resources");
   }
   if (action == "clear")
   {
-    auto cleared = clear_project_trust_decision(session.paths(), session.workspace_dir());
+    auto cleared = clear_project_trust_decision(paths, workspace_dir);
     if (!cleared)
       return std::unexpected(std::move(cleared.error()));
-    return reload_project_trust_state(session, "cleared project trust decision");
+    return reload_project_trust_state(unlocked_session, "cleared project trust decision");
   }
   return handled_text("unsupported trust action: " + action + "\nsupported: status, project, deny, clear");
 }

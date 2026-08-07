@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/app/runtime/session_ts.h"
 #include "ava/event/RuntimeEvent.h"
 #include "ava/agent/mode.h"
 #include "ava/tools/file_tools.h"

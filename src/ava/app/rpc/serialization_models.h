@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/app/runtime/session_ts.h"
 #include <string>
 
 namespace ava::config {

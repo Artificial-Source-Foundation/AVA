@@ -168,27 +168,34 @@ std::vector<std::string> model_diagnostics(ava::config::ModelInfo const& model, 
   return diagnostics;
 }
 
-std::string format_models_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
+std::string format_models_text(runtime::session_ts const& unlocked_session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
+  ava::config::ModelInfo current_model;
+  std::optional<runtime::ReasoningSelection> current_reasoning;
+  {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    current_model = session_r->model();
+    current_reasoning = session_r->reasoning();
+  }
   auto const providers = ava::provider::builtin_provider_registry();
   auto models = effective_models(registry);
   bool current_in_catalog = false;
 
   std::string output = "Models:\n";
-  output += "current " + session.model().provider_id + "/" + session.model().model_id + "\n";
-  output += session.reasoning() ? "reasoning current " + session.reasoning()->level + "\n" : "reasoning current default\n";
+  output += "current " + current_model.provider_id + "/" + current_model.model_id + "\n";
+  output += current_reasoning ? "reasoning current " + current_reasoning->level + "\n" : "reasoning current default\n";
   output += "default " + registry.default_provider_id + "/" + registry.default_model_id + "\n";
   if (!query.empty())
     output += "filter " + sanitize_inline_text(std::string(query)) + "\n";
   std::size_t shown = 0;
   for (auto const& model : models)
   {
-    current_in_catalog = current_in_catalog || (model.provider_id == session.model().provider_id && model.model_id == session.model().model_id);
+    current_in_catalog = current_in_catalog || (model.provider_id == current_model.provider_id && model.model_id == current_model.model_id);
     if (!model_matches_query(model, query))
       continue;
     ++shown;
     bool const registered = providers.contains(model.provider_id);
-    output += model.provider_id == session.model().provider_id && model.model_id == session.model().model_id ? "* " : "  ";
+    output += model.provider_id == current_model.provider_id && model.model_id == current_model.model_id ? "* " : "  ";
     output += model.provider_id + "/" + model.model_id;
     if (!model.display_name.empty())
       output += "  " + model.display_name;
@@ -222,7 +229,7 @@ std::string format_models_text(runtime::Session const& session, ava::config::Mod
   }
   if (!current_in_catalog)
   {
-    output += "* " + session.model().provider_id + "/" + session.model().model_id + "  current model outside catalog\n";
+    output += "* " + current_model.provider_id + "/" + current_model.model_id + "  current model outside catalog\n";
   }
   if (shown == 0 && !query.empty())
   {
@@ -279,8 +286,9 @@ std::string provider_credential_status(ava::config::XdgPaths const& paths, ava::
   return sanitize_inline_text(type) + " source=" + sanitize_inline_text(source);
 }
 
-std::string format_providers_text(runtime::Session const& session, ava::config::ModelRegistry const& registry, std::string_view query)
+std::string format_providers_text(runtime::session_ts const& unlocked_session, ava::config::ModelRegistry const& registry, std::string_view query)
 {
+  auto const paths = runtime::session_ts::crat(unlocked_session)->paths();
   auto const provider_registry = ava::provider::builtin_provider_registry();
   std::string output = "Providers:\n";
   if (!query.empty())
@@ -300,7 +308,7 @@ std::string format_providers_text(runtime::Session const& session, ava::config::
     output += "    runtime=" + std::string(registered ? "registered" : "not registered") +
               " selectable=" + std::string(profile.runtime_selectable ? "yes" : "no") +
               " models=" + std::to_string(model_count_for_provider(registry, profile.provider_id)) + "\n";
-    output += "    auth=" + provider_credential_status(session.paths(), profile) + "\n";
+    output += "    auth=" + provider_credential_status(paths, profile) + "\n";
     output += "    connect=" + sanitize_inline_text(profile.connect_detail.empty() ? std::string("not documented") : profile.connect_detail) +
               " oauth=" + provider_oauth_status(profile) + "\n";
     if (!profile.api_family.empty())
@@ -336,10 +344,11 @@ ava::core::Result<CommandResult> run_models_command(runtime::session_ts& unlocke
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto registry = ava::config::load_model_registry(session.paths());
+  auto const paths = runtime::session_ts::rat(unlocked_session)->paths();
+  auto registry = ava::config::load_model_registry(paths);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
-  add_output(result, format_models_text(session, *registry, trimmed_query));
+  add_output(result, format_models_text(unlocked_session, *registry, trimmed_query));
   return result;
 }
 
@@ -348,10 +357,11 @@ ava::core::Result<CommandResult> run_providers_command(runtime::session_ts& unlo
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto registry = ava::config::load_model_registry(session.paths());
+  auto const paths = runtime::session_ts::rat(unlocked_session)->paths();
+  auto registry = ava::config::load_model_registry(paths);
   if (!registry)
     return std::unexpected(std::move(registry.error()));
-  add_output(result, format_providers_text(session, *registry, trimmed_query));
+  add_output(result, format_providers_text(unlocked_session, *registry, trimmed_query));
   return result;
 }
 

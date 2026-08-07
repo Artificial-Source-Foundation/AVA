@@ -106,9 +106,9 @@ std::string make_user_turn_preview(std::string_view text)
   return preview;
 }
 
-ava::session::TranscriptLimits transcript_limits_for_session(runtime::Session const& session)
+ava::session::TranscriptLimits transcript_limits_for_session(runtime::session_ts const& unlocked_session)
 {
-  auto const& read_limits = session.session_read_limits();
+  auto const read_limits = runtime::session_ts::crat(unlocked_session)->session_read_limits();
   ava::session::TranscriptLimits limits;
   // Project every record the bound authority may load. Do not impose a lower
   // arbitrary total-text ceiling than the established session read policy.
@@ -118,9 +118,11 @@ ava::session::TranscriptLimits transcript_limits_for_session(runtime::Session co
   return limits;
 }
 
-ava::core::Result<std::vector<ava::session::TranscriptItem>> load_public_transcript(runtime::Session const& session, std::string_view operation)
+ava::core::Result<std::vector<ava::session::TranscriptItem>> load_public_transcript(runtime::session_ts const& unlocked_session,
+                                                                                   std::string_view operation)
 {
-  auto read_authority = session.read_authority_1();
+  auto const transcript_limits = transcript_limits_for_session(unlocked_session);
+  auto read_authority = runtime::session_ts::crat(unlocked_session)->read_authority_1();
   if (!read_authority)
   {
     auto error = std::move(read_authority.error());
@@ -135,7 +137,7 @@ ava::core::Result<std::vector<ava::session::TranscriptItem>> load_public_transcr
     error.with_context("operation", std::string(operation));
     return std::unexpected(std::move(error));
   }
-  auto transcript = ava::session::project_transcript(*entries, transcript_limits_for_session(session));
+  auto transcript = ava::session::project_transcript(*entries, transcript_limits);
   if (!transcript)
   {
     auto error = std::move(transcript.error());
@@ -157,7 +159,7 @@ ava::core::Result<SessionUserTurnList> list_session_user_turns(runtime::session_
     return std::unexpected(std::move(error));
   }
 
-  auto transcript = load_public_transcript(session, "list_session_user_turns");
+  auto transcript = load_public_transcript(unlocked_session, "list_session_user_turns");
   if (!transcript)
     return std::unexpected(std::move(transcript.error()));
 
@@ -194,7 +196,7 @@ ava::core::Result<std::string> read_session_user_turn_text(runtime::session_ts c
     return std::unexpected(std::move(error));
   }
 
-  auto transcript = load_public_transcript(session, "read_session_user_turn_text");
+  auto transcript = load_public_transcript(unlocked_session, "read_session_user_turn_text");
   if (!transcript)
     return std::unexpected(std::move(transcript.error()));
 
@@ -213,7 +215,7 @@ ava::core::Result<std::string> read_session_user_turn_text(runtime::session_ts c
 
 ava::core::VoidResult require_persistent_session_for_fork_from(runtime::session_ts const& unlocked_session)
 {
-  if (!session.sessionless())
+  if (!runtime::session_ts::crat(unlocked_session)->sessionless())
     return {};
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                 "Cannot fork-from a sessionless session. Start a persistent session first; /copy user still works for ephemeral turns.");

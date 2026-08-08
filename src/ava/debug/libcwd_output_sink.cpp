@@ -76,7 +76,6 @@ struct LibcwdOutputSink::Impl
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> file_buffer;
   std::unique_ptr<std::ostream> file_stream;
   bool enabled = false;
-  bool libcwd_turned_off = false;
   std::string error;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -240,20 +239,10 @@ LibcwdOutputSink::~LibcwdOutputSink()
   // retain the file stream when its owning RAII objects are destroyed. Standard
   // error remains alive through static teardown; the implementation-owned null
   // stream does not.
-  Debug(if (!impl_->libcwd_turned_off) libcw_do.off(); libcw_do.set_ostream(&std::cerr));
   if (impl_->file_stream)
     impl_->file_stream->flush();
   impl_->file_stream.reset();
   impl_->file_buffer.reset();
-}
-
-void LibcwdOutputSink::after_libcwd_init()
-{
-  if (!impl_->enabled && !impl_->libcwd_turned_off)
-  {
-    Debug(libcw_do.off());
-    impl_->libcwd_turned_off = true;
-  }
 }
 
 bool LibcwdOutputSink::enabled() const noexcept

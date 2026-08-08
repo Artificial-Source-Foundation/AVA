@@ -27,7 +27,6 @@ void initialize_debug()
   static std::string const log_stem(test_name);
   static ava::debug::LibcwdOutputSink output(log_stem);
   debug_init(output.enabled());
-  output.after_libcwd_init();
   if (!output.setup_succeeded())
     std::cerr << "failed to configure libcwd output: " << output.setup_error() << '\n';
   Dout(dc::notice, "AVA libcwd routing marker: test=" << log_stem);
@@ -63,6 +62,7 @@ void debug_init(bool have_private_output_stream)
 
   Debug(::NAMESPACE_DEBUG::init());
   Debug(libcw_do.always_flush_on());
+  Dout(dc::notice, "Debug output turned on.");
 }
 
 }  // namespace ava::app

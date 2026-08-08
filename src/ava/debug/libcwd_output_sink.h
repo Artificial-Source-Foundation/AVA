@@ -17,9 +17,6 @@ namespace ava::debug {
 // without being an error. The stem may contain ASCII letters, digits, '.',
 // '_' and '-' only, preventing an environment-provided test name from
 // influencing the directory traversal.
-//
-// Call after_libcwd_init() immediately after ava::app::debug_init(). The sink
-// owns the redirected stream until destruction and restores stderr safely.
 class LibcwdOutputSink final
 {
  public:
@@ -30,11 +27,6 @@ class LibcwdOutputSink final
   LibcwdOutputSink& operator=(LibcwdOutputSink const&) = delete;
   LibcwdOutputSink(LibcwdOutputSink&&) = delete;
   LibcwdOutputSink& operator=(LibcwdOutputSink&&) = delete;
-
-  // Balance libcwd initialization when no private output stream was opened.
-  //
-  // Repeated calls are harmless. A successfully enabled sink remains active.
-  void after_libcwd_init();
 
   // Return true when a validated private log is open and owns libcwd output.
   [[nodiscard]] bool enabled() const noexcept;

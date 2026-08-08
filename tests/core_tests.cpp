@@ -179,7 +179,6 @@ int main(int argc, char** argv)
   std::string_view const debug_suite_token = libcwd_suite_token(argc, argv);
   ava::debug::LibcwdOutputSink libcwd_output("ava_tests." + std::string(debug_suite_token));
   Debug(ava::app::debug_init(libcwd_output.enabled()));
-  libcwd_output.after_libcwd_init();
   if (!libcwd_output.setup_succeeded())
   {
     std::cerr << "failed to configure libcwd test output: " << libcwd_output.setup_error() << '\n';

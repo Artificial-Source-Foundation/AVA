@@ -1016,30 +1016,29 @@ void test_app_first_run_auth_onboarding()
   expect(unlocked_session_result.has_value(), "first-run onboarding test opens session");
   if (!unlocked_session_result)
     return;
-
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
 
   unsetenv("OPENAI_API_KEY");
-  auto missing = ava::app::first_run_auth_onboarding_message(*session_w);
+  auto missing = ava::app::first_run_auth_onboarding_message(unlocked_session);
   expect(missing && *missing == "! OpenAI not connected · /connect" && missing->find(paths.auth_file.string()) == std::string::npos &&
              std::ranges::count(*missing, '\n') == 0,
          "first-run TUI onboarding is one actionable advisory row without auth paths or environment dumps");
 
-  auto required = ava::app::provider_auth_required_message(*session_w, "\nslash tool commands still work offline.");
+  auto required = ava::app::provider_auth_required_message(unlocked_session, "\nslash tool commands still work offline.");
   expect(required.find("Auth is required for provider `openai`") != std::string::npos &&
              required.find("Connect with /connect or /login") != std::string::npos &&
              required.find("slash tool commands still work offline") != std::string::npos,
          "provider auth failure reuses onboarding guidance before a prompt runs");
 
   setenv("OPENAI_API_KEY", "test-openai-key", 1);
-  auto env_ready = ava::app::first_run_auth_onboarding_message(*session_w);
+  auto env_ready = ava::app::first_run_auth_onboarding_message(unlocked_session);
   expect(!env_ready, "first-run onboarding stays hidden when provider auth comes from the environment");
   unsetenv("OPENAI_API_KEY");
 
   auto stored = ava::config::store_provider_credential(
       paths, ava::config::ProviderCredential{.provider_id = "openai", .access_token = "stored-openai-key", .credential_type = "api_key", .source = "test"});
   expect(stored.has_value(), "first-run onboarding test stores OpenAI credential");
-  auto stored_ready = ava::app::first_run_auth_onboarding_message(*session_w);
+  auto stored_ready = ava::app::first_run_auth_onboarding_message(unlocked_session);
   expect(!stored_ready, "first-run onboarding stays hidden when provider auth is stored");
 }
 

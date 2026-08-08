@@ -85,22 +85,22 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
   write_app_test_file(workspace / ".ava" / "commands" / "defaults.md", "Default ${1:-release} ${2:-notes}\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   auto const* review = find_entry(registry, "/review");
   expect(review != nullptr && review->source == ava::app::UnifiedCommandSource::PromptProject && review->description == "Project review" &&
              review->hint == "<topic>",
          "command registry loads project prompt commands before global collisions");
   expect(has_diagnostic(registry, "/review", "command collision"), "command registry records deterministic prompt-command collision diagnostics");
 
-  auto expanded = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/review \"one arg\" two"});
+  auto expanded = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/review \"one arg\" two"});
   expect(expanded && expanded->handled && expanded->prompt_message &&
              expanded->prompt_message->find("Project one arg two one arg two \"one arg\" two two") != std::string::npos,
          "prompt command invocation expands positional, all-argument, raw, and slice placeholders safely");
-  auto literal = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/ship release notes extra"});
+  auto literal = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/ship release notes extra"});
   expect(literal && literal->prompt_message && literal->prompt_message->find("Ship $ release notes") != std::string::npos,
          "prompt command invocation treats $$ as a literal dollar and supports bounded slices");
-  auto defaulted = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/defaults"});
+  auto defaulted = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/defaults"});
   expect(defaulted && defaulted->prompt_message && defaulted->prompt_message->find("Default release notes") != std::string::npos,
          "prompt command invocation applies positional defaults when arguments are missing");
   auto direct_defaults = ava::app::expand_prompt_command_template("Defaults ${1:-seven} ${2:-fallback} ${3:-tail} ${0:-bad} ${x:-bad}", "\"\" custom");
@@ -123,8 +123,7 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
                       "---\nname: release\ndescription: Prepare release work\n---\nRelease skill body\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto registry = session_w->load_command_registry();
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry();
   ava::app::CommandRegistryEntry const* entry_skill_release = find_entry(registry, "/skill:release");
   ava::app::CommandRegistryEntry const* entry_release = find_entry(registry, "/release");
   bool namespaced_and_unnamespaced_success = entry_skill_release != nullptr && entry_release != nullptr;
@@ -135,7 +134,7 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
 
   std::vector<ava::permissions::Operation> operations;
   auto result =
-      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/skill:release", .permission_resolver = allow_all_permissions(&operations)});
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/skill:release", .permission_resolver = allow_all_permissions(&operations)});
   expect(result && result->handled && result->prompt_message && result->prompt_message->find("<skill_content name=\"release\">") != std::string::npos &&
              result->prompt_message->find("Release skill body") != std::string::npos,
          "skill command invocation returns normal prompt content");
@@ -155,11 +154,10 @@ void test_plugin_commands_are_registry_entries()
   write_app_test_file(plugin_dir / "plugin.json", app_test_plugin_manifest_json("com.example.cmd", "Command Plugin"));
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto enabled = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins enable com.example.cmd"});
+  auto enabled = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins enable com.example.cmd"});
   expect(enabled && enabled->handled, "plugin command registry test enables a project plugin without execution");
 
-  auto registry = session_w->load_command_registry();
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry();
   auto const* entry = find_entry(registry, "/plugin:com.example.cmd:todo");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::PluginCommand && entry->enabled && entry->plugin_id == "com.example.cmd" &&
              entry->plugin_command_name == "todo",
@@ -180,21 +178,20 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
   write_app_test_file(workspace / ".ava" / "mcp.json", app_test_mcp_config_json("demo", "Demo MCP", AVA_FAKE_MCP_SERVER_PATH));
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::Operation> operations;
-  auto registry =
-      session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
   auto const* entry = find_entry(registry, "/mcp:demo:release-notes");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::McpPrompt && entry->mcp_server_id == "demo" &&
              entry->mcp_prompt_name == "release-notes" && !entry->mcp_arguments.empty() && entry->mcp_arguments[0].name == "topic",
          "command registry exposes MCP prompts as command entries with argument metadata");
 
   auto result = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/mcp:demo:release-notes AVA", .permission_resolver = allow_all_permissions(&operations)});
+      unlocked_session, ava::app::CommandRequest{.command = "/mcp:demo:release-notes AVA", .permission_resolver = allow_all_permissions(&operations)});
   expect(result && result->handled && result->prompt_message && result->prompt_message->find("MCP prompt for AVA") != std::string::npos,
          "MCP prompt command invocation returns prompt text from prompts/get");
   auto alias_result =
-      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/release-notes AVA", .permission_resolver = allow_all_permissions(&operations)});
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/release-notes AVA", .permission_resolver = allow_all_permissions(&operations)});
   expect(alias_result && alias_result->handled && alias_result->prompt_message && alias_result->prompt_message->find("MCP prompt for AVA") != std::string::npos,
          "unnamespaced MCP prompt command entries are invokable");
   expect(std::ranges::find(operations, ava::permissions::Operation::McpServerLaunch) != operations.end() &&
@@ -211,8 +208,7 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   std::filesystem::create_directories(workspace);
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(ava::app::CommandRegistryOptions{
       .include_prompt_commands = false, .include_skills = false, .include_plugin_commands = false, .include_mcp_prompts = false});
   auto const* entry = find_entry(registry, "/session");
   expect(entry != nullptr && entry->command == "/stats" && entry->source == ava::app::UnifiedCommandSource::Builtin &&
@@ -226,24 +222,28 @@ void test_builtin_session_alias_registers_as_current_stats_command()
          "command registry exposes the discoverable built-in /sidebar TUI view");
   expect(ava::app::command_help_text().find("/sidebar") != std::string::npos, "command help includes the discoverable /sidebar TUI view");
 
-  auto seeded_stats_usage = session_w->append_owned(ava::session::SessionEntry{.id = "entry_session_alias_usage",
+  auto seeded_stats_usage = ava::app::runtime::session_ts::wat(unlocked_session)->append_owned(ava::session::SessionEntry{.id = "entry_session_alias_usage",
                                                                             .parent_id = "",
                                                                             .type = ava::session::EntryType::AssistantMessage,
                                                                             .timestamp = "2026-05-02T00:00:00Z",
                                                                             .data_json = "{\"text\":\"usage\",\"usage\":{\"input_tokens\":12,"
                                                                                          "\"output_tokens\":7,\"total_tokens\":19}}"});
   expect(seeded_stats_usage.has_value(), "command registry /session runtime test seeds usage metadata");
-  auto stats = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/stats"});
-  auto session_alias = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/session"});
+  auto stats = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/stats"});
+  auto session_alias = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/session"});
   expect(stats && session_alias && stats->handled && session_alias->handled && !stats->output.empty() && !session_alias->output.empty() &&
              session_alias->output[0] == stats->output[0] && session_alias->output[0].find("tokens: input=12 output=7 total=19") != std::string::npos,
          "command dispatcher runs /session with no arguments through the current-session /stats surface");
 
-  auto jobs = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/jobs"});
-  auto missing = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/jobs show job_missing"});
-  auto invalid_wait = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/jobs wait job_missing nope"});
-  auto active_wait = ava::app::run_jobs_command(session_w->subagent_coordinator(), session_w->store.session_id(), "wait job_missing 10", true);
-  auto active_result = ava::app::run_jobs_command(session_w->subagent_coordinator(), session_w->store.session_id(), "result job_missing", true);
+  auto jobs = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs"});
+  auto missing = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs show job_missing"});
+  auto invalid_wait = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs wait job_missing nope"});
+  auto const job_snapshot = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::pair{session_r->subagent_coordinator(), session_r->store.session_id()};
+  }();
+  auto active_wait = ava::app::run_jobs_command(job_snapshot.first, job_snapshot.second, "wait job_missing 10", true);
+  auto active_result = ava::app::run_jobs_command(job_snapshot.first, job_snapshot.second, "result job_missing", true);
   auto active_list_arguments = ava::app::active_jobs_command_arguments(" /jobs ");
   auto active_promote_arguments = ava::app::active_jobs_command_arguments("/jobs promote job_1");
   auto unrelated_active_command = ava::app::active_jobs_command_arguments("/jobs-extra promote job_1");
@@ -264,9 +264,11 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto& session = *session_w;
-  auto coordinator = session.subagent_coordinator();
+  auto const session_snapshot = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::pair{session_r->subagent_coordinator(), session_r->store.session_id()};
+  }();
+  auto const& [coordinator, session_id] = session_snapshot;
   expect(coordinator != nullptr, "interactive jobs human-output test requires a coordinator");
   if (!coordinator)
     return;
@@ -277,7 +279,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
 
   // Deterministic completed fixture: list/show must omit terminal summary; result includes it.
   auto completed_start = coordinator->start_background(
-      session.store.session_id(),
+      session_id,
       ava::agent::BackgroundJobStartOptions{
           .title = "Review pull request",
           .description = kPromptLeak,
@@ -291,7 +293,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   expect(completed_start.has_value(), "completed fixture starts");
   if (!completed_start)
     return;
-  auto completed = coordinator->wait(session.store.session_id(), completed_start->job.identity.job_id, std::chrono::seconds(2));
+  auto completed = coordinator->wait(session_id, completed_start->job.identity.job_id, std::chrono::seconds(2));
   expect(completed && !completed->timed_out && completed->job.execution == ava::agent::SubagentExecutionState::Completed &&
              completed->job.summary == kBoundedSummary,
          completed ? "completed fixture reaches terminal summary state"
@@ -300,10 +302,10 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
     return;
 
   auto const completed_id = completed->job.identity.job_id;
-  auto completed_list = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
-  auto completed_show = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show " + completed_id});
-  auto completed_result = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs result " + completed_id});
-  auto completed_result_ordinal = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs result 1"});
+  auto completed_list = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs"});
+  auto completed_show = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs show " + completed_id});
+  auto completed_result = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs result " + completed_id});
+  auto completed_result_ordinal = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs result 1"});
   expect(completed_list && completed_list->handled && !completed_list->output.empty() &&
              completed_list->output[0].find("Completed · Background · Review pull request") != std::string::npos &&
              completed_list->output[0].find("id " + completed_id) != std::string::npos &&
@@ -355,7 +357,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
 
   auto worker = std::make_shared<BlockingWorker>();
   auto started = coordinator->start_background(
-      session.store.session_id(),
+      session_id,
       ava::agent::BackgroundJobStartOptions{
           .title = std::string("Explore\x01repository\nnow"),
           .description = kPromptLeak,
@@ -370,7 +372,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
   if (!started)
     return;
 
-  auto const public_list = ava::agent::public_job_list_json(coordinator->list(session.store.session_id()));
+  auto const public_list = ava::agent::public_job_list_json(coordinator->list(session_id));
   auto const public_status = ava::agent::public_job_snapshot_json(*started);
   auto const public_completed = ava::agent::public_job_snapshot_json(*completed);
   auto const public_completed_result =
@@ -385,7 +387,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
              public_completed_result.find("\"schema_version\":1") != std::string::npos,
          "public job JSON stays schema v1 without title/display fields or prompt leakage, and keeps list/status vs result content policy");
 
-  auto list = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs"});
+  auto list = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs"});
   expect(list && list->handled && !list->output.empty() && list->output[0].rfind("Jobs (2):", 0) == 0 &&
              list->output[0].find("Running · Background · Explore repository now") != std::string::npos &&
              list->output[0].find("id " + started->job.identity.job_id) != std::string::npos && list->output[0].find("type explore") != std::string::npos &&
@@ -393,16 +395,16 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
              list->output[0].find("\"jobs\"") == std::string::npos && list->output[0].find(kBoundedSummary) == std::string::npos,
          "interactive /jobs list is human text with display-only ordinals, sanitized title, and no prompt/summary leak");
 
-  auto show = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show " + started->job.identity.job_id});
+  auto show = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs show " + started->job.identity.job_id});
   expect(show && show->handled && !show->output.empty() && show->output[0].rfind("Running · Background · Explore repository now", 0) == 0 &&
              show->output[0].find("id " + started->job.identity.job_id) != std::string::npos && show->output[0].find(kPromptLeak) == std::string::npos,
          "interactive /jobs show keeps a human primary line and exact job id on the secondary details line");
 
-  auto ordinal = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs show 1"});
+  auto ordinal = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs show 1"});
   expect(ordinal && ordinal->handled && !ordinal->output.empty() && ordinal->output[0] == "jobs: subagent job not found",
          "display ordinals are never accepted as job-control authority");
 
-  auto canceled = ava::app::run_command(session, ava::app::CommandRequest{.command = "/jobs cancel " + started->job.identity.job_id});
+  auto canceled = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/jobs cancel " + started->job.identity.job_id});
   bool const has_cancel_state =
       canceled && canceled->handled && !canceled->output.empty() &&
       (canceled->output[0].find("Canceled") != std::string::npos || canceled->output[0].find("cancel requested") != std::string::npos);
@@ -416,7 +418,7 @@ void test_interactive_jobs_human_output_keeps_public_json_contract()
              canceled->output[0].find(kPromptLeak) == std::string::npos,
          "interactive cancel receipt requires cancel requested or terminal Canceled and retains the exact job id");
 
-  auto waited = coordinator->wait(session.store.session_id(), started->job.identity.job_id, std::chrono::seconds(2));
+  auto waited = coordinator->wait(session_id, started->job.identity.job_id, std::chrono::seconds(2));
   bool const terminal = waited && !waited->timed_out &&
                         (waited->job.execution == ava::agent::SubagentExecutionState::Completed || waited->job.execution == ava::agent::SubagentExecutionState::Failed ||
                          waited->job.execution == ava::agent::SubagentExecutionState::Canceled ||
@@ -463,20 +465,21 @@ void test_project_trust_gates_project_resource_commands()
   write_app_test_file(workspace / ".ava" / "plugins" / "com.example.local" / "skills" / "triage.md", "Local plugin skill\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  std::string const& system_prompt = session_w->system_prompt();
+  auto system_prompt = [&] { return ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt(); };
+  auto project_trust = [&] { return ava::app::runtime::session_ts::rat(unlocked_session)->project_trust(); };
 
-  expect(session_w->project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(session_w->project_trust()),
-         "runtime session defaults project resources to skipped without a trust decision");
-  expect(system_prompt.find("Project AGENTS context still loads") != std::string::npos &&
-             system_prompt.find("Global append instruction") != std::string::npos && system_prompt.find("Project system replacement") == std::string::npos &&
-             system_prompt.find("Project append instruction") == std::string::npos && system_prompt.find("local-skill") == std::string::npos,
-         "project AGENTS context loads while project system prompt files and skills remain gated");
+  expect(project_trust().decision == ava::app::ProjectTrustDecision::Unknown && !ava::app::project_resources_trusted(project_trust()),
+          "runtime session defaults project resources to skipped without a trust decision");
+  expect(system_prompt().find("Project AGENTS context still loads") != std::string::npos &&
+              system_prompt().find("Global append instruction") != std::string::npos && system_prompt().find("Project system replacement") == std::string::npos &&
+              system_prompt().find("Project append instruction") == std::string::npos && system_prompt().find("local-skill") == std::string::npos,
+          "project AGENTS context loads while project system prompt files and skills remain gated");
 
-  auto registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/global") != nullptr && find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,
          "untrusted sessions load global prompt commands but skip project prompt and skill commands");
-  auto context_before = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context"});
+  auto context_before = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/context"});
   expect(context_before && context_before->handled && !context_before->output.empty() &&
              context_before->output[0].find("project_trust=unknown project_resources=skipped") != std::string::npos &&
              context_before->output[0].find("system_prompt_sources=1") != std::string::npos &&
@@ -486,31 +489,32 @@ void test_project_trust_gates_project_resource_commands()
              context_before->output[0].find("plugin_sources=0") != std::string::npos &&
              context_before->output[0].find("prompt_command  project  local") == std::string::npos,
          "untrusted /context reports skipped project resources without listing project freshness sources");
-  auto plugins_before = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/plugins list"});
+  auto plugins_before = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins list"});
   expect(
       plugins_before && plugins_before->handled && !plugins_before->output.empty() && plugins_before->output[0].find("com.example.local") == std::string::npos,
       "untrusted plugin commands do not discover project plugin manifests");
 
-  auto trust = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/trust project"});
+  auto trust = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/trust project"});
   expect(trust && trust->handled && !trust->output.empty() && trust->output[0].find("trusted project resources") != std::string::npos &&
              trust->output[0].find("project_resources=enabled") != std::string::npos &&
-             session_w->project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
-         "/trust project persists trust outside the workspace and reloads the runtime prompt state");
-  expect(system_prompt.find("Project system replacement") != std::string::npos && system_prompt.find("Project append instruction") != std::string::npos &&
-             system_prompt.find("Global append instruction") == std::string::npos && system_prompt.find("Implement changes directly") == std::string::npos &&
-             system_prompt.find("local-skill") != std::string::npos,
-         "trusted project resources replace/append the active system prompt after reload");
+              project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
+          "/trust project persists trust outside the workspace and reloads the runtime prompt state");
+  expect(system_prompt().find("Project system replacement") != std::string::npos && system_prompt().find("Project append instruction") != std::string::npos &&
+              system_prompt().find("Global append instruction") == std::string::npos && system_prompt().find("Implement changes directly") == std::string::npos &&
+              system_prompt().find("local-skill") != std::string::npos,
+          "trusted project resources replace/append the active system prompt after reload");
 
-  registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/local") != nullptr && find_entry(registry, "/skill:local-skill") != nullptr,
          "trusted sessions expose project prompt and skill commands");
-  auto local = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/local topic"});
+  auto local = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/local topic"});
   expect(local && local->handled && local->prompt_message && local->prompt_message->find("Local project command topic") != std::string::npos,
          "trusted project prompt commands can be invoked");
-  auto skill = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/skill:local-skill", .permission_resolver = allow_all_permissions()});
+  auto skill = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/skill:local-skill", .permission_resolver = allow_all_permissions()});
   expect(skill && skill->handled && skill->prompt_message && skill->prompt_message->find("Local skill body") != std::string::npos,
          "trusted project skill commands can be invoked");
-  auto context_after = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context"});
+  auto context_after = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/context"});
   expect(context_after && context_after->handled && !context_after->output.empty() &&
              context_after->output[0].find("project_trust=trusted project_resources=enabled") != std::string::npos &&
              context_after->output[0].find("system_prompt  project  SYSTEM.md") != std::string::npos &&
@@ -533,13 +537,13 @@ void test_project_trust_gates_project_resource_commands()
     expect(denied_with_bad_prompt.has_value(), denied_with_bad_prompt
                                                    ? "test denies project trust for failed reload"
                                                    : "test denies project trust for failed reload: " + denied_with_bad_prompt.error().format());
-    auto failed_reload = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload trust"});
+    auto failed_reload = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/reload trust"});
     expect(failed_reload && failed_reload->handled && !failed_reload->output.empty() && failed_reload->output[0].find("trust: error") != std::string::npos &&
                failed_reload->output[0].find("freshness source is not a regular file") != std::string::npos &&
-               session_w->project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
-           "/reload trust keeps the old trust state if dependent prompt reload fails");
-    expect(system_prompt.find("Project system replacement") != std::string::npos && system_prompt.find("Project append instruction") != std::string::npos,
-           "/reload trust keeps the old prompt state if dependent prompt reload fails");
+                project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
+            "/reload trust keeps the old trust state if dependent prompt reload fails");
+    expect(system_prompt().find("Project system replacement") != std::string::npos && system_prompt().find("Project append instruction") != std::string::npos,
+            "/reload trust keeps the old prompt state if dependent prompt reload fails");
     std::error_code restore_error;
     std::filesystem::remove(global_append, restore_error);
     write_app_test_file(global_append, "Global append instruction.\n");
@@ -552,16 +556,17 @@ void test_project_trust_gates_project_resource_commands()
   auto denied = ava::app::set_project_trust_decision(paths, workspace, false);
   expect(denied.has_value(),
          denied ? "test denies project trust outside the active session" : "test denies project trust outside the active session: " + denied.error().format());
-  auto reload_trust = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/reload trust"});
+  auto reload_trust = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/reload trust"});
   expect(reload_trust && reload_trust->handled && !reload_trust->output.empty() && reload_trust->output[0].find("Reload report:") != std::string::npos &&
              reload_trust->output[0].find("trust: loaded") != std::string::npos && reload_trust->output[0].find("decision: denied") != std::string::npos &&
              reload_trust->output[0].find("project_resources: skipped") != std::string::npos &&
-             session_w->project_trust().decision == ava::app::ProjectTrustDecision::Denied,
-         "/reload trust applies external deny decisions and disables project resources");
-  expect(system_prompt.find("Project system replacement") == std::string::npos && system_prompt.find("Project append instruction") == std::string::npos &&
-             system_prompt.find("local-skill") == std::string::npos,
-         "/reload trust removes trusted project prompt content after denial");
-  registry = session_w->load_command_registry(ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+              project_trust().decision == ava::app::ProjectTrustDecision::Denied,
+          "/reload trust applies external deny decisions and disables project resources");
+  expect(system_prompt().find("Project system replacement") == std::string::npos && system_prompt().find("Project append instruction") == std::string::npos &&
+              system_prompt().find("local-skill") == std::string::npos,
+          "/reload trust removes trusted project prompt content after denial");
+  registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,
          "/reload trust removes project prompt and skill commands after denial");
 }

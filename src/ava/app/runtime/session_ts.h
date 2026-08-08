@@ -133,46 +133,46 @@ inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std
 // Use this instead of CRITICAL_AREA_BEGIN_R if `unlocked_session` is a const&.
 #define CRITICAL_AREA_BEGIN_CR(session)                       \
   AVA_DECLARE_ACCESS_TYPE_CR(session##_r, unlocked_##session) \
-  AVA_DEBUG_PRINT_MESSAGE("Created session##_r from unlocked_##session")
+  AVA_DEBUG_PRINT_MESSAGE("Created " #session "_r from unlocked_" #session)
 
 // Locks `unlocked_session` for reading; use `session_r` to access the Session.
 // This can only be used once per scope. See CRITICAL_AREA_CONTINUE_R.
 #define CRITICAL_AREA_BEGIN_R(session)                       \
   AVA_DECLARE_ACCESS_TYPE_R(session##_r, unlocked_##session) \
-  AVA_DEBUG_PRINT_MESSAGE("Created session##_r from unlocked_##session")
+  AVA_DEBUG_PRINT_MESSAGE("Created " #session "_r from unlocked_" #session)
 
 // Unlock `session_r`. Using it after this will lead to a SEGFAULT.
 #define CRITICAL_AREA_END_R(session)                                      \
   do                                                                      \
   {                                                                       \
-    session##_r.unlock() AVA_DEBUG_PRINT_MESSAGE("Unlocked session##_r"); \
+    session##_r.unlock() AVA_DEBUG_PRINT_MESSAGE("Unlocked " #session "_r"); \
   } while (0)
 
 // Locks `unlocked_session` again for reading after the use of CRITICAL_AREA_END_R; use `session_r` to access the Session.
 #define CRITICAL_AREA_CONTINUE_R(session)                                                   \
   do                                                                                        \
   {                                                                                         \
-    session##_r.relock(unlocked_##session) AVA_DEBUG_PRINT_MESSAGE("Relocked session##_r"); \
+    session##_r.relock(unlocked_##session) AVA_DEBUG_PRINT_MESSAGE("Relocked " #session "_r"); \
   } while (0)
 
 // Locks `unlocked_session` for reading and writing; use `session_w` to access the Session.
 // This can only be used once per scope. See CRITICAL_AREA_CONTINUE_W.
 #define CRITICAL_AREA_BEGIN_W(session)                       \
   AVA_DECLARE_ACCESS_TYPE_W(session##_w, unlocked_##session) \
-  AVA_DEBUG_PRINT_MESSAGE("Created session##_r from unlocked_##session")
+  AVA_DEBUG_PRINT_MESSAGE("Created " #session "_r from unlocked_" #session)
 
 // Unlock `session_w`. Using it after this will lead to a SEGFAULT.
 #define CRITICAL_AREA_END_W(session)                                      \
   do                                                                      \
   {                                                                       \
-    session##_w.unlock() AVA_DEBUG_PRINT_MESSAGE("Unlocked session##_r"); \
+    session##_w.unlock() AVA_DEBUG_PRINT_MESSAGE("Unlocked " #session "_r"); \
   } while (0)
 
 // Locks `unlocked_session` again for reading and writing after the use of CRITICAL_AREA_END_W; use `session_w` to access the Session.
 #define CRITICAL_AREA_CONTINUE_W(session)                                                   \
   do                                                                                        \
   {                                                                                         \
-    session##_w.relock(unlocked_##session) AVA_DEBUG_PRINT_MESSAGE("Relocked session##_w"); \
+    session##_w.relock(unlocked_##session) AVA_DEBUG_PRINT_MESSAGE("Relocked " #session "_w"); \
   } while (0)
 
 // Aliases used when the lock just runs till the end of the scope (no CRITICAL_AREA_END_*).

@@ -57,7 +57,8 @@ void test_app_session_jsonl_import_export_portable_attachments()
   expect(unlocked_session_result.has_value(), "portable JSONL attachment test opens runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto const attachment_json = std::string(R"({"id":"img_portable","type":"image","mime_type":"image/png","byte_size":12,)"
                                            R"("sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",)"
@@ -72,9 +73,11 @@ void test_app_session_jsonl_import_export_portable_attachments()
   if (!appended)
     return;
 
-  auto stdout_export = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/export jsonl"});
+  CRITICAL_AREA_END_W(session);
+  auto stdout_export = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export jsonl"});
   auto const stdout_jsonl = stdout_export && !stdout_export->output.empty() ? stdout_export->output.front() : std::string{};
-  auto file_export = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
+  auto file_export = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export jsonl attachment-export.jsonl"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const file_jsonl = app_read_binary_file(workspace / "attachment-export.jsonl");
   expect(stdout_export && stdout_export->handled && file_export && file_export->handled && !file_export->output.empty() && stdout_jsonl == file_jsonl &&
              file_jsonl.find("attachments/source-only.png") == std::string::npos && file_jsonl.find("attachments/portable-redacted") != std::string::npos &&
@@ -98,13 +101,17 @@ void test_app_session_jsonl_import_export_portable_attachments()
                                                        .data_json = "{\"mode\":\"build\",\"provider\":\"openai\",\"model\":\"gpt-5.5\"}"};
   write_import_entries(workspace / "nonportable-attachment.jsonl", {import_start, attached_entry});
   auto const session_before_nonportable_import = session_w->store.session_id();
-  auto nonportable_import = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/import nonportable-attachment.jsonl --confirm"});
+  CRITICAL_AREA_END_W(session);
+  auto nonportable_import = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/import nonportable-attachment.jsonl --confirm"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(nonportable_import && nonportable_import->handled && !nonportable_import->output.empty() &&
              nonportable_import->output[0].find("non-redacted image attachment metadata") != std::string::npos &&
              session_w->store.session_id() == session_before_nonportable_import,
          "direct non-portable attachment references remain rejected rather than creating dangling bytes");
 
-  auto imported = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/import attachment-export.jsonl --confirm"});
+  CRITICAL_AREA_END_W(session);
+  auto imported = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/import attachment-export.jsonl --confirm"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto imported_entries = session_w->store.load();
   expect(imported && imported->handled && !imported->output.empty() && imported->output[0].find("imported session") != std::string::npos && imported_entries &&
              std::ranges::any_of(*imported_entries,
@@ -132,7 +139,8 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
   expect(unlocked_session_result.has_value(), "private JSONL export test opens a runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto appended = session_w->append_owned(ava::session::SessionEntry{
       .id = "entry_private_reasoning_export",
@@ -147,14 +155,18 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
   if (!appended)
     return;
 
-  auto stdout_export = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/export jsonl"});
+  CRITICAL_AREA_END_W(session);
+  auto stdout_export = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export jsonl"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const stdout_jsonl = stdout_export && !stdout_export->output.empty() ? stdout_export->output.front() : std::string{};
   expect(stdout_export && stdout_export->handled && stdout_jsonl.find("visible reasoning summary") != std::string::npos &&
              stdout_jsonl.find("private_replay_metadata_omitted") != std::string::npos && stdout_jsonl.find("export-private-signature") == std::string::npos &&
              stdout_jsonl.find("export-private-redacted") == std::string::npos && stdout_jsonl.find("export-private-cipher") == std::string::npos,
          "command dispatcher /export jsonl stdout removes private reasoning replay values while preserving visible portable content");
 
-  auto file_export = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/export jsonl private-export.jsonl"});
+  CRITICAL_AREA_END_W(session);
+  auto file_export = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export jsonl private-export.jsonl"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const export_path = workspace / "private-export.jsonl";
   auto const file_jsonl = app_read_binary_file(export_path);
   expect(file_export && file_export->handled && !file_export->output.empty() && file_export->output.front().find("format: jsonl") != std::string::npos &&
@@ -173,7 +185,9 @@ void test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata()
                                                }),
          "private JSONL export leaves active session reasoning metadata unchanged");
 
-  auto imported = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/import private-export.jsonl --confirm"});
+  CRITICAL_AREA_END_W(session);
+  auto imported = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/import private-export.jsonl --confirm"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto imported_entries = session_w->store.load();
   expect(imported && imported->handled && !imported->output.empty() && imported->output.front().find("imported session") != std::string::npos &&
              imported_entries &&
@@ -206,7 +220,8 @@ void test_app_session_branch_commands()
   expect(unlocked_session_result.has_value(), "slash branch command test opens runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto const source_session_id = session_w->store.session_id();
   auto seed = session_w->append_owned(ava::session::SessionEntry{.id = "entry_branch_seed",
@@ -222,7 +237,9 @@ void test_app_session_branch_commands()
     torn_source << "{\"version\":3,\"id\":\"command-fork-torn";
   }
 
-  auto forked = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/fork Review branch"});
+  CRITICAL_AREA_END_W(session);
+  auto forked = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/fork Review branch"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const fork_session_id = session_w->store.session_id();
   auto fork_metadata = ava::session::load_session_metadata(session_w->store);
   expect(forked && forked->handled && !forked->output.empty() && fork_session_id != source_session_id &&
@@ -243,7 +260,9 @@ void test_app_session_branch_commands()
     std::ofstream torn_fork(fork_path, std::ios::binary | std::ios::app);
     torn_fork << "{\"version\":3,\"id\":\"command-clone-torn";
   }
-  auto cloned = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/clone Full copy"});
+  CRITICAL_AREA_END_W(session);
+  auto cloned = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/clone Full copy"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const clone_session_id = session_w->store.session_id();
   auto clone_metadata = ava::session::load_session_metadata(session_w->store);
   auto clone_entries = session_w->store.load();
@@ -259,7 +278,9 @@ void test_app_session_branch_commands()
   expect(!clone_contender && clone_contender.error().message().find("already owned") != std::string::npos,
          "slash /clone transfers the destination lease directly into the replacement runtime");
 
-  auto sessions = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/tree Full copy"});
+  CRITICAL_AREA_END_W(session);
+  auto sessions = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/tree Full copy"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(sessions && sessions->handled && !sessions->output.empty() && sessions->output[0].find("Full copy") != std::string::npos &&
              sessions->output[0].find("origin=clone") != std::string::npos,
          "slash /tree alias exposes newly cloned branch in the session tree");
@@ -278,15 +299,15 @@ void test_app_session_fork_from_entry_and_user_turns()
   open_context.current_dir = workspace;
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
-  auto unlocked_session = ava::app::runtime::Session::open(open_context);
-  expect(unlocked_session.has_value(), "fork-from-entry test opens a persistent runtime session");
-  if (!unlocked_session)
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), "fork-from-entry test opens a persistent runtime session");
+  if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session);
-  auto* session = &*session_w;
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto seed = [&](std::string id, ava::session::EntryType type, std::string timestamp, std::string data_json) {
-    return session->append_owned(
+    return session_w->append_owned(
         ava::session::SessionEntry{.id = std::move(id), .parent_id = "", .type = type, .timestamp = std::move(timestamp), .data_json = std::move(data_json)});
   };
   expect(
@@ -299,28 +320,29 @@ void test_app_session_fork_from_entry_and_user_turns()
           seed("entry_assistant_c", ava::session::EntryType::AssistantMessage, "2026-05-08T00:00:07Z", "{\"text\":\"assistant gamma\"}"),
       "fork-from-entry test seeds user/assistant/internal-replay history");
 
-  auto listed = ava::app::list_session_user_turns(*session);
+  CRITICAL_AREA_END_W(session);
+  auto listed = ava::app::list_session_user_turns(unlocked_session);
   expect(listed && listed->turns.size() == 3 && !listed->truncated_before && listed->turns[0].entry_id == "entry_user_a" &&
              listed->turns[0].timestamp == "2026-05-08T00:00:01Z" && listed->turns[0].preview == "alpha first line" &&
              listed->turns[1].entry_id == "entry_user_b" && listed->turns[1].preview == "beta second" && listed->turns[2].entry_id == "entry_user_c" &&
              listed->turns[2].preview == "gamma third",
          "user-turn listing returns stable public user entry ids and terminal-neutral previews while excluding assistant/internal replay");
 
-  auto picker = ava::app::user_turn_selector_view(*session, "Fork from user turn", "Enter fork");
+  auto picker = ava::app::user_turn_selector_view(unlocked_session, "Fork from user turn", "Enter fork");
   expect(picker && picker->title == "Fork from user turn" && picker->selected_item_index == 0 && picker->items.size() == 3 &&
              picker->items[0].value == "entry_user_c" && picker->items[1].value == "entry_user_b" && picker->items[2].value == "entry_user_a" &&
              picker->items[2].label == "alpha first line",
          "session-backed user-turn selector is newest-first with stable entry ids from the bound read authority");
 
-  auto capped = ava::app::list_session_user_turns(*session, 2);
+  auto capped = ava::app::list_session_user_turns(unlocked_session, 2);
   expect(capped && capped->truncated_before && capped->turns.size() == 2 && capped->turns[0].entry_id == "entry_user_b" &&
              capped->turns[1].entry_id == "entry_user_c",
          "user-turn listing reports truncation and keeps only the newest items when capped");
 
-  auto exact_text = ava::app::read_session_user_turn_text(*session, "entry_user_a");
-  auto assistant_text = ava::app::read_session_user_turn_text(*session, "entry_assistant_a");
-  auto missing_text = ava::app::read_session_user_turn_text(*session, "entry_missing");
-  auto internal_text = ava::app::read_session_user_turn_text(*session, "entry_user_internal");
+  auto exact_text = ava::app::read_session_user_turn_text(unlocked_session, "entry_user_a");
+  auto assistant_text = ava::app::read_session_user_turn_text(unlocked_session, "entry_assistant_a");
+  auto missing_text = ava::app::read_session_user_turn_text(unlocked_session, "entry_missing");
+  auto internal_text = ava::app::read_session_user_turn_text(unlocked_session, "entry_user_internal");
   expect(exact_text && *exact_text == "alpha first\nline" && *exact_text != listed->turns[0].preview && !assistant_text &&
              assistant_text.error().category() == ava::core::ErrorCategory::NotFound && !missing_text &&
              missing_text.error().category() == ava::core::ErrorCategory::NotFound && !internal_text &&
@@ -331,41 +353,50 @@ void test_app_session_fork_from_entry_and_user_turns()
   std::string earlier_entry_id = "entry_user_a";
   if (picker && picker->items.size() >= 3)
     earlier_entry_id = picker->items[2].value;
-  auto const copy_text = ava::app::read_session_user_turn_text(*session, earlier_entry_id);
+  auto const copy_text = ava::app::read_session_user_turn_text(unlocked_session, earlier_entry_id);
   expect(copy_text && *copy_text == "alpha first\nline",
          "copy-user path re-reads exact full text for the selected earlier entry id rather than the preview row");
   auto const oversized_copy =
       ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence(std::string(ava::tui::runtime_transcript::kMaxTerminalClipboardTextBytes + 1, 'z'));
   expect(!oversized_copy, "user-turn clipboard path rejects payloads above the existing 64 KiB OSC 52 bound without truncation");
 
-  auto const source_session_id = session->store.session_id();
+  CRITICAL_AREA_CONTINUE_W(session);
+  auto const source_session_id = session_w->store.session_id();
   auto listed_before = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
-  auto invalid = ava::app::run_fork_command(*session, "Bad cut", "entry_does_not_exist");
+  CRITICAL_AREA_END_W(session);
+  auto invalid = ava::app::run_fork_command(unlocked_session, "Bad cut", "entry_does_not_exist");
+  CRITICAL_AREA_CONTINUE_W(session);
   auto listed_after_invalid = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
   expect(!invalid && invalid.error().category() == ava::core::ErrorCategory::NotFound &&
-             invalid.error().message().find("branch source entry not found") != std::string::npos && session->store.session_id() == source_session_id &&
+              invalid.error().message().find("branch source entry not found") != std::string::npos && session_w->store.session_id() == source_session_id &&
              listed_before && listed_after_invalid && listed_after_invalid->size() == listed_before->size(),
          "invalid branch_from_entry_id fails closed without replacing the current session or leaking a created session");
 
-  auto tip_fork = ava::app::run_fork_command(*session, "Tip fork", {});
-  auto const tip_session_id = session->store.session_id();
-  auto tip_metadata = ava::session::load_session_metadata(session->store);
-  auto tip_entries = session->store.load();
+  CRITICAL_AREA_END_W(session);
+  auto tip_fork = ava::app::run_fork_command(unlocked_session, "Tip fork", {});
+  CRITICAL_AREA_CONTINUE_W(session);
+  auto const tip_session_id = session_w->store.session_id();
+  auto tip_metadata = ava::session::load_session_metadata(session_w->store);
+  auto tip_entries = session_w->store.load();
   expect(tip_fork && tip_fork->handled && tip_session_id != source_session_id && tip_metadata && tip_metadata->branch_from_entry_id == "entry_assistant_c" &&
              tip_metadata->branch_origin == "fork" && tip_entries &&
              std::ranges::any_of(*tip_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_user_c"; }) &&
              std::ranges::any_of(*tip_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_assistant_c"; }),
          "empty-ID fork preserves tip semantics and copies through the current tip entry");
 
-  auto resumed_source = ava::app::run_command(*session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
-  expect(resumed_source && resumed_source->handled && session->store.session_id() == source_session_id,
+  CRITICAL_AREA_END_W(session);
+  auto resumed_source = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  CRITICAL_AREA_CONTINUE_W(session);
+  expect(resumed_source && resumed_source->handled && session_w->store.session_id() == source_session_id,
          "fork-from-entry test resumes the original source before the explicit cut");
 
   // Prove the picker-selected earlier id (not the tip / latest user turn) reaches the branch path.
-  auto cut_fork = ava::app::run_fork_command(*session, "Cut fork", earlier_entry_id);
-  auto const cut_session_id = session->store.session_id();
-  auto cut_metadata = ava::session::load_session_metadata(session->store);
-  auto cut_entries = session->store.load();
+  CRITICAL_AREA_END_W(session);
+  auto cut_fork = ava::app::run_fork_command(unlocked_session, "Cut fork", earlier_entry_id);
+  CRITICAL_AREA_CONTINUE_W(session);
+  auto const cut_session_id = session_w->store.session_id();
+  auto cut_metadata = ava::session::load_session_metadata(session_w->store);
+  auto cut_entries = session_w->store.load();
   expect(cut_fork && cut_fork->handled && cut_session_id != source_session_id && cut_session_id != tip_session_id && cut_metadata &&
              cut_metadata->branch_from_entry_id == earlier_entry_id && cut_metadata->branch_origin == "fork" && cut_entries &&
              std::ranges::any_of(*cut_entries, [&](ava::session::SessionEntry const& entry) { return entry.id == earlier_entry_id; }) &&
@@ -377,44 +408,48 @@ void test_app_session_fork_from_entry_and_user_turns()
   ava::app::runtime::OpenContext ephemeral_context = open_context;
   ava::app::runtime::SessionLifecycleRequest ephemeral_request;
   ephemeral_request.sessionless = true;
-  auto unlocked_ephemeral = ava::app::runtime::Session::open(ephemeral_context, ephemeral_request);
-  expect(unlocked_ephemeral.has_value(), "user-turn test opens an ephemeral runtime session");
-  if (!unlocked_ephemeral)
+  auto unlocked_ephemeral_result = ava::app::runtime::Session::open(ephemeral_context, ephemeral_request);
+  expect(unlocked_ephemeral_result.has_value(), "user-turn test opens an ephemeral runtime session");
+  if (!unlocked_ephemeral_result)
     return;
-  ava::app::runtime::session_ts::wat ephemeral_w(*unlocked_ephemeral);
-  auto* ephemeral = &*ephemeral_w;
-  expect(ephemeral->sessionless() && ephemeral->store.is_ephemeral(), "user-turn test opens an ephemeral runtime session");
-  expect(ephemeral->append_owned(ava::session::SessionEntry{.id = "ephemeral_user",
+  ava::app::runtime::session_ts& unlocked_ephemeral = *unlocked_ephemeral_result;
+  CRITICAL_AREA_BEGIN_W(ephemeral);
+  expect(ephemeral_w->sessionless() && ephemeral_w->store.is_ephemeral(), "user-turn test opens an ephemeral runtime session");
+  expect(ephemeral_w->append_owned(ava::session::SessionEntry{.id = "ephemeral_user",
                                                             .parent_id = "",
                                                             .type = ava::session::EntryType::UserMessage,
                                                             .timestamp = "2026-05-08T01:00:00Z",
                                                             .data_json = "{\"text\":\"ephemeral body\"}"}) &&
-             ephemeral->append_owned(ava::session::SessionEntry{.id = "ephemeral_assistant",
+              ephemeral_w->append_owned(ava::session::SessionEntry{.id = "ephemeral_assistant",
                                                                 .parent_id = "",
                                                                 .type = ava::session::EntryType::AssistantMessage,
                                                                 .timestamp = "2026-05-08T01:00:01Z",
                                                                 .data_json = "{\"text\":\"ephemeral assistant\"}"}),
          "user-turn test seeds ephemeral history through the runtime owner");
-  auto ephemeral_listed = ava::app::list_session_user_turns(*ephemeral);
-  auto ephemeral_text = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_user");
-  auto ephemeral_assistant = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_assistant");
+  CRITICAL_AREA_END_W(ephemeral);
+  auto ephemeral_listed = ava::app::list_session_user_turns(unlocked_ephemeral);
+  auto ephemeral_text = ava::app::read_session_user_turn_text(unlocked_ephemeral, "ephemeral_user");
+  auto ephemeral_assistant = ava::app::read_session_user_turn_text(unlocked_ephemeral, "ephemeral_assistant");
   expect(ephemeral_listed && ephemeral_listed->turns.size() == 1 && ephemeral_listed->turns[0].entry_id == "ephemeral_user" &&
              ephemeral_listed->turns[0].preview == "ephemeral body" && ephemeral_text && *ephemeral_text == "ephemeral body" && !ephemeral_assistant &&
              ephemeral_assistant.error().category() == ava::core::ErrorCategory::NotFound,
          "ephemeral read authority supports the same public user-turn list and exact-text helpers");
-  auto ephemeral_picker = ava::app::user_turn_selector_view(*ephemeral, "Copy user turn");
+  auto ephemeral_picker = ava::app::user_turn_selector_view(unlocked_ephemeral, "Copy user turn");
   expect(ephemeral_picker && ephemeral_picker->items.size() == 1 && ephemeral_picker->items[0].value == "ephemeral_user",
          "ephemeral sessions open the same user-turn selector through SessionReadAuthority");
-  auto ephemeral_copy = ava::app::read_session_user_turn_text(*ephemeral, "ephemeral_user");
+  auto ephemeral_copy = ava::app::read_session_user_turn_text(unlocked_ephemeral, "ephemeral_user");
   expect(ephemeral_copy && *ephemeral_copy == "ephemeral body", "/copy user continues to work for ephemeral/sessionless public turns");
-  auto sessionless_fork_guard = ava::app::require_persistent_session_for_fork_from(*ephemeral);
+  auto sessionless_fork_guard = ava::app::require_persistent_session_for_fork_from(unlocked_ephemeral);
   expect(!sessionless_fork_guard && sessionless_fork_guard.error().category() == ava::core::ErrorCategory::InvalidArgument &&
              sessionless_fork_guard.error().message().find("sessionless") != std::string::npos &&
              sessionless_fork_guard.error().message().find("/copy user") != std::string::npos,
          "sessionless /fork-from fails closed before picker open with an actionable persistent-session error");
-  auto const ephemeral_id_before = ephemeral->store.session_id();
-  auto sessionless_fork = ava::app::run_fork_command(*ephemeral, {}, "ephemeral_user");
-  expect(sessionless_fork && sessionless_fork->handled && !sessionless_fork->session_tree_changed && ephemeral->store.session_id() == ephemeral_id_before &&
+  CRITICAL_AREA_CONTINUE_W(ephemeral);
+  auto const ephemeral_id_before = ephemeral_w->store.session_id();
+  CRITICAL_AREA_END_W(ephemeral);
+  auto sessionless_fork = ava::app::run_fork_command(unlocked_ephemeral, {}, "ephemeral_user");
+  CRITICAL_AREA_CONTINUE_W(ephemeral);
+  expect(sessionless_fork && sessionless_fork->handled && !sessionless_fork->session_tree_changed && ephemeral_w->store.session_id() == ephemeral_id_before &&
              !sessionless_fork->output.empty() && sessionless_fork->output[0].find("sessionless") != std::string::npos,
          "sessionless run_fork_command remains a non-switching handled result that must not be treated as an opened snapshot");
 
@@ -422,8 +457,7 @@ void test_app_session_fork_from_entry_and_user_turns()
   expect(unlocked_empty_session.has_value(), "empty user-turn selector test opens an ephemeral session");
   if (unlocked_empty_session)
   {
-    ava::app::runtime::session_ts::wat empty_session_w(*unlocked_empty_session);
-    auto empty_picker = ava::app::user_turn_selector_view(*empty_session_w, "Fork from user turn");
+    auto empty_picker = ava::app::user_turn_selector_view(*unlocked_empty_session, "Fork from user turn");
     expect(!empty_picker && empty_picker.error().category() == ava::core::ErrorCategory::NotFound &&
                empty_picker.error().message().find("no public user turns available") != std::string::npos,
            "empty user-turn sessions fail closed with an actionable status instead of opening a fork transition");
@@ -453,22 +487,27 @@ void test_app_session_new_resume_commands()
   expect(unlocked_session_result.has_value(), "slash new/resume command test opens runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   auto const source_session_id = session_w->store.session_id();
-  auto named_source = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/name Old title"});
+  CRITICAL_AREA_END_W(session);
+  auto named_source = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/name Old title"});
   expect(named_source && named_source->handled && !named_source->output.empty() && named_source->output[0] == "session name set: \"Old title\"",
          "slash new/resume command test names the source session for title-first lifecycle receipts");
 
-  auto missing_resume = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/resume"});
+  auto missing_resume = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/resume"});
   expect(missing_resume && missing_resume->handled && !missing_resume->output.empty() && missing_resume->output[0] == "usage: /resume <id>",
          "slash /resume without an id returns usage text");
 
-  auto clearance = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/clearance Fresh session"});
+  auto clearance = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/clearance Fresh session"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(clearance && !clearance->handled && session_w->store.session_id() == source_session_id,
          "slash /clearance does not prefix-dispatch the exact /clear alias");
 
-  auto cleared = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/clear Fresh session"});
+  CRITICAL_AREA_END_W(session);
+  auto cleared = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/clear Fresh session"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const fresh_session_id = session_w->store.session_id();
   auto fresh_metadata = ava::session::load_session_metadata(session_w->store);
   auto fresh_entries = session_w->store.load();
@@ -484,12 +523,16 @@ void test_app_session_new_resume_commands()
              session_w->session_read_limits().max_file_bytes == open_context.session_read_limits->max_file_bytes,
          "slash /clear preserves the active runtime opening context");
 
-  auto old_sessions = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions Old"});
+  CRITICAL_AREA_END_W(session);
+  auto old_sessions = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions Old"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(old_sessions && old_sessions->handled && !old_sessions->output.empty() && old_sessions->output[0].find("Old title") != std::string::npos &&
              old_sessions->output[0].find(source_session_id) != std::string::npos,
          "slash /clear leaves the previous session listable");
 
-  auto resumed = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  CRITICAL_AREA_END_W(session);
+  auto resumed = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(resumed && resumed->handled && !resumed->output.empty() && session_w->store.session_id() == source_session_id &&
              resumed->output[0].find("resumed session " + source_session_id) != std::string::npos,
          "the previous session remains resumable after slash /clear");
@@ -498,21 +541,27 @@ void test_app_session_new_resume_commands()
              session_w->session_read_limits().max_file_bytes == open_context.session_read_limits->max_file_bytes,
          "slash /resume preserves the active runtime opening context");
 
-  auto fresh_sessions = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions Fresh"});
+  CRITICAL_AREA_END_W(session);
+  auto fresh_sessions = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions Fresh"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(fresh_sessions && fresh_sessions->handled && !fresh_sessions->output.empty() &&
              fresh_sessions->output[0].find("Fresh session") != std::string::npos &&
              fresh_sessions->output[0].find(fresh_session_id) != std::string::npos,
          "slash /sessions shows named sessions created through /clear");
 
-  auto const slash_items = ava::app::command_catalog_slash_items_1(*session_w);
+  CRITICAL_AREA_END_W(session);
+  auto const slash_items = ava::app::command_catalog_slash_items_1(unlocked_session);
   auto const clear_matches = ava::tui::filter_slash_commands("/clear", slash_items);
-  auto help = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/help"});
+  auto help = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/help"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(clear_matches.size() == 1 && clear_matches.front().command == "/new" &&
              std::ranges::find(clear_matches.front().aliases, "/clear") != clear_matches.front().aliases.end() && help && help->handled &&
              !help->output.empty() && help->output.front().find("/clear") != std::string::npos,
          "slash /clear is present as one exact /new alias in command help and autocomplete");
 
-  auto unnamed = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/new"});
+  CRITICAL_AREA_END_W(session);
+  auto unnamed = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/new"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const unnamed_session_id = session_w->store.session_id();
   auto const expected_unnamed_receipt = "started session \"Untitled session\" · id " + unnamed_session_id + "\nprevious session \"Old title\" · id " +
                                         source_session_id + "\nswitched to \"Untitled session\"";
@@ -536,11 +585,15 @@ void test_app_session_new_resume_commands()
   if (!replaced)
     return;
 
-  auto ephemeral_fresh = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/new"});
+  CRITICAL_AREA_END_W(session);
+  auto ephemeral_fresh = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/new"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(ephemeral_fresh && ephemeral_fresh->handled && session_w->sessionless(),
          "slash /new preserves ephemeral lifecycle while rebuilding incompatible temporary anchors");
 
-  auto resumed_from_ephemeral = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  CRITICAL_AREA_END_W(session);
+  auto resumed_from_ephemeral = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/resume " + source_session_id});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(resumed_from_ephemeral && resumed_from_ephemeral->handled && !session_w->sessionless() && session_w->store.session_id() == source_session_id,
          "slash /resume from an ephemeral current session opens the requested persistent session");
 }
@@ -562,26 +615,29 @@ void test_app_session_metadata_commands()
   expect(unlocked_session_result.has_value(), "slash metadata command test opens runtime session");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
 
-  auto missing_name = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/name"});
+  auto missing_name = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/name"});
   expect(missing_name && missing_name->handled && !missing_name->session_tree_changed && !missing_name->output.empty() &&
              missing_name->output[0] == "usage: /name <name|--clear>",
          "slash /name without a name returns usage text");
 
-  auto no_labels = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/labels"});
+  auto no_labels = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/labels"});
   expect(no_labels && no_labels->handled && !no_labels->session_tree_changed && !no_labels->output.empty() &&
              no_labels->output[0].find("session labels: <none>") != std::string::npos,
          "slash /labels without arguments reports current labels and usage");
 
-  auto renamed = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/rename Auth follow-up"});
+  auto renamed = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/rename Auth follow-up"});
+  CRITICAL_AREA_BEGIN_W(session);
   auto metadata_after_name = ava::session::load_session_metadata(session_w->store);
   expect(renamed && renamed->handled && renamed->session_tree_changed && !renamed->output.empty() &&
              renamed->output[0].find("session name set: \"Auth follow-up\"") != std::string::npos && metadata_after_name &&
              metadata_after_name->name == "Auth follow-up" && metadata_after_name->actor == "tui",
          "slash /rename alias appends current-session name metadata");
 
-  auto labeled = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/label auth bug"});
+  CRITICAL_AREA_END_W(session);
+  auto labeled = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/label auth bug"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_after_labels = ava::session::load_session_metadata(session_w->store);
   expect(labeled && labeled->handled && labeled->session_tree_changed && !labeled->output.empty() &&
              labeled->output[0].find("session labels set: auth,bug") != std::string::npos && metadata_after_labels &&
@@ -589,7 +645,9 @@ void test_app_session_metadata_commands()
              metadata_after_labels->labels[1] == "bug" && metadata_after_labels->actor == "tui",
          "slash /label alias appends current-session label metadata without losing the session name");
 
-  auto const slash_items = ava::app::command_catalog_slash_items_1(*session_w);
+  CRITICAL_AREA_END_W(session);
+  auto const slash_items = ava::app::command_catalog_slash_items_1(unlocked_session);
+  CRITICAL_AREA_CONTINUE_W(session);
   auto has_session_completion = [](ava::tui::SlashCommandItem const* item, std::size_t argument_index, std::string_view value,
                                    std::string_view description_fragment, std::vector<std::string> previous_args = {}) {
     return item != nullptr && std::ranges::any_of(item->argument_completions, [&](auto const& completion) {
@@ -619,18 +677,22 @@ void test_app_session_metadata_commands()
                                     {"archive", session_w->store.session_id()}),
          "slash palette session completions expose session archive, rename, resume, and tree workflows");
 
-  auto duplicate_labels = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/labels auth auth"});
+  CRITICAL_AREA_END_W(session);
+  auto duplicate_labels = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/labels auth auth"});
   expect(!duplicate_labels && duplicate_labels.error().message() == "session labels must be unique",
          "slash /labels reuses backend metadata validation for duplicate labels");
 
-  auto tree = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/tree auth"});
+  auto tree = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/tree auth"});
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(tree && tree->handled && !tree->output.empty() && tree->output[0].find("Auth follow-up") != std::string::npos &&
              tree->output[0].find("labels=auth,bug") != std::string::npos,
          "slash /tree exposes names and labels written through slash metadata commands");
 
   auto const active_session_id_before_selected_rename = session_w->store.session_id();
-  auto renamed_selected =
-      ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/sessions rename " + active_session_id_before_selected_rename + " Selector name"});
+  CRITICAL_AREA_END_W(session);
+  auto renamed_selected = ava::app::run_command(
+      unlocked_session, ava::app::CommandRequest{.command = "/sessions rename " + active_session_id_before_selected_rename + " Selector name"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_after_selected_rename = ava::session::load_session_metadata(session_w->store);
   expect(renamed_selected && renamed_selected->handled && !renamed_selected->output.empty() &&
              renamed_selected->output[0].find("session " + active_session_id_before_selected_rename + " name set: \"Selector name\"") != std::string::npos &&
@@ -638,13 +700,17 @@ void test_app_session_metadata_commands()
              session_w->store.session_id() == active_session_id_before_selected_rename,
          "slash /sessions rename appends name metadata to a selected session without switching runtime sessions");
 
-  auto cleared_labels = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/labels --clear"});
+  CRITICAL_AREA_END_W(session);
+  auto cleared_labels = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/labels --clear"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_after_clear_labels = ava::session::load_session_metadata(session_w->store);
   expect(cleared_labels && cleared_labels->handled && !cleared_labels->output.empty() && cleared_labels->output[0] == "session labels cleared" &&
              metadata_after_clear_labels && metadata_after_clear_labels->labels.empty(),
          "slash /labels --clear appends empty label metadata");
 
-  auto cleared_name = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/name --clear"});
+  CRITICAL_AREA_END_W(session);
+  auto cleared_name = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/name --clear"});
+  CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_after_clear_name = ava::session::load_session_metadata(session_w->store);
   expect(cleared_name && cleared_name->handled && !cleared_name->output.empty() && cleared_name->output[0] == "session name cleared" &&
              metadata_after_clear_name && metadata_after_clear_name->name.empty(),

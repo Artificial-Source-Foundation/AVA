@@ -29,9 +29,9 @@ bool contains_ascii_case_insensitive(std::string_view text, std::string_view que
   return lower_ascii(text).find(lower_ascii(query)) != std::string::npos;
 }
 
-ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::Session const& session)
+ava::core::Result<std::vector<ava::session::SessionEntry>> load_runtime_entries(runtime::session_ts const& unlocked_session)
 {
-  auto read_authority = session.read_authority_1();
+  auto read_authority = runtime::session_ts::crat(unlocked_session)->read_authority_1();
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   return read_authority->load();

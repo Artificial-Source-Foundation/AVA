@@ -74,7 +74,7 @@ std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry 
   return models;
 }
 
-std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::session_ts const& unlocked_session, bool configured)
+std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runtime::Session const& session, bool configured)
 {
   bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
   std::string json = "{";
@@ -115,10 +115,7 @@ std::string model_info_json(ava::config::ModelInfo const& model, ava::app::runti
   json += ",\"compatibility_quirks\":";
   json += string_array_json(model.compatibility_quirks);
   json += ',';
-  {
-    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
-    json += bool_field_json("selected", session_r->model().provider_id == model.provider_id && session_r->model().model_id == model.model_id);
-  }
+  json += bool_field_json("selected", session.model().provider_id == model.provider_id && session.model().model_id == model.model_id);
   json += '}';
   return json;
 }

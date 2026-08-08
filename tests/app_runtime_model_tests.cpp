@@ -203,7 +203,8 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
   ava::core::VoidResult appended_text;
   ava::core::VoidResult appended_commit;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+    CRITICAL_AREA_BEGIN_W(session);
     appended_user = session_w->append_owned(ava::session::SessionEntry{.id = "user_openai_replay",
                                                                         .parent_id = "",
                                                                         .type = ava::session::EntryType::UserMessage,
@@ -873,7 +874,9 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
     {
       session_w->model_selection().model = *anthropic_proxy;
       session_w->model_selection().reasoning.reset();
-      auto cycled = ava::app::cycle_runtime_reasoning(*session_w);
+      CRITICAL_AREA_END_W(session);
+      auto cycled = ava::app::cycle_runtime_reasoning(unlocked_session);
+      CRITICAL_AREA_CONTINUE_W(session);
       expect(cycled.has_value() && session_w->reasoning() && session_w->reasoning()->level == "enabled" && session_w->reasoning()->budget_tokens &&
                  *session_w->reasoning()->budget_tokens == 4096,
              "runtime reasoning cycling uses API-family fallback profile for custom Anthropic-compatible models");
@@ -890,12 +893,13 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
 
 void test_app_runtime_branch_construction_failure_rolls_back_created_file()
 {
-  auto seed_source_attachment = [](ava::app::runtime::Session& session) {
-    auto entries = session.store.load();
+  auto seed_source_attachment = [](ava::app::runtime::session_ts& unlocked_session) {
+    ava::app::runtime::session_ts::wat session_w(unlocked_session);
+    auto entries = session_w->store.load();
     if (!entries || entries->empty())
       return false;
     auto appended =
-        session.append_owned(ava::session::SessionEntry{.id = "entry_rollback_attachment",
+        session_w->append_owned(ava::session::SessionEntry{.id = "entry_rollback_attachment",
                                                         .parent_id = entries->back().id,
                                                         .type = ava::session::EntryType::UserMessage,
                                                         .timestamp = "2026-07-16T00:00:00Z",
@@ -906,7 +910,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
                                                         .version = 2});
     if (!appended)
       return false;
-    auto const attachment = ava::session::attachment_storage_root(session.store) / "attachments" / "rollback.txt";
+    auto const attachment = ava::session::attachment_storage_root(session_w->store) / "attachments" / "rollback.txt";
     write_app_test_file(attachment, "hello");
     return true;
   };
@@ -930,14 +934,15 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     std::filesystem::path source_path;
     ava::core::Result<ava::app::CommandResult> forked;
     bool source_id_unchanged = false;
+    ava::app::runtime::session_ts& unlocked_source = *unlocked_source_result;
+    expect(seed_source_attachment(unlocked_source), "TUI rollback test seeds an active source with a copyable attachment");
     {
-      ava::app::runtime::session_ts::wat source_w(*unlocked_source_result);
-      expect(seed_source_attachment(*source_w), "TUI rollback test seeds an active source with a copyable attachment");
+      ava::app::runtime::session_ts::wat source_w(unlocked_source);
       source_id = source_w->store.session_id();
       source_path = source_w->store.session_path();
       std::filesystem::create_directories(paths.models_file);
-      forked = ava::app::run_command(*source_w, ava::app::CommandRequest{.command = "/fork rollback"});
     }
+    forked = ava::app::run_command(unlocked_source, ava::app::CommandRequest{.command = "/fork rollback"});
     auto const created_id = forked ? std::optional<std::string>{} : app_error_context(forked.error(), "created_session_id");
     bool destination_jsonl_removed = false;
     bool destination_attachment_retained = false;
@@ -979,9 +984,9 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
       return;
     std::string source_id;
     std::filesystem::path source_path;
+    expect(seed_source_attachment(*unlocked_source_result), "startup fork rollback test seeds a source with a copyable attachment");
     {
       ava::app::runtime::session_ts::wat source_w(*unlocked_source_result);
-      expect(seed_source_attachment(*source_w), "startup fork rollback test seeds a source with a copyable attachment");
       source_id = source_w->store.session_id();
       source_path = source_w->store.session_path();
     }

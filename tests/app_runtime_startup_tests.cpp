@@ -291,7 +291,8 @@ void test_app_active_context_status_tracks_compaction_projection()
   expect(unlocked_session_result.has_value(), unlocked_session_result ? "active context status fixture opens a runtime session" : unlocked_session_result.error().format());
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
 
   session_w->model_selection().model.context_window_tokens = 272'000;
   auto expected_status = [&](std::size_t active_tokens) {
@@ -302,7 +303,9 @@ void test_app_active_context_status_tracks_compaction_projection()
     return ava::app::line_shell_internal::format_active_context_status_value(display, session_w->model().context_window_tokens);
   };
 
-  auto const initial_status = ava::app::line_shell_internal::active_context_status_for_session(*session_w);
+  CRITICAL_AREA_END_W(session);
+  auto const initial_status = ava::app::line_shell_internal::active_context_status_for_session(unlocked_session);
+  CRITICAL_AREA_CONTINUE_W(session);
   auto authority = session_w->read_authority_1();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
   auto const initial_tokens =
@@ -312,7 +315,9 @@ void test_app_active_context_status_tracks_compaction_projection()
          "active context status uses compact count plus percent when the model window is known");
 
   session_w->model_selection().model.context_window_tokens = std::nullopt;
-  auto const unknown_status = ava::app::line_shell_internal::active_context_status_for_session(*session_w);
+  CRITICAL_AREA_END_W(session);
+  auto const unknown_status = ava::app::line_shell_internal::active_context_status_for_session(unlocked_session);
+  CRITICAL_AREA_CONTINUE_W(session);
   auto const unknown_expected = initial_tokens
                                     ? std::optional<std::string>{ava::app::line_shell_internal::format_active_context_status_value(
                                           static_cast<long long>(*initial_tokens + ava::session::estimate_tokens(session_w->system_prompt())), std::nullopt)}
@@ -327,7 +332,9 @@ void test_app_active_context_status_tracks_compaction_projection()
                                                                                          .type = ava::session::EntryType::UserMessage,
                                                                                          .timestamp = "2026-01-01T00:00:00Z",
                                                                                          .data_json = "{\"text\":\"" + std::string(50'000, 'x') + "\"}"});
-  auto const grown_status = appended_user ? ava::app::line_shell_internal::active_context_status_for_session(*session_w) : std::nullopt;
+  CRITICAL_AREA_END_W(session);
+  auto const grown_status = appended_user ? ava::app::line_shell_internal::active_context_status_for_session(unlocked_session) : std::nullopt;
+  CRITICAL_AREA_CONTINUE_W(session);
   auto grown_authority = session_w->read_authority_1();
   auto grown_entries =
       grown_authority ? grown_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(grown_authority.error()));
@@ -347,7 +354,9 @@ void test_app_active_context_status_tracks_compaction_projection()
                                                                                                                  .timestamp = "2026-01-01T00:00:01Z",
                                                                                                                  .data_json = "{\"text\":\"recent\"}"})
                                                    : ava::core::VoidResult(std::unexpected(appended_compaction.error()));
-  auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(*session_w) : std::nullopt;
+  CRITICAL_AREA_END_W(session);
+  auto const compacted_status = appended_recent ? ava::app::line_shell_internal::active_context_status_for_session(unlocked_session) : std::nullopt;
+  CRITICAL_AREA_CONTINUE_W(session);
   auto compacted_authority = session_w->read_authority_1();
   auto compacted_entries = compacted_authority ? compacted_authority->load()
                                                : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(compacted_authority.error()));
@@ -355,7 +364,9 @@ void test_app_active_context_status_tracks_compaction_projection()
                                                : ava::core::Result<std::size_t>(std::unexpected(compacted_entries.error()));
   auto const complete_tokens = compacted_entries ? ava::session::estimate_session_tokens(*compacted_entries)
                                                  : ava::core::Result<std::size_t>(std::unexpected(compacted_entries.error()));
-  auto const cumulative_token_status = ava::app::line_shell_internal::token_status_for_session(*session_w);
+  CRITICAL_AREA_END_W(session);
+  auto const cumulative_token_status = ava::app::line_shell_internal::token_status_for_session(unlocked_session);
+  CRITICAL_AREA_CONTINUE_W(session);
   expect(initial_status && appended_user && grown_status && grown_tokens && compaction && appended_compaction && appended_recent && compacted_status &&
              active_tokens && complete_tokens && *grown_status != *initial_status && *grown_status == expected_status(*grown_tokens) &&
              *compacted_status != *grown_status && *compacted_status == expected_status(*active_tokens) && *active_tokens < *complete_tokens &&
@@ -1089,7 +1100,8 @@ void test_app_runtime_cli_prompt_overrides()
     return;
 
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+    CRITICAL_AREA_BEGIN_W(session);
 
     expect(session_w->base_prompt().from_override && !session_w->base_prompt().source_path &&
                session_w->base_prompt().byte_count == std::string_view("cli system prompt").size() && session_w->base_prompt().content_fingerprint != 0,
@@ -1114,19 +1126,21 @@ void test_app_runtime_cli_prompt_overrides()
         session_w->freshness_sources(), [](auto const& source) { return source.kind == ava::app::runtime::FreshnessSourceKind::AppendSystemPrompt; });
     expect(system_source_count == 1 && append_source_count == 2, "cli prompt overrides are tracked as system prompt freshness sources");
 
-    auto context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context --system-prompt"});
+    CRITICAL_AREA_END_W(session);
+    auto context = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/context --system-prompt"});
     expect(context && context->handled && !context->output.empty() && context->output[0].find("system_prompt_sources=3") != std::string::npos &&
                context->output[0].find("system_prompt  cli  --system-prompt  <inline>") != std::string::npos &&
                context->output[0].find("status=inline") != std::string::npos && context->output[0].find("SYSTEM.md") == std::string::npos,
            "context freshness reports cli system prompt overrides as inline sources");
-    auto append_context = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/context --append-system-prompt"});
+    auto append_context = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/context --append-system-prompt"});
     expect(append_context && append_context->handled && !append_context->output.empty() &&
                append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/1  <inline>") != std::string::npos &&
                append_context->output[0].find("append_system_prompt  cli  --append-system-prompt/2  <inline>") != std::string::npos &&
                append_context->output[0].find("APPEND_SYSTEM.md") == std::string::npos,
            "context freshness reports repeated cli append prompt overrides as inline sources");
 
-    auto switched_mode = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/mode"});
+    auto switched_mode = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/mode"});
+    CRITICAL_AREA_CONTINUE_W(session);
     expect(switched_mode && switched_mode->handled && session_w->mode() == ava::agent::Mode::Build &&
                session_w->system_prompt().find("cli system prompt") != std::string::npos &&
                session_w->system_prompt().find("cli append prompt two") != std::string::npos &&

@@ -1200,19 +1200,18 @@ void test_enabled_plugin_dynamic_resources_list_and_read()
   expect(enabled.has_value(), "dynamic resource test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  auto prompt_list = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
-  auto skill_list = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins dynamic-skills", .permission_resolver = allow});
+  auto prompt_list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto skill_list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-skills", .permission_resolver = allow});
   auto prompt_read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamic dyn-review", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamic dyn-review", .permission_resolver = allow});
   auto skill_read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-skill com.example.dynamic dyn-triage", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-skill com.example.dynamic dyn-triage", .permission_resolver = allow});
 
   expect(prompt_list && prompt_list->handled && command_output_text(prompt_list).find("com.example.dynamic/dyn-review") != std::string::npos &&
              command_output_text(prompt_list).find("Generated review prompt") != std::string::npos,
@@ -1256,16 +1255,15 @@ void test_disabled_plugin_dynamic_resources_do_not_execute()
              "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  auto list = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.disabled any", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.disabled any", .permission_resolver = allow});
 
   expect(list && list->handled && command_output_text(list).find("none") != std::string::npos &&
              command_output_text(list).find("com.example.disabled") == std::string::npos,
@@ -1296,16 +1294,15 @@ void test_dynamic_resources_require_explicit_manifest_capability()
   expect(enabled.has_value(), "dynamic capability test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
 
-  auto list = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.nodynamic dyn-review", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.nodynamic dyn-review", .permission_resolver = allow});
 
   expect(list && list->handled && command_output_text(list).find("none") != std::string::npos &&
              command_output_text(list).find("com.example.nodynamic") == std::string::npos,
@@ -1332,14 +1329,13 @@ void test_dynamic_resource_read_rejects_invalid_names_before_launch()
   expect(enabled.has_value(), "dynamic invalid-name test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicname ../bad", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicname ../bad", .permission_resolver = allow});
 
   expect(read && read->handled && command_output_text(read).find("invalid dynamic prompt name") != std::string::npos,
          "direct dynamic read validates resource names before sending resource.read: " + command_output_text(read));
@@ -1379,14 +1375,13 @@ void test_dynamic_resource_proxy_requests_use_core_service_handler()
   expect(enabled.has_value(), "dynamic proxy test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
     return ava::permissions::PermissionResolution::Allow;
   };
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicproxy dyn-proxy", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicproxy dyn-proxy", .permission_resolver = allow});
   auto const output = command_output_text(read);
   auto const response = read_text(response_file);
   auto content = proxy_response_content(response);
@@ -1424,13 +1419,12 @@ void test_plugin_reported_dynamic_resource_errors_surface_text()
   expect(enabled.has_value(), "dynamic error test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
-  auto list = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
+  auto list = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow});
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicerrors dyn-error", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.dynamicerrors dyn-error", .permission_resolver = allow});
   auto const list_output = command_output_text(list);
   auto const read_output = command_output_text(read);
   expect(list && list->handled && list_output.find("list boom") == std::string::npos && list_output.find("external_failure") != std::string::npos,
@@ -1459,7 +1453,6 @@ void test_dynamic_resource_commands_respect_prelaunch_cancellation()
   expect(enabled.has_value(), "dynamic cancellation test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   std::vector<ava::permissions::PermissionPrompt> prompts;
   auto allow = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     prompts.push_back(prompt);
@@ -1467,9 +1460,9 @@ void test_dynamic_resource_commands_respect_prelaunch_cancellation()
   };
   auto canceled = [] { return true; };
   auto list = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow, .cancel_requested = canceled});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompts", .permission_resolver = allow, .cancel_requested = canceled});
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{
+      unlocked_session, ava::app::CommandRequest{
                    .command = "/plugins dynamic-prompt com.example.dynamiccancel dyn-cancel", .permission_resolver = allow, .cancel_requested = canceled});
   auto const list_output = command_output_text(list);
   auto const read_output = command_output_text(read);
@@ -1502,12 +1495,11 @@ void test_malformed_dynamic_resource_result_fails_safely()
   expect(enabled.has_value(), "malformed dynamic resource test enables project plugin");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
   auto allow = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
   auto read = ava::app::run_plugins_command(
-      *session_w, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.malformedresource broken", .permission_resolver = allow});
+      unlocked_session, ava::app::CommandRequest{.command = "/plugins dynamic-prompt com.example.malformedresource broken", .permission_resolver = allow});
   auto const output = command_output_text(read);
   expect(read && read->handled && output.find("plugin dynamic resource read result is malformed") != std::string::npos &&
              output.find("response_bytes") != std::string::npos,
@@ -1531,8 +1523,7 @@ void test_static_plugin_resources_remain_manifest_only()
   write_text(plugin_dir / "plugin.sh", "printf '%s\\n' executed > executed.txt\n");
 
   auto unlocked_session = plugin_command_test_session(paths, workspace);
-  SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-  auto prompt = ava::app::run_plugins_command(*session_w, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
+  auto prompt = ava::app::run_plugins_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins prompt com.example.staticresource static-review"});
   auto const output = command_output_text(prompt);
   expect(prompt && prompt->handled && output.find("Static prompt body") != std::string::npos && output.find("path:") != std::string::npos,
          "static /plugins prompt still reads manifest-declared files: " + output);

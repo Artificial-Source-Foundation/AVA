@@ -23,22 +23,25 @@ using namespace ava::tests;
 
 // Exercise authentication commands using unlocked_session and compare the rebuilt prompt with plan_system_prompt.
 //
-// The commands mutate session mode, prompt, and stored credentials. The function requires an unlocked session on entry and holds a write guard throughout;
-// it performs no explicit thread joins or waits that require temporarily releasing the guard.
+// The commands mutate session mode, prompt, and stored credentials. Each command acquires its own session access.
 void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_session, std::string const& plan_system_prompt)
 {
-  CRITICAL_AREA_BEGIN_W(session); // lock
-
-  auto mode = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/mode"});
-  expect(mode && mode->handled && session_w->mode() == ava::agent::Mode::Build && !mode->output.empty() && mode->output[0].find("build") != std::string::npos,
+  auto mode = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/mode"});
+  auto mode_snapshot = [&] {
+    ava::app::runtime::session_ts::rat session_r(unlocked_session);
+    return std::pair{session_r->mode(), session_r->system_prompt()};
+  }();
+  auto const& [current_mode, system_prompt] = mode_snapshot;
+  expect(mode && mode->handled && current_mode == ava::agent::Mode::Build && !mode->output.empty() && mode->output[0].find("build") != std::string::npos,
          "command dispatcher /mode toggles runtime mode");
-  expect(session_w->system_prompt() != plan_system_prompt && session_w->system_prompt().find("Implement changes directly") != std::string::npos &&
-             session_w->system_prompt().find("dispatcher context changed after session open") != std::string::npos,
+  expect(system_prompt != plan_system_prompt && system_prompt.find("Implement changes directly") != std::string::npos &&
+             system_prompt.find("dispatcher context changed after session open") != std::string::npos,
          "command dispatcher /mode rebuilds the mode-specific system prompt with context");
+  auto const paths = ava::app::runtime::session_ts::rat(unlocked_session)->paths();
 
   bool saw_secret_prompt = false;
   auto connect = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/login moonshot api-key", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
+      unlocked_session, ava::app::CommandRequest{.command = "/login moonshot api-key", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                                              saw_secret_prompt =
                                                  prompt.modal && prompt.secret && prompt.allow_custom && prompt.question.find("moonshot") != std::string::npos;
                                              return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = "slash-moonshot-api-key"};
@@ -47,14 +50,14 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
              connect->output[0].find("Stored moonshot API key credential") != std::string::npos,
          "command dispatcher /login alias stores provider API key credentials via masked prompt");
   ava::tests::FakeTransport credential_transport({});
-  auto slash_moonshot = ava::config::provider_credential_for_request(session_w->paths(), "moonshot", credential_transport);
+  auto slash_moonshot = ava::config::provider_credential_for_request(paths, "moonshot", credential_transport);
   expect(slash_moonshot && slash_moonshot->has_value() && (*slash_moonshot)->access_token == "slash-moonshot-api-key" &&
              (*slash_moonshot)->credential_type == "api_key",
          "slash provider connect writes loadable provider credential");
 
   std::size_t connect_prompt_count = 0;
   auto connect_modal = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
+      unlocked_session, ava::app::CommandRequest{.command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                                              if (connect_prompt_count == 0)
                                              {
                                                expect(prompt.modal && prompt.searchable && prompt.allow_custom && prompt.question == "Select provider",
@@ -76,14 +79,14 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
   expect(connect_modal && connect_modal->handled && connect_prompt_count == 2 && !connect_modal->output.empty() &&
              connect_modal->output[0].find("Stored anthropic API key credential") != std::string::npos,
          "command dispatcher /connect walks provider and secret modals for API-key-only providers");
-  auto slash_anthropic = ava::config::provider_credential_for_request(session_w->paths(), "anthropic", credential_transport);
+  auto slash_anthropic = ava::config::provider_credential_for_request(paths, "anthropic", credential_transport);
   expect(slash_anthropic && slash_anthropic->has_value() && (*slash_anthropic)->access_token == "slash-api-key" &&
              (*slash_anthropic)->credential_type == "api_key",
          "slash provider connect modal writes loadable API key credential");
 
   std::size_t openai_connect_prompt_count = 0;
   auto connect_openai_modal = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{
+      unlocked_session, ava::app::CommandRequest{
                       .command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                         if (openai_connect_prompt_count == 0)
                         {
@@ -132,14 +135,14 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
   expect(connect_openai_modal && connect_openai_modal->handled && openai_connect_prompt_count == 3 && !connect_openai_modal->output.empty() &&
              connect_openai_modal->output[0].find("Stored openai API key credential") != std::string::npos,
          "command dispatcher /connect OpenAI walks provider, method, and secret modals");
-  auto slash_openai_from_modal = ava::config::load_openai_credential(session_w->paths());
+  auto slash_openai_from_modal = ava::config::load_openai_credential(paths);
   expect(slash_openai_from_modal && slash_openai_from_modal->has_value() && (*slash_openai_from_modal)->type == ava::config::OpenAICredentialType::ApiKey &&
              (*slash_openai_from_modal)->access_token == "slash-openai-modal-api-key",
          "slash OpenAI connect modal writes loadable OpenAI credential");
 
   std::size_t back_connect_prompt_count = 0;
   auto connect_back_modal = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
+      unlocked_session, ava::app::CommandRequest{.command = "/connect", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                                              if (back_connect_prompt_count == 0)
                                              {
                                                ++back_connect_prompt_count;
@@ -173,7 +176,7 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
          "command dispatcher /connect previous option returns to provider modal");
 
   auto connect_cancel = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/connect", .question_resolver = [](ava::agent::QuestionPrompt const&) {
+      unlocked_session, ava::app::CommandRequest{.command = "/connect", .question_resolver = [](ava::agent::QuestionPrompt const&) {
                                              return ava::core::Result<ava::agent::QuestionAnswer>{
                                                  std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "question prompt canceled"))};
                                            }});
@@ -182,7 +185,7 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
 
   bool saw_openai_secret_prompt = false;
   auto connect_openai_api = ava::app::run_command(
-      *session_w, ava::app::CommandRequest{.command = "/connect openai api-key", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
+      unlocked_session, ava::app::CommandRequest{.command = "/connect openai api-key", .question_resolver = [&](ava::agent::QuestionPrompt const& prompt) {
                                              saw_openai_secret_prompt =
                                                  prompt.modal && prompt.secret && prompt.allow_custom && prompt.question.find("openai") != std::string::npos;
                                              return ava::agent::QuestionAnswer{.selected_options = {}, .custom_text = "slash-openai-api-key"};
@@ -190,12 +193,12 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
   expect(connect_openai_api && connect_openai_api->handled && saw_openai_secret_prompt && !connect_openai_api->output.empty() &&
              connect_openai_api->output[0].find("Stored openai API key credential") != std::string::npos,
          "command dispatcher /connect openai api-key prompts once and stores OpenAI API key credential");
-  auto slash_openai = ava::config::load_openai_credential(session_w->paths());
+  auto slash_openai = ava::config::load_openai_credential(paths);
   expect(slash_openai && slash_openai->has_value() && (*slash_openai)->type == ava::config::OpenAICredentialType::ApiKey &&
              (*slash_openai)->access_token == "slash-openai-api-key",
          "slash OpenAI API key connect writes loadable OpenAI credential");
 
-  auto connect_without_tui = ava::app::run_command(*session_w, ava::app::CommandRequest{.command = "/connect anthropic"});
+  auto connect_without_tui = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/connect anthropic"});
   expect(connect_without_tui && connect_without_tui->handled && !connect_without_tui->output.empty() &&
              connect_without_tui->output[0].find("--api-key-stdin") != std::string::npos &&
              connect_without_tui->output[0].find("--api-key-env") != std::string::npos,

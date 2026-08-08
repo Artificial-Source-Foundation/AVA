@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include "debug.h"
 
 #ifdef CWDEBUG
 #include <utils/at_scope_end.h>
@@ -208,8 +209,8 @@ std::optional<std::string> committed_delivery_turn(std::vector<ava::session::Ses
 
 struct SubagentDeliveryManager::ParentCapsule
 {
-  ParentCapsule(runtime::Session session_in, runtime::RunOptions options_in, CapsuleGeneration generation_in)
-      : unlocked_session(std::move(session_in)), run_options(std::move(options_in)), generation(generation_in)
+  ParentCapsule(runtime::Session_aggregate_base&& detached_state, runtime::RunOptions options_in, CapsuleGeneration generation_in)
+      : unlocked_session(std::move(detached_state)), run_options(std::move(options_in)), generation(generation_in)
   {
   }
   // Background delivery retains only this detached, independently leased copy; every access below is scoped through rat/wat guards.
@@ -283,7 +284,8 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = session_r->create_detached(std::move(lease), *authority, nullptr);
+  auto detached_state = session_r->create_detached_state(std::move(lease), *authority, nullptr);
+
   auto safe_options = detached_run_options(options);
   auto const session_id = session_r->store.session_id();
 
@@ -300,7 +302,7 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
     published_generation = next_generation_++;
     if (next_generation_ == 0)
       next_generation_ = 1;
-    auto refreshed = std::make_shared<ParentCapsule>(std::move(snapshot), std::move(safe_options), published_generation);
+    auto refreshed = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(safe_options), published_generation);
     if (found == parents_.end())
       parents_.emplace(session_id, std::move(refreshed));
     else
@@ -327,32 +329,42 @@ bool SubagentDeliveryManager::parent_needed(std::string_view session_id) const
   return pending && !pending->empty();
 }
 
-ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(runtime::Session const& session)
+ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runtime::session_ts const& unlocked_session)
 {
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::refresh_parent_configuration");
+
+  CRITICAL_AREA_BEGIN_CR(session);
+  auto const session_id = session_r->store.session_id();
+  CRITICAL_AREA_END_R(session);
+
   std::shared_ptr<ParentCapsule> retained;
   {
     std::lock_guard lock(mutex_);
-    auto found = parents_.find(session.store.session_id());
+    auto found = parents_.find(session_id);
     if (found == parents_.end())
       return {};
     retained = found->second;
   }
-  auto authority = session.read_authority_1();
+
+  CRITICAL_AREA_CONTINUE_R(session);
+  auto authority = session_r->read_authority_1();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   ava::session::SessionLease lease;
-  if (!session.sessionless())
+  if (!session_r->sessionless())
   {
-    auto duplicated = session.lease().duplicate();
+    auto duplicated = session_r->lease().duplicate();
     if (!duplicated)
       return std::unexpected(std::move(duplicated.error()));
     lease = std::move(*duplicated);
   }
-  auto snapshot = session.create_detached(std::move(lease), *authority, nullptr);
+  auto detached_state = session_r->create_detached_state(std::move(lease), *authority, nullptr);
   auto retained_options = retained->run_options;
+  CRITICAL_AREA_END_R(session);
+
   {
     std::lock_guard lock(mutex_);
-    auto found = parents_.find(session.store.session_id());
+    auto found = parents_.find(session_id);
     if (!accepting_ || found == parents_.end() || found->second != retained)
     {
       clear_secret(retained_options.access_token);
@@ -361,7 +373,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(ru
     auto const generation = next_generation_++;
     if (next_generation_ == 0)
       next_generation_ = 1;
-    found->second = std::make_shared<ParentCapsule>(std::move(snapshot), std::move(retained_options), generation);
+    found->second = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(retained_options), generation);
   }
   changed_.notify_all();
   return {};
@@ -369,6 +381,10 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(ru
 
 void SubagentDeliveryManager::release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation)
 {
+  // This function potentially destroys a ParentCapsule object, which owns a session_ts,
+  // and we are not allowed to hold a session lock while destroying a Session instance.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::release_parent_if_unused");
+
   auto capsule_active = [](std::shared_ptr<ParentCapsule> const& capsule) {
     SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
     return session_r->run_controller() && session_r->run_controller()->snapshot().active;
@@ -401,6 +417,9 @@ void SubagentDeliveryManager::attach_parent(std::string_view parent_session_id)
 
 void SubagentDeliveryManager::release_detached_parent(std::string_view parent_session_id)
 {
+  // Might call release_parent_if_unused.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::release_detached_parent");
+
   std::optional<CapsuleGeneration> generation;
   {
     std::lock_guard lock(mutex_);
@@ -414,24 +433,26 @@ void SubagentDeliveryManager::release_detached_parent(std::string_view parent_se
     release_parent_if_unused(parent_session_id, *generation);
 }
 
-ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::retained_session(std::string_view session_id,
-                                                                                             std::filesystem::path const& workspace_identity,
-                                                                                             bool exact_session_id)
+ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session(std::string_view session_id,
+                                                                                  std::filesystem::path const& workspace_identity, bool& found,
+                                                                                  bool exact_session_id)
 {
+  found = false;
   std::shared_ptr<ParentCapsule> capsule;
   auto const expected_workspace = normalized_workspace_identity(workspace_identity);
   bool saw_foreign_owner = false;
   {
     std::lock_guard lock(mutex_);
     if (!accepting_)
-      return std::optional<runtime::Session>{};
-    auto found = parents_.find(std::string(session_id));
-    if (found != parents_.end())
+      return std::unexpected(retained_owner_not_found(session_id));
+    auto retained = parents_.find(std::string(session_id));
+    if (retained != parents_.end())
     {
-      SCOPED_CRITICAL_AREA_R(session_r, found->second->unlocked_session);
+      found = true;
+      SCOPED_CRITICAL_AREA_R(session_r, retained->second->unlocked_session);
       if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         return std::unexpected(retained_owner_not_found(session_id));
-      capsule = found->second;
+      capsule = retained->second;
     }
     else if (!exact_session_id)
     {
@@ -452,16 +473,20 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
           return std::unexpected(std::move(error));
         }
         capsule = retained;
+        found = true;
       }
     }
     if (!capsule)
     {
       if (saw_foreign_owner)
+      {
+        found = true;
         return std::unexpected(retained_owner_not_found(session_id));
-      return std::optional<runtime::Session>{};
+      }
+      return std::unexpected(retained_owner_not_found(session_id));
     }
   }
-  auto attached_result = [&]() -> ava::core::Result<runtime::Session> {
+  auto detached_state_result = [&]() -> ava::core::Result<runtime::Session_aggregate_base> {
     SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
     auto authority = session_r->read_authority_1();
     if (!authority)
@@ -474,13 +499,16 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
         return std::unexpected(std::move(duplicated.error()));
       lease = std::move(*duplicated);
     }
-    return session_r->create_detached(std::move(lease), *authority, shared_from_this());
+    return session_r->create_detached_state(std::move(lease), *authority, shared_from_this());
   }();
-  if (!attached_result)
-    return std::unexpected(std::move(attached_result.error()));
-  attached_result->created = false;
-  attach_parent(attached_result->store.session_id());
-  return std::optional<runtime::Session>(std::move(*attached_result));
+  if (!detached_state_result)
+    return std::unexpected(std::move(detached_state_result.error()));
+  detached_state_result->created = false;
+  auto const attached_id = detached_state_result->store.session_id();
+
+  attach_parent(attached_id);
+
+  return ava::core::Result<runtime::session_ts>(std::in_place, std::move(*detached_state_result));
 }
 
 void SubagentDeliveryManager::enqueue(ava::agent::SubagentCoordinatorJobSnapshot const& snapshot) noexcept
@@ -553,6 +581,9 @@ void SubagentDeliveryManager::worker_loop(std::stop_token stop_token)
 void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot snapshot, std::shared_ptr<ParentCapsule> const& capsule,
                                       std::stop_token stop_token)
 {
+  // Might call release_parent_if_unused.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::deliver");
+
   auto capsule_controller = [](std::shared_ptr<ParentCapsule> const& retained) {
     SCOPED_CRITICAL_AREA_R(session_r, retained->unlocked_session);
     return session_r->run_controller();
@@ -731,6 +762,9 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
 
 void SubagentDeliveryManager::shutdown() noexcept
 {
+  // Potentially joins a thread.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::shutdown");
+
   try
   {
     std::vector<std::shared_ptr<SessionRunController>> controllers;

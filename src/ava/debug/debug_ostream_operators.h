@@ -1,6 +1,5 @@
 #pragma once
 
-#include <threadsafe/threadsafe.h>
 #include <boost/intrusive_ptr.hpp>
 #include <concepts>
 #include <condition_variable>
@@ -121,6 +120,10 @@ inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
 
 template<ConceptAnyStdFunction T>
 inline std::ostream& operator<<(std::ostream& os, T const& fn);
+
+namespace print_members {
+inline std::ostream& operator<<(std::ostream& os, char const* str);
+} // namespace print_members
 //-----------------
 
 // Non-inline, defined below.
@@ -144,6 +147,7 @@ std::ostream& operator<<(std::ostream& os, struct termios const& te);
 // Include all operator<<'s before defining ones that use LIBCWD_USING_OSTREAM_PRELUDE.
 #include <cwds/debug_ostream_operators.h>
 #include "print_reference.h"
+#include <threadsafe/threadsafe.h>
 #include "utils/print_pointer.h"
 #include "utils/to_string.h"
 
@@ -221,6 +225,17 @@ std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
   os.write("$std::function$", 15);
   return os;
 }
+
+namespace print_members {
+
+// Only add quotes around string literals when printed from print_members_on member functions (elsewhere use `utils::print_string`).
+std::ostream& operator<<(std::ostream& os, char const* str)
+{
+  os << ::debug::print_string(str);
+  return os;
+}
+
+} // namespace print_members
 
 //=============================================================================
 // Implementation of operator<<'s that are not marked as inline.

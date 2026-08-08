@@ -109,11 +109,11 @@ ReloadReportRow reload_model_settings(runtime::session_ts& unlocked_session)
   {
     SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     session_w->model_selection().scoped_model_cycle = registry->scoped_model_cycle;
-    if (auto refreshed = session_w->refresh_parent_configuration(); !refreshed)
-      return reload_error_row("models", refreshed.error());
     scoped_cycle = session_w->scoped_model_cycle() ? "configured" : "not configured";
     active_model = session_w->model().provider_id + "/" + session_w->model().model_id + " (unchanged)";
   }
+  if (auto refreshed = runtime::Session::refresh_parent_configuration(unlocked_session); !refreshed)
+    return reload_error_row("models", refreshed.error());
   ReloadReportRow row{.name = "models", .status = "loaded", .details = {}};
   append_reload_detail(row, "config", paths.models_file.string());
   append_reload_detail(row, "models", std::to_string(registry->models.size()));
@@ -133,15 +133,15 @@ ReloadReportRow reload_prompt_settings(runtime::session_ts& unlocked_session)
   auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_trusted, prompt_overrides);
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
+  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
+    return reload_error_row("prompts", refreshed.error());
   std::tuple<bool, std::size_t, std::size_t, std::string> details;
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    if (auto refreshed = session_w->apply_prompt_state(std::move(*prompt_state)); !refreshed)
-      return reload_error_row("prompts", refreshed.error());
-    details = {project_resources_trusted(session_w->project_trust()), session_w->context_sources().size(), session_w->freshness_sources().size(),
-               session_w->base_prompt().from_override   ? std::string("override")
-               : session_w->base_prompt().source_path ? session_w->base_prompt().source_path->string()
-                                                       : std::string("built-in")};
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    details = {project_resources_trusted(session_r->project_trust()), session_r->context_sources().size(), session_r->freshness_sources().size(),
+               session_r->base_prompt().from_override   ? std::string("override")
+                : session_r->base_prompt().source_path ? session_r->base_prompt().source_path->string()
+                                                        : std::string("built-in")};
   }
   auto& [resources_enabled, context_source_count, freshness_source_count, base_prompt] = details;
   ReloadReportRow row{.name = "prompts", .status = "loaded", .details = {}};
@@ -172,10 +172,10 @@ ReloadReportRow reload_trust_settings(runtime::session_ts& unlocked_session)
   {
     SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     session_w->trust_state().project_trust = std::move(next_trust);
-    if (auto refreshed = session_w->apply_prompt_state(std::move(*prompt_state)); !refreshed)
-      return reload_error_row("trust", refreshed.error());
-    applied_trust = session_w->project_trust();
   }
+  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
+    return reload_error_row("trust", refreshed.error());
+  applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
   ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
   append_reload_detail(row, "trust_file", applied_trust.trust_file.string());
   append_reload_detail(row, "decision", std::string(to_string(applied_trust.decision)));

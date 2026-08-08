@@ -185,12 +185,8 @@ int run_tui(ShellState state)
     auto unlocked_opened_result = open_requested_session(target_session_id);
     if (!unlocked_opened_result)
       return std::unexpected(std::move(unlocked_opened_result.error()));
-    {
-      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-      SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-      if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-        return std::unexpected(std::move(replaced.error()));
-    }
+    if (auto replaced = ava::app::runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+      return std::unexpected(std::move(replaced.error()));
     application_catalog.retarget_session(ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id());
     application_catalog.refresh_values(unlocked_session, hotkeys);
     return state_snapshot(status_prefix + target_session_id);
@@ -399,7 +395,7 @@ int run_tui(ShellState state)
                              : ava::app::rpc::previous_runtime_model(ava::app::runtime::session_ts::rat(unlocked_session));
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = ava::app::runtime::session_ts::wat(unlocked_session)->switch_model(std::move(*model));
+        auto switched = ava::app::runtime::Session::switch_model_and_refresh(unlocked_session, std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model cycled" : "model already selected");
@@ -627,7 +623,7 @@ int run_tui(ShellState state)
         auto model = ava::app::resolve_runtime_model(invocation_paths, value.substr(0, separator), value.substr(separator + 1));
         if (!model)
           return std::unexpected(std::move(model.error()));
-        auto switched = ava::app::runtime::session_ts::wat(unlocked_session)->switch_model(std::move(*model));
+        auto switched = ava::app::runtime::Session::switch_model_and_refresh(unlocked_session, std::move(*model));
         if (!switched)
           return std::unexpected(std::move(switched.error()));
         return state_snapshot(*switched ? "model switched" : "model already selected");
@@ -636,7 +632,7 @@ int run_tui(ShellState state)
           -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (!level)
         {
-          auto changed = ava::app::runtime::session_ts::wat(unlocked_session)->set_reasoning(std::nullopt);
+          auto changed = ava::app::runtime::Session::set_reasoning_and_refresh(unlocked_session, std::nullopt);
           if (!changed)
             return std::unexpected(std::move(changed.error()));
           return state_snapshot(*changed ? "thinking mode set to Default" : "thinking mode already Default");
@@ -645,7 +641,7 @@ int run_tui(ShellState state)
         auto selection = ava::app::reasoning_selection_for_level(model, *level);
         if (!selection)
           return std::unexpected(std::move(selection.error()));
-        auto changed = ava::app::runtime::session_ts::wat(unlocked_session)->set_reasoning(std::move(*selection));
+        auto changed = ava::app::runtime::Session::set_reasoning_and_refresh(unlocked_session, std::move(*selection));
         if (!changed)
           return std::unexpected(std::move(changed.error()));
         auto const label = ava::app::reasoning_level_label(*level);
@@ -750,12 +746,8 @@ int run_tui(ShellState state)
         auto unlocked_opened_result = open_requested_session(value);
         if (!unlocked_opened_result)
           return std::unexpected(std::move(unlocked_opened_result.error()));
-        {
-          SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-          SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-          if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-            return std::unexpected(std::move(replaced.error()));
-        }
+        if (auto replaced = ava::app::runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+          return std::unexpected(std::move(replaced.error()));
         application_catalog.retarget_session(ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id());
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot("session opened");

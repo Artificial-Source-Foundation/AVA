@@ -58,7 +58,7 @@ def main() -> int:
         failures.append("runtime code still uses pathname/lease metadata adapters instead of SessionReadAuthority:\n  " + "\n  ".join(legacy_metadata_reads))
 
     require_text(source, "src/ava/agent/message_builder.h", "build_messages(ava::session::SessionReadAuthority read_authority", failures)
-    require_text(source, "src/ava/app/runtime_compaction.h", "compact_runtime_context(Session& session, ava::session::SessionReadAuthority read_authority", failures)
+    require_text(source, "src/ava/app/runtime_compaction.h", "compact_runtime_context(session_ts& unlocked_session, ava::session::SessionReadAuthority read_authority", failures)
     require_text(source, "src/ava/agent/agent_loop.h", "std::optional<ava::session::SessionReadAuthority> session_read_authority", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_ephemeral(store, invocation_inputs_.session_read_limits)", failures)
     require_text(source, "src/ava/app/runtime/Session.h", "create_persistent(store, resources_.lease, invocation_inputs_.session_read_limits)", failures)

@@ -433,16 +433,18 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    CRITICAL_AREA_BEGIN_W(session);
     ava::core::Result<ava::config::ModelInfo> selected =
         command.type == "set_model" ? resolve_requested_model(session_w, command) : next_runtime_model(session_w);
     if (!selected)
       return handled(write_error(context.output, command.id, selected.error()));
 
-    auto switched = session_w->switch_model(std::move(*selected));
+    CRITICAL_AREA_END_W(session);
+    auto switched = runtime::Session::switch_model_and_refresh(unlocked_session, std::move(*selected));
     if (!switched)
       return handled(write_error(context.output, command.id, switched.error()));
-    return handled(write_success(context.output, command.id, session_w->state_result_json_1(cancel_requested(context.run_state))));
+    return handled(
+        write_success(context.output, command.id, runtime::session_ts::rat(unlocked_session)->state_result_json_1(cancel_requested(context.run_state))));
   }
 
   if (command.type == "set_reasoning" || command.type == "clear_reasoning")
@@ -470,11 +472,11 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       }
     }
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    auto changed = session_w->set_reasoning(std::move(selection));
+    auto changed = runtime::Session::set_reasoning_and_refresh(unlocked_session, std::move(selection));
     if (!changed)
       return handled(write_error(context.output, command.id, changed.error()));
-    return handled(write_success(context.output, command.id, session_w->state_result_json_1(cancel_requested(context.run_state))));
+    return handled(
+        write_success(context.output, command.id, runtime::session_ts::rat(unlocked_session)->state_result_json_1(cancel_requested(context.run_state))));
   }
 
   if (command.type == "fork_session" || command.type == "clone_session")
@@ -487,7 +489,8 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("clone_session does not support branch_from_entry_id")));
     }
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    CRITICAL_AREA_BEGIN_W(session);
+
     auto source_session_id = resolve_branch_source_session_id(session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
@@ -510,8 +513,10 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
         .actor = "rpc"});
     if (!branched)
       return handled(write_error(context.output, command.id, branched.error()));
-
     auto owned_options = session_w->replacement_open_context(context.open_context);
+
+    CRITICAL_AREA_END_W(session);
+
     auto unlocked_opened_result = ava::app::runtime::Session::open_owned(owned_options, branched->store, branched->lease, true);
     if (!unlocked_opened_result)
     {
@@ -522,11 +527,14 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     {
       SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
       opened_w->created = true;
-      if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-        return handled(write_error(context.output, command.id, replaced.error()));
     }
+    if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
+    CRITICAL_AREA_CONTINUE_W(session);
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
+    ava::core::Result<bool> result = handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
+    CRITICAL_AREA_END_W(session);
+    return result;
   }
 
   if (command.type == "summarize_branch")
@@ -614,14 +622,10 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!unlocked_created_result)
       return handled(write_error(context.output, command.id, unlocked_created_result.error()));
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    {
-      SCOPED_CRITICAL_AREA_W(created_w, *unlocked_created_result);
-      if (auto replaced = session_w->replace_with(std::move(*created_w)); !replaced)
-        return handled(write_error(context.output, command.id, replaced.error()));
-    }
+    if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_created_result); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
+    return handled(write_success(context.output, command.id, runtime::session_ts::rat(unlocked_session)->state_result_json_1(false)));
   }
 
   if (command.type == "open_session" || command.type == "switch_session")
@@ -634,17 +638,13 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    auto unlocked_opened_result = session_w->open_requested(context.open_context, *command.session_id);
+    auto unlocked_opened_result = runtime::Session::open_requested(unlocked_session, context.open_context, *command.session_id);
     if (!unlocked_opened_result)
       return handled(write_error(context.output, command.id, unlocked_opened_result.error()));
-    {
-      SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-      if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-        return handled(write_error(context.output, command.id, replaced.error()));
-    }
+    if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+      return handled(write_error(context.output, command.id, replaced.error()));
     reset_cancel_after_session_switch(context.run_state);
-    return handled(write_success(context.output, command.id, session_w->state_result_json_1(false)));
+    return handled(write_success(context.output, command.id, runtime::session_ts::rat(unlocked_session)->state_result_json_1(false)));
   }
 
   return false;

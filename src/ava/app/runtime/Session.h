@@ -10,8 +10,8 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
-#include "ava/app/session_run_controller.h"
 #include "ava/app/runtime/session_ts.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
@@ -149,6 +149,8 @@ struct SessionResources
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
 
+  void swap(SessionResources& other);
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
@@ -192,16 +194,18 @@ class Session : protected Session_aggregate_base
   Session(Session&& session) = default;
 
  private:
+  template <typename, typename>
+  friend class threadsafe::Unlocked;
+
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
   // Called from replace_with.
   Session& operator=(Session&& session) = default;
 
-  static ava::core::Result<session_ts> construct(
-      OpenContext const& context, SessionLifecycleRequest const& request,
-      ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created,
-      bool load_existing_entries, bool append_session_start, bool append_initial_session_name,
-      std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager, std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
+  static ava::core::Result<session_ts> construct(OpenContext const& context, SessionLifecycleRequest const& request, ava::session::SessionStore& store,
+                                                 ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool append_session_start,
+                                                 bool append_initial_session_name, std::shared_ptr<ava::app::SubagentDeliveryManager> delivery_manager,
+                                                 std::shared_ptr<ava::app::SessionTitleCoordinator> title_coordinator);
 
 #ifdef CWDEBUG
  public:
@@ -220,37 +224,43 @@ class Session : protected Session_aggregate_base
   // conflict or the selected session cannot be created, recovered, or opened.
   static ava::core::Result<session_ts> open(OpenContext const& context, SessionLifecycleRequest const& request = {});
 
+  // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
+  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir,
+                                               SessionLifecycleRequest request = {});
+
+  // Convenience wrapper to create new persistent session at `workspace_root` and `current_dir`, overriding those locations in `context`.
+  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
+  {
+    return open_at(std::move(context), workspace_root, current_dir);
+  }
+
+  // Open a session using `request`, inheriting active state from `current` and frontend-only policy from `base_context`.
+  static ava::core::Result<session_ts> open_like(session_ts const& unlocked_session, OpenContext const& base_context, SessionLifecycleRequest request = {});
+
+  // Convenience wrapper to create a persistent session inheriting active state from `current` and frontend-only policy from `base_context`.
+  static ava::core::Result<session_ts> create_like(session_ts const& unlocked_session, OpenContext const& base_context)
+  {
+    return open_like(unlocked_session, base_context);
+  }
+
   // Consume an already-owned persistent store and its lease without reopening by path.
   // Inputs remain intact on failure so callers can roll back by stable identity.
-  static ava::core::Result<session_ts> open_owned(
-      OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created);
+  static ava::core::Result<session_ts> open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease,
+                                                  bool created);
 
-  // Open a session using `request` at `workspace_root` and `current_dir`, overriding those locations in `context`.
-  static ava::core::Result<session_ts> open_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request);
-
-  // Create a persistent session at `workspace_root` and `current_dir`, overriding
-  // those locations in `context`.
-  static ava::core::Result<session_ts> create_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                              std::filesystem::path const& current_dir);
-
-  // Create a persistent session inheriting active state from `current` and
-  // frontend-only policy from `base_context`.
-  static ava::core::Result<session_ts> create_like(session_ts const& unlocked_session, OpenContext const& base_context);
-
-  // Open a session using `request`, inheriting active state from `current` and
-  // frontend-only policy from `base_context`.
-  ava::core::Result<session_ts> open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const;
-
-  Session create_detached(
-    ava::session::SessionLease lease, ava::session::SessionReadAuthority authority, std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
-
-  ava::core::Result<session_ts> open_requested(OpenContext const& base_context, std::string_view requested_session_id) const
+  static ava::core::Result<session_ts> open_requested(session_ts const& unlocked_session, OpenContext const& base_context,
+                                                      std::string_view requested_session_id)
   {
-    SessionLifecycleRequest request;
-    request.requested_session_id = std::string(requested_session_id);
-    return open_similar(base_context, std::move(request));
+    SessionLifecycleRequest request{.requested_session_id = std::string(requested_session_id)};
+    return open_like(unlocked_session, base_context, std::move(request));
   }
+
+  // Snapshot detached-session construction state using lease, authority, and manager while inheriting this session's active state and shared resources.
+  //
+  // The returned aggregate contains no Session object. Callers may therefore move it into the final session_ts after releasing this session's lock
+  // without destructing a temporary Session at the boundary.
+  Session_aggregate_base create_detached_state(ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
+                                               std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const;
 
   // Return the AVA-owned filesystem roots that command planning and model
   // ToolContexts are pre-authorized to access.
@@ -366,21 +376,18 @@ class Session : protected Session_aggregate_base
             .anchor_set = anchor_set()};
   }
 
-  // Publish callback-free mutable runtime configuration into an existing retained parent capsule
-  // without changing its safe policy snapshot.
+  // Publish callback-free mutable runtime configuration from unlocked_session into an existing retained parent capsule.
   //
-  // Returns failure when the parent delivery manager rejects the configuration update;
-  // returns success when no delivery manager is attached or the update was applied.
-  [[nodiscard]] ava::core::VoidResult refresh_parent_configuration() const;
+  // The wrapper must be unlocked. Returns failure when the parent delivery manager rejects the update; returns success when no manager is attached or
+  // the update was applied. No session lock remains held while the manager replaces its capsule.
+  [[nodiscard]] static ava::core::VoidResult refresh_parent_configuration(session_ts const& unlocked_session);
 
-  // Stop background work and replace this session's contents with `replacement`,
-  // rebinding the application-scoped subagent coordinator/delivery, title
-  // coordinator, and diagnostics services that cannot round-trip through disk.
+  // Replace unlocked_current with unlocked_replacement, rebinding application-scoped services that cannot round-trip through disk.
   //
-  // This is the visible-session detach boundary: when `replacement` targets a
-  // different session the previously visible parent is released so another AVA
-  // process may activate it. Always succeeds.
-  [[nodiscard]] ava::core::VoidResult replace_with(Session&& replacement);
+  // Both wrappers must be distinct and unlocked. This method owns both write-lock scopes and releases them before notifying the delivery manager that
+  // the previously visible parent detached; that notification may destroy a retained session or otherwise block. Returns an invalid-argument error
+  // only when both parameters identify the same wrapper.
+  [[nodiscard]] static ava::core::VoidResult replace_with(session_ts& unlocked_current, session_ts& unlocked_replacement);
 
   // Recover torn-tail and incomplete-assistant-output suffix entries from the
   // session identified by `source_session_id` so a follow-up mutation
@@ -424,28 +431,35 @@ class Session : protected Session_aggregate_base
   // reasoning update rejects the resolved selection.
   [[nodiscard]] ava::core::VoidResult apply_initial_reasoning_level(std::string_view requested_level);
 
-  // Move a freshly assembled PromptState into the session's resolved state and
-  // refresh bound parent capsules.
+  // Move a freshly assembled PromptState into this already write-locked session's resolved state without refreshing retained parents.
   //
-  // `prompt_state` is consumed regardless of failure. Returns failure only when
-  // refresh_parent_configuration rejects the configuration update.
+  // `prompt_state` is consumed. This locked mutation primitive always succeeds.
   [[nodiscard]] ava::core::VoidResult apply_prompt_state(PromptState prompt_state);
+
+  // Apply prompt_state to unlocked_session, release its write lock, then synchronously refresh retained parent configuration.
+  [[nodiscard]] static ava::core::VoidResult apply_prompt_state_and_refresh(session_ts& unlocked_session, PromptState prompt_state);
 
   // Switch the active model to `model`, re-deriving the prompt state for the
   // current mode and clearing any active reasoning selection.
   //
   // Returns false (without writing) when `model` already matches the active
   // provider/model pair. Returns failure when prompt-state loading, the model
-  // change append, or the parent configuration refresh rejects the switch.
+  // change append rejects the switch. This locked mutation primitive does not refresh retained parents.
   [[nodiscard]] ava::core::Result<bool> switch_model(ava::config::ModelInfo model);
+
+  // Switch unlocked_session's model, release its write lock, then refresh retained parent configuration when the model changed.
+  [[nodiscard]] static ava::core::Result<bool> switch_model_and_refresh(session_ts& unlocked_session, ava::config::ModelInfo model);
 
   // Set the active reasoning selection, resolving it against the current model.
   //
   // A nullopt `selection` clears reasoning. Non-nullopt selections are trimmed
   // and resolved through the model's supported levels. Returns false (without
   // writing) when the resolved selection equals the active one. Returns failure
-  // when the model rejects the level or the append/refresh route rejects the change.
+  // when the model rejects the level or append rejects the change. This locked mutation primitive does not refresh retained parents.
   [[nodiscard]] ava::core::Result<bool> set_reasoning(std::optional<ReasoningSelection> selection);
+
+  // Set unlocked_session's reasoning, release its write lock, then refresh retained parent configuration when the selection changed.
+  [[nodiscard]] static ava::core::Result<bool> set_reasoning_and_refresh(session_ts& unlocked_session, std::optional<ReasoningSelection> selection);
 
   [[nodiscard]] ava::core::Result<ava::session::SessionMetadataView> load_metadata() const;
 

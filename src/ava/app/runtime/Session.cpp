@@ -305,23 +305,23 @@ void load_mcp_prompt_commands(RegistryBuilder& builder, Session& session, Comman
     return;
   }
 
-  auto context = ava::tools::ToolContext{
-      .workspace_dir = session.workspace_dir(),
-      .mode = session.mode(),
-      .permission_resolver = options.permission_resolver,
-      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
-      .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
-        auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
-                                                .parent_id = "",
-                                                .type = ava::session::EntryType::PermissionDecision,
-                                                .timestamp = ava::session::now_timestamp(),
-                                                .data_json = ava::tools::permission_audit_data_json(event)};
-        return session.append_owned(std::move(entry));
-      },
-      .session_id = session.store.session_id(),
-      .provider_id = session.model().provider_id,
-      .model_id = session.model().model_id,
-      .current_dir = session.current_dir()};
+  auto context =
+      ava::tools::ToolContext{.workspace_dir = session.workspace_dir(),
+                              .mode = session.mode(),
+                              .permission_resolver = options.permission_resolver,
+                              .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(session.permission_rule_store()),
+                              .permission_audit_sink = [&session](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+                                auto entry = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                                        .parent_id = "",
+                                                                        .type = ava::session::EntryType::PermissionDecision,
+                                                                        .timestamp = ava::session::now_timestamp(),
+                                                                        .data_json = ava::tools::permission_audit_data_json(event)};
+                                return session.append_owned(std::move(entry));
+                              },
+                              .session_id = session.store.session_id(),
+                              .provider_id = session.model().provider_id,
+                              .model_id = session.model().model_id,
+                              .current_dir = session.current_dir()};
   context.permission_tool_name = "mcp_prompts";
   context.current_tool_name = "mcp_prompts";
   context.cancel_requested = options.cancel_requested;
@@ -558,6 +558,181 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
 }
 
 } // namespace
+
+void SessionResources::swap(SessionResources& other)
+{
+  lease.swap(other.lease);
+  anchor_set.swap(other.anchor_set);
+  run_controller.swap(other.run_controller);
+  append_target.swap(other.append_target);
+  bound_read_authority.swap(other.bound_read_authority);
+  subagent_coordinator.swap(other.subagent_coordinator);
+  subagent_delivery_manager.swap(other.subagent_delivery_manager);
+  session_title_coordinator.swap(other.session_title_coordinator);
+  diagnostics.swap(other.diagnostics);
+  mcp_config.swap(other.mcp_config);
+}
+
+// static
+ava::core::Result<session_ts> Session::open_like(session_ts const& unlocked_session, OpenContext const& base_context, SessionLifecycleRequest request)
+{
+  CRITICAL_AREA_BEGIN_CR(session);
+  OpenContext const open_context = session_r->replacement_open_context(base_context);
+  auto const workspace_dir = session_r->workspace_dir();
+  auto const current_dir = session_r->current_dir();
+  CRITICAL_AREA_END_R(session);
+  return open_at(std::move(open_context), workspace_dir, current_dir, std::move(request));
+}
+
+// static
+ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir,
+                                               SessionLifecycleRequest request)
+{
+  context.workspace_dir = workspace_root;
+  context.current_dir = current_dir;
+  return Session::open(context, request);
+}
+
+// static
+ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
+{
+  if (request.requested_session_id && request.continue_last_session)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
+  if (request.fork_session_id && (request.requested_session_id || request.continue_last_session))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either fork or session resume options, not both"));
+  if (request.sessionless && (request.requested_session_id || request.continue_last_session || request.fork_session_id))
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either no-session or session resume options, not both"));
+
+  auto directories = resolve_runtime_directories(context);
+  if (!directories)
+    return std::unexpected(std::move(directories.error()));
+  auto const& workspace_dir = directories->first;
+
+  if (request.requested_session_id && context.subagent_delivery_manager)
+  {
+    bool retained_found = false;
+    auto retained = context.subagent_delivery_manager->retained_session(*request.requested_session_id, workspace_dir, retained_found, context.exact_session_id);
+    if (retained_found)
+      return retained;
+  }
+  auto const session_read_limits = context.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
+
+  bool created = true;
+  bool created_from_fork = false;
+  bool load_existing_entries = false;
+  bool should_append_session_start = true;
+  ava::session::SessionLease lease;
+  ava::core::Result<ava::session::SessionStore> store = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
+  if (request.sessionless)
+  {
+    store = ava::session::SessionStore::create_ephemeral(workspace_dir);
+  }
+  else if (request.fork_session_id)
+  {
+    auto resolved = resolve_session_id(workspace_dir, context.paths.sessions_dir, *request.fork_session_id);
+    if (!resolved)
+      return std::unexpected(resolved.error());
+    auto source = ava::session::SessionStore::open(workspace_dir, *resolved, context.paths.sessions_dir);
+    if (!source)
+      return std::unexpected(std::move(source.error()));
+    auto source_lease = ava::session::SessionLease::acquire(source->session_path());
+    if (!source_lease)
+      return std::unexpected(std::move(source_lease.error()));
+    auto recovered = source->recover_torn_tail(*source_lease, session_read_limits);
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*source_lease, session_read_limits);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
+    auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
+                                                                                         .root_dir = context.paths.sessions_dir,
+                                                                                         .source_session_id = *resolved,
+                                                                                         .branch_from_entry_id = {},
+                                                                                         .name = request.initial_session_name,
+                                                                                         .labels = std::nullopt,
+                                                                                         .read_limits = context.session_read_limits,
+                                                                                         .source_lease = &*source_lease,
+                                                                                         .mode = ava::session::SessionBranchMode::Fork,
+                                                                                         .actor = "cli"});
+    if (!branch)
+      return std::unexpected(std::move(branch.error()));
+    store = std::move(branch->store);
+    lease = std::move(branch->lease);
+    created_from_fork = true;
+    load_existing_entries = true;
+    should_append_session_start = false;
+  }
+  else if (request.requested_session_id)
+  {
+    if (context.exact_session_id)
+    {
+      store = ava::session::SessionStore::open(workspace_dir, *request.requested_session_id, context.paths.sessions_dir);
+    }
+    else
+    {
+      auto resolved = resolve_session_id(workspace_dir, context.paths.sessions_dir, *request.requested_session_id);
+      if (!resolved)
+        return std::unexpected(resolved.error());
+      store = ava::session::SessionStore::open(workspace_dir, *resolved, context.paths.sessions_dir);
+    }
+    created = false;
+    load_existing_entries = true;
+  }
+  else if (request.continue_last_session)
+  {
+    auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, context.paths.sessions_dir);
+    if (!sessions)
+      return std::unexpected(sessions.error());
+    if (!sessions->empty())
+    {
+      if (context.subagent_delivery_manager)
+      {
+        bool retained_found = false;
+        auto retained = context.subagent_delivery_manager->retained_session(sessions->front().session_id, workspace_dir, retained_found, true);
+        if (retained_found)
+          return retained;
+      }
+      store = ava::session::SessionStore::open(workspace_dir, sessions->front().session_id, context.paths.sessions_dir);
+      created = false;
+      load_existing_entries = true;
+    }
+    else
+    {
+      store = ava::session::SessionStore::create(workspace_dir, context.paths.sessions_dir);
+    }
+  }
+  else
+  {
+    store = ava::session::SessionStore::create(workspace_dir, context.paths.sessions_dir);
+  }
+  if (!store)
+    return std::unexpected(store.error());
+
+  if (!created)
+  {
+    auto acquired = ava::session::SessionLease::acquire(store->session_path());
+    if (!acquired)
+      return std::unexpected(std::move(acquired.error()));
+    lease = std::move(*acquired);
+    auto recovered = store->recover_torn_tail(lease, session_read_limits);
+    if (!recovered)
+      return std::unexpected(std::move(recovered.error()));
+    auto staged_recovery = store->recover_incomplete_assistant_output_suffix(lease, session_read_limits);
+    if (!staged_recovery)
+      return std::unexpected(std::move(staged_recovery.error()));
+  }
+
+  auto unlocked_session_result =
+      construct(context, request, *store, lease, created, load_existing_entries, created && should_append_session_start,
+                request.initial_session_name.has_value() && !request.fork_session_id, context.subagent_delivery_manager, context.session_title_coordinator);
+  if (!unlocked_session_result && created_from_fork)
+  {
+    auto error = std::move(unlocked_session_result.error());
+    ava::session::rollback_created_session_with_context(*store, lease, error);
+    return std::unexpected(std::move(error));
+  }
+  return unlocked_session_result;
+}
 
 // static
 ava::core::Result<session_ts> Session::construct(OpenContext const& context, runtime::SessionLifecycleRequest const& request, ava::session::SessionStore& store,
@@ -819,150 +994,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
 }
 
 // static
-ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
-{
-  if (request.requested_session_id && request.continue_last_session)
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either requested session id or continue, not both"));
-  if (request.fork_session_id && (request.requested_session_id || request.continue_last_session))
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either fork or session resume options, not both"));
-  if (request.sessionless && (request.requested_session_id || request.continue_last_session || request.fork_session_id))
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "use either no-session or session resume options, not both"));
-
-  auto directories = resolve_runtime_directories(context);
-  if (!directories)
-    return std::unexpected(std::move(directories.error()));
-  auto const& workspace_dir = directories->first;
-
-  if (request.requested_session_id && context.subagent_delivery_manager)
-  {
-    auto retained = context.subagent_delivery_manager->retained_session(*request.requested_session_id, workspace_dir, context.exact_session_id);
-    if (!retained)
-      return std::unexpected(std::move(retained.error()));
-    if (*retained)
-      return std::move(**retained);
-  }
-  auto const session_read_limits = context.session_read_limits.value_or(ava::session::legacy_unbounded_session_read_limits());
-
-  bool created = true;
-  bool created_from_fork = false;
-  bool load_existing_entries = false;
-  bool should_append_session_start = true;
-  ava::session::SessionLease lease;
-  ava::core::Result<ava::session::SessionStore> store = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session was not initialized"));
-  if (request.sessionless)
-  {
-    store = ava::session::SessionStore::create_ephemeral(workspace_dir);
-  }
-  else if (request.fork_session_id)
-  {
-    auto resolved = resolve_session_id(workspace_dir, context.paths.sessions_dir, *request.fork_session_id);
-    if (!resolved)
-      return std::unexpected(resolved.error());
-    auto source = ava::session::SessionStore::open(workspace_dir, *resolved, context.paths.sessions_dir);
-    if (!source)
-      return std::unexpected(std::move(source.error()));
-    auto source_lease = ava::session::SessionLease::acquire(source->session_path());
-    if (!source_lease)
-      return std::unexpected(std::move(source_lease.error()));
-    auto recovered = source->recover_torn_tail(*source_lease, session_read_limits);
-    if (!recovered)
-      return std::unexpected(std::move(recovered.error()));
-    auto staged_recovery = source->recover_incomplete_assistant_output_suffix(*source_lease, session_read_limits);
-    if (!staged_recovery)
-      return std::unexpected(std::move(staged_recovery.error()));
-    auto branch = ava::session::create_session_branch(ava::session::SessionBranchOptions{.workspace_dir = workspace_dir,
-                                                                                         .root_dir = context.paths.sessions_dir,
-                                                                                         .source_session_id = *resolved,
-                                                                                         .branch_from_entry_id = {},
-                                                                                         .name = request.initial_session_name,
-                                                                                         .labels = std::nullopt,
-                                                                                         .read_limits = context.session_read_limits,
-                                                                                         .source_lease = &*source_lease,
-                                                                                         .mode = ava::session::SessionBranchMode::Fork,
-                                                                                         .actor = "cli"});
-    if (!branch)
-      return std::unexpected(std::move(branch.error()));
-    store = std::move(branch->store);
-    lease = std::move(branch->lease);
-    created_from_fork = true;
-    load_existing_entries = true;
-    should_append_session_start = false;
-  }
-  else if (request.requested_session_id)
-  {
-    if (context.exact_session_id)
-    {
-      store = ava::session::SessionStore::open(workspace_dir, *request.requested_session_id, context.paths.sessions_dir);
-    }
-    else
-    {
-      auto resolved = resolve_session_id(workspace_dir, context.paths.sessions_dir, *request.requested_session_id);
-      if (!resolved)
-        return std::unexpected(resolved.error());
-      store = ava::session::SessionStore::open(workspace_dir, *resolved, context.paths.sessions_dir);
-    }
-    created = false;
-    load_existing_entries = true;
-  }
-  else if (request.continue_last_session)
-  {
-    auto sessions = ava::session::SessionStore::list_sessions(workspace_dir, context.paths.sessions_dir);
-    if (!sessions)
-      return std::unexpected(sessions.error());
-    if (!sessions->empty())
-    {
-      if (context.subagent_delivery_manager)
-      {
-        auto retained = context.subagent_delivery_manager->retained_session(sessions->front().session_id, workspace_dir, true);
-        if (!retained)
-          return std::unexpected(std::move(retained.error()));
-        if (*retained)
-          return std::move(**retained);
-      }
-      store = ava::session::SessionStore::open(workspace_dir, sessions->front().session_id, context.paths.sessions_dir);
-      created = false;
-      load_existing_entries = true;
-    }
-    else
-    {
-      store = ava::session::SessionStore::create(workspace_dir, context.paths.sessions_dir);
-    }
-  }
-  else
-  {
-    store = ava::session::SessionStore::create(workspace_dir, context.paths.sessions_dir);
-  }
-  if (!store)
-    return std::unexpected(store.error());
-
-  if (!created)
-  {
-    auto acquired = ava::session::SessionLease::acquire(store->session_path());
-    if (!acquired)
-      return std::unexpected(std::move(acquired.error()));
-    lease = std::move(*acquired);
-    auto recovered = store->recover_torn_tail(lease, session_read_limits);
-    if (!recovered)
-      return std::unexpected(std::move(recovered.error()));
-    auto staged_recovery = store->recover_incomplete_assistant_output_suffix(lease, session_read_limits);
-    if (!staged_recovery)
-      return std::unexpected(std::move(staged_recovery.error()));
-  }
-
-  auto unlocked_session_result =
-      construct(context, request, *store, lease, created, load_existing_entries, created && should_append_session_start,
-                request.initial_session_name.has_value() && !request.fork_session_id, context.subagent_delivery_manager, context.session_title_coordinator);
-  if (!unlocked_session_result && created_from_fork)
-  {
-    auto error = std::move(unlocked_session_result.error());
-    ava::session::rollback_created_session_with_context(*store, lease, error);
-    return std::unexpected(std::move(error));
-  }
-  return unlocked_session_result;
-}
-
-// static
-ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease, bool created)
+ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease,
+                                                  bool created)
 {
   if (store.is_ephemeral())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "owned runtime session handoff requires a persistent session"));
@@ -979,8 +1012,11 @@ ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, av
   return construct(context, {}, store, lease, created, true, false, false, context.subagent_delivery_manager, context.session_title_coordinator);
 }
 
-Session Session::create_detached(ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
-                                 std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const
+// Snapshot all state needed to construct a detached session, using lease, authority, and manager for its independent resources.
+//
+// No Session is constructed here, so returning this aggregate while the source session is read-locked cannot destruct a temporary Session.
+Session_aggregate_base Session::create_detached_state(ava::session::SessionLease lease, ava::session::SessionReadAuthority authority,
+                                                      std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const
 {
   SessionResources session_resources{.lease = std::move(lease),
                                      .anchor_set = anchor_set(),
@@ -992,46 +1028,13 @@ Session Session::create_detached(ava::session::SessionLease lease, ava::session:
                                      .session_title_coordinator = session_title_coordinator(),
                                      .diagnostics = diagnostics(),
                                      .mcp_config = mcp_config()};
-  return Session(Session_aggregate_base{.invocation_inputs_ = invocation_inputs(),
-                                        .resolved_prompt_state_ = resolve_prompt_state(),
-                                        .model_selection_ = model_selection(),
-                                        .trust_state_ = trust_state(),
-                                        .resources_ = std::move(session_resources),
-                                        .store = store,
-                                        .created = created});
-}
-
-//static
-ava::core::Result<session_ts> Session::create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
-{
-  context.workspace_dir = workspace_root;
-  context.current_dir = current_dir;
-  return Session::open(context);
-}
-
-//static
-ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root,
-                                                            std::filesystem::path const& current_dir, SessionLifecycleRequest request)
-{
-  context.workspace_dir = workspace_root;
-  context.current_dir = current_dir;
-  return Session::open(context, request);
-}
-
-//static
-ava::core::Result<session_ts> Session::create_like(session_ts const& unlocked_session, OpenContext const& base_context)
-{
-  CRITICAL_AREA_BEGIN_CR(session);
-  OpenContext const open_context = session_r->replacement_open_context(base_context);
-  auto const workspace_dir = session_r->workspace_dir();
-  auto const current_dir = session_r->current_dir();
-  CRITICAL_AREA_END_R(session);
-  return create_at(std::move(open_context), workspace_dir, current_dir);
-}
-
-ava::core::Result<session_ts> Session::open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const
-{
-  return open_at(replacement_open_context(base_context), workspace_dir(), current_dir(), std::move(request));
+  return Session_aggregate_base{.invocation_inputs_ = invocation_inputs(),
+                                .resolved_prompt_state_ = resolve_prompt_state(),
+                                .model_selection_ = model_selection(),
+                                .trust_state_ = trust_state(),
+                                .resources_ = std::move(session_resources),
+                                .store = store,
+                                .created = created};
 }
 
 CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
@@ -1051,45 +1054,112 @@ CommandRegistry Session::load_command_registry(CommandRegistryOptions options)
   return std::move(builder.registry);
 }
 
-ava::core::VoidResult Session::refresh_parent_configuration() const
+// static
+ava::core::VoidResult Session::refresh_parent_configuration(session_ts const& unlocked_session)
 {
-  auto const& manager = subagent_delivery_manager();
-  return manager ? manager->refresh_parent_configuration_1(*this) : ava::core::VoidResult{};
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::refresh_parent_configuration");
+  CRITICAL_AREA_BEGIN_CR(session);
+  auto manager = session_r->subagent_delivery_manager();
+  CRITICAL_AREA_END_R(session);
+  return manager ? manager->refresh_parent_configuration(unlocked_session) : ava::core::VoidResult{};
 }
 
-ava::core::VoidResult Session::replace_with(Session&& replacement)
+// static
+ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, session_ts& unlocked_replacement)
 {
-  // Background ownership and diagnostics are application-scoped. Retire only
-  // the visible session controller and preserve the exact services across navigation.
-  auto coordinator = resources().subagent_coordinator;
-  auto delivery_manager = resources().subagent_delivery_manager;
-  auto title_coordinator = resources().session_title_coordinator;
-  auto diagnostics = resources().diagnostics;
-  auto const detached_parent_id = sessionless() ? std::string{} : store.session_id();
-  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement.sessionless() || replacement.store.session_id() != detached_parent_id);
-  resources().run_controller.reset();
-  *this = std::move(replacement);
-  if (delivery_manager)
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::replace_with");
+
+  if (&unlocked_current == &unlocked_replacement)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot replace a session with itself"));
+
+  // We can't destroy any resources while holding session locks; therefore keep a store for them outside the critical area.
+  SessionResources old_resources;
+
+  CRITICAL_AREA_BEGIN_W(current);
+
+  // Zero-out all resources of current, without destroying any; we just park them in `old_resources`.
+  current_w->resources().swap(old_resources);
+
+  CRITICAL_AREA_BEGIN_W(replacement);
+
+  // We might need to call release_detached_parent on this after releasing the locks.
+  auto const detached_parent_id = current_w->sessionless() ? std::string{} : current_w->store.session_id();
+  bool const leaves_detached_parent = !detached_parent_id.empty() && (replacement_w->sessionless() || replacement_w->store.session_id() != detached_parent_id);
+  auto const old_subagent_delivery_manager = old_resources.subagent_delivery_manager;
+
+  // Replace current with replacement.
+  *current_w = std::move(*replacement_w);
+
+  // Normal slash navigation does use `current.replacement_open_context`.
+  // That function copies the current session’s manager, coordinator, title coordinator, and diagnostics
+  // into the replacement context. Those normal replacements therefore generally share identities.
+  // However, we need replace_with to work too if current has any of those already set, in which case
+  // they should not have been replaced.
+  //
+  // The correct algorithm here would be, in pseudo code:
+  //
+  // 1. If current has a manager:
+  //      preserve current.manager
+  //      coordinator = current.manager->coordinator()
+  //
+  // 2. Otherwise, if replacement has a manager:
+  //      use replacement.manager
+  //      coordinator = replacement.manager->coordinator()
+  //
+  // 3. Otherwise, neither has a manager:
+  //      preserve current.coordinator if present;
+  //      otherwise use replacement.coordinator.
+  //
+  // Note that it is impossible for a `manager->coordinator()` to be null, if the `manager` exists.
+  ASSERT(!old_resources.subagent_delivery_manager ||
+         (old_resources.subagent_delivery_manager->coordinator() &&
+          old_resources.subagent_delivery_manager->coordinator() == old_resources.subagent_coordinator));
+  ASSERT(!current_w->resources().subagent_delivery_manager ||
+         (current_w->resources().subagent_delivery_manager->coordinator() &&
+          current_w->resources().subagent_delivery_manager->coordinator() == current_w->resources().subagent_coordinator));
+
+  if (old_resources.subagent_delivery_manager)                  // 1. If current has a manager.
   {
-    resources().subagent_delivery_manager = delivery_manager;
-    resources().subagent_coordinator = resources().subagent_delivery_manager->coordinator();
+    // Put subagent_delivery_manager and subagent_coordinator back as a pair.
+    current_w->resources().subagent_delivery_manager.swap(old_resources.subagent_delivery_manager);
+    current_w->resources().subagent_coordinator.swap(old_resources.subagent_coordinator);
   }
-  else if (coordinator)
-    resources().subagent_coordinator = coordinator;
-  if (title_coordinator)
-    resources().session_title_coordinator = std::move(title_coordinator);
-  if (diagnostics)
-    resources().diagnostics = std::move(diagnostics);
+  // 2. Otherwise, if replacement has a manager; has already been taken care of by the `*current_w = std::move(*replacement_w);` above.
+  else if (!current_w->resources().subagent_delivery_manager)   // 3. Otherwise, neither has a manager:
+  {
+    if (old_resources.subagent_coordinator)                     // preserve current.coordinator if present.
+      current_w->resources().subagent_coordinator.swap(old_resources.subagent_coordinator);
+  }
+
+  // Also put back any already existing session_title_coordinator and/or diagnostics.
+  if (old_resources.session_title_coordinator)
+    current_w->resources().session_title_coordinator.swap(old_resources.session_title_coordinator);
+  if (old_resources.diagnostics)
+    current_w->resources().diagnostics.swap(old_resources.diagnostics);
+
+  // We expect replacement to always have a subagent_delivery_manager because it
+  // should have been constructed with `Session::construct`, that does:
+  //   .subagent_coordinator = delivery_manager->coordinator(),
+  //   .subagent_delivery_manager = std::move(delivery_manager),
+  // after making sure `delivery_manager` is non-null; replace_with is never called
+  // on a manager-less Session. And thus
+  ASSERT(current_w->resources().subagent_delivery_manager);
+  ASSERT(current_w->resources().subagent_coordinator == current_w->resources().subagent_delivery_manager->coordinator());
+
+  CRITICAL_AREA_END_W(replacement);
+  CRITICAL_AREA_END_W(current);
 
   // This is an explicit visible-session detach boundary. The delivery manager
-  // keeps the exact parent capsule while process-local work still needs it.
-  if (leaves_detached_parent && delivery_manager)
-    delivery_manager->release_detached_parent(detached_parent_id);
+  // keeps the exact parent capsule while process-local work still needs it. Both
+  // session locks must be released before this potentially blocking boundary.
+  if (leaves_detached_parent && old_subagent_delivery_manager)
+    old_subagent_delivery_manager->release_detached_parent(detached_parent_id);
+
   return {};
 }
 
 ava::core::VoidResult Session::recover_source_for_mutation(std::string const& source_session_id,
-                                                            std::optional<ava::session::SessionLease>& temporary_source_lease)
+                                                           std::optional<ava::session::SessionLease>& temporary_source_lease)
 {
   if (source_session_id == store.session_id())
   {
@@ -1205,7 +1275,19 @@ ava::core::VoidResult Session::apply_prompt_state(PromptState prompt_state)
                                                .freshness_sources = std::move(prompt_state.freshness_sources),
                                                .system_prompt = std::move(prompt_state.system_prompt),
                                                .ambient_extension_free_system_prompt = std::move(prompt_state.ambient_extension_free_system_prompt)};
-  return refresh_parent_configuration();
+  return {};
+}
+
+// static
+ava::core::VoidResult Session::apply_prompt_state_and_refresh(session_ts& unlocked_session, PromptState prompt_state)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_prompt_state_and_refresh");
+  CRITICAL_AREA_BEGIN_W(session);
+  auto applied = session_w->apply_prompt_state(std::move(prompt_state));
+  CRITICAL_AREA_END_W(session);
+  if (!applied)
+    return applied;
+  return refresh_parent_configuration(unlocked_session);
 }
 
 ava::core::Result<bool> Session::switch_model(ava::config::ModelInfo model)
@@ -1231,9 +1313,21 @@ ava::core::Result<bool> Session::switch_model(ava::config::ModelInfo model)
                                                .system_prompt = std::move(prompt_state->system_prompt),
                                                .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   model_selection().reasoning = std::nullopt;
-  if (auto refreshed = refresh_parent_configuration(); !refreshed)
-    return std::unexpected(std::move(refreshed.error()));
   return true;
+}
+
+// static
+ava::core::Result<bool> Session::switch_model_and_refresh(session_ts& unlocked_session, ava::config::ModelInfo model)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::switch_model_and_refresh");
+  CRITICAL_AREA_BEGIN_W(session);
+  auto switched = session_w->switch_model(std::move(model));
+  CRITICAL_AREA_END_W(session);
+  if (!switched || !*switched)
+    return switched;
+  if (auto refreshed = refresh_parent_configuration(unlocked_session); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  return switched;
 }
 
 ava::core::Result<bool> Session::set_reasoning(std::optional<ReasoningSelection> selection)
@@ -1256,9 +1350,21 @@ ava::core::Result<bool> Session::set_reasoning(std::optional<ReasoningSelection>
   if (!appended)
     return std::unexpected(std::move(appended.error()));
   model_selection().reasoning = std::move(selection);
-  if (auto refreshed = refresh_parent_configuration(); !refreshed)
-    return std::unexpected(std::move(refreshed.error()));
   return true;
+}
+
+// static
+ava::core::Result<bool> Session::set_reasoning_and_refresh(session_ts& unlocked_session, std::optional<ReasoningSelection> selection)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::set_reasoning_and_refresh");
+  CRITICAL_AREA_BEGIN_W(session);
+  auto changed = session_w->set_reasoning(std::move(selection));
+  CRITICAL_AREA_END_W(session);
+  if (!changed || !*changed)
+    return changed;
+  if (auto refreshed = refresh_parent_configuration(unlocked_session); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  return changed;
 }
 
 ava::core::Result<ava::session::SessionMetadataView> Session::load_metadata() const

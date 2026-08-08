@@ -428,13 +428,11 @@ void test_coordinator_fallback_and_navigation_lifetime()
   expect(state->wait_started(), "title navigation generator starts");
   auto unlocked_replacement_result = ava::app::runtime::Session::create_like(unlocked_session, ava::app::runtime::OpenContext{});
   expect(unlocked_replacement_result.has_value(), unlocked_replacement_result ? "replacement session opens" : unlocked_replacement_result.error().format());
-  CRITICAL_AREA_CONTINUE_W(session);
 
   if (unlocked_replacement_result)
-  {
-    SCOPED_CRITICAL_AREA_W(replacement_w, *unlocked_replacement_result);
-    expect(session_w->replace_with(std::move(*replacement_w)).has_value(), "visible session navigation succeeds during title work");
-  }
+    expect(ava::app::runtime::Session::replace_with(unlocked_session, *unlocked_replacement_result).has_value(),
+           "visible session navigation succeeds during title work");
+  CRITICAL_AREA_CONTINUE_W(session);
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "navigation title coordinator becomes idle");
   auto summaries = ava::session::SessionStore::list_sessions(session_w->workspace_dir(), session_w->paths().sessions_dir);

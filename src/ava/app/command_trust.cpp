@@ -65,10 +65,10 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts&
   {
     SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     session_w->trust_state().project_trust = std::move(next_trust);
-    if (auto refreshed = session_w->apply_prompt_state(std::move(*prompt_state)); !refreshed)
-      return std::unexpected(std::move(refreshed.error()));
-    applied_trust = session_w->project_trust();
   }
+  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(applied_trust));
 }
 

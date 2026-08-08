@@ -91,13 +91,12 @@ ava::core::Result<CommandResult> run_branch_command(runtime::session_ts& unlocke
   }
   std::string switched_session_id;
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
     opened_w->created = true;
-    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
-    switched_session_id = session_w->store.session_id();
   }
+  if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+    return std::unexpected(std::move(replaced.error()));
+  switched_session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
 
   result.session_tree_changed = true;
   auto const mode_text = mode == ava::session::SessionBranchMode::Clone ? std::string("cloned") : std::string("forked");
@@ -155,12 +154,8 @@ ava::core::Result<CommandResult> run_new_session_command(runtime::session_ts& un
         return std::unexpected(std::move(metadata.error()));
     }
   }
-  {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
-  }
+  if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+    return std::unexpected(std::move(replaced.error()));
 
   result.session_tree_changed = true;
   std::string output = "started session \"" + created_session_title + "\" · id " + created_session_id;
@@ -186,12 +181,8 @@ ava::core::Result<CommandResult> run_resume_command(runtime::session_ts& unlocke
   if (!unlocked_opened_result)
     return std::unexpected(std::move(unlocked_opened_result.error()));
 
-  {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
-  }
+  if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+    return std::unexpected(std::move(replaced.error()));
   add_output(result, "resumed session " + runtime::session_ts::rat(unlocked_session)->store.session_id());
   return result;
 }
@@ -278,10 +269,10 @@ ava::core::Result<CommandResult> run_mode_command(runtime::session_ts& unlocked_
     {
       return std::unexpected(std::move(appended.error()));
     }
-    if (auto refreshed = session_w->apply_prompt_state(std::move(*prompt_state)); !refreshed)
-      return std::unexpected(std::move(refreshed.error()));
-    applied_mode = session_w->mode();
   }
+  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
+    return std::unexpected(std::move(refreshed.error()));
+  applied_mode = runtime::session_ts::rat(unlocked_session)->mode();
   add_output(result, "mode switched to " + ava::agent::to_string(applied_mode));
   return result;
 }

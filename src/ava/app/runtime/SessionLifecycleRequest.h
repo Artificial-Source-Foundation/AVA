@@ -16,9 +16,9 @@ namespace ava::app::runtime {
 struct SessionLifecycleRequest
 {
   bool sessionless = false;
-  std::optional<std::string> requested_session_id;
-  std::optional<std::string> fork_session_id;
-  std::optional<std::string> initial_session_name;
+  std::optional<std::string> requested_session_id = {};
+  std::optional<std::string> fork_session_id = {};
+  std::optional<std::string> initial_session_name = {};
   bool continue_last_session = false;
   std::optional<std::string> initial_reasoning_level = std::nullopt;
   // Strict adapters may pin the persisted cwd while retaining lease acquisition inside the protocol-neutral runtime ownership boundary.

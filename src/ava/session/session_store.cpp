@@ -249,6 +249,13 @@ void SessionTraceScope::succeed(std::size_t entry_count) noexcept
 
 }  // namespace detail
 
+void SessionLease::swap(SessionLease& other)
+{
+  std::swap(fd_, other.fd_);
+  canonical_path_.swap(other.canonical_path_);
+  std::swap(created_, other.created_);
+}
+
 using detail::project_key;
 
 SessionStore::SessionStore(SessionStoreOptions options) : options_(std::move(options)), observation_attachment_(std::make_shared<ObservationAttachment>())

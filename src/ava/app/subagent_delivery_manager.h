@@ -64,10 +64,11 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   using CapsuleGeneration = std::uint64_t;
 
   [[nodiscard]] ava::core::Result<CapsuleGeneration> refresh_parent(runtime::session_ts const& unlocked_session, runtime::RunOptions const& options);
-  // Refreshes configuration-only runtime state while preserving the current
-  // detached callback-free policy snapshot. Missing capsules are a no-op.
-  // Called from Session::refresh_parent_configuration that passes *this: session is already locked.
-  [[nodiscard]] ava::core::VoidResult refresh_parent_configuration_1(runtime::Session const& session);
+  // Refresh configuration-only runtime state from unlocked_session while preserving the current detached callback-free policy snapshot.
+  //
+  // The wrapper must be unlocked. Missing capsules are a no-op; failures duplicate session authority or publish the replacement capsule. The source
+  // read lock is released before replacing the capsule, because replacement may destroy a retained Session.
+  [[nodiscard]] ava::core::VoidResult refresh_parent_configuration(runtime::session_ts const& unlocked_session);
   void release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation);
   // Marks an explicit runtime attachment, preventing stale detach state from
   // releasing this visible parent's retained capsule.
@@ -76,11 +77,13 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   // Retains any capsule still needed for a live job or delivery.
   void release_detached_parent(std::string_view parent_session_id);
 
-  // Navigation uses this before pathname acquisition, allowing an inactive
-  // retained parent to share its exact controller/append/read authority.
-  [[nodiscard]] ava::core::Result<std::optional<runtime::Session>> retained_session(std::string_view session_id,
-                                                                                    std::filesystem::path const& workspace_identity,
-                                                                                    bool exact_session_id = false);
+  // Find a retained session matching session_id and workspace_identity, reporting benign absence through found.
+  //
+  // On success found is true and the result owns the detached session. When no retained session exists, found is false and callers must ignore the
+  // sentinel error result. All genuine lookup or attachment errors set found to true and remain available through the result.
+  [[nodiscard]] ava::core::Result<runtime::session_ts> retained_session(std::string_view session_id,
+                                                                         std::filesystem::path const& workspace_identity, bool& found,
+                                                                         bool exact_session_id = false);
 
   void shutdown() noexcept;
 

@@ -532,14 +532,9 @@ ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocke
     add_output(result, error.format());
     return result;
   }
-  std::string imported_session_id;
-  {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
-    if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
-      return std::unexpected(std::move(replaced.error()));
-    imported_session_id = session_w->store.session_id();
-  }
+  if (auto replaced = runtime::Session::replace_with(unlocked_session, *unlocked_opened_result); !replaced)
+    return std::unexpected(std::move(replaced.error()));
+  auto const imported_session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
   result.session_tree_changed = true;
   add_output(result, "imported session " + imported_session_id + " from " + import_path.string() + "\n  entries: " + std::to_string(entries->size()) +
                          "\n  switched to " + imported_session_id);

@@ -404,6 +404,7 @@ void test_app_session_fork_from_entry_and_user_turns()
              !std::ranges::any_of(*cut_entries, [](ava::session::SessionEntry const& entry) { return entry.id == "entry_assistant_a"; }) &&
              cut_fork->output[0].find("at " + earlier_entry_id) != std::string::npos,
          "picker-selected earlier user-entry fork cuts history at that exact entry id rather than the tip");
+  CRITICAL_AREA_END_W(session);
 
   ava::app::runtime::OpenContext ephemeral_context = open_context;
   ava::app::runtime::SessionLifecycleRequest ephemeral_request;
@@ -452,6 +453,7 @@ void test_app_session_fork_from_entry_and_user_turns()
   expect(sessionless_fork && sessionless_fork->handled && !sessionless_fork->session_tree_changed && ephemeral_w->store.session_id() == ephemeral_id_before &&
              !sessionless_fork->output.empty() && sessionless_fork->output[0].find("sessionless") != std::string::npos,
          "sessionless run_fork_command remains a non-switching handled result that must not be treated as an opened snapshot");
+  CRITICAL_AREA_END_W(ephemeral);
 
   auto unlocked_empty_session = ava::app::runtime::Session::open(ephemeral_context, ephemeral_request);
   expect(unlocked_empty_session.has_value(), "empty user-turn selector test opens an ephemeral session");
@@ -563,6 +565,7 @@ void test_app_session_new_resume_commands()
   auto unnamed = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/new"});
   CRITICAL_AREA_CONTINUE_W(session);
   auto const unnamed_session_id = session_w->store.session_id();
+  CRITICAL_AREA_END_W(session);
   auto const expected_unnamed_receipt = "started session \"Untitled session\" · id " + unnamed_session_id + "\nprevious session \"Old title\" · id " +
                                         source_session_id + "\nswitched to \"Untitled session\"";
   expect(unnamed && unnamed->handled && unnamed->output.size() == 1 && unnamed->output[0] == expected_unnamed_receipt,
@@ -579,13 +582,11 @@ void test_app_session_new_resume_commands()
   expect(unlocked_sessionless_result.has_value(), "slash new/resume test opens an ephemeral current session");
   if (!unlocked_sessionless_result)
     return;
-  SCOPED_CRITICAL_AREA_W(sessionless_w, *unlocked_sessionless_result);
-  auto replaced = session_w->replace_with(std::move(*sessionless_w));
+  auto replaced = ava::app::runtime::Session::replace_with(unlocked_session, *unlocked_sessionless_result);
   expect(replaced.has_value(), "slash new/resume test replaces the current session through its lifecycle API");
   if (!replaced)
     return;
 
-  CRITICAL_AREA_END_W(session);
   auto ephemeral_fresh = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/new"});
   CRITICAL_AREA_CONTINUE_W(session);
   expect(ephemeral_fresh && ephemeral_fresh->handled && session_w->sessionless(),
@@ -596,6 +597,7 @@ void test_app_session_new_resume_commands()
   CRITICAL_AREA_CONTINUE_W(session);
   expect(resumed_from_ephemeral && resumed_from_ephemeral->handled && !session_w->sessionless() && session_w->store.session_id() == source_session_id,
          "slash /resume from an ephemeral current session opens the requested persistent session");
+  CRITICAL_AREA_END_W(session);
 }
 
 void test_app_session_metadata_commands()

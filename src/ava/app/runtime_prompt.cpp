@@ -162,29 +162,35 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
     }
     return std::unexpected(std::move(error));
   };
-  struct ParentRefresh final
-  {
-    std::shared_ptr<SubagentDeliveryManager> manager;
-    std::string session_id;
-    std::optional<SubagentDeliveryManager::CapsuleGeneration> generation = std::nullopt;
-    ~ParentRefresh()
-    {
-      if (manager && generation)
-        manager->release_parent_if_unused(session_id, *generation);
-    }
-  } refresh{options.synthetic_subagent_delivery ? nullptr : session_r->subagent_delivery_manager(), session_r->store.session_id()};
 
   std::string const session_id_copy = session_r->store.session_id();
   std::string const provider_id_copy = session_r->model().provider_id;
   bool const offline_copy = session_r->is_offline() || options.offline;
-  CRITICAL_AREA_END_R(session);
 
-  if (refresh.manager)
+  // Scope of `refresh`.
   {
-    auto retained = refresh.manager->refresh_parent(unlocked_session, options);
-    if (!retained)
-      return fail_run(std::move(retained.error()));
-    refresh.generation = *retained;
+    struct ParentRefresh final
+    {
+      std::shared_ptr<SubagentDeliveryManager> manager;
+      std::string session_id;
+      std::optional<SubagentDeliveryManager::CapsuleGeneration> generation = std::nullopt;
+      ~ParentRefresh()
+      {
+        if (manager && generation)
+          manager->release_parent_if_unused(session_id, *generation);
+      }
+    } refresh{options.synthetic_subagent_delivery ? nullptr : session_r->subagent_delivery_manager(), session_r->store.session_id()};
+    CRITICAL_AREA_END_R(session);
+
+    if (refresh.manager)
+    {
+      auto retained = refresh.manager->refresh_parent(unlocked_session, options);
+      if (!retained)
+        return fail_run(std::move(retained.error()));
+      refresh.generation = *retained;
+    }
+
+    // No session lock may be held when refresh is destructed.
   }
 
   if (offline_copy)

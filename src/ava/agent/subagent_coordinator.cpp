@@ -6,7 +6,7 @@
 #include "ava/session/session_store.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
-#include "ava/app/runtime/session_ts.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <cstdint>

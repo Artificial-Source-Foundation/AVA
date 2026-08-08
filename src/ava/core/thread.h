@@ -176,6 +176,15 @@ inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std
               "] still locked while: " << operation << " at " << location.file_name() << ':' << location.line());
 }
 
+// Do not use the above functions directory. Use these macro's instead.
+#ifdef CWDEBUG
+#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ::ava::core::assert_no_session_lock_held(operation)
+#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ::ava::core::assert_session_unlocked(unlocked_session, operation)
+#else
+#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ((void)0)
+#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ((void)0)
+#endif
+
 // Register the calling thread with libcwd under `label`, so that debug output
 // can be attributed to it and the thread is named.
 //

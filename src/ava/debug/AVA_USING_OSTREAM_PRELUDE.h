@@ -40,9 +40,11 @@ namespace debug { using namespace debug::hidden_dummies::debug; }
   using ::debug::maxlen; \
   using ::debug::__write__
 
+// This prelude is what is used inside print_members_on member functions.
 #define AVA_USING_OSTREAM_PRELUDE(os) \
   os << std::boolalpha; \
   LIBCWD_USING_OSTREAM_PRELUDE; \
+  using ::debug::ostream_operators::print_members::operator<<; \
   os
 
 #include "NAMESPACE_DEBUG.h"

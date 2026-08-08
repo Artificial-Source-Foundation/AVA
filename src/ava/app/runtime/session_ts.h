@@ -27,14 +27,6 @@ using session_ts = threadsafe::Unlocked<Session, threadsafe::policy::Primitive<s
 
 }  // namespace ava::app::runtime
 
-#ifdef CWDEBUG
-#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ::ava::core::assert_no_session_lock_held(operation)
-#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ::ava::core::assert_session_unlocked(unlocked_session, operation)
-#else
-#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ((void)0)
-#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ((void)0)
-#endif
-
 #ifndef CWDEBUG
 #define AVA_DEBUG_PRINT_MESSAGE(msg)
 #else

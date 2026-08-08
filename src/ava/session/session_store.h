@@ -158,6 +158,8 @@ class SessionLease
   // mutate the shared open-file-description offset.
   [[nodiscard]] off_t offset_for_test() const noexcept;
 
+  void swap(SessionLease& other);
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:

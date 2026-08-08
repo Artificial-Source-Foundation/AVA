@@ -121,8 +121,6 @@ inline std::ostream& operator<<(std::ostream& os, std::shared_ptr<T> const& ptr)
 
 template<ConceptAnyStdFunction T>
 inline std::ostream& operator<<(std::ostream& os, T const& fn);
-
-inline std::ostream& operator<<(std::ostream& os, char const* str);
 //-----------------
 
 // Non-inline, defined below.
@@ -221,12 +219,6 @@ template<ConceptAnyStdFunction T>
 std::ostream& operator<<(std::ostream& os, T const& UNUSED_ARG(fn))
 {
   os.write("$std::function$", 15);
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, char const* str)
-{
-  os << ::debug::print_string(str);
   return os;
 }
 

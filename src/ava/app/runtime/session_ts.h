@@ -38,9 +38,11 @@ using session_ts = threadsafe::Unlocked<Session, threadsafe::policy::Primitive<s
 #ifndef CWDEBUG
 #define AVA_DEBUG_PRINT_MESSAGE(msg)
 #else
+#define AVA_STRINGIFY_(x) #x
+#define AVA_STRINGIFY(x) AVA_STRINGIFY_(x)
 #define AVA_DEBUG_PRINT_MESSAGE(msg) \
   ;                                  \
-  Dout(dc::session, msg << " from " __FILE__ << ":" << __LINE__)
+  Dout(dc::session, msg " from " __FILE__ ":" AVA_STRINGIFY(__LINE__))
 #endif
 
 #define AVA_DECLARE_ACCESS_TYPE_CR(session_r, unlocked_session) ava::app::runtime::session_ts::crat session_r(unlocked_session)

@@ -34,13 +34,16 @@
 #include <array>
 #include <cstddef>
 #include <future>
-#include <source_location>
 #include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
+#ifdef CWDEBUG
+#include <source_location>
+#include <threadsafe/AIMutex.h>
+#endif
 #include "debug.h"      // DEBUG_ONLY
 
 namespace ava::core {
@@ -99,25 +102,87 @@ inline void unregister_long_wait_incompatible_lock(void const* lock)
   return detail::long_wait_incompatible_locks.count != 0;
 }
 
-// Reject a potentially unbounded wait while the current thread owns an incompatible debug lock.
+// Track session mutex ownership by the current thread while retaining AIMutex's self-deadlock detection.
 //
-// Operation describes the wait. Location defaults to the caller so failures identify the boundary that attempted to block.
-inline void assert_no_long_wait_incompatible_lock(std::string_view operation, std::source_location location = std::source_location::current())
+// Every successful lock acquisition registers this mutex in thread-local state. Potentially blocking code can therefore reject execution while the
+// current thread owns any session mutex, even when that code has no reference to the corresponding session_ts object.
+class SessionDebugMutex final : public AIMutex
 {
-  if (current_thread_holds_long_wait_incompatible_lock())
-    DoutFatal(dc::coredump,
-              "Potentially blocking operation while holding (an) incompatible lock(s) [" <<
-              detail::long_wait_incompatible_locks << "]: " << operation << " at " << location.file_name() << ':' << location.line());
-}
-#endif
+ public:
+  // Acquire this session mutex and register it as owned by the current thread.
+  void lock()
+  {
+    DoutEntering(dc::session, "SessionDebugMutex::lock() [" << this << "]");
 
-#ifdef CWDEBUG
+    AIMutex::lock();
+    register_long_wait_incompatible_lock(this);
+
+    Dout(dc::session, "Locked SessionDebugMutex [" << this << "]");
+  }
+
+  // Try to acquire this session mutex, registering only a successful acquisition.
+  //
+  // Returns true only when the underlying mutex was acquired.
+  [[nodiscard]] bool try_lock()
+  {
+    DoutEntering(dc::session, "SessionDebugMutex::try_lock() [" << this << "]");
+
+    if (!AIMutex::try_lock())
+      return false;
+    register_long_wait_incompatible_lock(this);
+    Dout(dc::session, "Locked SessionDebugMutex (try_lock) [" << this << "]");
+    return true;
+  }
+
+  // Release this session mutex and remove it from the current thread's registry.
+  void unlock()
+  {
+    DoutEntering(dc::session, "SessionDebugMutex::unlock() [" << this << "]");
+
+    ASSERT(is_self_locked());
+    unregister_long_wait_incompatible_lock(this);
+    AIMutex::unlock();
+  }
+
+  // Return whether the current thread owns at least one debug session mutex.
+  [[nodiscard]] static bool current_thread_holds_session_lock() noexcept { return current_thread_holds_long_wait_incompatible_lock(); }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// Assert that the current thread owns no session mutex before entering a potentially blocking operation.
+//
+// `operation` describes the wait or other slow boundary.
+// `location` identifies the assertion call site; this function does not require access to a particular
+// session_ts because SessionDebugMutex maintains thread-local ownership state for every session.
+inline void assert_no_session_lock_held(std::string_view operation, std::source_location location = std::source_location::current())
+{
+  if (SessionDebugMutex::current_thread_holds_session_lock())
+    DoutFatal(dc::coredump,
+              "Potentially blocking operation while holding one or more session locks [" <<
+              detail::long_wait_incompatible_locks << "] while: " << operation << " at " << location.file_name() << ':' << location.line());
+}
+
+// Assert that the current thread does not own the mutex wrapped by unlocked_session before entering a potentially blocking operation.
+//
+// Operation describes the wait or other slow boundary. This narrower check complements assert_no_session_lock_held when the relevant session is
+// already part of the API contract.
+template <typename UnlockedSession>
+inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std::string_view operation,
+                                    std::source_location location = std::source_location::current())
+{
+  if (unlocked_session.mutex().is_self_locked())
+    DoutFatal(dc::coredump, "Session mutex [" << (void*)&unlocked_session.mutex() <<
+              "] still locked while: " << operation << " at " << location.file_name() << ':' << location.line());
+}
+
 // Register the calling thread with libcwd under `label`, so that debug output
 // can be attributed to it and the thread is named.
 //
 // Returns void. No-op when libcwd (CWDEBUG) is not enabled.
 void init_thread(std::string const& label);
-#endif
+
+#endif // CWDEBUG
 
 // Own a cooperative thread and reject implicit or explicit joins while the current thread holds a debug lock that forbids long waits.
 //
@@ -132,8 +197,10 @@ class JoinThread
   JoinThread() noexcept = default;
   ~JoinThread()
   {
+#ifdef CWDEBUG
     if (thread_.joinable())
       assert_join_allowed("implicitly joining JoinThread during destruction of thread");
+#endif
   }
 
   JoinThread(JoinThread const&) = delete;
@@ -143,12 +210,12 @@ class JoinThread
   {
     if (this != &other)
     {
+#ifdef CWDEBUG
       if (thread_.joinable())
         assert_join_allowed("implicitly joining JoinThread during move assignment into thread");
-      thread_ = std::move(other.thread_);
-#ifdef CWDEBUG
       label_ = std::move(other.label_);
 #endif
+      thread_ = std::move(other.thread_);
     }
     return *this;
   }
@@ -190,7 +257,7 @@ class JoinThread
   // Wait for the owned thread to finish after checking the debug no-long-wait contract.
   void join()
   {
-    assert_join_allowed("explicitly joining JoinThread");
+    Debug(assert_join_allowed("explicitly joining JoinThread"));
     thread_.join();
   }
 
@@ -208,27 +275,17 @@ class JoinThread
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
-#ifdef CWDEBUG
-  JoinThread(std::jthread thread, std::string label) : thread_(std::move(thread)), label_(std::move(label)) { }
-#else
-  explicit JoinThread(std::jthread thread) : thread_(std::move(thread)) { }
-#endif
+  explicit JoinThread(std::jthread thread, std::string label) : CWDEBUG_ONLY(label_(std::move(label)),) thread_(std::move(thread)) { }
 
-  void assert_join_allowed(std::string_view operation) const
-  {
 #ifdef CWDEBUG
-    if (current_thread_holds_long_wait_incompatible_lock())
-      DoutFatal(dc::coredump, "Potentially blocking operation while holding (an) incompatible lock(s) [" <<
-          detail::long_wait_incompatible_locks << "]: " << operation << " \"" << label_ << "\".");
-#else
-    static_cast<void>(operation);
-#endif
+  void assert_join_allowed(std::string_view CWDEBUG_ONLY(operation)) const
+  {
+    Debug(assert_no_session_lock_held(operation));
   }
 
-  std::jthread thread_;
-#ifdef CWDEBUG
   std::string label_;
 #endif
+  std::jthread thread_;
 };
 
 // Start a plain (non-cooperative) thread whose first action is init_thread(label).

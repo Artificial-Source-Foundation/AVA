@@ -125,7 +125,7 @@ void test_debug_session_mutex_tracks_current_thread()
   expect(worker_finished.load(std::memory_order_acquire), "JoinThread destruction requests stop and joins its worker");
 
 #ifdef CWDEBUG
-  using ava::app::runtime::SessionDebugMutex;
+  using ava::core::SessionDebugMutex;
 
   expect(!SessionDebugMutex::current_thread_holds_session_lock(), "debug session mutex registry starts empty");
   expect(!ava::core::current_thread_holds_long_wait_incompatible_lock(), "core long-wait registry starts empty");

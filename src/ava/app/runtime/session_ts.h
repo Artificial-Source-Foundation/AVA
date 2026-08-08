@@ -4,71 +4,18 @@
 #include "ava/core/thread.h"
 
 #include <threadsafe/threadsafe.h>
-#ifdef CWDEBUG
-#include <source_location>
-#include <string_view>
-#include <threadsafe/AIMutex.h>
-#endif
 
 namespace ava::app::runtime {
 
 class Session;
 
 #ifdef CWDEBUG
-// Track session mutex ownership by the current thread while retaining AIMutex's self-deadlock detection.
-//
-// Every successful lock acquisition registers this mutex in thread-local state. Potentially blocking code can therefore reject execution while the
-// current thread owns any session mutex, even when that code has no reference to the corresponding session_ts object.
-class SessionDebugMutex final : public AIMutex
-{
- public:
-  // Acquire this session mutex and register it as owned by the current thread.
-  void lock()
-  {
-    DoutEntering(dc::session, "SessionDebugMutex::lock() [" << this << "]");
-
-    AIMutex::lock();
-    ava::core::register_long_wait_incompatible_lock(this);
-
-    Dout(dc::session, "Locked SessionDebugMutex [" << this << "]");
-  }
-
-  // Try to acquire this session mutex, registering only a successful acquisition.
-  //
-  // Returns true only when the underlying mutex was acquired.
-  [[nodiscard]] bool try_lock()
-  {
-    DoutEntering(dc::session, "SessionDebugMutex::try_lock() [" << this << "]");
-
-    if (!AIMutex::try_lock())
-      return false;
-    ava::core::register_long_wait_incompatible_lock(this);
-    Dout(dc::session, "Locked SessionDebugMutex (try_lock) [" << this << "]");
-    return true;
-  }
-
-  // Release this session mutex and remove it from the current thread's registry.
-  void unlock()
-  {
-    DoutEntering(dc::session, "SessionDebugMutex::unlock() [" << this << "]");
-
-    ASSERT(is_self_locked());
-    ava::core::unregister_long_wait_incompatible_lock(this);
-    AIMutex::unlock();
-  }
-
-  // Return whether the current thread owns at least one debug session mutex.
-  [[nodiscard]] static bool current_thread_holds_session_lock() noexcept { return ava::core::current_thread_holds_long_wait_incompatible_lock(); }
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
 template <typename SESSION>
-class UnlockedSession : public threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<SessionDebugMutex>>
+class UnlockedSession : public threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<ava::core::SessionDebugMutex>>
 {
  public:
-  using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<SessionDebugMutex>>::Unlocked;
-  using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<SessionDebugMutex>>::mutex;
+  using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<ava::core::SessionDebugMutex>>::Unlocked;
+  using threadsafe::Unlocked<SESSION, threadsafe::policy::Primitive<ava::core::SessionDebugMutex>>::mutex;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -78,38 +25,11 @@ using session_ts = UnlockedSession<Session>;
 using session_ts = threadsafe::Unlocked<Session, threadsafe::policy::Primitive<std::mutex>>;
 #endif
 
-#ifdef CWDEBUG
-// Assert that the current thread owns no session mutex before entering a potentially blocking operation.
-//
-// Operation describes the wait or other slow boundary. Location identifies the assertion call site; this function does not require access to a
-// particular session_ts because SessionDebugMutex maintains thread-local ownership state for every session.
-inline void assert_no_session_lock_held(std::string_view operation, std::source_location location = std::source_location::current())
-{
-  bool const held = SessionDebugMutex::current_thread_holds_session_lock();
-  if (held)
-    DoutFatal(dc::coredump,
-              "Potentially blocking operation while holding a session mutex: " << operation << " at " << location.file_name() << ':' << location.line());
-}
-
-// Assert that the current thread does not own the mutex wrapped by unlocked_session before entering a potentially blocking operation.
-//
-// Operation describes the wait or other slow boundary. This narrower check complements assert_no_session_lock_held when the relevant session is
-// already part of the API contract.
-template <typename UnlockedSession>
-inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std::string_view operation,
-                                    std::source_location location = std::source_location::current())
-{
-  bool const held = unlocked_session.mutex().is_self_locked();
-  if (held)
-    DoutFatal(dc::coredump, "Session mutex still locked while: " << operation << " at " << location.file_name() << ':' << location.line());
-}
-#endif
-
 }  // namespace ava::app::runtime
 
 #ifdef CWDEBUG
-#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ::ava::app::runtime::assert_no_session_lock_held(operation)
-#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ::ava::app::runtime::assert_session_unlocked(unlocked_session, operation)
+#define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ::ava::core::assert_no_session_lock_held(operation)
+#define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ::ava::core::assert_session_unlocked(unlocked_session, operation)
 #else
 #define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ((void)0)
 #define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ((void)0)

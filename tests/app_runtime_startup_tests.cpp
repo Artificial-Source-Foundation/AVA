@@ -119,7 +119,7 @@ void test_app_runtime_open_session_and_context_prompt()
 
   std::string session_id;
   {
-    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
 
     expect(session_r->created && session_r->mode() == ava::agent::Mode::Plan && session_r->model().model_id == "gpt-5.5",
            "runtime session records created state, mode, and model");
@@ -159,7 +159,7 @@ void test_app_runtime_open_session_and_context_prompt()
   expect(unlocked_reopened_result.has_value(), unlocked_reopened_result ? "runtime reopens the existing session by id prefix" : unlocked_reopened_result.error().format());
   if (unlocked_reopened_result)
   {
-    ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
+    SCOPED_CRITICAL_AREA_R(reopened_r, *unlocked_reopened_result);
     expect(!reopened_r->created && reopened_r->store.session_id() == session_id,
         "runtime session resolves requested session id prefixes without creating a new session");
     auto reopened_entries = reopened_r->store.load();
@@ -400,7 +400,7 @@ void test_app_runtime_no_session_mode()
   if (!unlocked_session_result)
     return;
 
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
   expect(session_w->sessionless() && session_w->store.is_ephemeral(), "runtime opens no-session mode with an ephemeral store");
 
@@ -465,7 +465,7 @@ void test_app_runtime_replacement_open_context()
     return;
 
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
     ava::app::runtime::OpenContext base_context;
     base_context.workspace_dir = root / "wrong-workspace";
@@ -499,7 +499,7 @@ void test_app_runtime_replacement_open_context()
   if (!unlocked_created_at_result)
     return;
 
-  ava::app::runtime::session_ts::rat created_at_r(*unlocked_created_at_result);
+  SCOPED_CRITICAL_AREA_R(created_at_r, *unlocked_created_at_result);
   auto created_metadata = ava::session::load_session_metadata(created_at_r->store);
   expect(created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
          "location-explicit session creation has no startup lifecycle state");
@@ -533,7 +533,7 @@ void test_app_runtime_session_startup_options()
   std::string named_session_id;
   ava::core::Result<std::vector<ava::session::SessionEntry>> named_entries;
   {
-    ava::app::runtime::session_ts::rat named_r(*unlocked_named_result);
+    SCOPED_CRITICAL_AREA_R(named_r, *unlocked_named_result);
 
     expect(unlocked_named_result.has_value() && named_r->created, "runtime opens a named startup session");
 
@@ -556,7 +556,7 @@ void test_app_runtime_session_startup_options()
   expect(unlocked_custom_result.has_value(), unlocked_custom_result ? "runtime opens a session under a custom session directory" : unlocked_custom_result.error().format());
   if (unlocked_custom_result)
   {
-    ava::app::runtime::session_ts::rat custom_r(*unlocked_custom_result);
+    SCOPED_CRITICAL_AREA_R(custom_r, *unlocked_custom_result);
     expect(unlocked_custom_result.has_value() && custom_r->store.session_path().string().find(custom_paths.sessions_dir.string()) == 0,
            "runtime opens sessions under a custom session directory");
     auto default_sessions = ava::session::SessionStore::list_sessions(workspace, paths.sessions_dir);
@@ -597,7 +597,7 @@ void test_app_runtime_session_startup_options()
   expect(unlocked_forked_result.has_value(), unlocked_forked_result ? "runtime startup --fork opens a new forked session from the source prefix" : unlocked_forked_result.error().format());
   if (unlocked_forked_result)
   {
-    ava::app::runtime::session_ts::rat forked_r(*unlocked_forked_result);
+    SCOPED_CRITICAL_AREA_R(forked_r, *unlocked_forked_result);
     expect(forked_r->created && forked_r->store.session_id() != named_session_id, "runtime --fork creates a new session from a source prefix");
     auto fork_metadata = ava::session::load_session_metadata(forked_r->store);
     expect(fork_metadata && fork_metadata->name == "forked startup" && fork_metadata->parent_session_id == named_session_id &&
@@ -666,7 +666,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     std::string session_id;
     std::filesystem::path session_path;
     {
-      ava::app::runtime::session_ts::rat seeded_r(*unlocked_seeded_result);
+      SCOPED_CRITICAL_AREA_R(seeded_r, *unlocked_seeded_result);
       session_id = seeded_r->store.session_id();
       session_path = seeded_r->store.session_path();
     }
@@ -688,7 +688,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
     expect(unlocked_resumed_result.has_value(), unlocked_resumed_result ? "runtime torn-tail recovery resumes the quarantined source session" : unlocked_resumed_result.error().format());
     if (unlocked_resumed_result)
     {
-      ava::app::runtime::session_ts::rat resumed_r(*unlocked_resumed_result);
+      SCOPED_CRITICAL_AREA_R(resumed_r, *unlocked_resumed_result);
       auto loaded = unlocked_resumed_result ? resumed_r->store.load()
                                             : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(unlocked_resumed_result.error()));
       expect(unlocked_resumed_result && resumed_r->store.session_id() == session_id && loaded && loaded->size() == 1 &&
@@ -712,7 +712,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   std::string source_id;
   std::filesystem::path source_path;
   {
-    ava::app::runtime::session_ts::rat source_r(*unlocked_source_result);
+    SCOPED_CRITICAL_AREA_R(source_r, *unlocked_source_result);
     source_id = source_r->store.session_id();
     source_path = source_r->store.session_path();
   }
@@ -735,7 +735,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
          unlocked_forked_result ? "startup --fork opens a recovered forked session" : unlocked_forked_result.error().format());
   if (unlocked_forked_result)
   {
-    ava::app::runtime::session_ts::wat forked_w(*unlocked_forked_result);
+    SCOPED_CRITICAL_AREA_W(forked_w, *unlocked_forked_result);
     auto fork_entries = forked_w->store.load();
     expect(forked_w->created && fork_entries && fork_entries->size() == 2 && app_read_binary_file(source_path) == valid_source_bytes,
            "startup --fork temporarily leases and recovers its source before holding the lease through branch creation");
@@ -771,7 +771,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   std::string byte_limited_id;
   std::filesystem::path byte_limited_path;
   {
-    ava::app::runtime::session_ts::rat byte_limited_r(*unlocked_byte_limited_seed_result);
+    SCOPED_CRITICAL_AREA_R(byte_limited_r, *unlocked_byte_limited_seed_result);
     byte_limited_id = byte_limited_r->store.session_id();
     byte_limited_path = byte_limited_r->store.session_path();
   }
@@ -804,7 +804,7 @@ void test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork()
   std::string entry_limited_id;
   std::filesystem::path entry_limited_path;
   {
-    ava::app::runtime::session_ts::wat entry_limited_w(*unlocked_entry_limited_seed_result);
+    SCOPED_CRITICAL_AREA_W(entry_limited_w, *unlocked_entry_limited_seed_result);
     entry_limited_id = entry_limited_w->store.session_id();
     entry_limited_path = entry_limited_w->store.session_path();
     auto appended_entry = entry_limited_w->append_owned(ava::session::SessionEntry{.id = "bounded_second_entry",
@@ -853,7 +853,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
     return;
   std::string session_id;
   {
-    ava::app::runtime::session_ts::rat seeded_r(*unlocked_seeded_result);
+    SCOPED_CRITICAL_AREA_R(seeded_r, *unlocked_seeded_result);
     session_id = seeded_r->store.session_id();
   }
   auto function = [](std::string id, std::string call_id, std::size_t sequence) {
@@ -879,7 +879,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   auto first = function("reconcile-function-one", "reconcile-call-one", 0);
   auto second = function("reconcile-function-two", "reconcile-call-two", 1);
   {
-    ava::app::runtime::session_ts::wat seeded_w(*unlocked_seeded_result);
+    SCOPED_CRITICAL_AREA_W(seeded_w, *unlocked_seeded_result);
     auto committed = seeded_w->append_owned(first);
     committed = committed ? seeded_w->append_owned(second) : std::move(committed);
     committed = committed ? seeded_w->append_owned(ava::session::SessionEntry{.id = "reconcile-commit",
@@ -911,7 +911,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   ava::core::Result<std::vector<ava::session::SessionEntry>> entries;
   if (unlocked_resumed_result)
   {
-    ava::app::runtime::session_ts::rat resumed_r(*unlocked_resumed_result);
+    SCOPED_CRITICAL_AREA_R(resumed_r, *unlocked_resumed_result);
     entries = resumed_r->store.load();
   }
   else
@@ -960,7 +960,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   ava::core::Result<std::vector<ava::session::SessionEntry>> reopened_entries;
   if (unlocked_reopened_result)
   {
-    ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
+    SCOPED_CRITICAL_AREA_R(reopened_r, *unlocked_reopened_result);
     reopened_entries = reopened_r->store.load();
   }
   else
@@ -985,7 +985,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
                                                                                                                       .finish_reason = "tool_calls",
                                                                                                                       .usage_json = std::nullopt});
   {
-    ava::app::runtime::session_ts::wat zero_result_w(*unlocked_zero_result_seed_result);
+    SCOPED_CRITICAL_AREA_W(zero_result_w, *unlocked_zero_result_seed_result);
     zero_result_session_id = zero_result_w->store.session_id();
     auto zero_committed = zero_result_w->append_owned(function("zero-result-function", "zero-result-call", 0));
     zero_committed = zero_committed ? zero_result_w->append_owned(ava::session::SessionEntry{.id = "zero-result-commit",
@@ -1009,7 +1009,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   ava::core::Result<std::vector<ava::session::SessionEntry>> zero_entries;
   if (unlocked_zero_result_reopened_result)
   {
-    ava::app::runtime::session_ts::rat zero_reopened_r(*unlocked_zero_result_reopened_result);
+    SCOPED_CRITICAL_AREA_R(zero_reopened_r, *unlocked_zero_result_reopened_result);
     zero_entries = zero_reopened_r->store.load();
   }
   else
@@ -1033,7 +1033,7 @@ void test_app_runtime_reconciles_committed_function_calls_on_resume()
   ava::core::VoidResult invalid_committed;
   ava::core::VoidResult invalid_result;
   {
-    ava::app::runtime::session_ts::wat invalid_w(*unlocked_invalid_seed_result);
+    SCOPED_CRITICAL_AREA_W(invalid_w, *unlocked_invalid_seed_result);
     invalid_session_id = invalid_w->store.session_id();
     invalid_session_path = invalid_w->store.session_path();
     invalid_committed = invalid_w->append_owned(function("invalid-window-function", "invalid-window-call", 0));

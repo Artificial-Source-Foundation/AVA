@@ -202,7 +202,7 @@ std::filesystem::path const& AcpSessionHost::current_dir(runtime::session_ts::cr
 
 bool AcpSessionHost::accepts_images() const noexcept
 {
-  runtime::session_ts::crat session_r(unlocked_session_);
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session_);
   return std::ranges::find(session_r->model().input_modalities, "image") != session_r->model().input_modalities.end();
 }
 
@@ -640,7 +640,7 @@ void AcpSessionHost::cancel() noexcept
   // stop callbacks never acquire the host mutex; no host-owned I/O or wait is
   // performed while arbitration is locked.
   std::lock_guard lock(mutex_);
-  runtime::session_ts::crat session_r(unlocked_session_);
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session_);
   if (!active_prompt_ || !session_r->run_controller())
     return;
   auto accepted = session_r->run_controller()->request_stop(StopReason::UserCanceled);
@@ -656,7 +656,7 @@ ava::core::VoidResult AcpSessionHost::close()
 {
   {
     std::lock_guard lock(mutex_);
-    runtime::session_ts::crat session_r(unlocked_session_);
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session_);
     closing_ = true;
     permission_grants_.clear();
     if (active_prompt_ && session_r->run_controller())
@@ -810,21 +810,21 @@ void AcpSessionRegistry::release_insertion() noexcept
     --pending_insertions_;
 }
 
-ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_reserved(runtime::Session&& session)
+ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::insert_reserved(runtime::session_ts&& unlocked_session)
 {
-  auto id = session.store.session_id();
-  auto host = std::make_shared<AcpSessionHost>(std::move(session), options_);
+  auto const session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
+  auto host = std::make_shared<AcpSessionHost>(std::move(unlocked_session), options_);
   std::lock_guard lock(mutex_);
   if (pending_insertions_ == 0)
-    return std::unexpected(session_error("ACP session insertion lost its capacity reservation", id));
+    return std::unexpected(session_error("ACP session insertion lost its capacity reservation", session_id));
   --pending_insertions_;
   if (closing_)
     return std::unexpected(session_error("ACP connection is closing"));
   if (hosts_.size() >= kMaxConnectionSessions)
     return std::unexpected(session_error("ACP connection session limit reached"));
-  if (hosts_.contains(id))
-    return std::unexpected(session_error("session is already active on this connection", id));
-  hosts_.emplace(id, host);
+  if (hosts_.contains(session_id))
+    return std::unexpected(session_error("session is already active on this connection", session_id));
+  hosts_.emplace(session_id, host);
   return host;
 }
 
@@ -848,9 +848,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::create(st
   if (!unlocked_session_result)
     return std::unexpected(std::move(unlocked_session_result.error()));
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
-    session_w->resources().mcp_config = std::move(mcp_config);
-    auto inserted = insert_reserved(std::move(*session_w));
+    ava::app::runtime::session_ts::wat(*unlocked_session_result)->resources().mcp_config = std::move(mcp_config);
+    auto inserted = insert_reserved(std::move(*unlocked_session_result));
     release_reservation = false;
     return inserted;
   }
@@ -881,9 +880,8 @@ ava::core::Result<std::shared_ptr<AcpSessionHost>> AcpSessionRegistry::load(std:
   if (!unlocked_session_result)
     return std::unexpected(std::move(unlocked_session_result.error()));
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
-    session_w->resources().mcp_config = std::move(mcp_config);
-    auto inserted = insert_reserved(std::move(*session_w));
+    ava::app::runtime::session_ts::wat(*unlocked_session_result)->resources().mcp_config = std::move(mcp_config);
+    auto inserted = insert_reserved(std::move(*unlocked_session_result));
     release_reservation = false;
     return inserted;
   }

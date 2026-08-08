@@ -25,13 +25,12 @@ class SessionDebugMutex final : public AIMutex
   // Acquire this session mutex and register it as owned by the current thread.
   void lock()
   {
-    PRAGMA_DIAGNOSTIC_PUSH_IGNORE_frame_address DoutEntering(dc::notice, "SessionDebugMutex::lock() [" << this << "]");
-    PRAGMA_DIAGNOSTIC_POP
+    DoutEntering(dc::session, "SessionDebugMutex::lock() [" << this << "]");
 
     AIMutex::lock();
     ava::core::register_long_wait_incompatible_lock(this);
 
-    Dout(dc::notice, "Locked SessionDebugMutex [" << this << "]");
+    Dout(dc::session, "Locked SessionDebugMutex [" << this << "]");
   }
 
   // Try to acquire this session mutex, registering only a successful acquisition.
@@ -39,19 +38,19 @@ class SessionDebugMutex final : public AIMutex
   // Returns true only when the underlying mutex was acquired.
   [[nodiscard]] bool try_lock()
   {
-    DoutEntering(dc::notice, "SessionDebugMutex::try_lock() [" << this << "]");
+    DoutEntering(dc::session, "SessionDebugMutex::try_lock() [" << this << "]");
 
     if (!AIMutex::try_lock())
       return false;
     ava::core::register_long_wait_incompatible_lock(this);
-    Dout(dc::notice, "Locked SessionDebugMutex (try_lock) [" << this << "]");
+    Dout(dc::session, "Locked SessionDebugMutex (try_lock) [" << this << "]");
     return true;
   }
 
   // Release this session mutex and remove it from the current thread's registry.
   void unlock()
   {
-    DoutEntering(dc::notice, "SessionDebugMutex::unlock() [" << this << "]");
+    DoutEntering(dc::session, "SessionDebugMutex::unlock() [" << this << "]");
 
     ASSERT(is_self_locked());
     ava::core::unregister_long_wait_incompatible_lock(this);
@@ -121,7 +120,7 @@ inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std
 #else
 #define AVA_DEBUG_PRINT_MESSAGE(msg) \
   ;                                  \
-  Dout(dc::notice, msg << " from " __FILE__ << ":" << __LINE__)
+  Dout(dc::session, msg << " from " __FILE__ << ":" << __LINE__)
 #endif
 
 #define AVA_DECLARE_ACCESS_TYPE_CR(session_r, unlocked_session) ava::app::runtime::session_ts::crat session_r(unlocked_session)

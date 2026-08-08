@@ -766,7 +766,7 @@ void test_app_rpc_active_prompt_rejects_second_prompt_and_session_switch()
   expect(session.has_value() && unlocked_other_result.has_value(), "RPC active reject test opens runtime sessions");
   if (!session || !unlocked_other_result)
     return;
-  ava::app::runtime::session_ts::wat other_w(*unlocked_other_result);
+  SCOPED_CRITICAL_AREA_W(other_w, *unlocked_other_result);
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({sse_response(read_file_call_sse(outside_path.generic_string()))});

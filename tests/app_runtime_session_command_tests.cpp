@@ -579,7 +579,7 @@ void test_app_session_new_resume_commands()
   expect(unlocked_sessionless_result.has_value(), "slash new/resume test opens an ephemeral current session");
   if (!unlocked_sessionless_result)
     return;
-  ava::app::runtime::session_ts::wat sessionless_w(*unlocked_sessionless_result);
+  SCOPED_CRITICAL_AREA_W(sessionless_w, *unlocked_sessionless_result);
   auto replaced = session_w->replace_with(std::move(*sessionless_w));
   expect(replaced.has_value(), "slash new/resume test replaces the current session through its lifecycle API");
   if (!replaced)

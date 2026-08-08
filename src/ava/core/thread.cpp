@@ -13,6 +13,7 @@ namespace ava::core {
 void init_thread(std::string const& label)
 {
   Debug(NAMESPACE_DEBUG::init_thread(label));
+  Dout(dc::notice, "Started new thread \"" << label << "\" with id " << std::hex << std::this_thread::get_id());
 }
 
 }  // namespace ava::core

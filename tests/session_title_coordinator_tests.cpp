@@ -430,7 +430,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
   expect(unlocked_replacement_result.has_value(), unlocked_replacement_result ? "replacement session opens" : unlocked_replacement_result.error().format());
   if (unlocked_replacement_result)
   {
-    ava::app::runtime::session_ts::wat replacement_w(*unlocked_replacement_result);
+    SCOPED_CRITICAL_AREA_W(replacement_w, *unlocked_replacement_result);
     expect(session_w->replace_with(std::move(*replacement_w)).has_value(), "visible session navigation succeeds during title work");
   }
   state->allow_completion();
@@ -500,7 +500,7 @@ void test_session_specific_catalog_notifications_survive_navigation()
   };
   auto tree_builder = [&](ava::app::runtime::session_ts const& unlocked_current) {
     ++tree_builds;
-    ava::app::runtime::session_ts::crat current_r(unlocked_current);
+    SCOPED_CRITICAL_AREA_CR(current_r, unlocked_current);
     return ava::session::build_session_tree(current_r->workspace_dir(), current_r->paths().sessions_dir, current_r->store.session_id());
   };
   auto cache = ava::app::build_application_catalog_cache(unlocked_old_session, {}, workspace_walker, tree_builder);
@@ -716,7 +716,7 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   options.event_sink = [&](ava::event::RuntimeEvent const& event) -> ava::core::VoidResult {
     if (event.type() == ava::event::RuntimeEventType::Done)
     {
-      ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+      SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
       auto authority = session_w->read_authority_1();
       auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
       auto metadata = entries ? ava::session::session_metadata_from_entries(session_w->store.session_id(), *entries)
@@ -731,7 +731,7 @@ void test_runtime_trigger_is_after_completion_and_excludes_synthetic_turns()
   expect(result && result->committed_turn_id && title_absent_at_done, "runtime does not trigger title work from the earlier Done event");
   expect(coordinator->wait_until_idle(3s), "runtime title trigger coordinator becomes idle");
   auto metadata = [&unlocked_session_result] {
-    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
     return ava::session::load_session_metadata(session_r->store, session_r->lease());
   }();
   expect(metadata && metadata->effective_title() == "Five Word Runtime Trigger Title" && state->calls == 1 && coordinator->catalog_generation() == 2,

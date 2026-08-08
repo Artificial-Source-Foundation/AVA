@@ -335,7 +335,7 @@ void test_app_runtime_project_plugin_resources_follow_trust_gate()
   expect(unlocked_session_result.has_value(), "runtime opens with untrusted project plugin resources skipped");
   if (!unlocked_session_result)
     return;
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
   auto has_freshness_source = [&](ava::app::runtime::FreshnessSourceKind kind, std::string_view source_id, std::string_view name) {
     return std::ranges::any_of(session_w->freshness_sources(),

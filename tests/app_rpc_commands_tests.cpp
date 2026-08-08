@@ -484,7 +484,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::optional<std::string> single_json;
   if (single_session)
   {
-    ava::app::runtime::session_ts::wat single_session_w(*single_session);
+    SCOPED_CRITICAL_AREA_W(single_session_w, *single_session);
     appended_single = append_v4_text_turn(*single_session_w, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
     if (appended_single)
     {
@@ -503,7 +503,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
   std::optional<std::string> near_cap_json;
   if (near_cap_session)
   {
-    ava::app::runtime::session_ts::wat near_cap_session_w(*near_cap_session);
+    SCOPED_CRITICAL_AREA_W(near_cap_session_w, *near_cap_session);
     appended_near_cap = true;
     for (std::size_t index = 0; appended_near_cap && index < 190; ++index)
       appended_near_cap = append_v4_text_turn(*near_cap_session_w, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));

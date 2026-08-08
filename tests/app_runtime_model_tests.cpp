@@ -246,7 +246,7 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
 
   ava::core::Result<std::vector<ava::session::SessionEntry>> physical_entries;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
     physical_entries = session_w->store.load();
   }
   auto project_for = [&](ava::config::ModelInfo const& model) {
@@ -279,7 +279,7 @@ void test_runtime_model_switch_accepts_committed_openai_responses_reasoning()
          "foreign reasoning format and cross-provider targets receive visible answer text through portable request projection");
 
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
     auto controller = std::move(session_w->resources().run_controller);
     auto rejected_append_switch = session_w->switch_model(*target);
     session_w->resources().run_controller = std::move(controller);
@@ -341,7 +341,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
     return;
   std::string session_id;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
     expect(session_w->scoped_model_cycle() && session_w->scoped_model_cycle()->size() == 2 &&
                (*session_w->scoped_model_cycle())[0] == "anthropic/claude-test" && (*session_w->scoped_model_cycle())[1] == "openai/gpt-5.5",
            "runtime session restores persisted scoped model cycle");
@@ -353,7 +353,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   if (!model)
     return;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
     auto switched = session_w->switch_model(*model);
     expect(switched.has_value() && *switched, "runtime model switch reports a change");
     expect(session_w->model().provider_id == "anthropic" && session_w->model().model_id == "claude-test", "runtime model switch updates active session model");
@@ -422,7 +422,7 @@ void test_app_runtime_model_switch_persists_and_reopens()
   expect(unlocked_reopened_result.has_value(), "runtime releases its lease on normal lifetime end and reopens persisted session");
   if (unlocked_reopened_result)
   {
-    ava::app::runtime::session_ts::rat reopened_r(*unlocked_reopened_result);
+    SCOPED_CRITICAL_AREA_R(reopened_r, *unlocked_reopened_result);
     expect(reopened_r->model().provider_id == "anthropic" && reopened_r->model().model_id == "claude-test",
            "runtime reopen restores latest persisted model_change");
     auto const resumed_unknown_launch_display =
@@ -514,7 +514,7 @@ void test_app_runtime_model_switch_projects_incompatible_history_at_request_time
     return;
 
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
     auto project_current_request = [&]() {
       auto physical = session_w->store.load();
@@ -894,7 +894,7 @@ void test_app_runtime_reasoning_selection_persists_and_requests()
 void test_app_runtime_branch_construction_failure_rolls_back_created_file()
 {
   auto seed_source_attachment = [](ava::app::runtime::session_ts& unlocked_session) {
-    ava::app::runtime::session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     auto entries = session_w->store.load();
     if (!entries || entries->empty())
       return false;
@@ -937,7 +937,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     ava::app::runtime::session_ts& unlocked_source = *unlocked_source_result;
     expect(seed_source_attachment(unlocked_source), "TUI rollback test seeds an active source with a copyable attachment");
     {
-      ava::app::runtime::session_ts::wat source_w(unlocked_source);
+      SCOPED_CRITICAL_AREA_W(source_w, unlocked_source);
       source_id = source_w->store.session_id();
       source_path = source_w->store.session_path();
       std::filesystem::create_directories(paths.models_file);
@@ -956,7 +956,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     }
     auto source_contender = ava::session::SessionLease::acquire(source_path);
     {
-      ava::app::runtime::session_ts::rat source_r(*unlocked_source_result);
+      SCOPED_CRITICAL_AREA_R(source_r, *unlocked_source_result);
       source_id_unchanged = source_r->store.session_id() == source_id;
     }
     expect(!forked && created_id && forked.error().message().find("rollback") == std::string::npos &&
@@ -986,7 +986,7 @@ void test_app_runtime_branch_construction_failure_rolls_back_created_file()
     std::filesystem::path source_path;
     expect(seed_source_attachment(*unlocked_source_result), "startup fork rollback test seeds a source with a copyable attachment");
     {
-      ava::app::runtime::session_ts::wat source_w(*unlocked_source_result);
+      SCOPED_CRITICAL_AREA_W(source_w, *unlocked_source_result);
       source_id = source_w->store.session_id();
       source_path = source_w->store.session_path();
     }
@@ -1045,7 +1045,7 @@ void test_app_runtime_initial_reasoning_level_option()
     return;
   std::string session_id;
   {
-    ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
     expect(session_w->reasoning() && session_w->reasoning()->level == "high", "runtime startup applies initial reasoning level");
     session_id = session_w->store.session_id();
 
@@ -1070,7 +1070,7 @@ void test_app_runtime_initial_reasoning_level_option()
   expect(unlocked_cleared_result.has_value(), "runtime startup reasoning accepts off as clear_reasoning alias");
   if (unlocked_cleared_result)
   {
-    ava::app::runtime::session_ts::rat cleared_r(*unlocked_cleared_result);
+    SCOPED_CRITICAL_AREA_R(cleared_r, *unlocked_cleared_result);
     expect(!cleared_r->reasoning(), "runtime startup reasoning accepts off as clear_reasoning alias");
     auto cleared_entries = cleared_r->store.load();
     expect(cleared_entries.has_value(), "runtime startup reasoning clear reloads entries");

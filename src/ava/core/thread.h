@@ -48,12 +48,23 @@ namespace ava::core {
 #ifdef CWDEBUG
 namespace detail {
 inline constexpr std::size_t max_nested_long_wait_incompatible_locks = 32;
+using utils::has_print_on::operator<<;
 struct LongWaitIncompatibleLockRegistry
 {
   std::array<void const*, max_nested_long_wait_incompatible_locks> locks{};
   std::size_t count = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+  void print_on(std::ostream& os) const
+  {
+    char const* sep = "";
+    for (size_t i = 0; i < count; ++i)
+    {
+      os << sep << locks[i];
+      sep = ", ";
+    }
+  }
 };
 inline thread_local LongWaitIncompatibleLockRegistry long_wait_incompatible_locks;
 }  // namespace detail
@@ -95,7 +106,8 @@ inline void assert_no_long_wait_incompatible_lock(std::string_view operation, st
 {
   if (current_thread_holds_long_wait_incompatible_lock())
     DoutFatal(dc::coredump,
-              "Potentially blocking operation while holding an incompatible lock: " << operation << " at " << location.file_name() << ':' << location.line());
+              "Potentially blocking operation while holding (an) incompatible lock(s) [" <<
+              detail::long_wait_incompatible_locks << "]: " << operation << " at " << location.file_name() << ':' << location.line());
 }
 #endif
 
@@ -121,7 +133,7 @@ class JoinThread
   ~JoinThread()
   {
     if (thread_.joinable())
-      assert_join_allowed("implicitly joining JoinThread during destruction");
+      assert_join_allowed("implicitly joining JoinThread during destruction of thread");
   }
 
   JoinThread(JoinThread const&) = delete;
@@ -132,7 +144,7 @@ class JoinThread
     if (this != &other)
     {
       if (thread_.joinable())
-        assert_join_allowed("implicitly joining JoinThread during move assignment");
+        assert_join_allowed("implicitly joining JoinThread during move assignment into thread");
       thread_ = std::move(other.thread_);
 #ifdef CWDEBUG
       label_ = std::move(other.label_);
@@ -206,7 +218,8 @@ class JoinThread
   {
 #ifdef CWDEBUG
     if (current_thread_holds_long_wait_incompatible_lock())
-      DoutFatal(dc::coredump, "Potentially blocking operation while holding an incompatible lock: " << operation << " `" << label_ << '`');
+      DoutFatal(dc::coredump, "Potentially blocking operation while holding (an) incompatible lock(s) [" <<
+          detail::long_wait_incompatible_locks << "]: " << operation << " \"" << label_ << "\".");
 #else
     static_cast<void>(operation);
 #endif

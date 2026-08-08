@@ -816,7 +816,7 @@ int run(int argc, char** argv)
   int const status = run_interactive(*unlocked_session_result);
   if (print_farewell)
   {
-    ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
     print_exit_card(*session_r, status);
   }
   return status;

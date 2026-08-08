@@ -230,7 +230,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     std::shared_ptr<ava::agent::SubagentCoordinator> coordinator;
     std::string owner;
     {
-      session_ts::rat session_r(unlocked_session);
+      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
       coordinator = session_r->subagent_coordinator();
       owner = session_r->store.session_id();
     }
@@ -382,7 +382,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::permissions::PermissionRuleStore store;
     std::string session_id;
     {
-      session_ts::rat session_r(unlocked_session);
+      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
       store = session_r->permission_rule_store();
       session_id = session_r->store.session_id();
     }
@@ -411,7 +411,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     ava::permissions::PermissionRuleStore store;
     std::string session_id;
     {
-      session_ts::rat session_r(unlocked_session);
+      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
       store = session_r->permission_rule_store();
       session_id = session_r->store.session_id();
     }
@@ -433,7 +433,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     ava::core::Result<ava::config::ModelInfo> selected =
         command.type == "set_model" ? resolve_requested_model(session_w, command) : next_runtime_model(session_w);
     if (!selected)
@@ -470,7 +470,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       }
     }
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     auto changed = session_w->set_reasoning(std::move(selection));
     if (!changed)
       return handled(write_error(context.output, command.id, changed.error()));
@@ -487,7 +487,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("clone_session does not support branch_from_entry_id")));
     }
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     auto source_session_id = resolve_branch_source_session_id(session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
@@ -520,7 +520,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, error));
     }
     {
-      runtime::session_ts::wat opened_w(*unlocked_opened_result);
+      SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
       opened_w->created = true;
       if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
         return handled(write_error(context.output, command.id, replaced.error()));
@@ -559,7 +559,7 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
       return handled(write_error(context.output, command.id, invalid_rpc("summarize_branch requires reason")));
     }
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     auto source_session_id = resolve_branch_source_session_id(session_w, context.open_context, command);
     if (!source_session_id)
       return handled(write_error(context.output, command.id, source_session_id.error()));
@@ -610,13 +610,13 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
 
     auto unlocked_created_result = session_w->create_similar(context.open_context);
     if (!unlocked_created_result)
       return handled(write_error(context.output, command.id, unlocked_created_result.error()));
     {
-      session_ts::wat created_w(*unlocked_created_result);
+      SCOPED_CRITICAL_AREA_W(created_w, *unlocked_created_result);
       if (auto replaced = session_w->replace_with(std::move(*created_w)); !replaced)
         return handled(write_error(context.output, command.id, replaced.error()));
     }
@@ -634,12 +634,12 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    session_ts::wat session_w(unlocked_session);
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     auto unlocked_opened_result = session_w->open_requested(context.open_context, *command.session_id);
     if (!unlocked_opened_result)
       return handled(write_error(context.output, command.id, unlocked_opened_result.error()));
     {
-      session_ts::wat opened_w(*unlocked_opened_result);
+      SCOPED_CRITICAL_AREA_W(opened_w, *unlocked_opened_result);
       if (auto replaced = session_w->replace_with(std::move(*opened_w)); !replaced)
         return handled(write_error(context.output, command.id, replaced.error()));
     }

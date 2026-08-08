@@ -370,7 +370,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration_1(ru
 void SubagentDeliveryManager::release_parent_if_unused(std::string_view parent_session_id, CapsuleGeneration generation)
 {
   auto capsule_active = [](std::shared_ptr<ParentCapsule> const& capsule) {
-    runtime::session_ts::rat session_r(capsule->unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
     return session_r->run_controller() && session_r->run_controller()->snapshot().active;
   };
   std::shared_ptr<ParentCapsule> candidate;
@@ -428,7 +428,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     auto found = parents_.find(std::string(session_id));
     if (found != parents_.end())
     {
-      runtime::session_ts::rat session_r(found->second->unlocked_session);
+      SCOPED_CRITICAL_AREA_R(session_r, found->second->unlocked_session);
       if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         return std::unexpected(retained_owner_not_found(session_id));
       capsule = found->second;
@@ -439,7 +439,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
       {
         if (!retained_id.starts_with(session_id))
           continue;
-        runtime::session_ts::rat session_r(retained->unlocked_session);
+        SCOPED_CRITICAL_AREA_R(session_r, retained->unlocked_session);
         if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
         {
           saw_foreign_owner = true;
@@ -462,7 +462,7 @@ ava::core::Result<std::optional<runtime::Session>> SubagentDeliveryManager::reta
     }
   }
   auto attached_result = [&]() -> ava::core::Result<runtime::Session> {
-    runtime::session_ts::rat session_r(capsule->unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
     auto authority = session_r->read_authority_1();
     if (!authority)
       return std::unexpected(std::move(authority.error()));
@@ -554,7 +554,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
                                       std::stop_token stop_token)
 {
   auto capsule_controller = [](std::shared_ptr<ParentCapsule> const& retained) {
-    runtime::session_ts::rat session_r(retained->unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, retained->unlocked_session);
     return session_r->run_controller();
   };
 
@@ -568,7 +568,7 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   auto const fingerprint = prompt_fingerprint(prompt);
 
   auto entries = [&]() -> ava::core::Result<ava::session::SessionReadAuthority> {
-    runtime::session_ts::rat session_r(selected_capsule->unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, selected_capsule->unlocked_session);
     return session_r->read_authority_1();
   }();
   if (!entries)
@@ -743,7 +743,7 @@ void SubagentDeliveryManager::shutdown() noexcept
       controllers.reserve(parents_.size());
       for (auto const& [_, capsule] : parents_)
       {
-        runtime::session_ts::rat session_r(capsule->unlocked_session);
+        SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
         if (session_r->run_controller())
           controllers.push_back(session_r->run_controller());
       }

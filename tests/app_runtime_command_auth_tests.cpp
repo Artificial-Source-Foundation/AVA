@@ -28,7 +28,7 @@ void app_command_dispatcher_auth_part(ava::app::runtime::session_ts& unlocked_se
 {
   auto mode = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/mode"});
   auto mode_snapshot = [&] {
-    ava::app::runtime::session_ts::rat session_r(unlocked_session);
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     return std::pair{session_r->mode(), session_r->system_prompt()};
   }();
   auto const& [current_mode, system_prompt] = mode_snapshot;

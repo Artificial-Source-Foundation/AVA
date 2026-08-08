@@ -65,7 +65,7 @@ void test_application_catalog_cache_reuses_workspace_and_session_indexes()
   auto tree_builder = [&](ava::app::runtime::session_ts const& unlocked_current) -> ava::core::Result<ava::session::SessionTreeIndex> {
     ++session_tree_builds;
     auto current_snapshot = [&] {
-      ava::app::runtime::session_ts::crat current_r(unlocked_current);
+      SCOPED_CRITICAL_AREA_CR(current_r, unlocked_current);
       return std::tuple{current_r->store.session_id(), current_r->store.session_path().string()};
     }();
     auto const& [current_session_id, current_session_path] = current_snapshot;
@@ -313,7 +313,7 @@ void test_application_catalog_current_session_incremental_refresh()
   std::size_t topology_build_calls = 0;
   auto successful_tree_builder = [&](ava::app::runtime::session_ts const& unlocked_current) {
     ++topology_build_calls;
-    ava::app::runtime::session_ts::crat current_r(unlocked_current);
+    SCOPED_CRITICAL_AREA_CR(current_r, unlocked_current);
     return ava::session::build_session_tree(current_r->workspace_dir(), current_r->paths().sessions_dir, current_r->store.session_id());
   };
   auto const captured_before_topology = ava::app::SessionTitleCatalogChanges{.cursor = 8, .dirty_session_ids = {"old_session_dirty_before_switch"}};

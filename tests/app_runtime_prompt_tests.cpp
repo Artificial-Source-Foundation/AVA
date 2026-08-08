@@ -501,7 +501,7 @@ void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation(
     unnamed_options.on_subagent_launch = [&unnamed_launches](auto const& launch) { unnamed_launches.push_back(launch); };
     ava::tests::FakeTransport unnamed_transport({task_response("runtime_task_unnamed"), text_response("parent unnamed")});
     auto unnamed_result = ava::app::run_prompt(*unlocked_unnamed_session, "launch unnamed", provider, unnamed_transport, unnamed_options);
-    ava::app::runtime::session_ts::rat unnamed_session_r(*unlocked_unnamed_session);
+    SCOPED_CRITICAL_AREA_R(unnamed_session_r, *unlocked_unnamed_session);
     expect(unnamed_result && unnamed_launches.size() == 1 && unnamed_session_r->model().display_name == "unnamed-launch-model" &&
                ava::config::proven_configured_model_display_name(unnamed_session_r->model()).empty() &&
                unnamed_launches.front().display.model_display_name().empty() && !unnamed_launches.front().request_id.empty() &&
@@ -709,7 +709,7 @@ void test_app_clipboard_image_file_override_imports_attachment()
   if (!unlocked_session_result)
     return;
 
-  ava::app::runtime::session_ts::wat session_w(*unlocked_session_result);
+  SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
   ScopedEnvVar clipboard_file("AVA_CLIPBOARD_IMAGE_FILE", image_path.string());
   auto imported = ava::app::import_clipboard_image_attachment(session_w->store);
@@ -757,7 +757,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
 
   auto result = ava::app::run_prompt(*unlocked_session_result, "retry runtime", provider, transport, run_options);
 
-  ava::app::runtime::session_ts::rat session_r(*unlocked_session_result);
+  SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
 
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
          "runtime run_prompt retries transient provider transport failures when enabled");

@@ -426,10 +426,10 @@ void test_coordinator_fallback_and_navigation_lifetime()
   CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "Design <skill>hidden scaffold</skill> durable navigation titles", *seeded, options);
   expect(state->wait_started(), "title navigation generator starts");
+  auto unlocked_replacement_result = ava::app::runtime::Session::create_like(unlocked_session, ava::app::runtime::OpenContext{});
+  expect(unlocked_replacement_result.has_value(), unlocked_replacement_result ? "replacement session opens" : unlocked_replacement_result.error().format());
   CRITICAL_AREA_CONTINUE_W(session);
 
-  auto unlocked_replacement_result = session_w->create_similar(ava::app::runtime::OpenContext{});
-  expect(unlocked_replacement_result.has_value(), unlocked_replacement_result ? "replacement session opens" : unlocked_replacement_result.error().format());
   if (unlocked_replacement_result)
   {
     SCOPED_CRITICAL_AREA_W(replacement_w, *unlocked_replacement_result);

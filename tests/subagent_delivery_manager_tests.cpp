@@ -465,18 +465,17 @@ void test_active_turn_ordering_and_inactive_parent_navigation()
   expect(building && awaiting && completing && completed, "active parent turn closes before synthetic delivery admission");
   expect(admission->wait_reached(), "delivery worker reaches pre-admission after the parent controller becomes idle");
 
-  CRITICAL_AREA_BEGIN_W(fixture_session);
-
   ava::app::runtime::OpenContext base;
   base.paths = fixture.paths;
   base.subagent_coordinator = fixture.coordinator;
   base.subagent_delivery_manager = fixture.manager;
-  auto unlocked_replacement_result = fixture_session_w->create_similar(base);
+  auto unlocked_replacement_result = ava::app::runtime::Session::create_like(unlocked_fixture_session, base);
   expect(unlocked_replacement_result.has_value(), "navigation creates another visible session while parent delivery is pending");
   if (!unlocked_replacement_result)
     return;
   ava::app::runtime::session_ts& unlocked_replacement = *unlocked_replacement_result;
 
+  CRITICAL_AREA_BEGIN_W(fixture_session);
   CRITICAL_AREA_BEGIN_W(replacement);
   auto replacement_id = replacement_w->store.session_id();
   expect(fixture_session_w->replace_with(std::move(*replacement_w)).has_value(), "navigation replaces the visible session");

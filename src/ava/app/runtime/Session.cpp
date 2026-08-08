@@ -1001,7 +1001,7 @@ Session Session::create_detached(ava::session::SessionLease lease, ava::session:
                                         .created = created});
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::create_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir)
 {
   context.workspace_dir = workspace_root;
@@ -1009,7 +1009,7 @@ ava::core::Result<session_ts> Session::create_at(OpenContext context, std::files
   return Session::open(context);
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root,
                                                             std::filesystem::path const& current_dir, SessionLifecycleRequest request)
 {
@@ -1018,9 +1018,15 @@ ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesys
   return Session::open(context, request);
 }
 
-ava::core::Result<session_ts> Session::create_similar(OpenContext const& base_context) const
+//static
+ava::core::Result<session_ts> Session::create_like(session_ts const& unlocked_session, OpenContext const& base_context)
 {
-  return create_at(replacement_open_context(base_context), workspace_dir(), current_dir());
+  CRITICAL_AREA_BEGIN_CR(session);
+  OpenContext const open_context = session_r->replacement_open_context(base_context);
+  auto const workspace_dir = session_r->workspace_dir();
+  auto const current_dir = session_r->current_dir();
+  CRITICAL_AREA_END_R(session);
+  return create_at(std::move(open_context), workspace_dir, current_dir);
 }
 
 ava::core::Result<session_ts> Session::open_similar(OpenContext const& base_context, SessionLifecycleRequest request) const

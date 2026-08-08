@@ -610,11 +610,11 @@ ava::core::Result<bool> handle_session_rpc_command(RpcSessionCommandContext cont
     if (!active_rejected || *active_rejected)
       return active_rejected;
 
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-
-    auto unlocked_created_result = session_w->create_similar(context.open_context);
+    auto unlocked_created_result = runtime::Session::create_like(unlocked_session, context.open_context);
     if (!unlocked_created_result)
       return handled(write_error(context.output, command.id, unlocked_created_result.error()));
+
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
     {
       SCOPED_CRITICAL_AREA_W(created_w, *unlocked_created_result);
       if (auto replaced = session_w->replace_with(std::move(*created_w)); !replaced)

@@ -236,7 +236,7 @@ class Session : protected Session_aggregate_base
 
   // Create a persistent session inheriting active state from `current` and
   // frontend-only policy from `base_context`.
-  ava::core::Result<session_ts> create_similar(OpenContext const& base_context) const;
+  static ava::core::Result<session_ts> create_like(session_ts const& unlocked_session, OpenContext const& base_context);
 
   // Open a session using `request`, inheriting active state from `current` and
   // frontend-only policy from `base_context`.

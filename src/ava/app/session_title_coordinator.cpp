@@ -811,6 +811,9 @@ bool SessionTitleCoordinator::wait_until_idle(std::chrono::milliseconds timeout)
 
 void SessionTitleCoordinator::shutdown() noexcept
 {
+  // This function potentially joins threads which is blocking operation.
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SessionTitleCoordinator::shutdown()");
+
   std::vector<ava::core::JoinThread> workers;
   {
     std::lock_guard lock(mutex_);

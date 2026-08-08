@@ -360,6 +360,7 @@ void test_direct_provider_generation_is_isolated()
              metadata_json.find("\"generated_title\":\"Direct Fake Provider Session Title\"") != std::string::npos &&
              metadata_json.find("\"title\":\"Direct Fake Provider Session Title\"") != std::string::npos,
          "list, tree, and metadata serialization immediately expose the effective generated title");
+  CRITICAL_AREA_END_W(session);
   coordinator.value()->shutdown();
 }
 
@@ -397,6 +398,7 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   expect(metadata && metadata->effective_title() == "Manual Rename" && metadata->generated_title == "First ordinary prompt Overview and" && state->calls == 1 &&
              state->source == "First ordinary prompt",
          "coordinator permanently deduplicates by session id, binds the first prompt, and never refines over a concurrent manual rename");
+  CRITICAL_AREA_END_W(session);
   coordinator->shutdown();
 }
 
@@ -440,6 +442,7 @@ void test_coordinator_fallback_and_navigation_lifetime()
   expect(summaries && found != summaries->end() && found->title == "Five Word Navigation Provider Title",
          "provider refinement survives in-process navigation through its retained controller-owned route" +
              std::string(summaries && found != summaries->end() ? ": observed title '" + found->title + "'" : ": source summary missing"));
+  CRITICAL_AREA_END_W(session);
   coordinator->shutdown();
 }
 
@@ -616,6 +619,8 @@ void test_queue_delay_allows_later_turns_after_captured_first_commit()
   auto metadata = ava::session::load_session_metadata(delayed_w->store, delayed_w->lease());
   expect(metadata && metadata->effective_title() == "Five Word Delayed Queue Title" && state->calls == 2,
          "captured first-turn identity remains valid when later turns append during queue delay");
+  CRITICAL_AREA_END_W(delayed);
+  CRITICAL_AREA_END_W(overflow);
   coordinator->shutdown();
 }
 
@@ -647,6 +652,7 @@ void test_first_admission_permanently_binds_commit_identity()
   auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
   expect(metadata && metadata->effective_title().empty() && state->calls == 0,
          "the first admission is permanent and a commit outside the first ordinary turn cannot be replaced later");
+  CRITICAL_AREA_END_W(session);
   coordinator->shutdown();
 }
 
@@ -694,6 +700,7 @@ void test_fallback_append_failure_latches_without_retry()
   auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
   expect(!later && metadata && metadata->effective_title().empty() && state->calls == 0 && write_calls->load() == 1,
          "title fallback uses the controller route, never retries a mutation error, and preserves its append-failure latch");
+  CRITICAL_AREA_END_W(session);
   coordinator->shutdown();
 }
 
@@ -859,7 +866,9 @@ void test_shutdown_cancels_owned_generation()
   expect(state->wait_started(), "shutdown title generation starts");
   CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_before_shutdown = ava::session::load_session_metadata(session_w->store, session_w->lease());
+  CRITICAL_AREA_END_W(session);
   coordinator->shutdown();
+  CRITICAL_AREA_CONTINUE_W(session);
   auto metadata_after_shutdown = ava::session::load_session_metadata(session_w->store, session_w->lease());
   {
     std::lock_guard lock(state->mutex);

@@ -199,10 +199,22 @@ void run_tui_terminal_input_tests_part_1()
   auto const sanitized_wrap = ava::tui::detail::wrap_transcript_text(std::string(ava::tui::detail::kSgrUnderline) + "ab", 3);
   expect(!sanitized_wrap.empty() && sanitized_wrap[0].find('\x1b') == std::string::npos,
          "production transcript wrapping still sanitizes raw escape sequences before wrapping");
-  expect(ava::tui::terminal_kitty_keyboard_push_sequence() == std::string_view("\x1b[>5u") &&
+  auto const kitty_push_sequence = ava::tui::terminal_kitty_keyboard_push_sequence();
+  expect(kitty_push_sequence == std::string_view("\x1b[>5u") &&
              ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>5u\x1b[?u\x1b[c") &&
              ava::tui::terminal_kitty_keyboard_pop_sequence() == std::string_view("\x1b[<u"),
          "terminal session requests Kitty keyboard disambiguation plus alternate-key reporting, queries support, and restores the stack on exit");
+  // Kitty flags 5 are DISAMBIGUATE_ESCAPE_CODES (1) plus REPORT_ALTERNATE_KEYS
+  // (4). AVA intentionally excludes REPORT_EVENT_TYPES (2), so it does not
+  // expose the Alacritty <=0.14 duplicate-Enter event-reporting defect.
+  auto const current_kitty_flags =
+      kitty_push_sequence.size() == 5 && kitty_push_sequence[3] >= '0' && kitty_push_sequence[3] <= '9' ? kitty_push_sequence[3] - '0' : -1;
+  constexpr int kKittyDisambiguateEscapeCodes = 1;
+  constexpr int kKittyReportEventTypes = 2;
+  constexpr int kKittyReportAlternateKeys = 4;
+  expect((current_kitty_flags & kKittyDisambiguateEscapeCodes) != 0 && (current_kitty_flags & kKittyReportAlternateKeys) != 0 &&
+             (current_kitty_flags & kKittyReportEventTypes) == 0,
+         "current Kitty flags intentionally enable disambiguation and alternate keys without event-type reporting");
   expect(ava::tui::terminal_modify_other_keys_enable_sequence() == std::string_view("\x1b[>4;2m") &&
              ava::tui::terminal_modify_other_keys_disable_sequence() == std::string_view("\x1b[>4;0m"),
          "terminal session has xterm modifyOtherKeys fallback enable and disable sequences");

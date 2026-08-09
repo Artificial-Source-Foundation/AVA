@@ -1205,6 +1205,7 @@ void test_tui_osc52_clipboard_sequence_bounds()
   using ava::tui::runtime_transcript::base64_encode;
   using ava::tui::runtime_transcript::kMaxTerminalClipboardTextBytes;
   using ava::tui::runtime_transcript::try_build_osc52_clipboard_sequence;
+  using ava::tui::runtime_transcript::try_build_osc52_clipboard_transport;
 
   constexpr std::string_view kPrefix = "\x1b]52;c;";
   constexpr std::string_view kSuffix = "\x1b\\";
@@ -1229,6 +1230,20 @@ void test_tui_osc52_clipboard_sequence_bounds()
          "one-byte clipboard text builds the exact OSC 52 ST sequence");
   assert_valid_sequence("a", *one_byte, "one-byte");
 
+  std::string const raw_one_byte = "\x1b]52;c;YQ==\x1b\\";
+  std::string const wrapped_one_byte = "\x1bPtmux;\x1b\x1b]52;c;YQ==\x1b\x1b\\\x1b\\";
+  auto const direct_missing_tmux = try_build_osc52_clipboard_transport("a", std::nullopt);
+  auto const direct_empty_tmux = try_build_osc52_clipboard_transport("a", std::string_view{});
+  expect(direct_missing_tmux == raw_one_byte && direct_empty_tmux == raw_one_byte, "missing or empty TMUX routes the exact existing raw OSC 52 bytes directly");
+
+  auto const tmux_transport = try_build_osc52_clipboard_transport("a", "hostile;value\x1b-not-output");
+  expect(tmux_transport == raw_one_byte + wrapped_one_byte,
+         "nonempty TMUX routes the raw OSC 52 copy followed by one exact tmux passthrough with every inner ESC doubled");
+  auto const first_wrapper = tmux_transport ? tmux_transport->find("\x1bPtmux;") : std::string::npos;
+  expect(first_wrapper != std::string::npos && tmux_transport->find("\x1bPtmux;", first_wrapper + 1) == std::string::npos &&
+             tmux_transport->find("hostile") == std::string::npos,
+         "OSC 52 tmux routing adds one wrapper layer without interpolating TMUX content or recursively wrapping");
+
   constexpr std::string_view kUnicode = "界π";
   auto const unicode = try_build_osc52_clipboard_sequence(kUnicode);
   expect(unicode.has_value(), "Unicode clipboard text builds an OSC 52 sequence");
@@ -1246,9 +1261,11 @@ void test_tui_osc52_clipboard_sequence_bounds()
   auto const exact_seq = try_build_osc52_clipboard_sequence(exact);
   expect(exact_seq.has_value(), "exactly 64 KiB clipboard text is accepted");
   assert_valid_sequence(exact, *exact_seq, "exact-64KiB");
+  expect(try_build_osc52_clipboard_transport(exact, "tmux").has_value(), "exactly 65,536 source bytes are accepted by tmux OSC 52 routing");
 
   std::string const oversized(kMaxTerminalClipboardTextBytes + 1, 'y');
   expect(!try_build_osc52_clipboard_sequence(oversized).has_value(), "65,537-byte clipboard text is rejected without building a sequence");
+  expect(!try_build_osc52_clipboard_transport(oversized, "tmux").has_value(), "65,537 source bytes are rejected by tmux OSC 52 routing without truncation");
 }
 
 std::string long_thinking_body(std::size_t lines)

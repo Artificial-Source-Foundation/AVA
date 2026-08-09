@@ -528,6 +528,7 @@ void run_tui_transcript_selection_tests()
   // Production copy path over a frozen detached authority: geometry may cross the
   // private row, but the OSC52 payload must be built only from ordinary rows.
   {
+    ScopedEnvVar tmux("TMUX", "");
     ava::tui::ComposerSnapshot copy_snapshot;
     copy_snapshot.width = 40;
     copy_snapshot.height = 10;

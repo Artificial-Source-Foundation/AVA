@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -200,9 +201,31 @@ std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view t
   return sequence;
 }
 
+std::optional<std::string> try_build_osc52_clipboard_transport(std::string_view text, std::optional<std::string_view> tmux)
+{
+  auto raw_sequence = try_build_osc52_clipboard_sequence(text);
+  if (!raw_sequence.has_value() || !tmux.has_value() || tmux->empty())
+    return raw_sequence;
+
+  constexpr std::string_view kTmuxPassthroughPrefix = "\x1bPtmux;";
+  constexpr std::string_view kSequenceTerminator = "\x1b\\";
+  std::string transport = *raw_sequence;
+  transport.append(kTmuxPassthroughPrefix);
+  for (char byte : *raw_sequence)
+  {
+    if (byte == '\x1b')
+      transport.push_back('\x1b');
+    transport.push_back(byte);
+  }
+  transport.append(kSequenceTerminator);
+  return transport;
+}
+
 bool copy_text_to_terminal_clipboard(std::string_view text)
 {
-  auto sequence = try_build_osc52_clipboard_sequence(text);
+  auto const* tmux_value = std::getenv("TMUX");
+  auto const tmux = tmux_value == nullptr ? std::nullopt : std::optional<std::string_view>(tmux_value);
+  auto sequence = try_build_osc52_clipboard_transport(text, tmux);
   if (!sequence.has_value())
     return false;
   return write_all_to_stdout(*sequence);

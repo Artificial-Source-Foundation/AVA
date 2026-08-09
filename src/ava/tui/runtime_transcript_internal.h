@@ -28,7 +28,7 @@ namespace runtime_transcript {
 
 // Conservative raw clipboard text ceiling for OSC 52 copies. Empty or larger
 // inputs are rejected (no silent truncation) so terminals never receive an
-// unbounded paste payload through AVA's direct plain OSC 52 path.
+// unbounded paste payload through AVA's OSC 52 transport.
 inline constexpr std::size_t kMaxTerminalClipboardTextBytes = 65'536;  // 64 KiB
 
 [[nodiscard]] std::string assistant_meta_for_snapshot(ComposerSnapshot const& snapshot,
@@ -36,9 +36,13 @@ inline constexpr std::size_t kMaxTerminalClipboardTextBytes = 65'536;  // 64 KiB
 void apply_assistant_turn_meta(std::vector<TranscriptItem>& transcript, std::string const& meta, bool thinking_visible = true);
 std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::vector<std::string> const& outputs, std::string const& meta);
 [[nodiscard]] std::string base64_encode(std::string_view text);
-// Pure OSC 52 sequence builder: ESC ] 52 ; c ; <base64> ST (ESC \). Returns
-// nullopt for empty or oversized text and never truncates. No tmux DCS wrap.
+// Pure raw OSC 52 sequence builder: ESC ] 52 ; c ; <base64> ST (ESC \).
+// Returns nullopt for empty or oversized text and never truncates or wraps.
 [[nodiscard]] std::optional<std::string> try_build_osc52_clipboard_sequence(std::string_view text);
+// Pure terminal router. Direct terminals receive the raw sequence. A nonempty
+// TMUX value adds exactly one escaped tmux DCS passthrough copy after the raw
+// sequence; the value itself is never included in terminal output.
+[[nodiscard]] std::optional<std::string> try_build_osc52_clipboard_transport(std::string_view text, std::optional<std::string_view> tmux);
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
 [[nodiscard]] std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript);

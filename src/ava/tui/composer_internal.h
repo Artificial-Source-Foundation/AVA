@@ -459,6 +459,7 @@ struct TranscriptPositionIndicatorGeometry
 // and bottom-relative transcript scroll offset.
 [[nodiscard]] TranscriptPositionIndicatorGeometry transcript_position_indicator_geometry(std::size_t layout_lines, std::size_t transcript_height,
                                                                                          std::size_t transcript_scroll_offset) noexcept;
+// Styles the existing right-edge cell on thumb rows only. Plain output is unchanged.
 void apply_transcript_position_indicator_overlay(std::vector<std::string>& visible_lines, std::size_t content_width,
                                                  TranscriptPositionIndicatorGeometry geometry, bool plain_output);
 

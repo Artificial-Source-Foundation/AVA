@@ -2816,54 +2816,106 @@ TranscriptPositionIndicatorGeometry transcript_position_indicator_geometry(std::
 void apply_transcript_position_indicator_overlay(std::vector<std::string>& visible_lines, std::size_t content_width,
                                                  TranscriptPositionIndicatorGeometry geometry, bool plain_output)
 {
-  if (!geometry.visible || visible_lines.empty() || content_width == 0)
+  // Plain output has no non-destructive style-only representation for the thumb.
+  if (plain_output || !geometry.visible || geometry.thumb_length == 0 || visible_lines.empty() || content_width == 0)
     return;
+
+  auto reverse_state_after = [](std::string_view sequence, bool reversed) {
+    if (sequence.size() < 3 || !sequence.starts_with("\x1b[") || sequence.back() != 'm')
+      return reversed;
+    auto const parameters = sequence.substr(2, sequence.size() - 3);
+    if (parameters.empty())
+      return false;
+    for (std::size_t start = 0; start <= parameters.size();)
+    {
+      auto const separator = parameters.find(';', start);
+      auto const end = separator == std::string_view::npos ? parameters.size() : separator;
+      auto const parameter = parameters.substr(start, end - start);
+      auto value = std::size_t{0};
+      auto numeric = true;
+      for (auto const byte : parameter)
+      {
+        if (byte < '0' || byte > '9')
+        {
+          numeric = false;
+          break;
+        }
+        value = value * 10 + static_cast<std::size_t>(byte - '0');
+      }
+      if (numeric)
+      {
+        if (value == 0 || value == 27)
+          reversed = false;
+        else if (value == 7)
+          reversed = true;
+      }
+      if (separator == std::string_view::npos)
+        break;
+      start = separator + 1;
+    }
+    return reversed;
+  };
 
   for (std::size_t row = 0; row < visible_lines.size(); ++row)
   {
-    auto const marker =
-        row >= geometry.thumb_start && row < geometry.thumb_start + geometry.thumb_length ? (plain_output ? "#" : "█") : (plain_output ? "|" : "│");
-    auto const prefix_width = content_width - 1;
-    auto const& source = visible_lines[row];
-    std::string prefix;
-    prefix.reserve(source.size() + content_width);
+    if (row < geometry.thumb_start || row - geometry.thumb_start >= geometry.thumb_length)
+      continue;
+
+    auto& source = visible_lines[row];
+    auto target_start = std::string::npos;
+    auto target_end = std::string::npos;
+    auto target_reversed = false;
+    auto reversed = false;
     std::size_t columns = 0;
-    bool emitted_sgr = false;
-    bool emitted_osc = false;
-    for (std::size_t index = 0; index < source.size() && columns < prefix_width;)
+    for (std::size_t index = 0; index < source.size();)
     {
       auto const before = index;
       if (skip_sgr_sequence(source, index))
       {
-        prefix.append(source.substr(before, index - before));
-        emitted_sgr = true;
+        reversed = reverse_state_after(std::string_view(source).substr(before, index - before), reversed);
         continue;
       }
       if (skip_osc_sequence(source, index))
-      {
-        prefix.append(source.substr(before, index - before));
-        emitted_osc = true;
         continue;
-      }
+
       auto const cell = terminal_text_cell(source, index);
-      auto const cell_columns = std::max<std::size_t>(cell.columns, 1);
-      if (columns + cell_columns > prefix_width)
-        break;
-      prefix.append(source.substr(index, std::max<std::size_t>(cell.bytes, 1)));
-      index += std::max<std::size_t>(cell.bytes, 1);
+      auto const bytes = std::max<std::size_t>(cell.bytes, 1);
+      auto const cell_columns = cell.valid ? cell.columns : std::size_t{1};
+      if (cell_columns > 0 && columns <= content_width && cell_columns <= content_width - columns)
+      {
+        target_start = index;
+        target_end = index + bytes;
+        target_reversed = reversed;
+      }
+      index += bytes;
       columns += cell_columns;
     }
-    if (emitted_osc)
-      prefix += "\x1b]8;;\x1b\\";
-    if (emitted_sgr)
-      prefix += kSgrReset;
-    if (columns < prefix_width)
-      prefix.append(prefix_width - columns, ' ');
-    if (plain_output)
-      prefix += marker;
-    else
-      prefix += std::string(kSgrDim) + marker + std::string(kSgrReset);
-    visible_lines[row] = std::move(prefix);
+
+    auto const indicator_on = target_reversed ? kReverseVideoOff : kReverseVideo;
+    auto const indicator_off = target_reversed ? kReverseVideo : kReverseVideoOff;
+    if (columns < content_width)
+    {
+      // Keep the source byte-for-byte and style only a newly supplied right-edge pad cell.
+      auto const padding = content_width - columns;
+      source.append(padding - 1, ' ');
+      source += reversed ? kReverseVideoOff : kReverseVideo;
+      source.push_back(' ');
+      source += reversed ? kReverseVideo : kReverseVideoOff;
+      continue;
+    }
+    if (target_start == std::string::npos || target_end == std::string::npos)
+      continue;
+
+    // Insert around the complete rightmost displayed cluster. Existing SGR/OSC
+    // bytes and every visible source cell remain untouched and in their original order.
+    std::string styled;
+    styled.reserve(source.size() + indicator_on.size() + indicator_off.size());
+    styled.append(source, 0, target_start);
+    styled += indicator_on;
+    styled.append(source, target_start, target_end - target_start);
+    styled += indicator_off;
+    styled.append(source, target_end, std::string::npos);
+    source = std::move(styled);
   }
 }
 

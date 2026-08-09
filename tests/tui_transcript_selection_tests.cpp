@@ -301,11 +301,42 @@ void run_tui_transcript_selection_tests()
     auto const bottom = ava::tui::detail::transcript_position_indicator_geometry(100, 10, 0);
     auto const proportional = ava::tui::detail::transcript_position_indicator_geometry(20, 10, 5);
     auto const fits = ava::tui::detail::transcript_position_indicator_geometry(10, 10, 0);
-    std::vector<std::string> indicator_lines(10, "row");
-    ava::tui::detail::apply_transcript_position_indicator_overlay(indicator_lines, 8, middle, true);
-    auto const all_overlay_widths = std::ranges::all_of(indicator_lines, [](std::string const& line) {
-      return ava::tui::detail::terminal_text_columns(line) == 8 && (line.back() == '|' || line.back() == '#');
+    auto const cjk = std::string("abcdef\xE4\xBD\xA0");
+    auto const combining = std::string("abcdefg") + "e\xCC\x81";
+    auto const zwj = std::string("abcdef\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB");
+    auto const accent = std::string("\x1b[38;2;77;158;246m");
+    auto const reset = std::string("\x1b[0m");
+    auto const link_open = std::string("\x1b]8;;https://example.test\x1b\\");
+    auto const link_close = std::string("\x1b]8;;\x1b\\");
+    auto const reverse = std::string(ava::tui::detail::kReverseVideo);
+    auto const reverse_off = std::string(ava::tui::detail::kReverseVideoOff);
+    std::vector<std::string> indicator_source{
+        "12345678", "abcdefgZ",      cjk, combining, zwj, accent + "abcdefgZ" + reset, link_open + "abcdefgZ" + link_close, reverse + "abcdefgZ" + reverse_off,
+        "row",      "tail unchanged"};
+    auto indicator_lines = indicator_source;
+    auto const thumb = ava::tui::detail::TranscriptPositionIndicatorGeometry{.thumb_start = 1, .thumb_length = 8, .visible = true};
+    ava::tui::detail::apply_transcript_position_indicator_overlay(indicator_lines, 8, thumb, false);
+    auto const styled_content_survives =
+        indicator_lines[1] == "abcdefg" + reverse + "Z" + reverse_off && indicator_lines[2] == std::string("abcdef") + reverse + "\xE4\xBD\xA0" + reverse_off &&
+        indicator_lines[3] == std::string("abcdefg") + reverse + "e\xCC\x81" + reverse_off &&
+        indicator_lines[4] == std::string("abcdef") + reverse + "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB" + reverse_off &&
+        indicator_lines[5] == accent + "abcdefg" + reverse + "Z" + reverse_off + reset &&
+        indicator_lines[6] == link_open + "abcdefg" + reverse + "Z" + reverse_off + link_close &&
+        indicator_lines[7] == reverse + "abcdefg" + reverse_off + "Z" + reverse + reverse_off && indicator_lines[8] == "row    " + reverse + " " + reverse_off;
+    auto only_thumb_rows_styled = indicator_lines[0] == indicator_source[0] && indicator_lines[9] == indicator_source[9];
+    auto exact_thumb_widths = true;
+    for (std::size_t row = 1; row <= 8; ++row)
+    {
+      only_thumb_rows_styled = only_thumb_rows_styled && indicator_lines[row] != indicator_source[row];
+      exact_thumb_widths = exact_thumb_widths && ava::tui::detail::terminal_text_columns(indicator_lines[row]) == 8;
+    }
+    auto const no_destructive_glyphs = std::ranges::none_of(indicator_lines, [](std::string const& line) {
+      return line.find("│") != std::string::npos || line.find("█") != std::string::npos || line.find('|') != std::string::npos ||
+             line.find('#') != std::string::npos;
     });
+    auto plain_lines = indicator_source;
+    ava::tui::detail::apply_transcript_position_indicator_overlay(plain_lines, 8, thumb, true);
+    auto const plain_unchanged = plain_lines == indicator_source;
 
     using IndicatorClock = ava::tui::TranscriptPositionIndicatorState::Clock;
     ava::tui::TranscriptPositionIndicatorState indicator;
@@ -322,10 +353,11 @@ void run_tui_transcript_selection_tests()
     ++streaming_snapshot.transcript_generation;
     auto const streaming_stays_hidden = !streaming_renderer.transcript_position_indicator_visible();
     expect(top.visible && top.thumb_start == 0 && middle.visible && middle.thumb_start > top.thumb_start && middle.thumb_start < bottom.thumb_start &&
-               bottom.visible && bottom.thumb_start + bottom.thumb_length == 10 && proportional.thumb_length == 5 && !fits.visible && all_overlay_widths &&
-               waits_one_second && early_visible && expired && streaming_stays_hidden,
-           "the paint-only transcript indicator derives top/middle/bottom and proportional thumb geometry from full layout rows, hides when content fits, "
-           "overlays the right edge without changing width, expires deterministically after one second, and is not activated by live-tail streaming alone");
+               bottom.visible && bottom.thumb_start + bottom.thumb_length == 10 && proportional.thumb_length == 5 && !fits.visible && styled_content_survives &&
+               only_thumb_rows_styled && exact_thumb_widths && no_destructive_glyphs && plain_unchanged && waits_one_second && early_visible && expired &&
+               streaming_stays_hidden,
+           "the paint-only transcript indicator derives proportional geometry, styles only complete right-edge thumb cells without replacing ASCII, wide, "
+           "combining, ZWJ, SGR, or OSC8 content, leaves plain output unchanged, expires after one second, and stays hidden for live-tail streaming alone");
   }
 
   ava::tui::ComposerSnapshot snapshot;

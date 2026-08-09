@@ -1210,6 +1210,19 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
       return TranscriptSelectionMouseResult::Ignored;
     }
 
+    if (hit->on_header && (hit->tool_header || hit->thinking_header))
+    {
+      // Header clicks are actions, not multi-click selection seeds. Keeping them
+      // outside the body click chain lets rapid expand/collapse clicks keep
+      // toggling while a drag still converts the armed header into selection.
+      reset_click_chain();
+      pending_click_word_ = *word;
+      pending_click_count_ = 1;
+      arm_header(hit->endpoint, hit->tool_header, hit->thinking_header, snapshot, frozen_to_live_item_index_shift);
+      // Do not start a selection yet; drag converts the arm into selection.
+      snapshot.status = "selection started";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
     pending_click_word_ = *word;
     pending_click_count_ = next_click_count(*word, snapshot, frozen_to_live_item_index_shift, now);
     if (pending_click_count_ == 2)
@@ -1228,13 +1241,6 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
       }
       begin_granular_selection(*line, SelectionGranularity::Line, snapshot, draft_state, frozen_to_live_item_index_shift);
       snapshot.status = "selection active";
-      return TranscriptSelectionMouseResult::HandledNeedsRender;
-    }
-    if (hit->on_header && (hit->tool_header || hit->thinking_header))
-    {
-      arm_header(hit->endpoint, hit->tool_header, hit->thinking_header, snapshot, frozen_to_live_item_index_shift);
-      // Do not start a selection yet; drag converts the arm into selection.
-      snapshot.status = "selection started";
       return TranscriptSelectionMouseResult::HandledNeedsRender;
     }
     begin_selection(hit->endpoint, snapshot, draft_state, frozen_to_live_item_index_shift);
@@ -1324,12 +1330,10 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
         snapshot.status = "selection active";
         return TranscriptSelectionMouseResult::HandledNeedsRender;
       }
-      auto const completed_word = *pending_click_word_;
-      auto const completed_count = pending_click_count_;
       // Map the frozen armed item through the exact accumulated deferred shift and
       // toggle only the same source item; fail closed on eviction/replacement.
       auto const toggled = finish_header_click(snapshot, frozen_to_live_item_index_shift, toggle_tool, toggle_thinking);
-      commit_click(completed_word, completed_count, snapshot, frozen_to_live_item_index_shift, now);
+      reset_click_chain();
       return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
     }
     if (drag_ == DragKind::Selecting)
@@ -1380,6 +1384,18 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
       reset_click_chain();
       return TranscriptSelectionMouseResult::Ignored;
     }
+    if (hit->on_header && (hit->tool_header || hit->thinking_header))
+    {
+      range_.reset();
+      anchor_source_authority_.reset();
+      focus_source_authority_.reset();
+      reset_granular_drag();
+      reset_click_chain();
+      auto const toggled = toggle_header_at_frozen_item(snapshot, hit->endpoint.item_index, hit->tool_header, hit->thinking_header,
+                                                        frozen_to_live_item_index_shift, toggle_tool, toggle_thinking);
+      return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
+    }
+
     auto const count = next_click_count(*word, snapshot, frozen_to_live_item_index_shift, now);
     if (count == 2)
     {
@@ -1412,15 +1428,8 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
     anchor_source_authority_.reset();
     focus_source_authority_.reset();
     reset_granular_drag();
-    auto toggled = false;
-    if (hit->on_header && (hit->tool_header || hit->thinking_header))
-    {
-      toggled = toggle_header_at_frozen_item(snapshot, hit->endpoint.item_index, hit->tool_header, hit->thinking_header, frozen_to_live_item_index_shift,
-                                             toggle_tool, toggle_thinking);
-    }
     commit_click(*word, count, snapshot, frozen_to_live_item_index_shift, now);
-    return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender
-                   : (hit->on_header ? TranscriptSelectionMouseResult::Handled : TranscriptSelectionMouseResult::Ignored);
+    return hit->on_header ? TranscriptSelectionMouseResult::Handled : TranscriptSelectionMouseResult::Ignored;
   }
 
   return TranscriptSelectionMouseResult::Ignored;

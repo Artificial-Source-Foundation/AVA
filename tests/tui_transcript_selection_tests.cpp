@@ -388,10 +388,19 @@ void run_tui_transcript_selection_tests()
   static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftRelease, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
   expect(toggles == 1 && last_toggled == 0 && state.empty(), "transcript header press/release without movement preserves click-to-toggle fallback");
 
+  // Rapid action clicks on a tool/thinking header must continue toggling. They
+  // are not eligible for body double/triple-click word or line selection.
+  static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
+  static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftRelease, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
+  static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftClick, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
+  static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftClick, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
+  expect(toggles == 4 && last_toggled == 0 && state.empty(),
+         "rapid press/release and complete-click header actions keep toggling instead of entering the body multi-click selection chain");
+
   static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
   static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftRelease, 2, 5), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
   auto header_drag = state.range();
-  expect(toggles == 1 && header_drag && header_drag->anchor.item_index == 0 && header_drag->anchor.line_offset == 0 && header_drag->focus.line_offset == 1 &&
+  expect(toggles == 4 && header_drag && header_drag->anchor.item_index == 0 && header_drag->anchor.line_offset == 0 && header_drag->focus.line_offset == 1 &&
              !draft.selection_bounds(),
          "transcript header drag anchors at the original press endpoint, does not toggle, and clears draft selection");
 

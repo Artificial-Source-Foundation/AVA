@@ -1913,9 +1913,9 @@ std::string action_label(TuiAction action)
     case TuiAction::MessageDequeue:
       return "Dequeue message";
     case TuiAction::MessagePrev:
-      return "Previous message";
+      return "Previous user turn";
     case TuiAction::MessageNext:
-      return "Next message";
+      return "Next user turn";
     case TuiAction::JumpToBottom:
       return "Jump to live tail";
     case TuiAction::SessionNew:
@@ -2098,9 +2098,9 @@ std::string action_description(TuiAction action)
     case TuiAction::MessageDequeue:
       return "Restore the latest queued active-run message to the composer";
     case TuiAction::MessagePrev:
-      return "Jump to the previous transcript message boundary";
+      return "Jump to the previous retained user turn";
     case TuiAction::MessageNext:
-      return "Jump to the next transcript message boundary";
+      return "Jump to the next retained user turn, then return to the live tail";
     case TuiAction::JumpToBottom:
       return "Return the transcript to the live tail";
     case TuiAction::SessionNew:

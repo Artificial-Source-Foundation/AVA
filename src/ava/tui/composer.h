@@ -612,6 +612,8 @@ struct ComposerSnapshot
   bool path_completion_force_active = false;
   std::size_t transcript_scroll_offset = 0;
   std::size_t transcript_new_output_count = 0;
+  // Transient renderer-owned paint overlay; never changes transcript layout or hit geometry.
+  bool transcript_position_indicator_visible = false;
   std::size_t width = 80;
   std::size_t height = 24;
   std::size_t input_cursor = std::string::npos;

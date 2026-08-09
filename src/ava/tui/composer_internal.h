@@ -338,6 +338,19 @@ void mark_screen_row_dirty(ScreenRowCache& screen_cache, std::size_t row);
 [[nodiscard]] bool skip_sgr_sequence(std::string_view text, std::size_t& index);
 [[nodiscard]] bool skip_osc_sequence(std::string_view text, std::size_t& index);
 [[nodiscard]] std::size_t terminal_text_columns(std::string_view text);
+
+enum class WordSegmentClass
+{
+  Space,
+  Word,
+  WideWord,
+  Punctuation,
+};
+
+// Shared Unicode-aware segment classifier for composer word movement and rendered
+// transcript word selection. `cursor` must name a compact cluster start.
+[[nodiscard]] WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor);
+
 [[nodiscard]] std::string fit_line(std::string text, std::size_t width);
 [[nodiscard]] std::string fit_line_preserving_sgr(std::string text, std::size_t width);
 [[nodiscard]] std::string surface_line(std::string_view background_sgr, std::string line, std::size_t width);
@@ -432,6 +445,22 @@ void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<T
 [[nodiscard]] std::size_t cached_transcript_max_scroll_offset(TranscriptLayoutCache const& cache, std::size_t transcript_height);
 [[nodiscard]] std::vector<std::string> cached_visible_transcript_lines(TranscriptLayoutCache const& cache, std::size_t transcript_height,
                                                                        std::size_t transcript_scroll_offset);
+
+struct TranscriptPositionIndicatorGeometry
+{
+  std::size_t thumb_start = 0;
+  std::size_t thumb_length = 0;
+  bool visible = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+// Computes a top-relative proportional thumb from the authoritative full layout
+// and bottom-relative transcript scroll offset.
+[[nodiscard]] TranscriptPositionIndicatorGeometry transcript_position_indicator_geometry(std::size_t layout_lines, std::size_t transcript_height,
+                                                                                         std::size_t transcript_scroll_offset) noexcept;
+void apply_transcript_position_indicator_overlay(std::vector<std::string>& visible_lines, std::size_t content_width,
+                                                 TranscriptPositionIndicatorGeometry geometry, bool plain_output);
 
 // Compatibility overloads for focused renderer callers that still express the former collapsed/expanded switch.
 inline ToolPresentation legacy_tool_presentation(bool expanded)

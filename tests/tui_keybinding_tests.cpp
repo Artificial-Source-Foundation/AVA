@@ -443,6 +443,14 @@ void run_tui_keybinding_tests()
                               [](ava::tui::TuiKeyBindingHelpItem const& item) {
                                 return item.action == "jump_to_bottom" && item.label == "Jump to live tail" && item.keys.find("Ctrl+End") != std::string::npos;
                               }) &&
+          std::ranges::any_of(help_items,
+                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                return item.action == "message_prev" && item.label == "Previous user turn" && item.keys.find("Alt+K") != std::string::npos;
+                              }) &&
+          std::ranges::any_of(help_items,
+                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                return item.action == "message_next" && item.label == "Next user turn" && item.keys.find("Alt+J") != std::string::npos;
+                              }) &&
           std::ranges::any_of(
               help_items, [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "mode_toggle" && item.label == "Toggle build/plan mode"; }),
       "tui keybind help items carry human primary labels beside stable machine action ids");

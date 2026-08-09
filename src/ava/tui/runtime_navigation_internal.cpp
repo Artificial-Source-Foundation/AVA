@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <vector>
 #include <curses.h>
 
 namespace ava::tui {
@@ -94,6 +95,7 @@ void RuntimeNavigationController::scroll_up(std::size_t amount)
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);
   auto const clamped_scroll = std::min(renderer_.transcript_scroll_offset, max_scroll);
   renderer_.transcript_scroll_offset = std::min(max_scroll, clamped_scroll + amount);
+  renderer_.show_transcript_position_indicator();
   if (renderer_.transcript_scroll_offset > 0 && !renderer_.detached_sidebar_snapshot)
     renderer_.detached_sidebar_snapshot = sidebar_;
 }
@@ -110,11 +112,24 @@ void RuntimeNavigationController::scroll_down(std::size_t amount)
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);
   auto const clamped_scroll = std::min(renderer_.transcript_scroll_offset, max_scroll);
   renderer_.transcript_scroll_offset = amount >= clamped_scroll ? 0 : clamped_scroll - amount;
+  renderer_.show_transcript_position_indicator();
   if (renderer_.transcript_scroll_offset == 0)
   {
     renderer_.detached_new_output_count = 0;
     renderer_.detached_sidebar_snapshot.reset();
   }
+}
+
+std::size_t RuntimeNavigationController::transcript_page_size()
+{
+  static_cast<void>(refresh_completion_cache());
+  snapshot_.draft_scroll_offset = draft_state_.draft_scroll_offset;
+  auto const [width, height] = terminal_size();
+  snapshot_.width = width;
+  snapshot_.height = height;
+  renderer_.synchronize_detached_transcript_layout();
+  auto const body = detail::transcript_body_screen_geometry(snapshot_);
+  return std::max<std::size_t>(1, body.valid ? body.transcript_height / 2 : std::size_t{0});
 }
 
 bool RuntimeNavigationController::toggle_tool_details_at(std::size_t item_index)
@@ -303,6 +318,7 @@ void RuntimeNavigationController::jump_to_bottom(std::string status)
 {
   draft_state_.pending_escape_clear = false;
   renderer_.transcript_scroll_offset = 0;
+  renderer_.show_transcript_position_indicator();
   renderer_.discard_deferred_detached_transcript_update();
   renderer_.detached_new_output_count = 0;
   renderer_.detached_sidebar_snapshot.reset();
@@ -329,6 +345,7 @@ void RuntimeNavigationController::jump_to_transcript_item(std::size_t item_index
   auto const position = static_cast<std::size_t>(message - layout.message_item_indices.begin());
   auto const target_start = std::min(layout.message_starts[position], max_scroll);
   renderer_.transcript_scroll_offset = max_scroll - target_start;
+  renderer_.show_transcript_position_indicator();
   renderer_.discard_deferred_detached_transcript_update();
   if (renderer_.transcript_scroll_offset > 0)
   {
@@ -353,28 +370,32 @@ void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
   auto const max_scroll =
       detail::composer_max_transcript_scroll_offset_cached(snapshot_, width, height, renderer_.completion_cache, snapshot_.file_references_generation,
                                                            renderer_.transcript_layout_cache, snapshot_.transcript_generation);
-  if (max_scroll == 0)
+  auto const& layout = renderer_.transcript_layout_cache.layout;
+  std::vector<std::size_t> user_starts;
+  user_starts.reserve(layout.message_starts.size());
+  for (std::size_t position = 0; position < layout.message_starts.size() && position < layout.message_item_indices.size(); ++position)
   {
-    renderer_.transcript_scroll_offset = 0;
-    renderer_.detached_new_output_count = 0;
-    renderer_.detached_sidebar_snapshot.reset();
-    snapshot_.status = "transcript fits on screen";
+    auto const item_index = layout.message_item_indices[position];
+    if (item_index < snapshot_.transcript.size() && snapshot_.transcript[item_index].label == "you" && !snapshot_.transcript[item_index].tool)
+    {
+      auto const start = std::min(layout.message_starts[position], max_scroll);
+      if (user_starts.empty() || user_starts.back() != start)
+        user_starts.push_back(start);
+    }
+  }
+  if (user_starts.empty())
+  {
+    renderer_.show_transcript_position_indicator();
+    snapshot_.status = "no retained user turns";
     return;
   }
 
   auto const clamped_scroll = std::min(renderer_.transcript_scroll_offset, max_scroll);
   auto const current_start = max_scroll - clamped_scroll;
-  auto const& starts = renderer_.transcript_layout_cache.layout.message_starts;
-  if (starts.empty())
-  {
-    snapshot_.status = "no message boundaries";
-    return;
-  }
-
   auto target_start = std::optional<std::size_t>{};
   if (previous)
   {
-    for (auto const start : starts)
+    for (auto const start : user_starts)
     {
       if (start >= current_start)
         break;
@@ -382,13 +403,14 @@ void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
     }
     if (!target_start)
     {
-      snapshot_.status = "oldest message visible";
+      renderer_.show_transcript_position_indicator();
+      snapshot_.status = "oldest retained user turn";
       return;
     }
   }
   else
   {
-    for (auto const start : starts)
+    for (auto const start : user_starts)
     {
       if (start > current_start)
       {
@@ -404,6 +426,7 @@ void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
   }
 
   renderer_.transcript_scroll_offset = max_scroll > *target_start ? max_scroll - *target_start : 0;
+  renderer_.show_transcript_position_indicator();
   if (renderer_.transcript_scroll_offset > 0 && !renderer_.detached_sidebar_snapshot)
     renderer_.detached_sidebar_snapshot = sidebar_;
   if (renderer_.transcript_scroll_offset == 0)
@@ -411,7 +434,7 @@ void RuntimeNavigationController::scroll_to_message_boundary(bool previous)
     renderer_.detached_new_output_count = 0;
     renderer_.detached_sidebar_snapshot.reset();
   }
-  snapshot_.status = previous ? "previous message" : "next message";
+  snapshot_.status = previous ? "previous retained user turn" : "next retained user turn";
 }
 
 }  // namespace ava::tui

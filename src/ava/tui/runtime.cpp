@@ -2023,13 +2023,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::PageUp))
     {
-      auto const [_, height] = terminal_size();
-      scroll_up(std::max<std::size_t>(1, height / 2));
+      scroll_up(navigation.transcript_page_size());
     }
     else if (is_action(TuiAction::PageDown))
     {
-      auto const [_, height] = terminal_size();
-      scroll_down(std::max<std::size_t>(1, height / 2));
+      scroll_down(navigation.transcript_page_size());
     }
     else if (is_action(TuiAction::MessagePrev))
     {

@@ -2796,6 +2796,77 @@ std::vector<std::string> cached_visible_transcript_lines(TranscriptLayoutCache c
   return visible_transcript_lines(cache.layout.lines, cache.width, transcript_height, transcript_scroll_offset);
 }
 
+TranscriptPositionIndicatorGeometry transcript_position_indicator_geometry(std::size_t layout_lines, std::size_t transcript_height,
+                                                                           std::size_t transcript_scroll_offset) noexcept
+{
+  if (transcript_height == 0 || layout_lines <= transcript_height)
+    return {};
+
+  auto const max_scroll = layout_lines - transcript_height;
+  auto const scroll = std::min(transcript_scroll_offset, max_scroll);
+  auto const visible_start = max_scroll - scroll;
+  auto const thumb_length = std::max<std::size_t>(1, (transcript_height * transcript_height) / layout_lines);
+  auto const track_travel = transcript_height - std::min(transcript_height, thumb_length);
+  auto const quotient = visible_start / max_scroll;
+  auto const remainder = visible_start % max_scroll;
+  auto const thumb_start = std::min(track_travel, quotient * track_travel + (remainder * track_travel + max_scroll / 2) / max_scroll);
+  return {.thumb_start = thumb_start, .thumb_length = std::min(transcript_height, thumb_length), .visible = true};
+}
+
+void apply_transcript_position_indicator_overlay(std::vector<std::string>& visible_lines, std::size_t content_width,
+                                                 TranscriptPositionIndicatorGeometry geometry, bool plain_output)
+{
+  if (!geometry.visible || visible_lines.empty() || content_width == 0)
+    return;
+
+  for (std::size_t row = 0; row < visible_lines.size(); ++row)
+  {
+    auto const marker =
+        row >= geometry.thumb_start && row < geometry.thumb_start + geometry.thumb_length ? (plain_output ? "#" : "█") : (plain_output ? "|" : "│");
+    auto const prefix_width = content_width - 1;
+    auto const& source = visible_lines[row];
+    std::string prefix;
+    prefix.reserve(source.size() + content_width);
+    std::size_t columns = 0;
+    bool emitted_sgr = false;
+    bool emitted_osc = false;
+    for (std::size_t index = 0; index < source.size() && columns < prefix_width;)
+    {
+      auto const before = index;
+      if (skip_sgr_sequence(source, index))
+      {
+        prefix.append(source.substr(before, index - before));
+        emitted_sgr = true;
+        continue;
+      }
+      if (skip_osc_sequence(source, index))
+      {
+        prefix.append(source.substr(before, index - before));
+        emitted_osc = true;
+        continue;
+      }
+      auto const cell = terminal_text_cell(source, index);
+      auto const cell_columns = std::max<std::size_t>(cell.columns, 1);
+      if (columns + cell_columns > prefix_width)
+        break;
+      prefix.append(source.substr(index, std::max<std::size_t>(cell.bytes, 1)));
+      index += std::max<std::size_t>(cell.bytes, 1);
+      columns += cell_columns;
+    }
+    if (emitted_osc)
+      prefix += "\x1b]8;;\x1b\\";
+    if (emitted_sgr)
+      prefix += kSgrReset;
+    if (columns < prefix_width)
+      prefix.append(prefix_width - columns, ' ');
+    if (plain_output)
+      prefix += marker;
+    else
+      prefix += std::string(kSgrDim) + marker + std::string(kSgrReset);
+    visible_lines[row] = std::move(prefix);
+  }
+}
+
 std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript, std::size_t width, std::size_t transcript_height,
                                                   std::size_t transcript_scroll_offset)
 {

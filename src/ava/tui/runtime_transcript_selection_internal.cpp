@@ -121,6 +121,16 @@ std::string plain_slice(std::string_view plain_row, std::size_t column_start, st
   return out;
 }
 
+bool same_endpoint(TranscriptSelectionEndpoint const& left, TranscriptSelectionEndpoint const& right)
+{
+  return left.item_index == right.item_index && left.line_offset == right.line_offset && left.display_column == right.display_column;
+}
+
+bool same_unit(TranscriptSelectionUnit const& left, TranscriptSelectionUnit const& right)
+{
+  return same_endpoint(left.start, right.start) && same_endpoint(left.end, right.end);
+}
+
 bool append_bounded(std::string& out, std::string_view chunk, std::size_t max_bytes, bool& oversize)
 {
   if (oversize)
@@ -232,6 +242,68 @@ std::optional<TranscriptSelectionEndpoint> endpoint_for_absolute_line(detail::Tr
   auto const plain = transcript_selection_plain_row(layout.lines[absolute_line]);
   auto const snapped = snap_display_column(plain, display_column, /*prefer_end_on_half=*/false);
   return TranscriptSelectionEndpoint{.item_index = layout.message_item_indices[position], .line_offset = absolute_line - start, .display_column = snapped};
+}
+
+std::optional<TranscriptSelectionUnit> transcript_word_selection_unit(detail::TranscriptLayout const& layout, TranscriptSelectionEndpoint const& endpoint)
+{
+  auto const absolute = absolute_line_for_endpoint(layout, endpoint);
+  if (!absolute)
+    return std::nullopt;
+  auto const plain = transcript_selection_plain_row(layout.lines[*absolute]);
+  if (plain.empty())
+    return std::nullopt;
+
+  struct SegmentCell
+  {
+    std::size_t column_start = 0;
+    std::size_t column_end = 0;
+    detail::WordSegmentClass segment_class = detail::WordSegmentClass::Space;
+  };
+  std::vector<SegmentCell> cells;
+  std::size_t column = 0;
+  for (std::size_t index = 0; index < plain.size();)
+  {
+    auto const cell = detail::terminal_text_cell(plain, index);
+    auto const bytes = std::max<std::size_t>(cell.bytes, 1);
+    auto const columns = std::max<std::size_t>(cell.columns, 1);
+    cells.push_back(SegmentCell{.column_start = column, .column_end = column + columns, .segment_class = detail::word_segment_class_at(plain, index)});
+    index += bytes;
+    column += columns;
+  }
+  if (cells.empty())
+    return std::nullopt;
+
+  auto selected = cells.size() - 1;
+  for (std::size_t index = 0; index < cells.size(); ++index)
+  {
+    if (endpoint.display_column < cells[index].column_end)
+    {
+      selected = index;
+      break;
+    }
+  }
+  auto first = selected;
+  while (first > 0 && cells[first - 1].segment_class == cells[selected].segment_class) --first;
+  auto last = selected + 1;
+  while (last < cells.size() && cells[last].segment_class == cells[selected].segment_class) ++last;
+
+  auto start = endpoint;
+  start.display_column = cells[first].column_start;
+  auto end = endpoint;
+  end.display_column = cells[last - 1].column_end;
+  return TranscriptSelectionUnit{.start = start, .end = end};
+}
+
+std::optional<TranscriptSelectionUnit> transcript_line_selection_unit(detail::TranscriptLayout const& layout, TranscriptSelectionEndpoint const& endpoint)
+{
+  auto const absolute = absolute_line_for_endpoint(layout, endpoint);
+  if (!absolute)
+    return std::nullopt;
+  auto start = endpoint;
+  start.display_column = 0;
+  auto end = endpoint;
+  end.display_column = transcript_selection_plain_columns(transcript_selection_plain_row(layout.lines[*absolute]));
+  return TranscriptSelectionUnit{.start = start, .end = end};
 }
 
 bool endpoint_less(TranscriptSelectionEndpoint const& left, TranscriptSelectionEndpoint const& right, detail::TranscriptLayout const& layout)
@@ -388,6 +460,23 @@ void apply_transcript_selection_overlay(std::vector<std::string>& visible_lines,
   }
 }
 
+void RuntimeTranscriptSelectionState::reset_click_chain() noexcept
+{
+  click_chain_.reset();
+  pending_click_word_.reset();
+  pending_click_count_ = 0;
+  pointer_moved_ = false;
+}
+
+void RuntimeTranscriptSelectionState::reset_granular_drag() noexcept
+{
+  granularity_ = SelectionGranularity::Character;
+  granular_anchor_.reset();
+  edge_autoscroll_due_.reset();
+  edge_mouse_row_ = 0;
+  edge_mouse_column_ = 0;
+}
+
 void RuntimeTranscriptSelectionState::clear() noexcept
 {
   range_.reset();
@@ -399,6 +488,8 @@ void RuntimeTranscriptSelectionState::clear() noexcept
   armed_source_authority_.reset();
   armed_tool_header_ = false;
   armed_thinking_header_ = false;
+  reset_click_chain();
+  reset_granular_drag();
 }
 
 void RuntimeTranscriptSelectionState::cancel_pointer_interaction() noexcept
@@ -410,6 +501,8 @@ void RuntimeTranscriptSelectionState::cancel_pointer_interaction() noexcept
   armed_source_authority_.reset();
   armed_tool_header_ = false;
   armed_thinking_header_ = false;
+  reset_click_chain();
+  reset_granular_drag();
 }
 
 bool RuntimeTranscriptSelectionState::empty() const noexcept
@@ -420,6 +513,11 @@ bool RuntimeTranscriptSelectionState::empty() const noexcept
 bool RuntimeTranscriptSelectionState::dragging() const noexcept
 {
   return drag_ != DragKind::None;
+}
+
+bool RuntimeTranscriptSelectionState::has_click_chain() const noexcept
+{
+  return click_chain_.has_value() || pending_click_word_.has_value();
 }
 
 std::optional<TranscriptSelectionRange> RuntimeTranscriptSelectionState::range() const noexcept
@@ -518,6 +616,23 @@ void RuntimeTranscriptSelectionState::rebind_authority(detail::TranscriptLayout 
   if (snapshot && !refresh_source_authorities_or_clear(*snapshot))
     return;
   remap_or_clear(layout);
+  auto remap_unit = [&](TranscriptSelectionUnit& unit) {
+    auto start = remap_endpoint(layout, unit.start);
+    auto end = remap_endpoint(layout, unit.end);
+    if (!start || !end)
+      return false;
+    unit = TranscriptSelectionUnit{.start = *start, .end = *end};
+    return true;
+  };
+  if (click_chain_ && !remap_unit(click_chain_->word))
+    reset_click_chain();
+  if (pending_click_word_ && !remap_unit(*pending_click_word_))
+    reset_click_chain();
+  if (granular_anchor_ && !remap_unit(*granular_anchor_))
+  {
+    cancel_pointer_interaction();
+    return;
+  }
   if (armed_press_endpoint_)
   {
     auto remapped = remap_endpoint(layout, *armed_press_endpoint_);
@@ -543,7 +658,45 @@ void RuntimeTranscriptSelectionState::apply_item_index_shift(std::ptrdiff_t item
   {
     if (range_)
       remap_or_clear(layout);
+    auto remap_unit = [&](TranscriptSelectionUnit& unit) {
+      auto start = remap_endpoint(layout, unit.start);
+      auto end = remap_endpoint(layout, unit.end);
+      if (!start || !end)
+        return false;
+      unit = TranscriptSelectionUnit{.start = *start, .end = *end};
+      return true;
+    };
+    if (click_chain_ && !remap_unit(click_chain_->word))
+      reset_click_chain();
+    if (pending_click_word_ && !remap_unit(*pending_click_word_))
+      reset_click_chain();
+    if (granular_anchor_ && !remap_unit(*granular_anchor_))
+      cancel_pointer_interaction();
     return;
+  }
+  auto shift_unit = [&](TranscriptSelectionUnit& unit) {
+    auto start = shift_transcript_selection_item_index(unit.start.item_index, item_index_shift);
+    auto end = shift_transcript_selection_item_index(unit.end.item_index, item_index_shift);
+    if (!start || !end)
+      return false;
+    unit.start.item_index = *start;
+    unit.end.item_index = *end;
+    auto remapped_start = remap_endpoint(layout, unit.start);
+    auto remapped_end = remap_endpoint(layout, unit.end);
+    if (!remapped_start || !remapped_end)
+      return false;
+    unit = TranscriptSelectionUnit{.start = *remapped_start, .end = *remapped_end};
+    return true;
+  };
+  if (click_chain_ && !shift_unit(click_chain_->word))
+    reset_click_chain();
+  if (pending_click_word_ && !shift_unit(*pending_click_word_))
+    reset_click_chain();
+  if (granular_anchor_ && !shift_unit(*granular_anchor_))
+  {
+    cancel_pointer_interaction();
+    if (!range_)
+      return;
   }
   if (armed_header_item_ && armed_press_endpoint_)
   {
@@ -704,6 +857,7 @@ void RuntimeTranscriptSelectionState::begin_selection(TranscriptSelectionEndpoin
 {
   if (draft_state)
     draft_state->clear_selection();
+  reset_granular_drag();
   range_ = TranscriptSelectionRange{.anchor = endpoint, .focus = endpoint};
   // Endpoints stay on the frozen layout authority; source identity is captured from the
   // live transcript item after mapping any deferred frozen→live cap shift.
@@ -711,6 +865,27 @@ void RuntimeTranscriptSelectionState::begin_selection(TranscriptSelectionEndpoin
   anchor_source_authority_ = source_authority(snapshot, live_item);
   focus_source_authority_ = anchor_source_authority_;
   drag_ = DragKind::Selecting;
+  armed_header_item_.reset();
+  armed_press_endpoint_.reset();
+  armed_source_authority_.reset();
+  armed_tool_header_ = false;
+  armed_thinking_header_ = false;
+}
+
+void RuntimeTranscriptSelectionState::begin_granular_selection(TranscriptSelectionUnit const& unit, SelectionGranularity granularity,
+                                                               ComposerSnapshot const& snapshot, RuntimeDraftState* draft_state,
+                                                               std::ptrdiff_t frozen_to_live_item_index_shift)
+{
+  if (draft_state)
+    draft_state->clear_selection();
+  range_ = TranscriptSelectionRange{.anchor = unit.start, .focus = unit.end};
+  auto const anchor_live_item = shift_transcript_selection_item_index(unit.start.item_index, frozen_to_live_item_index_shift).value_or(unit.start.item_index);
+  auto const focus_live_item = shift_transcript_selection_item_index(unit.end.item_index, frozen_to_live_item_index_shift).value_or(unit.end.item_index);
+  anchor_source_authority_ = source_authority(snapshot, anchor_live_item);
+  focus_source_authority_ = source_authority(snapshot, focus_live_item);
+  drag_ = DragKind::Selecting;
+  granularity_ = granularity;
+  granular_anchor_ = unit;
   armed_header_item_.reset();
   armed_press_endpoint_.reset();
   armed_source_authority_.reset();
@@ -740,9 +915,63 @@ void RuntimeTranscriptSelectionState::extend_selection(TranscriptSelectionEndpoi
   armed_thinking_header_ = false;
 }
 
+std::optional<TranscriptSelectionUnit> RuntimeTranscriptSelectionState::selection_unit_for_hit(TranscriptSelectionHit const& hit,
+                                                                                               detail::TranscriptLayout const& layout,
+                                                                                               SelectionGranularity granularity) const
+{
+  if (granularity == SelectionGranularity::Word)
+    return transcript_word_selection_unit(layout, hit.endpoint);
+  if (granularity == SelectionGranularity::Line)
+    return transcript_line_selection_unit(layout, hit.endpoint);
+  return TranscriptSelectionUnit{.start = hit.endpoint, .end = hit.endpoint};
+}
+
+void RuntimeTranscriptSelectionState::extend_granular_selection(TranscriptSelectionUnit const& unit, ComposerSnapshot const& snapshot,
+                                                                std::ptrdiff_t frozen_to_live_item_index_shift, detail::TranscriptLayout const& layout)
+{
+  if (!granular_anchor_)
+    granular_anchor_ = unit;
+  auto const target_before_anchor = endpoint_less(unit.start, granular_anchor_->start, layout);
+  auto const focus = target_before_anchor ? unit.start : unit.end;
+  auto const anchor = target_before_anchor ? granular_anchor_->end : granular_anchor_->start;
+  range_ = TranscriptSelectionRange{.anchor = anchor, .focus = focus};
+  auto const anchor_live_item = shift_transcript_selection_item_index(anchor.item_index, frozen_to_live_item_index_shift).value_or(anchor.item_index);
+  auto const focus_live_item = shift_transcript_selection_item_index(focus.item_index, frozen_to_live_item_index_shift).value_or(focus.item_index);
+  anchor_source_authority_ = source_authority(snapshot, anchor_live_item);
+  focus_source_authority_ = source_authority(snapshot, focus_live_item);
+  drag_ = DragKind::Selecting;
+}
+
+std::size_t RuntimeTranscriptSelectionState::next_click_count(TranscriptSelectionUnit const& word, ComposerSnapshot const& snapshot,
+                                                              std::ptrdiff_t frozen_to_live_item_index_shift, Clock::time_point now) const
+{
+  if (!click_chain_ || click_chain_->count >= 3 || now < click_chain_->completed_at || now - click_chain_->completed_at > kMultiClickInterval ||
+      !same_unit(click_chain_->word, word))
+  {
+    return 1;
+  }
+  auto const live_item = shift_transcript_selection_item_index(word.start.item_index, frozen_to_live_item_index_shift);
+  auto const current = live_item ? source_authority(snapshot, *live_item) : std::nullopt;
+  if (!current || (click_chain_->source_authority && !source_authority_compatible(*click_chain_->source_authority, *current)))
+    return 1;
+  return click_chain_->count + 1;
+}
+
+void RuntimeTranscriptSelectionState::commit_click(TranscriptSelectionUnit const& word, std::size_t count, ComposerSnapshot const& snapshot,
+                                                   std::ptrdiff_t frozen_to_live_item_index_shift, Clock::time_point now)
+{
+  auto const live_item = shift_transcript_selection_item_index(word.start.item_index, frozen_to_live_item_index_shift);
+  click_chain_ =
+      ClickChain{.word = word, .count = count, .completed_at = now, .source_authority = live_item ? source_authority(snapshot, *live_item) : std::nullopt};
+  pending_click_word_.reset();
+  pending_click_count_ = 0;
+  pointer_moved_ = false;
+}
+
 void RuntimeTranscriptSelectionState::arm_header(TranscriptSelectionEndpoint endpoint, bool tool_header, bool thinking_header, ComposerSnapshot const& snapshot,
                                                  std::ptrdiff_t frozen_to_live_item_index_shift)
 {
+  reset_granular_drag();
   drag_ = DragKind::HeaderArmed;
   armed_header_item_ = endpoint.item_index;
   armed_press_endpoint_ = endpoint;
@@ -844,28 +1073,118 @@ bool RuntimeTranscriptSelectionState::autoscroll_for_row(ComposerSnapshot& snaps
   return changed;
 }
 
+bool RuntimeTranscriptSelectionState::can_autoscroll_for_row(TranscriptSelectionViewport const& viewport, std::size_t screen_row,
+                                                             std::size_t transcript_scroll_offset, bool treat_overview_as_top_edge) const
+{
+  if (viewport.transcript_height == 0 || screen_row == 0)
+    return false;
+  auto const row_index = screen_row - 1;
+  if (row_index < viewport.overview_height)
+    return treat_overview_as_top_edge && transcript_scroll_offset < viewport.max_scroll_offset;
+  auto const transcript_row = row_index - viewport.overview_height;
+  if (transcript_row == 0)
+    return transcript_scroll_offset < viewport.max_scroll_offset;
+  return transcript_row + 1 >= viewport.transcript_height && transcript_scroll_offset > 0;
+}
+
+void RuntimeTranscriptSelectionState::update_edge_autoscroll(TranscriptSelectionViewport const& viewport, InputEvent const& event,
+                                                             std::size_t transcript_scroll_offset, bool treat_overview_as_top_edge, Clock::time_point now)
+{
+  if (!can_autoscroll_for_row(viewport, event.mouse_row, transcript_scroll_offset, treat_overview_as_top_edge))
+  {
+    edge_autoscroll_due_.reset();
+    return;
+  }
+  edge_mouse_row_ = event.mouse_row;
+  edge_mouse_column_ = event.mouse_column;
+  edge_autoscroll_due_ = now + kEdgeAutoscrollInterval;
+}
+
+std::optional<RuntimeTranscriptSelectionState::Clock::duration> RuntimeTranscriptSelectionState::time_until_edge_autoscroll(Clock::time_point now) const
+{
+  if (!edge_autoscroll_due_)
+    return std::nullopt;
+  return now >= *edge_autoscroll_due_ ? Clock::duration::zero() : *edge_autoscroll_due_ - now;
+}
+
+TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::tick_edge_autoscroll(ComposerSnapshot& snapshot,
+                                                                                     detail::TranscriptLayoutCache const& layout_cache,
+                                                                                     std::size_t& transcript_scroll_offset,
+                                                                                     std::ptrdiff_t frozen_to_live_item_index_shift, Clock::time_point now)
+{
+  if (!edge_autoscroll_due_ || now < *edge_autoscroll_due_)
+    return TranscriptSelectionMouseResult::Ignored;
+  if (drag_ != DragKind::Selecting || snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list ||
+      snapshot.subagent_workspace || snapshot.sidebar_drawer_visible || !ensure_authority(layout_cache, &snapshot))
+  {
+    cancel_pointer_interaction();
+    return TranscriptSelectionMouseResult::HandledNeedsRender;
+  }
+  auto viewport = viewport_for(snapshot, layout_cache);
+  if (!viewport)
+  {
+    cancel_pointer_interaction();
+    return TranscriptSelectionMouseResult::HandledNeedsRender;
+  }
+  auto const changed = autoscroll_for_row(snapshot, *viewport, edge_mouse_row_, transcript_scroll_offset, true);
+  if (!changed)
+  {
+    edge_autoscroll_due_.reset();
+    return TranscriptSelectionMouseResult::Handled;
+  }
+
+  auto hit = hit_test(snapshot, layout_cache, edge_mouse_row_, edge_mouse_column_, frozen_to_live_item_index_shift);
+  if (!hit)
+  {
+    viewport = viewport_for(snapshot, layout_cache);
+    if (!viewport || layout_cache.layout.lines.empty())
+    {
+      cancel_pointer_interaction();
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    auto const edge_row =
+        edge_mouse_row_ <= viewport->overview_height + 1 ? viewport->overview_height + 1 : viewport->overview_height + viewport->transcript_height;
+    auto const edge_column = std::clamp(edge_mouse_column_, viewport->canvas_left + 1, viewport->canvas_left + viewport->content_width);
+    hit = hit_test(snapshot, layout_cache, edge_row, edge_column, frozen_to_live_item_index_shift);
+  }
+  if (hit)
+  {
+    if (granularity_ == SelectionGranularity::Character)
+      extend_selection(hit->endpoint, snapshot, frozen_to_live_item_index_shift);
+    else if (auto const unit = selection_unit_for_hit(*hit, layout_cache.layout, granularity_))
+      extend_granular_selection(*unit, snapshot, frozen_to_live_item_index_shift, layout_cache.layout);
+  }
+  viewport = viewport_for(snapshot, layout_cache);
+  if (viewport && can_autoscroll_for_row(*viewport, edge_mouse_row_, transcript_scroll_offset, true))
+    edge_autoscroll_due_ = now + kEdgeAutoscrollInterval;
+  else
+    edge_autoscroll_due_.reset();
+  snapshot.status = "selection active";
+  return TranscriptSelectionMouseResult::HandledNeedsRender;
+}
+
 TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(InputEvent const& event, ComposerSnapshot& snapshot,
                                                                              detail::TranscriptLayoutCache const& layout_cache, RuntimeDraftState* draft_state,
                                                                              std::size_t& transcript_scroll_offset,
                                                                              std::ptrdiff_t frozen_to_live_item_index_shift,
                                                                              std::function<bool(std::size_t)> const& toggle_tool,
-                                                                             std::function<bool(std::size_t)> const& toggle_thinking)
+                                                                             std::function<bool(std::size_t)> const& toggle_thinking, Clock::time_point now)
 {
   auto const key = event.key;
   if (key == Key::MousePointerCancel)
   {
-    if (!dragging())
-      return TranscriptSelectionMouseResult::Ignored;
+    auto const owned = dragging() || click_chain_.has_value() || pending_click_word_.has_value();
     cancel_pointer_interaction();
-    return TranscriptSelectionMouseResult::HandledNeedsRender;
+    return owned ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Ignored;
   }
   if (key != Key::MouseLeftPress && key != Key::MouseLeftDrag && key != Key::MouseLeftRelease && key != Key::MouseLeftClick)
     return TranscriptSelectionMouseResult::Ignored;
 
   // Prompts/questions/permissions/select lists/palettes own the pointer first.
-  if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.sidebar_drawer_visible)
+  if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list || snapshot.subagent_workspace ||
+      snapshot.sidebar_drawer_visible)
   {
-    if (dragging())
+    if (dragging() || click_chain_)
       clear();
     return TranscriptSelectionMouseResult::Ignored;
   }
@@ -874,16 +1193,42 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
     return TranscriptSelectionMouseResult::Ignored;
 
   auto const hit = hit_test(snapshot, layout_cache, event.mouse_row, event.mouse_column, frozen_to_live_item_index_shift);
+  auto const word = hit ? transcript_word_selection_unit(layout_cache.layout, hit->endpoint) : std::nullopt;
 
   if (key == Key::MouseLeftPress)
   {
-    if (!hit)
+    edge_autoscroll_due_.reset();
+    pointer_moved_ = false;
+    if (!hit || !word)
     {
       // Press outside transcript body: clear armed header / selection drag, keep
       // existing selection until a new body selection starts or composer claims.
       if (drag_ == DragKind::HeaderArmed || drag_ == DragKind::Selecting)
         cancel_pointer_interaction();
+      else
+        reset_click_chain();
       return TranscriptSelectionMouseResult::Ignored;
+    }
+
+    pending_click_word_ = *word;
+    pending_click_count_ = next_click_count(*word, snapshot, frozen_to_live_item_index_shift, now);
+    if (pending_click_count_ == 2)
+    {
+      begin_granular_selection(*word, SelectionGranularity::Word, snapshot, draft_state, frozen_to_live_item_index_shift);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    if (pending_click_count_ == 3)
+    {
+      auto const line = transcript_line_selection_unit(layout_cache.layout, hit->endpoint);
+      if (!line)
+      {
+        reset_click_chain();
+        return TranscriptSelectionMouseResult::Ignored;
+      }
+      begin_granular_selection(*line, SelectionGranularity::Line, snapshot, draft_state, frozen_to_live_item_index_shift);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
     }
     if (hit->on_header && (hit->tool_header || hit->thinking_header))
     {
@@ -901,14 +1246,13 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
   {
     if (drag_ == DragKind::None && !hit)
       return TranscriptSelectionMouseResult::Ignored;
+    pointer_moved_ = true;
+    click_chain_.reset();
 
     auto viewport = viewport_for(snapshot, layout_cache);
+    auto const treat_overview_as_top = drag_ == DragKind::Selecting || drag_ == DragKind::HeaderArmed || range_.has_value();
     if (viewport)
-    {
-      // During an owned drag (or extending an existing range), overview chrome is the top edge.
-      auto const treat_overview_as_top = drag_ == DragKind::Selecting || drag_ == DragKind::HeaderArmed || range_.has_value();
       static_cast<void>(autoscroll_for_row(snapshot, *viewport, event.mouse_row, transcript_scroll_offset, treat_overview_as_top));
-    }
 
     // Re-hit after possible autoscroll against the same frozen authority.
     auto drag_hit = hit_test(snapshot, layout_cache, event.mouse_row, event.mouse_column, frozen_to_live_item_index_shift);
@@ -937,61 +1281,92 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
       }
       begin_selection(*pressed, snapshot, draft_state, frozen_to_live_item_index_shift);
       extend_selection(drag_hit->endpoint, snapshot, frozen_to_live_item_index_shift);
-      snapshot.status = "selection active";
-      return TranscriptSelectionMouseResult::HandledNeedsRender;
     }
-    if (drag_ == DragKind::Selecting || range_)
+    else if (drag_ == DragKind::Selecting || range_)
     {
       if (drag_ != DragKind::Selecting && draft_state)
         draft_state->clear_selection();
-      extend_selection(drag_hit->endpoint, snapshot, frozen_to_live_item_index_shift);
-      snapshot.status = "selection active";
-      return TranscriptSelectionMouseResult::HandledNeedsRender;
+      if (granularity_ == SelectionGranularity::Character)
+        extend_selection(drag_hit->endpoint, snapshot, frozen_to_live_item_index_shift);
+      else if (auto const unit = selection_unit_for_hit(*drag_hit, layout_cache.layout, granularity_))
+        extend_granular_selection(*unit, snapshot, frozen_to_live_item_index_shift, layout_cache.layout);
     }
-    return TranscriptSelectionMouseResult::Ignored;
+    else
+    {
+      return TranscriptSelectionMouseResult::Ignored;
+    }
+
+    viewport = viewport_for(snapshot, layout_cache);
+    if (viewport)
+      update_edge_autoscroll(*viewport, event, transcript_scroll_offset, true, now);
+    snapshot.status = "selection active";
+    return TranscriptSelectionMouseResult::HandledNeedsRender;
   }
 
   if (key == Key::MouseLeftRelease)
   {
+    edge_autoscroll_due_.reset();
     if (drag_ == DragKind::HeaderArmed)
     {
       auto const pressed = armed_press_endpoint_;
-      if (!hit || !pressed)
+      if (!hit || !pressed || !pending_click_word_)
       {
         cancel_pointer_interaction();
         return TranscriptSelectionMouseResult::Handled;
       }
-      auto const moved = pressed->item_index != hit->endpoint.item_index || pressed->line_offset != hit->endpoint.line_offset ||
-                         pressed->display_column != hit->endpoint.display_column;
+      auto const moved = !same_endpoint(*pressed, hit->endpoint);
       if (moved)
       {
         begin_selection(*pressed, snapshot, draft_state, frozen_to_live_item_index_shift);
         extend_selection(hit->endpoint, snapshot, frozen_to_live_item_index_shift);
         drag_ = DragKind::None;
+        reset_click_chain();
         snapshot.status = "selection active";
         return TranscriptSelectionMouseResult::HandledNeedsRender;
       }
+      auto const completed_word = *pending_click_word_;
+      auto const completed_count = pending_click_count_;
       // Map the frozen armed item through the exact accumulated deferred shift and
       // toggle only the same source item; fail closed on eviction/replacement.
       auto const toggled = finish_header_click(snapshot, frozen_to_live_item_index_shift, toggle_tool, toggle_thinking);
+      commit_click(completed_word, completed_count, snapshot, frozen_to_live_item_index_shift, now);
       return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
     }
     if (drag_ == DragKind::Selecting)
     {
       if (hit)
-        extend_selection(hit->endpoint, snapshot, frozen_to_live_item_index_shift);
+      {
+        if (granularity_ == SelectionGranularity::Character)
+          extend_selection(hit->endpoint, snapshot, frozen_to_live_item_index_shift);
+        else if (auto const unit = selection_unit_for_hit(*hit, layout_cache.layout, granularity_))
+          extend_granular_selection(*unit, snapshot, frozen_to_live_item_index_shift, layout_cache.layout);
+      }
       drag_ = DragKind::None;
-      if (range_ && !endpoint_less(range_->anchor, range_->focus, layout_cache.layout) && !endpoint_less(range_->focus, range_->anchor, layout_cache.layout) &&
-          range_->anchor.display_column == range_->focus.display_column)
+      granular_anchor_.reset();
+      if (pointer_moved_)
       {
-        // Zero-width press/release: keep caret-less empty selection cleared.
-        clear();
-        snapshot.status.clear();
+        reset_click_chain();
       }
-      else if (range_)
+      else if (pending_click_word_)
       {
-        snapshot.status = "selection active";
+        auto const completed_word = *pending_click_word_;
+        auto const completed_count = pending_click_count_;
+        if (granularity_ == SelectionGranularity::Character && range_ && same_endpoint(range_->anchor, range_->focus))
+        {
+          // Zero-width press/release: keep caret-less empty selection cleared while
+          // retaining the completed click for a deterministic double-click chain.
+          range_.reset();
+          anchor_source_authority_.reset();
+          focus_source_authority_.reset();
+          snapshot.status.clear();
+        }
+        else if (range_)
+        {
+          snapshot.status = "selection active";
+        }
+        commit_click(completed_word, completed_count, snapshot, frozen_to_live_item_index_shift, now);
       }
+      granularity_ = SelectionGranularity::Character;
       return TranscriptSelectionMouseResult::HandledNeedsRender;
     }
     return TranscriptSelectionMouseResult::Ignored;
@@ -1000,19 +1375,52 @@ TranscriptSelectionMouseResult RuntimeTranscriptSelectionState::handle_mouse(Inp
   // Complete click (ncurses CLICKED or terminals that only emit click).
   if (key == Key::MouseLeftClick)
   {
-    if (!hit)
+    if (!hit || !word)
+    {
+      reset_click_chain();
       return TranscriptSelectionMouseResult::Ignored;
+    }
+    auto const count = next_click_count(*word, snapshot, frozen_to_live_item_index_shift, now);
+    if (count == 2)
+    {
+      begin_granular_selection(*word, SelectionGranularity::Word, snapshot, draft_state, frozen_to_live_item_index_shift);
+      drag_ = DragKind::None;
+      granular_anchor_.reset();
+      granularity_ = SelectionGranularity::Character;
+      commit_click(*word, count, snapshot, frozen_to_live_item_index_shift, now);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+    if (count == 3)
+    {
+      auto const line = transcript_line_selection_unit(layout_cache.layout, hit->endpoint);
+      if (!line)
+      {
+        reset_click_chain();
+        return TranscriptSelectionMouseResult::Ignored;
+      }
+      begin_granular_selection(*line, SelectionGranularity::Line, snapshot, draft_state, frozen_to_live_item_index_shift);
+      drag_ = DragKind::None;
+      granular_anchor_.reset();
+      granularity_ = SelectionGranularity::Character;
+      commit_click(*word, count, snapshot, frozen_to_live_item_index_shift, now);
+      snapshot.status = "selection active";
+      return TranscriptSelectionMouseResult::HandledNeedsRender;
+    }
+
+    range_.reset();
+    anchor_source_authority_.reset();
+    focus_source_authority_.reset();
+    reset_granular_drag();
+    auto toggled = false;
     if (hit->on_header && (hit->tool_header || hit->thinking_header))
     {
-      clear();
-      auto const toggled = toggle_header_at_frozen_item(snapshot, hit->endpoint.item_index, hit->tool_header, hit->thinking_header,
-                                                        frozen_to_live_item_index_shift, toggle_tool, toggle_thinking);
-      return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender : TranscriptSelectionMouseResult::Handled;
+      toggled = toggle_header_at_frozen_item(snapshot, hit->endpoint.item_index, hit->tool_header, hit->thinking_header, frozen_to_live_item_index_shift,
+                                             toggle_tool, toggle_thinking);
     }
-    // Body click without drag: place a collapsed selection cleared immediately
-    // so ordinary clicks do not leave a sticky highlight.
-    clear();
-    return TranscriptSelectionMouseResult::Ignored;
+    commit_click(*word, count, snapshot, frozen_to_live_item_index_shift, now);
+    return toggled ? TranscriptSelectionMouseResult::HandledNeedsRender
+                   : (hit->on_header ? TranscriptSelectionMouseResult::Handled : TranscriptSelectionMouseResult::Ignored);
   }
 
   return TranscriptSelectionMouseResult::Ignored;

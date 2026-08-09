@@ -31,14 +31,6 @@ bool is_ascii_space_at(std::string_view text, std::size_t cursor)
   return (byte & 0x80U) == 0 && std::isspace(byte) != 0;
 }
 
-enum class WordSegmentClass
-{
-  Space,
-  Word,
-  WideWord,
-  Punctuation,
-};
-
 bool is_unicode_space_codepoint(char32_t codepoint)
 {
   return codepoint == 0x00A0 || codepoint == 0x1680 || (codepoint >= 0x2000 && codepoint <= 0x200A) || codepoint == 0x2028 || codepoint == 0x2029 ||
@@ -61,8 +53,9 @@ bool is_wide_word_codepoint(char32_t codepoint)
          (codepoint >= 0xFF21 && codepoint <= 0xFF3A) || (codepoint >= 0xFF41 && codepoint <= 0xFF5A) || (codepoint >= 0x20000 && codepoint <= 0x3FFFD);
 }
 
-WordSegmentClass word_segment_class_at(std::string_view text, std::size_t cursor)
+detail::WordSegmentClass word_segment_class_at_impl(std::string_view text, std::size_t cursor)
 {
+  using detail::WordSegmentClass;
   if (is_ascii_space_at(text, cursor))
     return WordSegmentClass::Space;
   if (cursor >= text.size())
@@ -483,7 +476,7 @@ std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
   while (cursor > 0)
   {
     auto const previous = previous_atomic_cursor_at(draft, cursor);
-    if (word_segment_class_at(draft.text, previous) != WordSegmentClass::Space)
+    if (word_segment_class_at_impl(draft.text, previous) != detail::WordSegmentClass::Space)
       break;
     cursor = previous;
   }
@@ -491,13 +484,13 @@ std::size_t previous_atomic_word_cursor(ComposerDraftState const& draft)
     return 0;
   if (auto marker = paste_marker_touching_left(draft, cursor))
     return marker->start;
-  auto const target_class = word_segment_class_at(draft.text, previous_atomic_cursor_at(draft, cursor));
+  auto const target_class = word_segment_class_at_impl(draft.text, previous_atomic_cursor_at(draft, cursor));
   while (cursor > 0)
   {
     if (auto marker = paste_marker_touching_left(draft, cursor))
       return marker->start;
     auto const previous = previous_atomic_cursor_at(draft, cursor);
-    if (word_segment_class_at(draft.text, previous) != target_class)
+    if (word_segment_class_at_impl(draft.text, previous) != target_class)
       break;
     cursor = previous;
   }
@@ -511,7 +504,7 @@ std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
     return marker->end;
   if (auto marker = paste_marker_touching_left(draft, cursor); marker && cursor < marker->end)
     return marker->end;
-  while (cursor < draft.text.size() && word_segment_class_at(draft.text, cursor) == WordSegmentClass::Space)
+  while (cursor < draft.text.size() && word_segment_class_at_impl(draft.text, cursor) == detail::WordSegmentClass::Space)
   {
     cursor = next_atomic_cursor_at(draft, cursor);
   }
@@ -519,8 +512,8 @@ std::size_t next_atomic_word_cursor(ComposerDraftState const& draft)
     return marker->end;
   if (cursor >= draft.text.size())
     return cursor;
-  auto const target_class = word_segment_class_at(draft.text, cursor);
-  while (cursor < draft.text.size() && word_segment_class_at(draft.text, cursor) == target_class)
+  auto const target_class = word_segment_class_at_impl(draft.text, cursor);
+  while (cursor < draft.text.size() && word_segment_class_at_impl(draft.text, cursor) == target_class)
   {
     if (auto marker = paste_marker_starting_at(draft, cursor))
       return marker->end;
@@ -556,6 +549,11 @@ bool erase_range(ComposerDraftState& draft, std::size_t start, std::size_t end, 
 }
 
 }  // namespace
+
+detail::WordSegmentClass detail::word_segment_class_at(std::string_view text, std::size_t cursor)
+{
+  return word_segment_class_at_impl(text, cursor);
+}
 
 std::size_t clamp_composer_draft_cursor(std::string_view text, std::size_t cursor)
 {

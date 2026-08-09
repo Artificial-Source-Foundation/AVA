@@ -1982,7 +1982,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
   // Selection paint/hit-test share the full TranscriptLayout authority. While a
   // selection is active, force the full-layout visible path so the overlay maps
   // exactly onto the rows currently drawn from that authority.
-  if (snapshot.transcript_scroll_offset > 0 || selection_active)
+  if (snapshot.transcript_scroll_offset > 0 || selection_active || snapshot.transcript_position_indicator_visible)
   {
     auto& active_cache = transcript_cache ? *transcript_cache : local_transcript_cache;
     auto const compact_spacing = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
@@ -2020,6 +2020,12 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
       };
       // Non-mutating overlay: only the visible frame copy is highlighted.
       apply_transcript_selection_overlay(visible_transcript, active_cache.layout, range, visible_start, tui_plain_output());
+    }
+    if (snapshot.transcript_position_indicator_visible && active_cache.valid)
+    {
+      auto const geometry =
+          detail::transcript_position_indicator_geometry(active_cache.layout.lines.size(), transcript_height, snapshot.transcript_scroll_offset);
+      detail::apply_transcript_position_indicator_overlay(visible_transcript, width, geometry, tui_plain_output());
     }
   }
   else
@@ -2214,8 +2220,8 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
 
 detail::TranscriptBodyScreenGeometry detail::transcript_body_screen_geometry(ComposerSnapshot const& snapshot)
 {
-  if (snapshot.sidebar_drawer_visible || snapshot.select_list || snapshot.subagent_workspace || (snapshot.question_prompt && snapshot.question_prompt->modal) ||
-      snapshot.permission_prompt)
+  if (snapshot.sidebar_drawer_visible || snapshot.plugin_ui_modal || snapshot.select_list || snapshot.subagent_workspace ||
+      (snapshot.question_prompt && snapshot.question_prompt->modal) || snapshot.permission_prompt)
     return {};
 
   auto const canvas = composer_canvas_layout(snapshot);

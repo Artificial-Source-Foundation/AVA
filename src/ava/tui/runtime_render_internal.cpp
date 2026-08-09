@@ -60,6 +60,36 @@ bool runtime_wheel_input_accepted(WheelBurstGovernor& governor, Key key, WheelBu
   return true;
 }
 
+void TranscriptPositionIndicatorState::show(Clock::time_point now) noexcept
+{
+  expires_at_ = now + kVisibleDuration;
+}
+
+void TranscriptPositionIndicatorState::hide() noexcept
+{
+  expires_at_.reset();
+}
+
+bool TranscriptPositionIndicatorState::visible() const noexcept
+{
+  return expires_at_.has_value();
+}
+
+bool TranscriptPositionIndicatorState::expire_if_due(Clock::time_point now) noexcept
+{
+  if (!expires_at_ || now < *expires_at_)
+    return false;
+  expires_at_.reset();
+  return true;
+}
+
+std::optional<TranscriptPositionIndicatorState::Clock::duration> TranscriptPositionIndicatorState::time_until_expiry(Clock::time_point now) const noexcept
+{
+  if (!expires_at_)
+    return std::nullopt;
+  return now >= *expires_at_ ? Clock::duration::zero() : *expires_at_ - now;
+}
+
 void FrameScheduler::request(FrameRenderKind kind, Clock::time_point now)
 {
   if (failed_)
@@ -218,8 +248,34 @@ TranscriptSelectionMouseResult RuntimeRenderer::handle_transcript_selection_mous
   auto const frozen_to_live_item_index_shift = deferred_detached_viewport_ ? deferred_detached_viewport_->item_index_shift : std::ptrdiff_t{0};
   if (!prepare_transcript_selection_authority())
     return TranscriptSelectionMouseResult::Ignored;
-  return transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset, frozen_to_live_item_index_shift,
-                                            toggle_tool, toggle_thinking);
+  auto const scroll_before = transcript_scroll_offset;
+  auto const result = transcript_selection_.handle_mouse(event, snapshot_, transcript_layout_cache, &draft_state_, transcript_scroll_offset,
+                                                         frozen_to_live_item_index_shift, toggle_tool, toggle_thinking);
+  if (transcript_scroll_offset != scroll_before)
+  {
+    show_transcript_position_indicator();
+    if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot)
+      detached_sidebar_snapshot = sidebar_;
+    if (transcript_scroll_offset == 0)
+    {
+      detached_new_output_count = 0;
+      detached_sidebar_snapshot.reset();
+    }
+  }
+  return result;
+}
+
+void RuntimeRenderer::show_transcript_position_indicator(TranscriptPositionIndicatorState::Clock::time_point now)
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  transcript_position_indicator_.show(now);
+  snapshot_.transcript_position_indicator_visible = true;
+  frame_scheduler_.request(FrameRenderKind::Full, now);
+}
+
+bool RuntimeRenderer::transcript_position_indicator_visible() const noexcept
+{
+  return transcript_position_indicator_.visible();
 }
 
 bool RuntimeRenderer::copy_transcript_selection()
@@ -249,8 +305,10 @@ void RuntimeRenderer::reset_for_session_transition()
   transcript_layout_cache = {};
   screen_row_cache.valid = false;
   wheel_governor.reset();
+  transcript_position_indicator_.hide();
   snapshot_.transcript_scroll_offset = 0;
   snapshot_.transcript_new_output_count = 0;
+  snapshot_.transcript_position_indicator_visible = false;
 }
 
 void RuntimeRenderer::cancel_pointer_interaction()
@@ -265,7 +323,7 @@ void RuntimeRenderer::note_live_transcript_selection_item_shift(std::ptrdiff_t i
 {
   // HeaderArmed has no committed range but still owns a live item index that must track
   // leading eviction between press and release while the layout is not frozen.
-  if (!transcript_selection_.empty() || transcript_selection_.dragging())
+  if (!transcript_selection_.empty() || transcript_selection_.dragging() || transcript_selection_.has_click_chain())
     pending_live_selection_item_index_shift_ += item_index_shift;
 }
 
@@ -284,10 +342,45 @@ std::optional<TranscriptSelectionRange> RuntimeRenderer::transcript_selection_ra
   return transcript_selection_.range();
 }
 
+void RuntimeRenderer::service_auxiliary_timers(std::chrono::steady_clock::time_point now)
+{
+  std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+  if (auto const due = transcript_selection_.time_until_edge_autoscroll(now); due && *due <= std::chrono::steady_clock::duration::zero())
+  {
+    auto const scroll_before = transcript_scroll_offset;
+    auto result = TranscriptSelectionMouseResult::HandledNeedsRender;
+    if (prepare_transcript_selection_authority())
+    {
+      auto const frozen_to_live_item_index_shift = deferred_detached_viewport_ ? deferred_detached_viewport_->item_index_shift : std::ptrdiff_t{0};
+      result = transcript_selection_.tick_edge_autoscroll(snapshot_, transcript_layout_cache, transcript_scroll_offset, frozen_to_live_item_index_shift, now);
+    }
+    if (transcript_scroll_offset != scroll_before)
+    {
+      transcript_position_indicator_.show(now);
+      snapshot_.transcript_position_indicator_visible = true;
+      if (transcript_scroll_offset > 0 && !detached_sidebar_snapshot)
+        detached_sidebar_snapshot = sidebar_;
+      if (transcript_scroll_offset == 0)
+      {
+        detached_new_output_count = 0;
+        detached_sidebar_snapshot.reset();
+      }
+    }
+    if (result == TranscriptSelectionMouseResult::HandledNeedsRender)
+      frame_scheduler_.request(FrameRenderKind::Full, now);
+  }
+  if (transcript_position_indicator_.expire_if_due(now))
+  {
+    snapshot_.transcript_position_indicator_visible = false;
+    frame_scheduler_.request(FrameRenderKind::Full, now);
+  }
+}
+
 bool RuntimeRenderer::render()
 {
   if (frame_scheduler_.failed())
     return false;
+  service_auxiliary_timers(std::chrono::steady_clock::now());
   frame_scheduler_.discard_pending();
   auto const succeeded = render_full(false);
   frame_scheduler_.paint_completed(std::chrono::steady_clock::now(), succeeded);
@@ -381,8 +474,8 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     auto const completion_palette_visible = completion_cache.model && completion_cache.model->palette_visible;
     auto const slash_palette_is_visible =
         !snapshot.slash_palette_suppressed && slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
-        slash_palette_is_visible || completion_palette_visible)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list || snapshot.subagent_workspace ||
+        snapshot.sidebar_drawer_visible || slash_palette_is_visible || completion_palette_visible)
     {
       transcript_selection_.clear();
       pending_live_selection_item_index_shift_ = 0;
@@ -428,7 +521,9 @@ bool RuntimeRenderer::request_render(FrameRenderKind kind)
 
 bool RuntimeRenderer::flush_pending_render_if_due()
 {
-  auto const kind = frame_scheduler_.take_due(std::chrono::steady_clock::now());
+  auto const now = std::chrono::steady_clock::now();
+  service_auxiliary_timers(now);
+  auto const kind = frame_scheduler_.take_due(now);
   if (!kind)
     return !frame_scheduler_.failed();
   auto const succeeded = paint(*kind, true);
@@ -438,6 +533,7 @@ bool RuntimeRenderer::flush_pending_render_if_due()
 
 bool RuntimeRenderer::flush_pending_render()
 {
+  service_auxiliary_timers(std::chrono::steady_clock::now());
   auto const kind = frame_scheduler_.take_pending();
   if (!kind)
     return !frame_scheduler_.failed();
@@ -448,12 +544,20 @@ bool RuntimeRenderer::flush_pending_render()
 
 bool RuntimeRenderer::has_pending_render() const
 {
-  return frame_scheduler_.pending();
+  return frame_scheduler_.pending() || transcript_position_indicator_.visible() || transcript_selection_.time_until_edge_autoscroll().has_value();
 }
 
 std::chrono::steady_clock::duration RuntimeRenderer::time_until_pending_render() const
 {
-  return frame_scheduler_.time_until_due(std::chrono::steady_clock::now());
+  auto const now = std::chrono::steady_clock::now();
+  auto wait = std::chrono::steady_clock::duration::max();
+  if (frame_scheduler_.pending())
+    wait = std::min(wait, frame_scheduler_.time_until_due(now));
+  if (auto const indicator_wait = transcript_position_indicator_.time_until_expiry(now))
+    wait = std::min(wait, *indicator_wait);
+  if (auto const autoscroll_wait = transcript_selection_.time_until_edge_autoscroll(now))
+    wait = std::min(wait, *autoscroll_wait);
+  return wait == std::chrono::steady_clock::duration::max() ? std::chrono::steady_clock::duration::zero() : wait;
 }
 
 bool RuntimeRenderer::render_failed() const

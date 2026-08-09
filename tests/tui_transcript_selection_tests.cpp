@@ -1,11 +1,13 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
+#include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/runtime_transcript_selection_internal.h"
 #include "ava/tui/theme.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -59,12 +61,13 @@ ava::tui::TranscriptItem private_launch_selection_task()
 }
 
 template <typename ToggleTool, typename ToggleThinking>
-ava::tui::TranscriptSelectionMouseResult handle(ava::tui::RuntimeTranscriptSelectionState& state, ava::tui::InputEvent const& event,
-                                                ava::tui::ComposerSnapshot& snapshot, ava::tui::detail::TranscriptLayoutCache const& cache,
-                                                ava::tui::RuntimeDraftState* draft, std::size_t& scroll, ToggleTool const& toggle_tool,
-                                                ToggleThinking const& toggle_thinking, std::ptrdiff_t frozen_to_live_shift = 0)
+ava::tui::TranscriptSelectionMouseResult handle(
+    ava::tui::RuntimeTranscriptSelectionState& state, ava::tui::InputEvent const& event, ava::tui::ComposerSnapshot& snapshot,
+    ava::tui::detail::TranscriptLayoutCache const& cache, ava::tui::RuntimeDraftState* draft, std::size_t& scroll, ToggleTool const& toggle_tool,
+    ToggleThinking const& toggle_thinking, std::ptrdiff_t frozen_to_live_shift = 0,
+    ava::tui::RuntimeTranscriptSelectionState::Clock::time_point now = ava::tui::RuntimeTranscriptSelectionState::Clock::now())
 {
-  return state.handle_mouse(event, snapshot, cache, draft, scroll, frozen_to_live_shift, toggle_tool, toggle_thinking);
+  return state.handle_mouse(event, snapshot, cache, draft, scroll, frozen_to_live_shift, toggle_tool, toggle_thinking, now);
 }
 
 }  // namespace
@@ -150,6 +153,181 @@ void run_tui_transcript_selection_tests()
              highlighted.find("\x1b[0m") != std::string::npos && no_color == "red" && no_color.find('\x1b') == std::string::npos,
          "transcript selection highlight uses style-preserving reverse-off and emits no escapes in plain output");
 
+  // Shared Unicode segment classification drives rendered word selection across
+  // punctuation, whitespace, wide cells, and combining clusters.
+  auto const granular_layout = ava::tui::detail::TranscriptLayout{.lines = {"alpha,  beta \xE4\xBD\xA0\xE4\xBD\xA0 e\xCC\x81x", "gamma delta"},
+                                                                  .block_boundaries = {0, 2},
+                                                                  .message_starts = {0},
+                                                                  .content_starts = {0},
+                                                                  .message_item_indices = {0}};
+  auto const alpha_unit = ava::tui::transcript_word_selection_unit(granular_layout, *ava::tui::endpoint_for_absolute_line(granular_layout, 0, 2));
+  auto const punctuation_unit = ava::tui::transcript_word_selection_unit(granular_layout, *ava::tui::endpoint_for_absolute_line(granular_layout, 0, 5));
+  auto const whitespace_unit = ava::tui::transcript_word_selection_unit(granular_layout, *ava::tui::endpoint_for_absolute_line(granular_layout, 0, 6));
+  auto const wide_unit = ava::tui::transcript_word_selection_unit(granular_layout, *ava::tui::endpoint_for_absolute_line(granular_layout, 0, 14));
+  auto const combining_unit = ava::tui::transcript_word_selection_unit(granular_layout, *ava::tui::endpoint_for_absolute_line(granular_layout, 0, 18));
+  expect(alpha_unit && alpha_unit->start.display_column == 0 && alpha_unit->end.display_column == 5 && punctuation_unit &&
+             punctuation_unit->start.display_column == 5 && punctuation_unit->end.display_column == 6 && whitespace_unit &&
+             whitespace_unit->start.display_column == 6 && whitespace_unit->end.display_column == 8 && wide_unit && wide_unit->start.display_column == 13 &&
+             wide_unit->end.display_column == 17 && combining_unit && combining_unit->start.display_column == 18 && combining_unit->end.display_column == 20,
+         "rendered word units reuse the Unicode composer segment classifier and preserve punctuation, whitespace, wide, and combining cluster boundaries");
+
+  {
+    using SelectionClock = ava::tui::RuntimeTranscriptSelectionState::Clock;
+    auto const started = SelectionClock::time_point{};
+    ava::tui::ComposerSnapshot click_snapshot;
+    click_snapshot.width = 40;
+    click_snapshot.height = 10;
+    click_snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "stable source"}};
+    auto click_cache = selection_cache(granular_layout, 100);
+    ava::tui::RuntimeTranscriptSelectionState click_state;
+    ava::tui::RuntimeDraftState click_draft;
+    click_draft.draft.text = "draft stays";
+    click_draft.draft.cursor = 4;
+    std::size_t click_scroll = 0;
+    auto never = [](std::size_t) { return false; };
+    auto click = [&](std::size_t row, std::size_t column, std::chrono::milliseconds at) {
+      static_cast<void>(handle(click_state, mouse_event(ava::tui::Key::MouseLeftPress, row, column), click_snapshot, click_cache, &click_draft, click_scroll,
+                               never, never, 0, started + at));
+      static_cast<void>(handle(click_state, mouse_event(ava::tui::Key::MouseLeftRelease, row, column), click_snapshot, click_cache, &click_draft, click_scroll,
+                               never, never, 0, started + at + std::chrono::milliseconds(1)));
+    };
+
+    click(1, 2, std::chrono::milliseconds(0));
+    auto const single_empty = click_state.empty();
+    click(1, 2, std::chrono::milliseconds(100));
+    auto const double_range = click_state.range();
+    auto const double_text = double_range ? ava::tui::extract_transcript_selection_text(granular_layout, *double_range, 1024).text : std::string{};
+    click(1, 2, std::chrono::milliseconds(200));
+    auto const triple_range = click_state.range();
+    auto const triple_text = triple_range ? ava::tui::extract_transcript_selection_text(granular_layout, *triple_range, 1024).text : std::string{};
+    click(1, 2, std::chrono::milliseconds(300));
+    auto const fourth_resets = click_state.empty();
+    click(1, 2, std::chrono::milliseconds(900));
+    auto const timeout_resets = click_state.empty();
+    click(1, 10, std::chrono::milliseconds(1000));
+    auto const different_word_resets = click_state.empty();
+    expect(single_empty && double_text == "alpha" && triple_text == granular_layout.lines[0] && fourth_resets && timeout_resets && different_word_resets &&
+               click_draft.draft.text == "draft stays" && click_draft.draft.cursor == 4,
+           "500 ms click chains select word on click two, visual row on click three, reset on click four, timeout, or a different word, and never edit the "
+           "composer draft");
+
+    // A pointer cancel invalidates the click chain, while a proven cap shift remaps it.
+    click_state.clear();
+    click(1, 2, std::chrono::milliseconds(1100));
+    static_cast<void>(handle(click_state, mouse_event(ava::tui::Key::MousePointerCancel, 1, 2), click_snapshot, click_cache, &click_draft, click_scroll, never,
+                             never, 0, started + std::chrono::milliseconds(1150)));
+    click(1, 2, std::chrono::milliseconds(1200));
+    auto const cancel_failed_closed = click_state.empty();
+
+    click_state.clear();
+    click_snapshot.transcript.resize(3, click_snapshot.transcript[0]);
+    click(1, 2, std::chrono::milliseconds(1300));
+    auto shifted_click_layout = granular_layout;
+    shifted_click_layout.message_item_indices = {2};
+    click_state.apply_item_index_shift(2, shifted_click_layout);
+    click_cache = selection_cache(shifted_click_layout, 101);
+    click(1, 2, std::chrono::milliseconds(1400));
+    auto const cap_range = click_state.range();
+    auto const cap_text = cap_range ? ava::tui::extract_transcript_selection_text(shifted_click_layout, *cap_range, 1024).text : std::string{};
+
+    click_state.clear();
+    click_cache = selection_cache(granular_layout, 102);
+    click_snapshot.transcript[0].text = "before";
+    click(1, 2, std::chrono::milliseconds(1500));
+    click_snapshot.transcript[0].text = "replacement";
+    click_cache.transcript_generation = 103;
+    click(1, 2, std::chrono::milliseconds(1600));
+    expect(cancel_failed_closed && cap_text == "alpha" && click_state.empty(),
+           "pointer cancel and source-authority replacement fail closed while a proven transcript-cap shift remaps the pending click chain");
+  }
+
+  {
+    using SelectionClock = ava::tui::RuntimeTranscriptSelectionState::Clock;
+    auto const started = SelectionClock::time_point{};
+    ava::tui::ComposerSnapshot drag_snapshot;
+    drag_snapshot.width = 40;
+    drag_snapshot.height = 10;
+    drag_snapshot.transcript = {ava::tui::TranscriptItem{.label = "ava", .text = "stable source"}};
+    auto const drag_cache = selection_cache(granular_layout, 110);
+    ava::tui::RuntimeTranscriptSelectionState drag_state;
+    ava::tui::RuntimeDraftState drag_draft;
+    std::size_t drag_scroll = 0;
+    auto never = [](std::size_t) { return false; };
+    auto send = [&](ava::tui::Key key, std::size_t row, std::size_t column, int milliseconds) {
+      return handle(drag_state, mouse_event(key, row, column), drag_snapshot, drag_cache, &drag_draft, drag_scroll, never, never, 0,
+                    started + std::chrono::milliseconds(milliseconds));
+    };
+
+    // Double-click beta, then extend by complete words into the second visual row.
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 1, 10, 0));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 1, 10, 1));
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 1, 10, 100));
+    static_cast<void>(send(ava::tui::Key::MouseLeftDrag, 2, 8, 110));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 2, 8, 111));
+    auto const forward_range = drag_state.range();
+    auto const forward_text = forward_range ? ava::tui::extract_transcript_selection_text(granular_layout, *forward_range, 1024).text : std::string{};
+
+    // The same granular drag in reverse includes complete target and anchor words.
+    drag_state.clear();
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 2, 8, 200));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 2, 8, 201));
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 2, 8, 300));
+    static_cast<void>(send(ava::tui::Key::MouseLeftDrag, 1, 2, 310));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 1, 2, 311));
+    auto const backward_range = drag_state.range();
+    auto const backward_text = backward_range ? ava::tui::extract_transcript_selection_text(granular_layout, *backward_range, 1024).text : std::string{};
+
+    // Triple-click a row, then extend by complete rendered visual rows.
+    drag_state.clear();
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 1, 2, 400));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 1, 2, 401));
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 1, 2, 500));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 1, 2, 501));
+    static_cast<void>(send(ava::tui::Key::MouseLeftPress, 1, 2, 600));
+    static_cast<void>(send(ava::tui::Key::MouseLeftDrag, 2, 2, 610));
+    static_cast<void>(send(ava::tui::Key::MouseLeftRelease, 2, 2, 611));
+    auto const line_range = drag_state.range();
+    auto const line_text = line_range ? ava::tui::extract_transcript_selection_text(granular_layout, *line_range, 1024).text : std::string{};
+
+    expect(forward_text == "beta \xE4\xBD\xA0\xE4\xBD\xA0 e\xCC\x81x\ngamma delta" &&
+               backward_text == granular_layout.lines[0] + "\n" + granular_layout.lines[1] &&
+               line_text == granular_layout.lines[0] + "\n" + granular_layout.lines[1],
+           "word and line granular drags extend by complete rendered units in both directions across wrapped visual rows");
+  }
+
+  {
+    auto const top = ava::tui::detail::transcript_position_indicator_geometry(100, 10, 90);
+    auto const middle = ava::tui::detail::transcript_position_indicator_geometry(100, 10, 45);
+    auto const bottom = ava::tui::detail::transcript_position_indicator_geometry(100, 10, 0);
+    auto const proportional = ava::tui::detail::transcript_position_indicator_geometry(20, 10, 5);
+    auto const fits = ava::tui::detail::transcript_position_indicator_geometry(10, 10, 0);
+    std::vector<std::string> indicator_lines(10, "row");
+    ava::tui::detail::apply_transcript_position_indicator_overlay(indicator_lines, 8, middle, true);
+    auto const all_overlay_widths = std::ranges::all_of(indicator_lines, [](std::string const& line) {
+      return ava::tui::detail::terminal_text_columns(line) == 8 && (line.back() == '|' || line.back() == '#');
+    });
+
+    using IndicatorClock = ava::tui::TranscriptPositionIndicatorState::Clock;
+    ava::tui::TranscriptPositionIndicatorState indicator;
+    auto const started = IndicatorClock::time_point{};
+    indicator.show(started);
+    auto const waits_one_second = indicator.time_until_expiry(started) == ava::tui::TranscriptPositionIndicatorState::kVisibleDuration;
+    auto const early_visible = !indicator.expire_if_due(started + std::chrono::milliseconds(999)) && indicator.visible();
+    auto const expired = indicator.expire_if_due(started + std::chrono::milliseconds(1000)) && !indicator.visible();
+    ava::tui::ComposerSnapshot streaming_snapshot;
+    ava::tui::SidebarSnapshot streaming_sidebar;
+    ava::tui::RuntimeDraftState streaming_draft;
+    ava::tui::RuntimeRenderer streaming_renderer(streaming_snapshot, streaming_sidebar, streaming_draft);
+    streaming_snapshot.transcript.push_back(ava::tui::TranscriptItem{.label = "ava", .text = "streaming", .stream_id = "live", .append_only_stream = true});
+    ++streaming_snapshot.transcript_generation;
+    auto const streaming_stays_hidden = !streaming_renderer.transcript_position_indicator_visible();
+    expect(top.visible && top.thumb_start == 0 && middle.visible && middle.thumb_start > top.thumb_start && middle.thumb_start < bottom.thumb_start &&
+               bottom.visible && bottom.thumb_start + bottom.thumb_length == 10 && proportional.thumb_length == 5 && !fits.visible && all_overlay_widths &&
+               waits_one_second && early_visible && expired && streaming_stays_hidden,
+           "the paint-only transcript indicator derives top/middle/bottom and proportional thumb geometry from full layout rows, hides when content fits, "
+           "overlays the right edge without changing width, expires deterministically after one second, and is not activated by live-tail streaming alone");
+  }
+
   ava::tui::ComposerSnapshot snapshot;
   snapshot.width = 40;
   snapshot.height = 10;
@@ -218,11 +396,18 @@ void run_tui_transcript_selection_tests()
   ava::tui::RuntimeTranscriptSelectionState autoscroll_state;
   snapshot.status.clear();
   scroll = 0;
-  static_cast<void>(
-      handle(autoscroll_state, mouse_event(ava::tui::Key::MouseLeftPress, 2, 2), snapshot, scrolling_cache, &draft, scroll, never_toggle, never_toggle));
-  static_cast<void>(
-      handle(autoscroll_state, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), snapshot, scrolling_cache, &draft, scroll, never_toggle, never_toggle));
-  expect(scroll == 1 && autoscroll_state.range(), "transcript selection drag beyond the top edge autoscrolls while retaining selection authority");
+  using SelectionClock = ava::tui::RuntimeTranscriptSelectionState::Clock;
+  auto const held_started = SelectionClock::time_point{};
+  static_cast<void>(handle(autoscroll_state, mouse_event(ava::tui::Key::MouseLeftPress, 2, 2), snapshot, scrolling_cache, &draft, scroll, never_toggle,
+                           never_toggle, 0, held_started));
+  static_cast<void>(handle(autoscroll_state, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), snapshot, scrolling_cache, &draft, scroll, never_toggle,
+                           never_toggle, 0, held_started));
+  auto const held_wait = autoscroll_state.time_until_edge_autoscroll(held_started);
+  auto const early_tick = autoscroll_state.tick_edge_autoscroll(snapshot, scrolling_cache, scroll, 0, held_started + std::chrono::milliseconds(49));
+  auto const due_tick = autoscroll_state.tick_edge_autoscroll(snapshot, scrolling_cache, scroll, 0, held_started + std::chrono::milliseconds(50));
+  expect(scroll == 2 && autoscroll_state.range() && held_wait == ava::tui::RuntimeTranscriptSelectionState::kEdgeAutoscrollInterval &&
+             early_tick == ava::tui::TranscriptSelectionMouseResult::Ignored && due_tick == ava::tui::TranscriptSelectionMouseResult::HandledNeedsRender,
+         "transcript selection motion autoscrolls immediately and held-edge selection repeats at a deterministic 50 ms renderer cadence without a thread");
 
   // Overview chrome: new presses stay excluded, but an owned drag treats overview rows as the upper autoscroll edge.
   {

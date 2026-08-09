@@ -41,6 +41,7 @@ class RuntimeNavigationController final
 
   void scroll_up(std::size_t amount);
   void scroll_down(std::size_t amount);
+  [[nodiscard]] std::size_t transcript_page_size();
   [[nodiscard]] bool toggle_tool_details_at(std::size_t item_index);
   [[nodiscard]] std::optional<std::size_t> toggle_matching_tool_details(std::string_view query);
   [[nodiscard]] bool toggle_thinking_at(std::size_t item_index);

@@ -69,6 +69,24 @@ enum class FrameRenderKind
   Full,
 };
 
+class TranscriptPositionIndicatorState final
+{
+ public:
+  using Clock = std::chrono::steady_clock;
+  static constexpr auto kVisibleDuration = std::chrono::milliseconds(1000);
+
+  void show(Clock::time_point now = Clock::now()) noexcept;
+  void hide() noexcept;
+  [[nodiscard]] bool visible() const noexcept;
+  [[nodiscard]] bool expire_if_due(Clock::time_point now = Clock::now()) noexcept;
+  [[nodiscard]] std::optional<Clock::duration> time_until_expiry(Clock::time_point now = Clock::now()) const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  std::optional<Clock::time_point> expires_at_ = std::nullopt;
+};
+
 class FrameScheduler final
 {
  public:
@@ -122,6 +140,8 @@ class RuntimeRenderer final
 
   [[nodiscard]] TranscriptSelectionMouseResult handle_transcript_selection_mouse(InputEvent const& event, std::function<bool(std::size_t)> const& toggle_tool,
                                                                                  std::function<bool(std::size_t)> const& toggle_thinking);
+  void show_transcript_position_indicator(TranscriptPositionIndicatorState::Clock::time_point now = TranscriptPositionIndicatorState::Clock::now());
+  [[nodiscard]] bool transcript_position_indicator_visible() const noexcept;
   [[nodiscard]] bool copy_transcript_selection();
   void clear_transcript_selection();
   // Ends Selecting/HeaderArmed and draft mouse-select without discarding a committed
@@ -148,12 +168,14 @@ class RuntimeRenderer final
   [[nodiscard]] bool render_full(bool freeze_transcript_layout);
   [[nodiscard]] bool paint(FrameRenderKind kind, bool freeze_transcript_layout);
   [[nodiscard]] bool prepare_transcript_selection_authority();
+  void service_auxiliary_timers(std::chrono::steady_clock::time_point now);
 
   ComposerSnapshot& snapshot_;
   SidebarSnapshot& sidebar_;
   RuntimeDraftState& draft_state_;
   RuntimeTranscriptSelectionState transcript_selection_;
   std::ptrdiff_t pending_live_selection_item_index_shift_ = 0;
+  TranscriptPositionIndicatorState transcript_position_indicator_;
   FrameScheduler frame_scheduler_;
   std::optional<DeferredDetachedViewport> deferred_detached_viewport_ = std::nullopt;
 };

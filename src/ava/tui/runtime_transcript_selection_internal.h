@@ -6,6 +6,7 @@
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/terminal.h"
 
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -75,6 +76,14 @@ struct TranscriptSelectionHit
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TranscriptSelectionUnit
+{
+  TranscriptSelectionEndpoint start = {};
+  TranscriptSelectionEndpoint end = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TranscriptSelectionViewport
 {
   // Leading collapsed overview rows above the transcript body (0 when hidden).
@@ -100,6 +109,10 @@ struct TranscriptSelectionViewport
 [[nodiscard]] std::optional<std::size_t> absolute_line_for_endpoint(detail::TranscriptLayout const& layout, TranscriptSelectionEndpoint const& endpoint);
 [[nodiscard]] std::optional<TranscriptSelectionEndpoint> endpoint_for_absolute_line(detail::TranscriptLayout const& layout, std::size_t absolute_line,
                                                                                     std::size_t display_column);
+[[nodiscard]] std::optional<TranscriptSelectionUnit> transcript_word_selection_unit(detail::TranscriptLayout const& layout,
+                                                                                    TranscriptSelectionEndpoint const& endpoint);
+[[nodiscard]] std::optional<TranscriptSelectionUnit> transcript_line_selection_unit(detail::TranscriptLayout const& layout,
+                                                                                    TranscriptSelectionEndpoint const& endpoint);
 [[nodiscard]] bool endpoint_less(TranscriptSelectionEndpoint const& left, TranscriptSelectionEndpoint const& right, detail::TranscriptLayout const& layout);
 [[nodiscard]] std::pair<TranscriptSelectionEndpoint, TranscriptSelectionEndpoint> ordered_endpoints(TranscriptSelectionRange const& range,
                                                                                                     detail::TranscriptLayout const& layout);
@@ -123,12 +136,16 @@ enum class TranscriptSelectionMouseResult
 class RuntimeTranscriptSelectionState final
 {
  public:
+  using Clock = std::chrono::steady_clock;
+  static constexpr auto kMultiClickInterval = std::chrono::milliseconds(500);
+  static constexpr auto kEdgeAutoscrollInterval = std::chrono::milliseconds(50);
   void clear() noexcept;
   // Ends Selecting/HeaderArmed without discarding a committed range. Used for
   // Shift-modified reports, suspend/editor handoff, and mouse protocol boundaries.
   void cancel_pointer_interaction() noexcept;
   [[nodiscard]] bool empty() const noexcept;
   [[nodiscard]] bool dragging() const noexcept;
+  [[nodiscard]] bool has_click_chain() const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionRange> range() const noexcept;
   void publish(ComposerSnapshot& snapshot) const;
 
@@ -151,7 +168,11 @@ class RuntimeTranscriptSelectionState final
                                                             detail::TranscriptLayoutCache const& layout_cache, RuntimeDraftState* draft_state,
                                                             std::size_t& transcript_scroll_offset, std::ptrdiff_t frozen_to_live_item_index_shift,
                                                             std::function<bool(std::size_t)> const& toggle_tool,
-                                                            std::function<bool(std::size_t)> const& toggle_thinking);
+                                                            std::function<bool(std::size_t)> const& toggle_thinking, Clock::time_point now = Clock::now());
+  [[nodiscard]] std::optional<Clock::duration> time_until_edge_autoscroll(Clock::time_point now = Clock::now()) const;
+  [[nodiscard]] TranscriptSelectionMouseResult tick_edge_autoscroll(ComposerSnapshot& snapshot, detail::TranscriptLayoutCache const& layout_cache,
+                                                                    std::size_t& transcript_scroll_offset, std::ptrdiff_t frozen_to_live_item_index_shift,
+                                                                    Clock::time_point now = Clock::now());
 
   [[nodiscard]] bool copy_selection(ComposerSnapshot& snapshot, detail::TranscriptLayoutCache const& layout_cache);
 
@@ -183,6 +204,23 @@ class RuntimeTranscriptSelectionState final
     HeaderArmed,
   };
 
+  enum class SelectionGranularity
+  {
+    Character,
+    Word,
+    Line,
+  };
+
+  struct ClickChain
+  {
+    TranscriptSelectionUnit word = {};
+    std::size_t count = 0;
+    Clock::time_point completed_at = {};
+    std::optional<ItemSourceAuthority> source_authority = std::nullopt;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  };
+
   [[nodiscard]] bool has_compatible_authority(detail::TranscriptLayoutCache const& cache) const noexcept;
   [[nodiscard]] std::optional<TranscriptSelectionViewport> viewport_for(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache const& cache) const;
   [[nodiscard]] std::optional<TranscriptSelectionHit> hit_test(ComposerSnapshot const& snapshot, detail::TranscriptLayoutCache const& cache, std::size_t row,
@@ -192,7 +230,19 @@ class RuntimeTranscriptSelectionState final
   [[nodiscard]] bool refresh_source_authorities_or_clear(ComposerSnapshot const& snapshot);
   void begin_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot, RuntimeDraftState* draft_state,
                        std::ptrdiff_t frozen_to_live_item_index_shift);
+  void begin_granular_selection(TranscriptSelectionUnit const& unit, SelectionGranularity granularity, ComposerSnapshot const& snapshot,
+                                RuntimeDraftState* draft_state, std::ptrdiff_t frozen_to_live_item_index_shift);
   void extend_selection(TranscriptSelectionEndpoint const& endpoint, ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift);
+  void extend_granular_selection(TranscriptSelectionUnit const& unit, ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift,
+                                 detail::TranscriptLayout const& layout);
+  [[nodiscard]] std::optional<TranscriptSelectionUnit> selection_unit_for_hit(TranscriptSelectionHit const& hit, detail::TranscriptLayout const& layout,
+                                                                              SelectionGranularity granularity) const;
+  [[nodiscard]] std::size_t next_click_count(TranscriptSelectionUnit const& word, ComposerSnapshot const& snapshot,
+                                             std::ptrdiff_t frozen_to_live_item_index_shift, Clock::time_point now) const;
+  void commit_click(TranscriptSelectionUnit const& word, std::size_t count, ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift,
+                    Clock::time_point now);
+  void reset_click_chain() noexcept;
+  void reset_granular_drag() noexcept;
   void arm_header(TranscriptSelectionEndpoint endpoint, bool tool_header, bool thinking_header, ComposerSnapshot const& snapshot,
                   std::ptrdiff_t frozen_to_live_item_index_shift);
   [[nodiscard]] bool finish_header_click(ComposerSnapshot const& snapshot, std::ptrdiff_t frozen_to_live_item_index_shift,
@@ -202,6 +252,10 @@ class RuntimeTranscriptSelectionState final
                                                   std::function<bool(std::size_t)> const& toggle_thinking) const;
   [[nodiscard]] bool autoscroll_for_row(ComposerSnapshot& snapshot, TranscriptSelectionViewport const& viewport, std::size_t screen_row,
                                         std::size_t& transcript_scroll_offset, bool treat_overview_as_top_edge = false);
+  [[nodiscard]] bool can_autoscroll_for_row(TranscriptSelectionViewport const& viewport, std::size_t screen_row, std::size_t transcript_scroll_offset,
+                                            bool treat_overview_as_top_edge) const;
+  void update_edge_autoscroll(TranscriptSelectionViewport const& viewport, InputEvent const& event, std::size_t transcript_scroll_offset,
+                              bool treat_overview_as_top_edge, Clock::time_point now);
 
   std::optional<TranscriptSelectionRange> range_ = std::nullopt;
   std::optional<ItemSourceAuthority> anchor_source_authority_ = std::nullopt;
@@ -212,6 +266,15 @@ class RuntimeTranscriptSelectionState final
   std::optional<ItemSourceAuthority> armed_source_authority_ = std::nullopt;
   bool armed_tool_header_ = false;
   bool armed_thinking_header_ = false;
+  SelectionGranularity granularity_ = SelectionGranularity::Character;
+  std::optional<TranscriptSelectionUnit> granular_anchor_ = std::nullopt;
+  std::optional<ClickChain> click_chain_ = std::nullopt;
+  std::optional<TranscriptSelectionUnit> pending_click_word_ = std::nullopt;
+  std::size_t pending_click_count_ = 0;
+  bool pointer_moved_ = false;
+  std::optional<Clock::time_point> edge_autoscroll_due_ = std::nullopt;
+  std::size_t edge_mouse_row_ = 0;
+  std::size_t edge_mouse_column_ = 0;
   std::size_t authority_generation_ = 0;
   std::size_t authority_width_ = 0;
   ToolPresentation authority_tool_presentation_ = ToolPresentation::Rich;

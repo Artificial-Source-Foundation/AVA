@@ -159,14 +159,12 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
 
   if (is_action(active_event, TuiAction::PageUp))
   {
-    auto const [_, height] = terminal_size();
-    navigation_.scroll_up(std::max<std::size_t>(1, height / 2));
+    navigation_.scroll_up(navigation_.transcript_page_size());
     return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::PageDown))
   {
-    auto const [_, height] = terminal_size();
-    navigation_.scroll_down(std::max<std::size_t>(1, height / 2));
+    navigation_.scroll_down(navigation_.transcript_page_size());
     return to_input_handling(renderer_.request_render());
   }
   if (is_action(active_event, TuiAction::MessagePrev))

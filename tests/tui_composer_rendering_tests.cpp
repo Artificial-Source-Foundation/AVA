@@ -664,10 +664,28 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   navigation.scroll_to_message_boundary(false);
   auto const next_status = presentation.snapshot.status;
   auto const next_offset = renderer.transcript_scroll_offset;
+  auto const max_scroll = oldest_offset;
+  auto const next_start = max_scroll - std::min(max_scroll, next_offset);
+  auto const next_position = std::ranges::find(renderer.transcript_layout_cache.layout.message_starts, next_start);
+  auto const next_layout_position = static_cast<std::size_t>(next_position - renderer.transcript_layout_cache.layout.message_starts.begin());
+  auto const next_item_index = next_layout_position < renderer.transcript_layout_cache.layout.message_item_indices.size()
+                                   ? renderer.transcript_layout_cache.layout.message_item_indices[next_layout_position]
+                                   : std::string::npos;
 
   navigation.scroll_to_message_boundary(true);
   auto const prev_status = presentation.snapshot.status;
   auto const prev_offset = renderer.transcript_scroll_offset;
+  auto const prev_start = max_scroll - std::min(max_scroll, prev_offset);
+  auto const prev_position = std::ranges::find(renderer.transcript_layout_cache.layout.message_starts, prev_start);
+  auto const prev_layout_position = static_cast<std::size_t>(prev_position - renderer.transcript_layout_cache.layout.message_starts.begin());
+  auto const prev_item_index = prev_layout_position < renderer.transcript_layout_cache.layout.message_item_indices.size()
+                                   ? renderer.transcript_layout_cache.layout.message_item_indices[prev_layout_position]
+                                   : std::string::npos;
+
+  navigation.scroll_to_message_boundary(false);
+  navigation.scroll_to_message_boundary(false);
+  auto const past_last_status = presentation.snapshot.status;
+  auto const past_last_offset = renderer.transcript_scroll_offset;
 
   navigation.jump_to_bottom("live tail");
   auto const live_status = presentation.snapshot.status;
@@ -680,10 +698,37 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   bool const draft_unchanged =
       draft_state.draft.text == draft_before && draft_state.draft.cursor == cursor_before && presentation.snapshot.input == draft_before;
 
+  // Half-page navigation uses the actual transcript body after a wrapped composer
+  // consumes terminal rows, while ordinary three-row scrolling remains draft-sovereign.
+  static_cast<void>(resizeterm(12, 40));
+  draft_state.draft.text = std::string(180, 'x');
+  draft_state.draft.cursor = 73;
+  presentation.snapshot.input = draft_state.draft.text;
+  presentation.snapshot.input_cursor = draft_state.draft.cursor;
+  auto const wrapped_draft_before = draft_state.draft.text;
+  auto const wrapped_cursor_before = draft_state.draft.cursor;
+  auto const page = navigation.transcript_page_size();
+  auto const body = ava::tui::detail::transcript_body_screen_geometry(presentation.snapshot);
+  navigation.jump_to_bottom("live tail");
+  navigation.scroll_up(page);
+  auto const page_offset = renderer.transcript_scroll_offset;
+  navigation.jump_to_bottom("live tail");
+  navigation.scroll_up(3);
+  auto const plain_arrow_step_offset = renderer.transcript_scroll_offset;
+  bool const body_page_and_plain_arrow_sovereignty =
+      body.valid && page == std::max<std::size_t>(1, body.transcript_height / 2) && page != std::size_t{6} && page_offset == page &&
+      plain_arrow_step_offset == 3 && draft_state.draft.text == wrapped_draft_before && draft_state.draft.cursor == wrapped_cursor_before &&
+      !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
+      !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::HistoryNext, ava::tui::Key::ArrowDown) &&
+      !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&
+      !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::CursorDown, ava::tui::Key::ArrowDown);
+
   bool const passed = wheel_up_detached && wheel_reverse_reattached && wheel_step_is_three && wheel_clamps_at_oldest && detached &&
-                      oldest_status == "oldest message visible" && oldest_boundary_offset == oldest_offset && next_offset < oldest_offset && next_offset > 0 &&
-                      next_status == "next message" && prev_offset > next_offset && prev_status == "previous message" && live_offset == 0 &&
-                      live_status == "live tail" && already_live_offset == 0 && already_live_status == "live tail" && draft_unchanged &&
+                      oldest_status == "oldest retained user turn" && oldest_boundary_offset == oldest_offset && next_offset < oldest_offset &&
+                      next_offset > 0 && next_status == "next retained user turn" && prev_offset > next_offset &&
+                      prev_status == "previous retained user turn" && live_offset == 0 && next_item_index == 2 && prev_item_index == 0 &&
+                      past_last_offset == 0 && past_last_status == "live tail" && live_status == "live tail" && already_live_offset == 0 &&
+                      already_live_status == "live tail" && draft_unchanged && body_page_and_plain_arrow_sovereignty &&
                       ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessagePrev, ava::tui::Key::AltK) &&
                       ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::MessageNext, ava::tui::Key::AltJ) &&
                       ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::JumpToBottom, ava::tui::Key::CtrlEnd);
@@ -910,8 +955,11 @@ bool test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless
 
     bool const draft_unchanged =
         draft_state.draft.text == draft_before && draft_state.draft.cursor == cursor_before && presentation.snapshot.input == draft_before;
-    return offset_before == 0 && prev_offset == 0 && next_offset == 0 && prev_status == "transcript fits on screen" &&
-           next_status == "transcript fits on screen" && draft_unchanged;
+    auto const has_user =
+        std::ranges::any_of(presentation.snapshot.transcript, [](ava::tui::TranscriptItem const& item) { return item.label == "you" && !item.tool; });
+    auto const expected_prev = has_user ? std::string("oldest retained user turn") : std::string("no retained user turns");
+    auto const expected_next = has_user ? std::string("live tail") : std::string("no retained user turns");
+    return offset_before == 0 && prev_offset == 0 && next_offset == 0 && prev_status == expected_prev && next_status == expected_next && draft_unchanged;
   };
 
   bool const empty_ok = exercise({}, "message-boundary-empty");
@@ -1211,11 +1259,12 @@ void run_tui_composer_rendering_tests_part_1()
          "transcript receipt");
   expect(
       test_transcript_message_boundary_navigation_and_live_tail_reset(),
-      "transcript message-boundary navigation clamps at the oldest message, advances/retreats across prior/next boundaries, resets to live tail, applies the "
-      "shared three-row transcript wheel step with reverse reattach and hard clamp, and leaves the composer draft untouched while defaults keep "
-      "MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
+      "transcript user-turn navigation clamps at the oldest retained user turn, skips assistant turns, advances/retreats across retained user turns, resets to "
+      "live tail, applies the shared three-row transcript wheel step with reverse reattach and hard clamp, and leaves the composer draft untouched while "
+      "defaults keep MessagePrev/Next/JumpToBottom on Alt+K/Alt+J/Ctrl+End");
   expect(test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless(),
-         "message-prev/message-next on empty or fitting transcripts stay at offset 0 with transcript-fits status and leave the composer draft untouched");
+         "message-prev/message-next on empty or fitting transcripts stay at offset 0 with truthful retained-user/live-tail status and leave the composer "
+         "draft untouched");
   {
     auto const started_at = std::chrono::steady_clock::time_point{};
     ava::tui::detail::ActiveRunCadence cadence(started_at);

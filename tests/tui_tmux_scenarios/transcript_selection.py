@@ -1,8 +1,11 @@
-"""Credential-free real SGR transcript drag/copy coverage."""
+"""Credential-free real SGR transcript selection/copy coverage."""
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
+import shlex
 import time
 
 from tui_smoke_helpers import (
@@ -14,6 +17,7 @@ from tui_smoke_helpers import (
     send_literal,
     tmux,
     wait_for,
+    wait_for_screen_state,
     wait_for_session_exit,
 )
 from .common import _wait_for_normal_turn_request_count
@@ -37,6 +41,68 @@ def _wait_for_reverse(ctx: SmokeContext, session: str, label: str, timeout: floa
     raise RuntimeError(f"timed out waiting for {label}\nstyled screen:\n{last!r}")
 
 
+def _wait_for_no_reverse(ctx: SmokeContext, session: str, label: str, timeout: float = 8.0) -> str:
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        last = capture_styled(ctx.tmux, session)
+        if "\x1b[7m" not in last:
+            return last
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for {label}\nstyled screen:\n{last!r}")
+
+
+def _send_sgr_clicks(ctx: SmokeContext, session: str, column: int, row: int, count: int) -> None:
+    # One literal write keeps each physical press/release chain comfortably
+    # inside AVA's multi-click interval without introducing timing sleeps.
+    send_literal(ctx.tmux, session, (f"\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m") * count)
+
+
+def _copy_selection_payload(ctx: SmokeContext, session: str, name: str, expected: bytes) -> str:
+    # Selection copy shares the terminal clipboard's existing 64 KiB limit. The
+    # small fixture must produce both the direct and tmux-passthrough copies.
+    max_clipboard_bytes = 64 * 1024
+    if not expected or len(expected) > max_clipboard_bytes:
+        raise RuntimeError(f"invalid bounded OSC52 smoke expectation: {len(expected)} bytes")
+
+    pane_output = ctx.root / f"{name}-pane-output.bin"
+    pane_output.unlink(missing_ok=True)
+    tmux(ctx.tmux, "pipe-pane", "-t", session, f"cat > {shlex.quote(str(pane_output))}")
+    try:
+        send_keys(ctx.tmux, session, "C-c")
+        deadline = time.monotonic() + 8.0
+        last = b""
+        matches: list[re.Match[bytes]] = []
+        osc52 = re.compile(rb"\x1b+\]52;c;([A-Za-z0-9+/]+={0,2})\x1b+\\")
+        while time.monotonic() < deadline:
+            if pane_output.exists():
+                last = pane_output.read_bytes()
+                matches = list(osc52.finditer(last))
+                if len(matches) >= 2 and b"\x1bPtmux;\x1b\x1b]52;c;" in last:
+                    break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError(
+                f"timed out waiting for {name}; pane output did not contain complete raw and tmux OSC52 copies: {last!r}"
+            )
+
+        decoded: list[bytes] = []
+        for match in matches:
+            try:
+                payload = base64.b64decode(match.group(1), validate=True)
+            except (ValueError, binascii.Error) as error:
+                raise RuntimeError(f"{name} OSC52 payload was not valid base64: {match.group(1)!r}") from error
+            if len(payload) > max_clipboard_bytes:
+                raise RuntimeError(f"{name} OSC52 payload exceeded 64 KiB: {len(payload)} bytes")
+            decoded.append(payload)
+        if not decoded or any(payload != expected for payload in decoded):
+            raise RuntimeError(f"{name} copied the wrong transcript text: decoded={decoded!r}, expected={expected!r}")
+    finally:
+        tmux(ctx.tmux, "pipe-pane", "-t", session, check=False)
+
+    return wait_for(ctx.tmux, session, r"selection copy request sent", f"{name} truthful request-sent status")
+
+
 def scenario_transcript_selection(ctx: SmokeContext) -> None:
     session = ctx.session_name("transcript-selection")
     provider = ctx.start_fake_provider("transcript-selection", delay_ms=0)
@@ -48,9 +114,9 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
         data=ctx.active_data,
         no_color=False,
     )
-    ctx.active_workspace.joinpath("transcript-selection.txt").write_text(
-        "TRANSCRIPT-SELECTION-CARD-CONTENT\n", encoding="utf-8"
-    )
+    logical_line = "TRANSCRIPT MULTICLICK TARGETWORD SENTINEL"
+    target_word = "TARGETWORD"
+    ctx.active_workspace.joinpath("transcript-selection.txt").write_text(logical_line + "\n", encoding="utf-8")
     ctx.launch_ava(session, workspace=ctx.active_workspace, command=command, width=110, height=28)
     wait_for(ctx.tmux, session, r"Type a message|live session", "transcript-selection initial frame")
 
@@ -59,12 +125,16 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
     _wait_for_normal_turn_request_count(provider.request_log, 1, "transcript-selection fake-provider request")
     wait_for(ctx.tmux, session, r"headless active prompt complete", "transcript-selection fake-provider response")
 
+    send_literal(ctx.tmux, session, "/details compact")
+    send_keys(ctx.tmux, session, "Enter")
+    wait_for(ctx.tmux, session, r"tool details are now compact", "transcript-selection compact tool-card mode")
+
     send_literal(ctx.tmux, session, "/read transcript-selection.txt")
     send_keys(ctx.tmux, session, "Enter")
     card = wait_for(
         ctx.tmux,
         session,
-        r"TRANSCRIPT-SELECTION-CARD-CONTENT|Permission required",
+        rf"{re.escape(logical_line)}|Permission required",
         "transcript-selection tool-card seed",
     )
     if "Permission required" in card:
@@ -72,19 +142,44 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
         card = wait_for(
             ctx.tmux,
             session,
-            r"TRANSCRIPT-SELECTION-CARD-CONTENT",
+            re.escape(logical_line),
             "transcript-selection allowed tool card",
         )
 
-    header_row, header_line = _last_row_matching(card, r"[Rr]ead.*transcript-selection\.txt")
-    body_row, body_line = _last_row_matching(card, r"TRANSCRIPT-SELECTION-CARD-CONTENT")
+    header_pattern = r"[Rr]ead.*transcript-selection\.txt"
+    header_row, header_line = _last_row_matching(card, header_pattern)
+    body_row, body_line = _last_row_matching(card, re.escape(logical_line))
     if body_row <= header_row:
         raise RuntimeError(
             "tool-card body was not below its header, so header drag geometry was not testable\n"
             f"header row {header_row}: {header_line!r}\nbody row {body_row}: {body_line!r}\nscreen:\n{card}"
         )
     header_column = max(1, len(header_line) - len(header_line.lstrip()) + 2)
-    body_column = max(header_column + 4, len(body_line) - len(body_line.lstrip()) + 18)
+    body_column = body_line.index(target_word) + 1 + 2
+
+    # Rapid ordinary header clicks remain actions rather than body multi-click
+    # seeds. Re-read geometry after each redraw because expansion changes the
+    # tmux pane rows, and synchronize on visible detail content.
+    _send_sgr_clicks(ctx, session, header_column, header_row, 1)
+    expanded = wait_for_screen_state(
+        ctx.tmux,
+        session,
+        lambda screen: "output:" in screen,
+        "transcript-selection header expanded state",
+    )
+    if "\x1b[7m" in capture_styled(ctx.tmux, session):
+        raise RuntimeError(f"header click started transcript selection while expanding\nscreen:\n{expanded}")
+    expanded_header_row, expanded_header_line = _last_row_matching(expanded, header_pattern)
+    expanded_header_column = max(1, len(expanded_header_line) - len(expanded_header_line.lstrip()) + 2)
+    _send_sgr_clicks(ctx, session, expanded_header_column, expanded_header_row, 1)
+    collapsed = wait_for_screen_state(
+        ctx.tmux,
+        session,
+        lambda screen: "output:" not in screen,
+        "transcript-selection header collapsed state",
+    )
+    if "output:" in collapsed or "\x1b[7m" in capture_styled(ctx.tmux, session):
+        raise RuntimeError(f"rapid header click was hijacked by word/line selection instead of collapsing\nscreen:\n{collapsed}")
 
     # Send actual xterm SGR press, motion, and release reports through tmux. The
     # first endpoint is a toggle-capable tool header; movement must turn it into
@@ -115,6 +210,29 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
     if "\x1b[7m" not in copied_styled:
         raise RuntimeError(f"successful CopySelection cleared the transcript highlight\nstyled screen:\n{copied_styled!r}")
     save_evidence(ctx.root, "transcript-selection-copied", capture(ctx.tmux, session))
+
+    send_keys(ctx.tmux, session, "Escape")
+    _wait_for_no_reverse(ctx, session, "transcript-selection cleared drag selection")
+
+    # Exercise physical multi-click press/release reports on one stable body
+    # cell and verify the real clipboard bytes, not only reverse-video paint.
+    _send_sgr_clicks(ctx, session, body_column, body_row, 2)
+    _wait_for_reverse(ctx, session, "transcript-selection double-click word")
+    _copy_selection_payload(ctx, session, "transcript-selection-double-click", target_word.encode("utf-8"))
+
+    send_keys(ctx.tmux, session, "Escape")
+    _wait_for_no_reverse(ctx, session, "transcript-selection cleared double-click selection")
+    _send_sgr_clicks(ctx, session, body_column, body_row, 3)
+    _wait_for_reverse(ctx, session, "transcript-selection triple-click logical line")
+    # The transcript projection owns its two-space body indent, so selecting
+    # the complete logical rendered line includes it in the clipboard text.
+    triple_copied = _copy_selection_payload(
+        ctx,
+        session,
+        "transcript-selection-triple-click",
+        f"  {logical_line}".encode("utf-8"),
+    )
+    save_evidence(ctx.root, "transcript-selection-multiclick-copied", triple_copied)
 
     send_keys(ctx.tmux, session, "C-d")
     wait_for_session_exit(ctx.tmux, session)

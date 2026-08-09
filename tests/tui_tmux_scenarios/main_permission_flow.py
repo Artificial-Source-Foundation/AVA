@@ -169,6 +169,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy tool")
+    wait_for(tmux_exe, session, r"│  /copy tool(?:\s|$)", "copy latest tool details command draft")
     send_keys(tmux_exe, session, "Enter")
     copied_tool = wait_for(tmux_exe, session, r"latest tool details copy request sent", "copy latest tool details")
     if "latest tool details copy request sent" not in copied_tool:

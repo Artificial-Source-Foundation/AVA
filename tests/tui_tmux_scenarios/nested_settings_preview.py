@@ -278,8 +278,6 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     if '"theme": "dark"' not in disk:
         raise RuntimeError(f"invalid custom theme path disturbed configured dark theme\npath text:\n{disk}")
     save_evidence(root, "nested-settings-custom-theme-invalid-retained", sunrise_invalid)
-    send_keys(tmux_exe, session, "Escape")
-    wait_for(tmux_exe, session, r"Theme|Display|Model", "esc after custom theme catalog reload")
     close_settings(tmux_exe, session, "closed after custom theme catalog reload")
     send_keys(tmux_exe, session, "C-u")
     # Restore a valid sunrise file so later image checks are unaffected.

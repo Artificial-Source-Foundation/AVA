@@ -460,6 +460,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "!pwd")
+    wait_for(tmux_exe, session, r"│  !pwd(?:\s|$)", "bang shell command draft")
     send_keys(tmux_exe, session, "Enter")
     bang_permission = wait_for(
         tmux_exe,

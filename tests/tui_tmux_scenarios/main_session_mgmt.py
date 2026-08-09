@@ -366,6 +366,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, session, old_new_marker, "old transcript marker before /new")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/new Presentation reset new")
+    wait_for(tmux_exe, session, r"│  /new Presentation reset new(?:\s|$)", "presentation reset new command draft")
     send_keys(tmux_exe, session, "Enter")
     reset_by_new = wait_for(
         tmux_exe,
@@ -384,6 +385,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, session, old_clear_marker, "old transcript marker before /clear")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/clear Presentation reset clear")
+    wait_for(tmux_exe, session, r"│  /clear Presentation reset clear(?:\s|$)", "presentation reset clear command draft")
     send_keys(tmux_exe, session, "Enter")
     reset_by_clear = wait_for(
         tmux_exe,

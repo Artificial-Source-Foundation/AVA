@@ -323,7 +323,24 @@ def main() -> int:
                     f"captured:\n{visible.decode(errors='replace')}"
                 )
 
-            os.write(master_fd, b"/copy last\r")
+            completion_pattern = re.compile(rb"AVA OSC8 Fake[^\r\n]*\d+ms")
+            if completion_pattern.search(visible) is None:
+                read_until(
+                    master_fd,
+                    process,
+                    lambda data: completion_pattern.search(strip_control_sequences(data)) is not None,
+                    "completed assistant turn before OSC 52 copy",
+                    timeout=12.0,
+                )
+
+            os.write(master_fd, b"\x1b[200~/copy\x1b[201~")
+            read_until(
+                master_fd,
+                process,
+                lambda data: b"/copy" in strip_control_sequences(data),
+                "OSC 52 copy command draft",
+            )
+            os.write(master_fd, b"\r")
             copied = read_until(
                 master_fd,
                 process,

@@ -179,7 +179,8 @@ void reset_child_signals() noexcept
 [[noreturn]] void child_launch_failed(int error_fd) noexcept
 {
   int const saved_errno = errno == 0 ? EIO : errno;
-  static_cast<void>(::write(error_fd, &saved_errno, sizeof(saved_errno)));
+  auto const written = ::write(error_fd, &saved_errno, sizeof(saved_errno));
+  static_cast<void>(written);
   _exit(127);
 }
 
@@ -193,7 +194,8 @@ void descriptor_exec(int executable_fd, char* const argv[], char* const environm
   errno = ENOSYS;
 #endif
   int const saved_errno = errno;
-  static_cast<void>(::write(error_fd, &saved_errno, sizeof(saved_errno)));
+  auto const written = ::write(error_fd, &saved_errno, sizeof(saved_errno));
+  static_cast<void>(written);
   _exit(127);
 }
 
@@ -702,7 +704,7 @@ struct MermaidRenderCoordinator::Impl
 
   void start()
   {
-    worker = ava::core::make_jthread("mermaid_render", [this](std::stop_token stop_token) { worker_loop(stop_token); });
+    worker = ava::core::JoinThread::create("mermaid_render", [this](std::stop_token stop_token) { worker_loop(stop_token); });
   }
 
   void signal_worker() noexcept
@@ -820,7 +822,7 @@ struct MermaidRenderCoordinator::Impl
   std::size_t accepted_cache_bytes = 0;
   bool shutting_down = false;
   Pipe wake_pipe;
-  std::jthread worker;
+  ava::core::JoinThread worker;
 };
 
 ava::core::Result<std::unique_ptr<MermaidRenderCoordinator>> MermaidRenderCoordinator::create(MermaidRenderConfiguration configuration)

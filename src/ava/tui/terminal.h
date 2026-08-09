@@ -153,6 +153,24 @@ enum class KeyboardProtocolResponseAction
   DisableModifyOtherKeys
 };
 
+enum class TerminalCursorStyle
+{
+  Default,
+  Block,
+  Underline,
+  Bar
+};
+
+struct TerminalCursorSettings
+{
+  TerminalCursorStyle style = TerminalCursorStyle::Default;
+  bool blink = true;
+
+  bool operator==(TerminalCursorSettings const&) const = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 struct TerminalBackgroundColor
 {
   int red = 0;
@@ -197,6 +215,11 @@ void erase_last_utf8_codepoint(std::string& text);
 [[nodiscard]] std::string_view terminal_kitty_keyboard_push_sequence();
 [[nodiscard]] std::string_view terminal_kitty_keyboard_query_sequence();
 [[nodiscard]] std::string_view terminal_kitty_keyboard_pop_sequence();
+[[nodiscard]] std::string_view terminal_alacritty_da2_query_sequence();
+[[nodiscard]] std::optional<int> terminal_alacritty_da2_version(std::string_view sequence);
+// DA2 version bytes are trusted only for a positively identified direct Alacritty.
+[[nodiscard]] bool terminal_alacritty_da2_probe_environment_allows_query(std::optional<std::string_view> tmux, std::optional<std::string_view> term,
+                                                                         std::optional<std::string_view> term_program);
 [[nodiscard]] std::string_view terminal_modify_other_keys_enable_sequence();
 [[nodiscard]] std::string_view terminal_modify_other_keys_disable_sequence();
 [[nodiscard]] std::string_view terminal_bracketed_paste_enable_sequence();
@@ -214,6 +237,9 @@ void erase_last_utf8_codepoint(std::string& text);
 struct TerminalProtocolOwnership
 {
   bool kitty_keyboard_pushed = false;
+  int kitty_keyboard_active_flags = 0;
+  int kitty_keyboard_desired_flags = 7;
+  bool alacritty_da2_probe_armed = false;
   bool kitty_keyboard_supported = false;
   bool keyboard_protocol_kitty_response_seen = false;
   bool modify_other_keys_enabled = false;
@@ -236,6 +262,13 @@ void release_owned_terminal_protocols() noexcept;
 void rearm_owned_terminal_protocols() noexcept;
 // Final session teardown of owned protocols: release plus clear negotiation memory.
 void restore_owned_terminal_protocols() noexcept;
+// TUI-thread-only cursor ownership. Default never writes a reset unless AVA
+// previously forced a DECSCUSR style. Release/reset is shared with handoff and teardown.
+void apply_terminal_cursor_settings(TerminalCursorSettings settings) noexcept;
+[[nodiscard]] TerminalCursorSettings terminal_cursor_settings() noexcept;
+[[nodiscard]] bool terminal_cursor_style_forced() noexcept;
+[[nodiscard]] std::string_view terminal_cursor_style_sequence(TerminalCursorSettings settings) noexcept;
+[[nodiscard]] std::string_view terminal_cursor_style_reset_sequence() noexcept;
 // Apply TIOCGWINSZ via resizeterm only when the kernel size differs from current
 // ncurses geometry. Same-size calls are no-ops so repeated W6 fit refreshes cannot
 // flood KEY_RESIZE. Fail-soft without a TTY or before curses init.

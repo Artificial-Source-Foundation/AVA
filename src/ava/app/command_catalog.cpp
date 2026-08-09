@@ -41,6 +41,10 @@ std::vector<CommandCatalogEntry> const& command_catalog()
       CommandCatalogEntry{.command = "/images", .description = "Persist TUI image preview visibility", .hint = "[on|off|reset]", .category = "General"},
       CommandCatalogEntry{
           .command = "/image-width", .description = "Persist TUI image preview width in cells", .hint = "<8..160>|reset", .category = "General"},
+      CommandCatalogEntry{.command = "/cursor",
+                          .description = "Persist TUI cursor style and blink",
+                          .hint = "default|block|underline|bar [blink|steady]",
+                          .category = "General"},
       CommandCatalogEntry{.command = "/mode", .description = "Toggle build/plan mode", .category = "General"},
       CommandCatalogEntry{.command = "/details",
                           .description = "Set or toggle Compact, Rich, or Expanded tool cards",

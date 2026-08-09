@@ -140,7 +140,8 @@ void test_app_command_dispatcher()
 
   expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") && ava::app::is_backend_command("/providers") &&
              ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/keybindings") && ava::app::is_backend_command("/theme") &&
-             ava::app::is_backend_command("/images") && ava::app::is_backend_command("/image-width") && ava::app::is_backend_command("/details") &&
+             ava::app::is_backend_command("/images") && ava::app::is_backend_command("/image-width") && ava::app::is_backend_command("/cursor") &&
+             ava::app::is_backend_command("/details") &&
              ava::app::is_backend_command("/sidebar") && ava::app::is_backend_command("/overview") && ava::app::is_backend_command("/tool") &&
              ava::app::is_backend_command("/tools write") && ava::app::is_backend_command("/diff") && ava::app::is_backend_command("/copy") &&
              ava::app::is_backend_command("/find src/*.cpp") && ava::app::is_backend_command("/ls src") && ava::app::is_backend_command("/thinking") &&

@@ -28,6 +28,7 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
                             .project_trust = options.project_trust,
                             .show_images = options.show_images,
                             .image_width_cells = options.image_width_cells,
+                            .cursor = options.cursor,
                             .startup_overview = options.startup_overview};
   snapshot.mermaid_config_epoch = options.mermaid_render.config_epoch;
   snapshot.mermaid_enabled = options.mermaid_render.enabled;
@@ -158,6 +159,8 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   snapshot.context_source_count = state.context_source_count;
   snapshot.show_images = state.show_images;
   snapshot.image_width_cells = state.image_width_cells;
+  snapshot.cursor = state.cursor;
+  apply_terminal_cursor_settings(snapshot.cursor);
   if (snapshot.mermaid_config_epoch != state.mermaid_config_epoch || snapshot.mermaid_enabled != state.mermaid_enabled)
   {
     snapshot.mermaid_config_epoch = state.mermaid_config_epoch;

@@ -188,6 +188,16 @@ void populate_display_section(SelectListView& view, ComposerSnapshot const& snap
   if (!current_listed && snapshot.image_width_cells >= 8 && snapshot.image_width_cells <= 160)
     add_image_width_action(view, snapshot.image_width_cells, snapshot.image_width_cells);
   add_settings_action_row(view, std::string(kSettingsImageWidthReset), "Width default");
+  auto add_cursor_style = [&](TerminalCursorStyle style, std::string_view token, std::string label) {
+    add_settings_action_row(view, std::string(kSettingsCursorStylePrefix) + std::string(token), std::move(label),
+                            snapshot.cursor.style == style ? "current" : std::string{});
+  };
+  add_cursor_style(TerminalCursorStyle::Default, "default", "Cursor default");
+  add_cursor_style(TerminalCursorStyle::Block, "block", "Cursor block");
+  add_cursor_style(TerminalCursorStyle::Underline, "underline", "Cursor underline");
+  add_cursor_style(TerminalCursorStyle::Bar, "bar", "Cursor bar");
+  add_settings_action_row(view, std::string(kSettingsCursorBlink), "Cursor blink", snapshot.cursor.blink ? "current" : std::string{});
+  add_settings_action_row(view, std::string(kSettingsCursorSteady), "Cursor steady", snapshot.cursor.blink ? std::string{} : "current");
   add_settings_action_row(view, std::string(kSettingsDraftThinking), "Thinking blocks", snapshot.thinking_visible ? "visible" : "hidden");
 }
 
@@ -603,7 +613,7 @@ SelectListView build_settings_select_list_view_for_section(SettingsSection secti
     case SettingsSection::Display: {
       auto view = make_settings_shell("Settings › Display", "No display settings match",
                                       footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
-      view.items.reserve(12);
+      view.items.reserve(18);
       populate_display_section(view, snapshot);
       return view;
     }
@@ -736,12 +746,19 @@ void DisplayPreviewTransaction::apply_image_overlay(ComposerSnapshot& snapshot) 
 {
   snapshot.show_images = authoritative.show_images;
   snapshot.image_width_cells = authoritative.image_width_cells;
-  if (!overlay)
-    return;
-  if (overlay->show_images)
-    snapshot.show_images = *overlay->show_images;
-  if (overlay->image_width_cells)
-    snapshot.image_width_cells = *overlay->image_width_cells;
+  snapshot.cursor = authoritative.cursor;
+  if (overlay)
+  {
+    if (overlay->show_images)
+      snapshot.show_images = *overlay->show_images;
+    if (overlay->image_width_cells)
+      snapshot.image_width_cells = *overlay->image_width_cells;
+    if (overlay->cursor_style)
+      snapshot.cursor.style = *overlay->cursor_style;
+    if (overlay->cursor_blink)
+      snapshot.cursor.blink = *overlay->cursor_blink;
+  }
+  apply_terminal_cursor_settings(snapshot.cursor);
 }
 
 void DisplayPreviewTransaction::apply_theme_overlay() const
@@ -761,7 +778,7 @@ void reapply_settings_preview_after_display_reload(DisplayPreviewTransaction& pr
 {
   // Always rebase from the hydrated authoritative presentation. Do not compare overlay values.
   auto const staged_token = preview.overlay ? std::optional<std::string>{preview.overlay->action_token} : std::nullopt;
-  preview.rebase(DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells});
+  preview.rebase(DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells, .cursor = snapshot.cursor});
   if (staged_token)
   {
     // Refresh against app-delivered options when the token still resolves. If a previously valid
@@ -833,6 +850,8 @@ bool settings_action_is_previewable(std::string_view value)
   if (value == kSettingsImagesOn || value == kSettingsImagesOff || value == kSettingsImagesReset)
     return true;
   if (value == kSettingsImageWidthReset || value.starts_with(kSettingsImageWidthPrefix))
+    return true;
+  if (value.starts_with(kSettingsCursorStylePrefix) || value == kSettingsCursorBlink || value == kSettingsCursorSteady)
     return true;
   return false;
 }
@@ -907,6 +926,31 @@ std::optional<DisplayPreviewOverlay> settings_preview_overlay_for_action(std::st
   if (value == kSettingsImageWidthReset)
   {
     overlay.image_width_cells = 60;
+    return overlay;
+  }
+  if (value.starts_with(kSettingsCursorStylePrefix))
+  {
+    auto const style = value.substr(kSettingsCursorStylePrefix.size());
+    if (style == "default")
+      overlay.cursor_style = TerminalCursorStyle::Default;
+    else if (style == "block")
+      overlay.cursor_style = TerminalCursorStyle::Block;
+    else if (style == "underline")
+      overlay.cursor_style = TerminalCursorStyle::Underline;
+    else if (style == "bar")
+      overlay.cursor_style = TerminalCursorStyle::Bar;
+    else
+      return std::nullopt;
+    return overlay;
+  }
+  if (value == kSettingsCursorBlink)
+  {
+    overlay.cursor_blink = true;
+    return overlay;
+  }
+  if (value == kSettingsCursorSteady)
+  {
+    overlay.cursor_blink = false;
     return overlay;
   }
   if (value.starts_with(kSettingsImageWidthPrefix))

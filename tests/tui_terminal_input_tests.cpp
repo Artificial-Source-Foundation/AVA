@@ -200,21 +200,15 @@ void run_tui_terminal_input_tests_part_1()
   expect(!sanitized_wrap.empty() && sanitized_wrap[0].find('\x1b') == std::string::npos,
          "production transcript wrapping still sanitizes raw escape sequences before wrapping");
   auto const kitty_push_sequence = ava::tui::terminal_kitty_keyboard_push_sequence();
-  expect(kitty_push_sequence == std::string_view("\x1b[>5u") &&
-             ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>5u\x1b[?u\x1b[c") &&
+  expect(kitty_push_sequence == std::string_view("\x1b[>7u") &&
+             ava::tui::terminal_kitty_keyboard_query_sequence() == std::string_view("\x1b[>7u\x1b[?u\x1b[c") &&
              ava::tui::terminal_kitty_keyboard_pop_sequence() == std::string_view("\x1b[<u"),
-         "terminal session requests Kitty keyboard disambiguation plus alternate-key reporting, queries support, and restores the stack on exit");
-  // Kitty flags 5 are DISAMBIGUATE_ESCAPE_CODES (1) plus REPORT_ALTERNATE_KEYS
-  // (4). AVA intentionally excludes REPORT_EVENT_TYPES (2), so it does not
-  // expose the Alacritty <=0.14 duplicate-Enter event-reporting defect.
-  auto const current_kitty_flags =
-      kitty_push_sequence.size() == 5 && kitty_push_sequence[3] >= '0' && kitty_push_sequence[3] <= '9' ? kitty_push_sequence[3] - '0' : -1;
+         "normal terminal sessions request all supported Kitty key-reporting flags, query support, and restore the stack on exit");
   constexpr int kKittyDisambiguateEscapeCodes = 1;
   constexpr int kKittyReportEventTypes = 2;
   constexpr int kKittyReportAlternateKeys = 4;
-  expect((current_kitty_flags & kKittyDisambiguateEscapeCodes) != 0 && (current_kitty_flags & kKittyReportAlternateKeys) != 0 &&
-             (current_kitty_flags & kKittyReportEventTypes) == 0,
-         "current Kitty flags intentionally enable disambiguation and alternate keys without event-type reporting");
+  constexpr int kHealthyKittyFlags = kKittyDisambiguateEscapeCodes | kKittyReportEventTypes | kKittyReportAlternateKeys;
+  expect(kHealthyKittyFlags == 7 && kitty_push_sequence == "\x1b[>7u", "normal Kitty sequence maps all supported key-reporting flags");
   expect(ava::tui::terminal_modify_other_keys_enable_sequence() == std::string_view("\x1b[>4;2m") &&
              ava::tui::terminal_modify_other_keys_disable_sequence() == std::string_view("\x1b[>4;0m"),
          "terminal session has xterm modifyOtherKeys fallback enable and disable sequences");
@@ -2359,8 +2353,190 @@ bool sequences_contain(std::vector<std::string> const& sequences, std::string_vi
   return std::find(sequences.begin(), sequences.end(), std::string(needle)) != sequences.end();
 }
 
+void test_alacritty_da2_version_gate_and_lifecycle()
+{
+  expect(ava::tui::terminal_alacritty_da2_probe_environment_allows_query(std::nullopt, "xterm-256color", "Alacritty") &&
+             !ava::tui::terminal_alacritty_da2_probe_environment_allows_query(std::nullopt, "xterm-256color", "ghostty") &&
+             !ava::tui::terminal_alacritty_da2_probe_environment_allows_query("/tmp/tmux", "xterm-256color", "Alacritty") &&
+             !ava::tui::terminal_alacritty_da2_probe_environment_allows_query(std::nullopt, "tmux-256color", "Alacritty") &&
+             !ava::tui::terminal_alacritty_da2_probe_environment_allows_query(std::nullopt, "screen-256color", "Alacritty"),
+         "only a positively identified direct Alacritty is eligible for the DA2 query");
+
+  auto const version_2401 = ava::tui::terminal_alacritty_da2_version("[>0;2401;1c");
+  auto const version_2402 = ava::tui::terminal_alacritty_da2_version("[>0;2402;1c");
+  expect(version_2401 && *version_2401 == 2401 && version_2402 && *version_2402 == 2402 && ava::tui::terminal_alacritty_da2_version("[>0;1;1c") == 1 &&
+             ava::tui::terminal_alacritty_da2_version("[>0;999999;1c") == 999999,
+         "strict Alacritty DA2 parsing preserves the exact 2401/2402 boundary and accepted version range");
+  for (auto const malformed : {std::string_view("[>0;0;1c"), std::string_view("[>0;1000000;1c"), std::string_view("[>1;2402;1c"),
+                               std::string_view("[>0;2402;0c"), std::string_view("[>0;2402;1;2c"), std::string_view("[>0;24x2;1c"),
+                               std::string_view("[>0;2402;1C"), std::string_view("[?0;2402;1c"), std::string_view("[>0;2402;1cjunk")})
+  {
+    expect(!ava::tui::terminal_alacritty_da2_version(malformed), "malformed or non-Alacritty DA2 reply is rejected: " + std::string(malformed));
+  }
+
+  constexpr std::string_view fragmented_reply = "[>0;2402;1c";
+  for (std::size_t length = 1; length < fragmented_reply.size(); ++length)
+  {
+    expect(!ava::tui::terminal_escape_sequence_complete(fragmented_reply.substr(0, length)),
+           "fragmented DA2 reply remains incomplete until its strict final byte");
+  }
+  expect(ava::tui::terminal_escape_sequence_complete(fragmented_reply), "the complete fragmented DA2 reply becomes one bounded CSI sequence");
+
+  // Unknown/non-Alacritty and multiplexer environments never arm DA2 and use flags 7.
+  for (auto const& environment : {std::pair{std::string(""), std::string("xterm-256color")}, std::pair{std::string("ghostty"), std::string("xterm-256color")},
+                                  std::pair{std::string("Alacritty"), std::string("tmux-256color")}})
+  {
+    ScopedEnvVar term_program_guard("TERM_PROGRAM", environment.first);
+    ScopedEnvVar term_guard("TERM", environment.second);
+    ScopedEnvVar tmux_guard("TMUX", "");
+    reset_lifecycle_test_seams();
+    SequenceCapture capture;
+    g_sequence_capture = &capture;
+    ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+    ava::tui::arm_owned_terminal_protocols_on_enter();
+    auto const ownership = ava::tui::terminal_protocol_ownership();
+    expect(ownership.kitty_keyboard_active_flags == 7 && ownership.kitty_keyboard_desired_flags == 7 && !ownership.alacritty_da2_probe_armed &&
+               count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_query_sequence()) == 1 &&
+               !sequences_contain(capture.sequences, ava::tui::terminal_alacritty_da2_query_sequence()) &&
+               !ava::tui::terminal_keyboard_protocol_handle_response("[>0;2402;1c"),
+           "non-Alacritty and mux sessions keep flags 7 and do not trust unsolicited DA2 replies");
+    ava::tui::restore_owned_terminal_protocols();
+    reset_lifecycle_test_seams();
+  }
+
+  // A direct Alacritty starts at 5. Malformed input leaves the asynchronous probe
+  // armed; an exact 2401 response consumes it without changing the active flags.
+  {
+    ScopedEnvVar term_program_guard("TERM_PROGRAM", "Alacritty");
+    ScopedEnvVar term_guard("TERM", "xterm-256color");
+    ScopedEnvVar tmux_guard("TMUX", "");
+    reset_lifecycle_test_seams();
+    SequenceCapture capture;
+    g_sequence_capture = &capture;
+    ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+    ava::tui::arm_owned_terminal_protocols_on_enter();
+    auto ownership = ava::tui::terminal_protocol_ownership();
+    expect(ownership.kitty_keyboard_active_flags == 5 && ownership.kitty_keyboard_desired_flags == 5 && ownership.alacritty_da2_probe_armed &&
+               sequences_contain(capture.sequences, "\x1b[>5u\x1b[?u\x1b[c") &&
+               count_sequence(capture.sequences, ava::tui::terminal_alacritty_da2_query_sequence()) == 1,
+           "direct Alacritty starts conservatively at flags 5 and issues one nonblocking DA2 query");
+    ava::tui::release_owned_terminal_protocols();
+    ava::tui::rearm_owned_terminal_protocols();
+    expect(ava::tui::terminal_protocol_ownership().kitty_keyboard_active_flags == 5 && ava::tui::terminal_protocol_ownership().alacritty_da2_probe_armed &&
+               count_sequence(capture.sequences, ava::tui::terminal_alacritty_da2_query_sequence()) == 1,
+           "an absent DA2 reply leaves flags 5 active across handoff without reissuing the asynchronous query");
+    expect(!ava::tui::terminal_keyboard_protocol_handle_response("[>0;2402;2c") && ava::tui::terminal_protocol_ownership().alacritty_da2_probe_armed,
+           "malformed DA2 does not consume or upgrade the armed probe");
+    expect(ava::tui::terminal_keyboard_protocol_handle_response("[>0;2401;1c"), "exact Alacritty 2401 DA2 is consumed");
+    ownership = ava::tui::terminal_protocol_ownership();
+    expect(ownership.kitty_keyboard_active_flags == 5 && ownership.kitty_keyboard_desired_flags == 5 && !ownership.alacritty_da2_probe_armed &&
+               count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 1,
+           "Alacritty 2401 remains on flags 5 without replacing the active stack layer");
+    ava::tui::release_owned_terminal_protocols();
+    ava::tui::rearm_owned_terminal_protocols();
+    expect(ava::tui::terminal_protocol_ownership().kitty_keyboard_active_flags == 5 && count_sequence(capture.sequences, "\x1b[>5u") == 2,
+           "the selected flags 5 survive repeated handoff and rearm");
+    ava::tui::restore_owned_terminal_protocols();
+    reset_lifecycle_test_seams();
+  }
+
+  // Exact 2402 upgrades by replacing, never stacking, AVA's one active layer.
+  {
+    ScopedEnvVar term_program_guard("TERM_PROGRAM", "alacritty");
+    ScopedEnvVar term_guard("TERM", "xterm-256color");
+    ScopedEnvVar tmux_guard("TMUX", "");
+    reset_lifecycle_test_seams();
+    SequenceCapture capture;
+    g_sequence_capture = &capture;
+    ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+    ava::tui::arm_owned_terminal_protocols_on_enter();
+    expect(ava::tui::terminal_keyboard_protocol_handle_response("[>0;2402;1c"), "exact Alacritty 2402 DA2 is consumed");
+    auto ownership = ava::tui::terminal_protocol_ownership();
+    expect(ownership.kitty_keyboard_active_flags == 7 && ownership.kitty_keyboard_desired_flags == 7 && !ownership.alacritty_da2_probe_armed &&
+               count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 1 &&
+               count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 1,
+           "Alacritty 2402 performs one balanced pop/push replacement to flags 7");
+    auto const after_upgrade = capture.sequences.size();
+    expect(!ava::tui::terminal_keyboard_protocol_handle_response("[>0;2402;1c") && capture.sequences.size() == after_upgrade,
+           "a duplicate or unsolicited DA2 reply cannot grow the Kitty stack");
+    ava::tui::release_owned_terminal_protocols();
+    ava::tui::rearm_owned_terminal_protocols();
+    expect(ava::tui::terminal_protocol_ownership().kitty_keyboard_active_flags == 7 &&
+               count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_push_sequence()) == 2,
+           "the upgraded flags 7 survive handoff and rearm without another DA2 query");
+    ava::tui::restore_owned_terminal_protocols();
+    expect(count_sequence(capture.sequences, ava::tui::terminal_kitty_keyboard_pop_sequence()) == 3 &&
+               count_sequence(capture.sequences, ava::tui::terminal_alacritty_da2_query_sequence()) == 1,
+           "Alacritty upgrade plus handoff and final restore leave every Kitty stack layer balanced");
+    reset_lifecycle_test_seams();
+  }
+}
+
+void test_terminal_cursor_mapping_and_lifecycle()
+{
+  using CursorSettings = ava::tui::TerminalCursorSettings;
+  using CursorStyle = ava::tui::TerminalCursorStyle;
+  expect(ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Default, .blink = true}).empty() &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Block, .blink = true}) == "\x1b[1 q" &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Block, .blink = false}) == "\x1b[2 q" &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Underline, .blink = true}) == "\x1b[3 q" &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Underline, .blink = false}) == "\x1b[4 q" &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Bar, .blink = true}) == "\x1b[5 q" &&
+             ava::tui::terminal_cursor_style_sequence(CursorSettings{.style = CursorStyle::Bar, .blink = false}) == "\x1b[6 q" &&
+             ava::tui::terminal_cursor_style_reset_sequence() == "\x1b[0 q",
+         "cursor style and blink settings map exactly to DECSCUSR 1-6 and reset 0");
+
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "ghostty");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar tmux_guard("TMUX", "");
+  reset_lifecycle_test_seams();
+  SequenceCapture capture;
+  g_sequence_capture = &capture;
+  ava::tui::detail::set_terminal_sequence_writer_for_test(&capture_terminal_sequence);
+
+  ava::tui::apply_terminal_cursor_settings(CursorSettings{});
+  ava::tui::release_owned_terminal_protocols();
+  ava::tui::restore_owned_terminal_protocols();
+  expect(capture.sequences.empty() && !ava::tui::terminal_cursor_style_forced(),
+         "default cursor settings never emit DECSCUSR or perturb the inherited shell cursor");
+
+  auto const forced = CursorSettings{.style = CursorStyle::Bar, .blink = false};
+  ava::tui::arm_owned_terminal_protocols_on_enter();
+  ava::tui::apply_terminal_cursor_settings(forced);
+  ava::tui::apply_terminal_cursor_settings(forced);
+  expect(count_sequence(capture.sequences, "\x1b[6 q") == 1 && ava::tui::terminal_cursor_style_forced() && ava::tui::terminal_cursor_settings() == forced,
+         "a non-default cursor is applied once and retained as TUI-owned state");
+  ava::tui::release_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_cursor_style_reset_sequence()) == 1 && !ava::tui::terminal_cursor_style_forced() &&
+             ava::tui::terminal_cursor_settings() == forced,
+         "handoff resets a forced cursor before suspend or external-editor ownership transfer while retaining the desired style");
+  ava::tui::rearm_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, "\x1b[6 q") == 2 && ava::tui::terminal_cursor_style_forced(),
+         "resume reapplies the retained cursor style on the TUI thread");
+  ava::tui::restore_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_cursor_style_reset_sequence()) == 2 && !ava::tui::terminal_cursor_style_forced() &&
+             ava::tui::terminal_cursor_settings() == CursorSettings{},
+         "final teardown resets only the cursor AVA forced and clears retained cursor settings");
+
+  auto const reset_count = count_sequence(capture.sequences, ava::tui::terminal_cursor_style_reset_sequence());
+  ava::tui::restore_owned_terminal_protocols();
+  expect(count_sequence(capture.sequences, ava::tui::terminal_cursor_style_reset_sequence()) == reset_count,
+         "idempotent final teardown does not emit a cursor reset after ownership is gone");
+
+  ava::tui::apply_terminal_cursor_settings(CursorSettings{.style = CursorStyle::Underline, .blink = true});
+  ava::tui::apply_terminal_cursor_settings(CursorSettings{});
+  ava::tui::apply_terminal_cursor_settings(CursorSettings{});
+  expect(count_sequence(capture.sequences, "\x1b[3 q") == 1 &&
+             count_sequence(capture.sequences, ava::tui::terminal_cursor_style_reset_sequence()) == reset_count + 1,
+         "selecting default resets exactly one style AVA forced and repeated default remains non-interfering");
+  reset_lifecycle_test_seams();
+}
+
 void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
 {
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "ghostty");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar tmux_guard("TMUX", "");
   reset_lifecycle_test_seams();
   SequenceCapture capture;
   g_sequence_capture = &capture;
@@ -2464,6 +2640,9 @@ void test_terminal_protocol_lifecycle_enter_handoff_resume_restore()
 
 void test_terminal_protocol_lifecycle_kitty_supported_path()
 {
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "ghostty");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar tmux_guard("TMUX", "");
   reset_lifecycle_test_seams();
   SequenceCapture capture;
   g_sequence_capture = &capture;
@@ -2514,9 +2693,12 @@ void test_terminal_input_flush_ordering_seam()
 
 void test_external_editor_and_suspend_share_handoff_sequence()
 {
+  ScopedEnvVar term_program_guard("TERM_PROGRAM", "ghostty");
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  ScopedEnvVar tmux_guard("TMUX", "");
   // Deterministic stand-in for both RuntimeActionController handoff paths: the
-  // production suspend/editor code calls release before endwin and rearm after
-  // reset_prog_mode + geometry refresh. Prove the shared sequence contract here.
+  // production suspend/editor code leaves curses, releases protocols before the
+  // handoff, and rearms after reset_prog_mode + geometry refresh.
   reset_lifecycle_test_seams();
   SequenceCapture capture;
   g_sequence_capture = &capture;
@@ -2960,6 +3142,8 @@ void run_tui_terminal_osc11_theme_tests()
 
 void run_tui_terminal_lifecycle_protocol_tests()
 {
+  test_alacritty_da2_version_gate_and_lifecycle();
+  test_terminal_cursor_mapping_and_lifecycle();
   test_terminal_protocol_lifecycle_enter_handoff_resume_restore();
   test_terminal_protocol_lifecycle_kitty_supported_path();
   test_terminal_input_flush_ordering_seam();

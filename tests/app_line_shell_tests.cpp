@@ -128,6 +128,14 @@ void test_line_shell_question_success_retry_multi_custom_and_cancel()
          "line-shell question EOF returns the existing cancellation contract with plain-language output");
 }
 
+void test_display_settings_command_classification_includes_cursor()
+{
+  using ava::app::line_shell_internal::is_display_settings_command;
+  expect(is_display_settings_command("/cursor default") && is_display_settings_command("  /cursor underline steady\t") &&
+             !is_display_settings_command("/cursor-shaped") && !is_display_settings_command("/cursorbar"),
+         "cursor commands trigger TUI display hydration without broad prefix matches");
+}
+
 void test_line_shell_question_invalid_and_secret_fail_bounded()
 {
   std::istringstream invalid("9\n8\n7\n");
@@ -156,5 +164,6 @@ void run_app_line_shell_tests()
   test_line_shell_bounded_reader_accepts_limit_and_recovers_after_oversize();
   test_line_shell_permission_numbered_text_cancel_and_guidance();
   test_line_shell_question_success_retry_multi_custom_and_cancel();
+  test_display_settings_command_classification_includes_cursor();
   test_line_shell_question_invalid_and_secret_fail_bounded();
 }

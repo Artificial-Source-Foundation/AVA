@@ -6,6 +6,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
 #include "ava/tui/runtime_plugin_ui.h"
+#include "ava/tui/terminal.h"
 #include "ava/session/attachments.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
@@ -125,6 +126,7 @@ struct TuiRuntimeStateSnapshot
   // Effective display presentation owned by the application display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  TerminalCursorSettings cursor = {};
   std::uint64_t mermaid_config_epoch = 0;
   bool mermaid_enabled = false;
   // Application-owned path-free startup/resources snapshot. Omitted rather than
@@ -295,6 +297,7 @@ struct TuiRuntimeOptions
   std::vector<TodoItem> initial_todos = {};
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  TerminalCursorSettings cursor = {};
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
   TuiMermaidRenderBridge mermaid_render;
   TuiKeyBindings key_bindings = default_key_bindings();

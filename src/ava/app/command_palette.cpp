@@ -243,8 +243,7 @@ std::vector<WorkspacePathCandidate> walk_workspace_path_candidates(runtime::sess
     return candidates;
 
   std::size_t visited = 0;
-  for (std::filesystem::recursive_directory_iterator it(current_dir, error), end; it != end && visited < kMaxPathCompletionVisited;
-       it.increment(error))
+  for (std::filesystem::recursive_directory_iterator it(current_dir, error), end; it != end && visited < kMaxPathCompletionVisited; it.increment(error))
   {
     if (error)
     {
@@ -651,13 +650,18 @@ void add_parent_summary_hint(tui::SelectListView& view, ava::session::SessionTre
 }
 
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::session_ts const& unlocked_session,
-                                      std::vector<CommandHotkey> const& hotkeys,
-                                      std::vector<WorkspacePathCandidate> const& path_completions, ava::session::SessionTreeIndex const* session_tree)
+                                      std::vector<CommandHotkey> const& hotkeys, std::vector<WorkspacePathCandidate> const& path_completions,
+                                      ava::session::SessionTreeIndex const* session_tree)
 {
   auto [paths, workspace_dir, include_project_resources, subagent_coordinator, session_id, anchor_set, context_sources] = [&] {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
-    return std::tuple{session_r->paths(), session_r->workspace_dir(), project_resources_trusted(session_r->project_trust()),
-                      session_r->subagent_coordinator(), session_r->store.session_id(), session_r->anchor_set(), session_r->context_sources()};
+    return std::tuple{session_r->paths(),
+                      session_r->workspace_dir(),
+                      project_resources_trusted(session_r->project_trust()),
+                      session_r->subagent_coordinator(),
+                      session_r->store.session_id(),
+                      session_r->anchor_set(),
+                      session_r->context_sources()};
   }();
   auto const resource_policy = runtime::make_extension_resource_policy(paths, workspace_dir, include_project_resources);
   if (!path_completions.empty())
@@ -722,6 +726,20 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "compact", "Use one fitted summary row per tool", "General", {}, false);
     add_completion(item, 0, "rich", "Use human calls with bounded useful output", "General", {}, false);
     add_completion(item, 0, "expanded", "Show all retained output within the defensive display cap", "General", {}, false);
+  }
+
+  if (auto index = find_item_index(items, "/cursor"))
+  {
+    auto& item = items[*index];
+    add_completion(item, 0, "default", "Do not override the shell cursor", "General", {}, false);
+    add_completion(item, 0, "block", "Use a block cursor", "General", {}, false);
+    add_completion(item, 0, "underline", "Use an underline cursor", "General", {}, false);
+    add_completion(item, 0, "bar", "Use a bar cursor", "General", {}, false);
+    for (auto const& style : {std::string("default"), std::string("block"), std::string("underline"), std::string("bar")})
+    {
+      add_completion(item, 1, "blink", "Use the blinking variant", "General", {style}, false);
+      add_completion(item, 1, "steady", "Use the steady variant", "General", {style}, false);
+    }
   }
 
   if (auto index = find_item_index(items, "/theme"))
@@ -909,8 +927,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     add_completion(item, 0, "clear", "Remove this workspace trust decision", "Trust");
   }
 
-  auto const diagnostics =
-      ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, workspace_dir);
+  auto const diagnostics = ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, workspace_dir);
   if (auto index = find_item_index(items, "/plugins"))
   {
     auto& item = items[*index];
@@ -1039,8 +1056,8 @@ void refresh_application_catalog_values(ApplicationCatalogCache& cache, runtime:
   ++cache.operations.value_refreshes;
 }
 
-void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys,
-                                           WorkspaceCatalogWalker workspace_walker)
+void refresh_application_workspace_catalog(ApplicationCatalogCache& cache, runtime::session_ts const& unlocked_session,
+                                           std::vector<CommandHotkey> const& hotkeys, WorkspaceCatalogWalker workspace_walker)
 {
   auto candidates = workspace_walker ? workspace_walker(unlocked_session) : walk_workspace_path_candidates(unlocked_session);
   ++cache.operations.workspace_walks;
@@ -1147,8 +1164,8 @@ void ApplicationCatalogCoordinator::refresh_workspace(runtime::session_ts const&
 }
 
 ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_session_tree_during_operation(runtime::session_ts const& unlocked_session,
-                                                                                              std::vector<CommandHotkey> const& hotkeys,
-                                                                                              SessionTreeIndexBuilder session_tree_builder)
+                                                                                             std::vector<CommandHotkey> const& hotkeys,
+                                                                                             SessionTreeIndexBuilder session_tree_builder)
 {
   auto tree = build_current_session_tree(unlocked_session, session_tree_builder);
   ++cache_.operations.session_tree_builds;
@@ -1180,7 +1197,7 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_session_tree_and_
 }
 
 ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_during_operation(runtime::session_ts const& unlocked_session,
-                                                                                                 std::vector<CommandHotkey> const& hotkeys)
+                                                                                                std::vector<CommandHotkey> const& hotkeys)
 {
   auto [authority, session_id, session_path] = [&] {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
@@ -1212,13 +1229,15 @@ ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session_d
   return refreshed;
 }
 
-ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session(runtime::session_ts const& unlocked_session, std::vector<CommandHotkey> const& hotkeys)
+ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_current_session(runtime::session_ts const& unlocked_session,
+                                                                               std::vector<CommandHotkey> const& hotkeys)
 {
   std::lock_guard lock(mutex_);
   return refresh_current_session_during_operation(unlocked_session, hotkeys);
 }
 
-ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_title_changes(runtime::session_ts const& unlocked_session, SessionTitleCatalogChanges const& changes,
+ava::core::Result<bool> ApplicationCatalogCoordinator::refresh_title_changes(runtime::session_ts const& unlocked_session,
+                                                                             SessionTitleCatalogChanges const& changes,
                                                                              std::vector<CommandHotkey> const& hotkeys,
                                                                              SessionTreeIndexBuilder session_tree_builder)
 {
@@ -1422,7 +1441,8 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
   if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty())
   {
     view.selected_item_index = view.items.size();
-    view.items.push_back(scoped_model_selector_item(current_model, current_model, scoped_model_cycle, ensured_provider_catalog->contains(current_model.provider_id)));
+    view.items.push_back(
+        scoped_model_selector_item(current_model, current_model, scoped_model_cycle, ensured_provider_catalog->contains(current_model.provider_id)));
   }
 
   return view;

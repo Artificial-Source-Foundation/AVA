@@ -810,13 +810,14 @@ ava::core::Result<CommandResult> run_theme_command(runtime::session_ts& unlocked
                       "\n  active: " + active_tui_theme_summary());
 }
 
-ava::core::Result<CommandResult> run_images_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_images_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)
     return handled_text("unsupported images options: " + std::string(argument) + "\n" + tui_show_images_setting_usage());
 
-  auto settings = load_tui_display_settings(session.paths());
+  auto const paths = runtime::session_ts::crat(unlocked_session)->paths();
+  auto settings = load_tui_display_settings(paths);
   if (!settings)
     return std::unexpected(std::move(settings.error()));
 
@@ -829,30 +830,61 @@ ava::core::Result<CommandResult> run_images_command(runtime::Session& session, s
 
   if (is_tui_show_images_reset_value(args.front()))
   {
-    auto stored = store_tui_show_images_setting(session.paths(), std::nullopt);
+    auto stored = store_tui_show_images_setting(paths, std::nullopt);
     if (!stored)
       return std::unexpected(std::move(stored.error()));
-    return handled_text("Reset TUI image visibility to the default (on).\n  config: " + tui_display_settings_file(session.paths()).string());
+    return handled_text("Reset TUI image visibility to the default (on).\n  config: " + tui_display_settings_file(paths).string());
   }
 
   auto const normalized = normalize_tui_show_images_setting(args.front());
   if (!normalized)
     return handled_text("unsupported images option: " + args.front() + "\n" + tui_show_images_setting_usage());
 
-  auto stored = store_tui_show_images_setting(session.paths(), *normalized);
+  auto stored = store_tui_show_images_setting(paths, *normalized);
   if (!stored)
     return std::unexpected(std::move(stored.error()));
   return handled_text(std::string("Stored TUI image visibility ") + (*normalized ? "on" : "off") +
-                      ".\n  config: " + tui_display_settings_file(session.paths()).string());
+                      ".\n  config: " + tui_display_settings_file(paths).string());
 }
 
-ava::core::Result<CommandResult> run_image_width_command(runtime::Session& session, std::string_view argument)
+ava::core::Result<CommandResult> run_cursor_command(runtime::session_ts& unlocked_session, std::string_view argument)
+{
+  auto const args = split_command_arguments(argument);
+  if (args.empty() || args.size() > 2)
+    return handled_text(tui_cursor_setting_usage());
+
+  auto const style = normalize_tui_cursor_style_setting(args.front());
+  if (!style)
+    return handled_text("unsupported cursor style: " + args.front() + "\n" + tui_cursor_setting_usage());
+
+  auto blink = std::optional<bool>{};
+  if (args.size() == 2)
+  {
+    blink = normalize_tui_cursor_blink_setting(args[1]);
+    if (!blink)
+      return handled_text("unsupported cursor blink mode: " + args[1] + "\n" + tui_cursor_setting_usage());
+  }
+
+  auto const paths = runtime::session_ts::crat(unlocked_session)->paths();
+  auto stored = store_tui_cursor_setting(paths, *style, blink);
+  if (!stored)
+    return std::unexpected(std::move(stored.error()));
+  auto settings = load_tui_display_settings(paths);
+  if (!settings)
+    return std::unexpected(std::move(settings.error()));
+  auto const blink_name = settings->cursor.blink ? "blink" : "steady";
+  return handled_text("Stored TUI cursor " + std::string(tui_cursor_style_name(settings->cursor.style)) + " " + blink_name +
+                      ".\n  config: " + tui_display_settings_file(paths).string());
+}
+
+ava::core::Result<CommandResult> run_image_width_command(runtime::session_ts& unlocked_session, std::string_view argument)
 {
   auto const args = split_command_arguments(argument);
   if (args.size() > 1)
     return handled_text("unsupported image-width options: " + std::string(argument) + "\n" + tui_image_width_setting_usage());
 
-  auto settings = load_tui_display_settings(session.paths());
+  auto const paths = runtime::session_ts::crat(unlocked_session)->paths();
+  auto settings = load_tui_display_settings(paths);
   if (!settings)
     return std::unexpected(std::move(settings.error()));
 
@@ -865,20 +897,20 @@ ava::core::Result<CommandResult> run_image_width_command(runtime::Session& sessi
 
   if (is_tui_image_width_reset_value(args.front()))
   {
-    auto stored = store_tui_image_width_setting(session.paths(), std::nullopt);
+    auto stored = store_tui_image_width_setting(paths, std::nullopt);
     if (!stored)
       return std::unexpected(std::move(stored.error()));
-    return handled_text("Reset TUI image width to the default (60 cells).\n  config: " + tui_display_settings_file(session.paths()).string());
+    return handled_text("Reset TUI image width to the default (60 cells).\n  config: " + tui_display_settings_file(paths).string());
   }
 
   auto const normalized = normalize_tui_image_width_setting(args.front());
   if (!normalized)
     return handled_text("unsupported image width: " + args.front() + "\n" + tui_image_width_setting_usage());
 
-  auto stored = store_tui_image_width_setting(session.paths(), *normalized);
+  auto stored = store_tui_image_width_setting(paths, *normalized);
   if (!stored)
     return std::unexpected(std::move(stored.error()));
-  return handled_text("Stored TUI image width " + std::to_string(*normalized) + " cells.\n  config: " + tui_display_settings_file(session.paths()).string());
+  return handled_text("Stored TUI image width " + std::to_string(*normalized) + " cells.\n  config: " + tui_display_settings_file(paths).string());
 }
 
 std::string dynamic_command_argument(std::string_view line)
@@ -1063,15 +1095,19 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   }
   if (starts_with_command(request.command, "/images"))
   {
-    return run_images_command(session, command_argument(request.command, "/images"));
+    return run_images_command(unlocked_session, command_argument(request.command, "/images"));
   }
   if (starts_with_command(request.command, "/image-width"))
   {
-    return run_image_width_command(session, command_argument(request.command, "/image-width"));
+    return run_image_width_command(unlocked_session, command_argument(request.command, "/image-width"));
+  }
+  if (starts_with_command(request.command, "/cursor"))
+  {
+    return run_cursor_command(unlocked_session, command_argument(request.command, "/cursor"));
   }
   if (request.command == "/settings")
   {
-    return handled_text("Settings are shown as a TUI view. Use /theme, /images on|off|reset, and /image-width <8..160>|reset to persist display settings.");
+    return handled_text("Settings are shown as a TUI view. Use /theme, /images, /image-width, and /cursor to persist display settings.");
   }
   if (starts_with_command(request.command, "/details"))
   {

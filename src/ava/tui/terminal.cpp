@@ -18,6 +18,7 @@
 #include <clocale>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -28,9 +29,22 @@ namespace {
 
 constexpr int kTerminalEscapeDelayMs = 100;
 constexpr std::size_t kOsc11ResponseMaxBytes = 256;
-constexpr std::string_view kKittyKeyboardPushSequence = "\x1b[>5u";
-constexpr std::string_view kKittyKeyboardQuerySequence = "\x1b[>5u\x1b[?u\x1b[c";
+constexpr int kKittyKeyboardHealthyFlags = 7;
+constexpr int kKittyKeyboardBrokenAlacrittyFlags = 5;
+constexpr int kBrokenAlacrittyMaxPackedVersion = 2401;
+constexpr std::string_view kKittyKeyboardPushSequence = "\x1b[>7u";
+constexpr std::string_view kKittyKeyboardBrokenAlacrittyPushSequence = "\x1b[>5u";
+constexpr std::string_view kKittyKeyboardQuerySequence = "\x1b[>7u\x1b[?u\x1b[c";
+constexpr std::string_view kKittyKeyboardBrokenAlacrittyQuerySequence = "\x1b[>5u\x1b[?u\x1b[c";
 constexpr std::string_view kKittyKeyboardPopSequence = "\x1b[<u";
+constexpr std::string_view kAlacrittyDa2QuerySequence = "\x1b[>c";
+constexpr std::string_view kCursorStyleResetSequence = "\x1b[0 q";
+constexpr std::string_view kCursorBlinkingBlockSequence = "\x1b[1 q";
+constexpr std::string_view kCursorSteadyBlockSequence = "\x1b[2 q";
+constexpr std::string_view kCursorBlinkingUnderlineSequence = "\x1b[3 q";
+constexpr std::string_view kCursorSteadyUnderlineSequence = "\x1b[4 q";
+constexpr std::string_view kCursorBlinkingBarSequence = "\x1b[5 q";
+constexpr std::string_view kCursorSteadyBarSequence = "\x1b[6 q";
 constexpr std::string_view kModifyOtherKeysEnableSequence = "\x1b[>4;2m";
 constexpr std::string_view kModifyOtherKeysDisableSequence = "\x1b[>4;0m";
 constexpr std::string_view kTerminalBackgroundQuerySequence = "\x1b]11;?\x1b\\";
@@ -38,13 +52,17 @@ constexpr std::string_view kTerminalBackgroundQuerySequence = "\x1b]11;?\x1b\\";
 sig_atomic_t volatile g_terminal_signal = 0;
 bool g_keyboard_protocol_kitty_response_seen = false;
 bool g_keyboard_protocol_kitty_supported = false;
-bool g_kitty_keyboard_pushed = false;
+int g_kitty_keyboard_active_flags = 0;
+int g_kitty_keyboard_desired_flags = kKittyKeyboardHealthyFlags;
+bool g_alacritty_da2_probe_armed = false;
 bool g_modify_other_keys_enabled = false;
 bool g_modify_other_keys_desired = false;
 bool g_bracketed_paste_enabled = false;
 bool g_mouse_enabled = false;
 bool g_left_mouse_down = false;
 bool g_terminal_background_response_handler_armed = false;
+TerminalCursorSettings g_terminal_cursor_settings{};
+bool g_terminal_cursor_style_forced = false;
 detail::TerminalSequenceWriter g_terminal_sequence_writer = nullptr;
 detail::TerminalFlushinpHook g_terminal_flushinp_hook = nullptr;
 detail::TerminalTcflushHook g_terminal_tcflush_hook = nullptr;
@@ -159,27 +177,44 @@ void set_bracketed_paste(bool enabled)
   g_bracketed_paste_enabled = enabled;
 }
 
+std::string_view kitty_keyboard_push_sequence_for_flags(int flags)
+{
+  return flags == kKittyKeyboardBrokenAlacrittyFlags ? kKittyKeyboardBrokenAlacrittyPushSequence : kKittyKeyboardPushSequence;
+}
+
 void push_kitty_keyboard_protocol(bool include_query)
 {
   // Never grow the Kitty keyboard stack: one AVA-owned push at a time.
-  if (g_kitty_keyboard_pushed)
+  if (g_kitty_keyboard_active_flags != 0)
     return;
-  write_terminal_sequence(include_query ? kKittyKeyboardQuerySequence : kKittyKeyboardPushSequence);
-  g_kitty_keyboard_pushed = true;
+  if (include_query)
+  {
+    write_terminal_sequence(g_kitty_keyboard_desired_flags == kKittyKeyboardBrokenAlacrittyFlags ? kKittyKeyboardBrokenAlacrittyQuerySequence
+                                                                                                 : kKittyKeyboardQuerySequence);
+  }
+  else
+  {
+    write_terminal_sequence(kitty_keyboard_push_sequence_for_flags(g_kitty_keyboard_desired_flags));
+  }
+  g_kitty_keyboard_active_flags = g_kitty_keyboard_desired_flags;
+  if (include_query && g_alacritty_da2_probe_armed)
+    write_terminal_sequence(kAlacrittyDa2QuerySequence);
 }
 
 void pop_kitty_keyboard_protocol()
 {
-  if (!g_kitty_keyboard_pushed)
+  if (g_kitty_keyboard_active_flags == 0)
     return;
   write_terminal_sequence(kKittyKeyboardPopSequence);
-  g_kitty_keyboard_pushed = false;
+  g_kitty_keyboard_active_flags = 0;
 }
 
 void reset_keyboard_protocol_negotiation()
 {
   g_keyboard_protocol_kitty_response_seen = false;
   g_keyboard_protocol_kitty_supported = false;
+  g_kitty_keyboard_desired_flags = kKittyKeyboardHealthyFlags;
+  g_alacritty_da2_probe_armed = false;
   g_modify_other_keys_desired = false;
   g_modify_other_keys_enabled = false;
 }
@@ -1520,12 +1555,16 @@ void detail::reset_terminal_protocol_ownership_for_test() noexcept
 {
   g_keyboard_protocol_kitty_response_seen = false;
   g_keyboard_protocol_kitty_supported = false;
-  g_kitty_keyboard_pushed = false;
+  g_kitty_keyboard_active_flags = 0;
+  g_kitty_keyboard_desired_flags = kKittyKeyboardHealthyFlags;
+  g_alacritty_da2_probe_armed = false;
   g_modify_other_keys_enabled = false;
   g_modify_other_keys_desired = false;
   g_bracketed_paste_enabled = false;
   g_mouse_enabled = false;
   g_left_mouse_down = false;
+  g_terminal_cursor_settings = {};
+  g_terminal_cursor_style_forced = false;
 }
 
 void CursesSession::restore() noexcept
@@ -1612,6 +1651,45 @@ std::string_view terminal_kitty_keyboard_pop_sequence()
   return kKittyKeyboardPopSequence;
 }
 
+std::string_view terminal_alacritty_da2_query_sequence()
+{
+  return kAlacrittyDa2QuerySequence;
+}
+
+std::optional<int> terminal_alacritty_da2_version(std::string_view sequence)
+{
+  if (!sequence.starts_with("[>0;") || sequence.size() < 8 || sequence.back() != 'c')
+    return std::nullopt;
+  auto index = std::size_t{4};
+  auto const version = parse_unsigned_int(sequence, index);
+  if (!version || *version < 1 || *version > 999999 || !consume_char(sequence, index, ';'))
+    return std::nullopt;
+  auto const final_parameter = parse_unsigned_int(sequence, index);
+  if (!final_parameter || *final_parameter != 1 || index + 1 != sequence.size() || sequence[index] != 'c')
+    return std::nullopt;
+  return version;
+}
+
+bool terminal_alacritty_da2_probe_environment_allows_query(std::optional<std::string_view> tmux, std::optional<std::string_view> term,
+                                                           std::optional<std::string_view> term_program)
+{
+  if (tmux && !tmux->empty())
+    return false;
+  if (term && (term->starts_with("tmux") || term->starts_with("screen")))
+    return false;
+  if (!term_program)
+    return false;
+  constexpr std::string_view expected = "alacritty";
+  if (term_program->size() != expected.size())
+    return false;
+  for (std::size_t index = 0; index < expected.size(); ++index)
+  {
+    if (static_cast<char>(std::tolower(static_cast<unsigned char>((*term_program)[index]))) != expected[index])
+      return false;
+  }
+  return true;
+}
+
 std::string_view terminal_modify_other_keys_enable_sequence()
 {
   return kModifyOtherKeysEnableSequence;
@@ -1645,7 +1723,10 @@ std::string_view terminal_mouse_disable_sequence()
 TerminalProtocolOwnership terminal_protocol_ownership() noexcept
 {
   return TerminalProtocolOwnership{
-      .kitty_keyboard_pushed = g_kitty_keyboard_pushed,
+      .kitty_keyboard_pushed = g_kitty_keyboard_active_flags != 0,
+      .kitty_keyboard_active_flags = g_kitty_keyboard_active_flags,
+      .kitty_keyboard_desired_flags = g_kitty_keyboard_desired_flags,
+      .alacritty_da2_probe_armed = g_alacritty_da2_probe_armed,
       .kitty_keyboard_supported = g_keyboard_protocol_kitty_supported,
       .keyboard_protocol_kitty_response_seen = g_keyboard_protocol_kitty_response_seen,
       .modify_other_keys_enabled = g_modify_other_keys_enabled,
@@ -1657,9 +1738,18 @@ TerminalProtocolOwnership terminal_protocol_ownership() noexcept
 
 void arm_owned_terminal_protocols_on_enter() noexcept
 {
-  // Fresh session: clear prior negotiation memory, then enable paste/mouse and
-  // push Kitty with query/DA exactly once.
+  // Fresh session: healthy/unknown terminals start with all supported key-reporting
+  // flags. A positively identified direct Alacritty starts conservatively without
+  // event types and upgrades only after its asynchronous strict DA2 reply proves
+  // the fixed version.
   reset_keyboard_protocol_negotiation();
+  auto const environment = [](char const* name) -> std::optional<std::string_view> {
+    auto const* value = std::getenv(name);
+    return value == nullptr ? std::nullopt : std::optional<std::string_view>{value};
+  };
+  g_alacritty_da2_probe_armed = terminal_alacritty_da2_probe_environment_allows_query(environment("TMUX"), environment("TERM"), environment("TERM_PROGRAM"));
+  if (g_alacritty_da2_probe_armed)
+    g_kitty_keyboard_desired_flags = kKittyKeyboardBrokenAlacrittyFlags;
   apply_mouse_enabled(true);
   set_bracketed_paste(true);
   push_kitty_keyboard_protocol(/*include_query=*/true);
@@ -1673,6 +1763,11 @@ void release_owned_terminal_protocols() noexcept
   pop_kitty_keyboard_protocol();
   set_bracketed_paste(false);
   apply_mouse_enabled(false);
+  if (g_terminal_cursor_style_forced)
+  {
+    write_terminal_sequence(kCursorStyleResetSequence);
+    g_terminal_cursor_style_forced = false;
+  }
 }
 
 void rearm_owned_terminal_protocols() noexcept
@@ -1684,12 +1779,65 @@ void rearm_owned_terminal_protocols() noexcept
   push_kitty_keyboard_protocol(/*include_query=*/false);
   if (g_modify_other_keys_desired)
     enable_modify_other_keys_fallback();
+  apply_terminal_cursor_settings(g_terminal_cursor_settings);
 }
 
 void restore_owned_terminal_protocols() noexcept
 {
   release_owned_terminal_protocols();
   reset_keyboard_protocol_negotiation();
+  g_terminal_cursor_settings = {};
+}
+
+std::string_view terminal_cursor_style_sequence(TerminalCursorSettings settings) noexcept
+{
+  switch (settings.style)
+  {
+    case TerminalCursorStyle::Default:
+      return {};
+    case TerminalCursorStyle::Block:
+      return settings.blink ? kCursorBlinkingBlockSequence : kCursorSteadyBlockSequence;
+    case TerminalCursorStyle::Underline:
+      return settings.blink ? kCursorBlinkingUnderlineSequence : kCursorSteadyUnderlineSequence;
+    case TerminalCursorStyle::Bar:
+      return settings.blink ? kCursorBlinkingBarSequence : kCursorSteadyBarSequence;
+  }
+  return {};
+}
+
+std::string_view terminal_cursor_style_reset_sequence() noexcept
+{
+  return kCursorStyleResetSequence;
+}
+
+void apply_terminal_cursor_settings(TerminalCursorSettings settings) noexcept
+{
+  auto const already_applied = g_terminal_cursor_style_forced && g_terminal_cursor_settings == settings;
+  g_terminal_cursor_settings = settings;
+  auto const sequence = terminal_cursor_style_sequence(settings);
+  if (sequence.empty())
+  {
+    if (g_terminal_cursor_style_forced)
+    {
+      write_terminal_sequence(kCursorStyleResetSequence);
+      g_terminal_cursor_style_forced = false;
+    }
+    return;
+  }
+  if (already_applied)
+    return;
+  write_terminal_sequence(sequence);
+  g_terminal_cursor_style_forced = true;
+}
+
+TerminalCursorSettings terminal_cursor_settings() noexcept
+{
+  return g_terminal_cursor_settings;
+}
+
+bool terminal_cursor_style_forced() noexcept
+{
+  return g_terminal_cursor_style_forced;
 }
 
 void refresh_terminal_geometry_from_kernel() noexcept
@@ -1777,6 +1925,21 @@ KeyboardProtocolResponseAction terminal_keyboard_protocol_response_action(std::s
 
 bool terminal_keyboard_protocol_handle_response(std::string_view sequence)
 {
+  if (auto const version = terminal_alacritty_da2_version(sequence))
+  {
+    if (!g_alacritty_da2_probe_armed)
+      return false;
+    g_alacritty_da2_probe_armed = false;
+    g_kitty_keyboard_desired_flags = *version > kBrokenAlacrittyMaxPackedVersion ? kKittyKeyboardHealthyFlags : kKittyKeyboardBrokenAlacrittyFlags;
+    // Replace AVA's one active stack layer rather than stacking another push.
+    if (g_kitty_keyboard_active_flags != 0 && g_kitty_keyboard_active_flags != g_kitty_keyboard_desired_flags)
+    {
+      pop_kitty_keyboard_protocol();
+      push_kitty_keyboard_protocol(/*include_query=*/false);
+    }
+    return true;
+  }
+
   if (auto const flags = terminal_kitty_keyboard_flags_response(sequence))
   {
     auto const action = terminal_keyboard_protocol_response_action(sequence, g_keyboard_protocol_kitty_response_seen, g_modify_other_keys_enabled);

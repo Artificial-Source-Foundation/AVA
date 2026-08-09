@@ -608,12 +608,16 @@ ava::core::Result<DisplaySettingsDocument> parse_display_settings_document(std::
   DisplaySettingsDocument document{.theme = std::nullopt,
                                    .show_images = std::nullopt,
                                    .image_width_cells = std::nullopt,
+                                   .cursor_style = std::nullopt,
+                                   .cursor_blink = std::nullopt,
                                    .mermaid = std::nullopt,
                                    .unknown_fields = {},
                                    .path = std::move(path)};
   bool saw_theme = false;
   bool saw_show_images = false;
   bool saw_image_width = false;
+  bool saw_cursor_style = false;
+  bool saw_cursor_blink = false;
   bool saw_mermaid = false;
   for (auto const& entry : *entries)
   {
@@ -649,6 +653,31 @@ ava::core::Result<DisplaySettingsDocument> parse_display_settings_document(std::
       if (!decoded)
         return std::unexpected(std::move(decoded.error()));
       document.image_width_cells = *decoded;
+      continue;
+    }
+    if (entry.key == "cursor_style")
+    {
+      if (saw_cursor_style)
+        return std::unexpected(invalid_display_error("duplicate cursor_style field", document.path, "cursor_style"));
+      saw_cursor_style = true;
+      auto decoded = decode_json_string_value(entry.raw_value, document.path, "cursor_style");
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      auto style = normalize_tui_cursor_style_setting(*decoded);
+      if (!style || tui_cursor_style_name(*style) != *decoded)
+        return std::unexpected(invalid_display_error("cursor_style must be default, block, underline, or bar", document.path, "cursor_style"));
+      document.cursor_style = *style;
+      continue;
+    }
+    if (entry.key == "cursor_blink")
+    {
+      if (saw_cursor_blink)
+        return std::unexpected(invalid_display_error("duplicate cursor_blink field", document.path, "cursor_blink"));
+      saw_cursor_blink = true;
+      auto decoded = decode_json_bool_value(entry.raw_value, document.path, "cursor_blink");
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      document.cursor_blink = *decoded;
       continue;
     }
     if (entry.key == "mermaid")
@@ -706,13 +735,18 @@ std::string serialize_mermaid_settings(MermaidDisplaySettings const& settings)
 std::string serialize_display_settings_document(DisplaySettingsDocument const& document)
 {
   std::vector<DisplayJsonEntry> entries;
-  entries.reserve(4 + document.unknown_fields.size());
+  entries.reserve(6 + document.unknown_fields.size());
   if (document.theme)
     entries.push_back(DisplayJsonEntry{.key = "theme", .raw_value = std::string("\"") + ava::core::json::escape(*document.theme) + "\""});
   if (document.show_images)
     entries.push_back(DisplayJsonEntry{.key = "show_images", .raw_value = *document.show_images ? "true" : "false"});
   if (document.image_width_cells)
     entries.push_back(DisplayJsonEntry{.key = "image_width_cells", .raw_value = std::to_string(*document.image_width_cells)});
+  if (document.cursor_style)
+    entries.push_back(
+        DisplayJsonEntry{.key = "cursor_style", .raw_value = std::string("\"") + std::string(tui_cursor_style_name(*document.cursor_style)) + "\""});
+  if (document.cursor_blink)
+    entries.push_back(DisplayJsonEntry{.key = "cursor_blink", .raw_value = *document.cursor_blink ? "true" : "false"});
   if (document.mermaid)
     entries.push_back(DisplayJsonEntry{.key = "mermaid", .raw_value = serialize_mermaid_settings(*document.mermaid)});
   for (auto const& unknown : document.unknown_fields) entries.push_back(DisplayJsonEntry{.key = unknown.first, .raw_value = unknown.second});
@@ -788,8 +822,14 @@ ava::core::Result<DisplaySettingsDocument> load_or_default_document(ava::config:
   if (exists_error)
     return std::unexpected(io_error("failed to inspect TUI display settings", path, exists_error));
   if (!exists)
-    return DisplaySettingsDocument{
-        .theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .mermaid = std::nullopt, .unknown_fields = {}, .path = path};
+    return DisplaySettingsDocument{.theme = std::nullopt,
+                                   .show_images = std::nullopt,
+                                   .image_width_cells = std::nullopt,
+                                   .cursor_style = std::nullopt,
+                                   .cursor_blink = std::nullopt,
+                                   .mermaid = std::nullopt,
+                                   .unknown_fields = {},
+                                   .path = path};
 
   auto content = read_display_settings_text(path);
   if (!content)
@@ -806,12 +846,19 @@ TuiDisplaySettings display_settings_from_document_fields(DisplaySettingsDocument
                               .image_width_cells = kDefaultTuiImageWidthCells,
                               .show_images_configured = false,
                               .image_width_configured = false,
+                              .cursor = {},
+                              .cursor_style_configured = false,
+                              .cursor_blink_configured = false,
                               .mermaid = document.mermaid.value_or(MermaidDisplaySettings{}),
                               .path = document.path};
   settings.show_images = document.show_images.value_or(true);
   settings.image_width_cells = document.image_width_cells.value_or(kDefaultTuiImageWidthCells);
   settings.show_images_configured = document.show_images.has_value();
   settings.image_width_configured = document.image_width_cells.has_value();
+  settings.cursor.style = document.cursor_style.value_or(ava::tui::TerminalCursorStyle::Default);
+  settings.cursor.blink = document.cursor_blink.value_or(true);
+  settings.cursor_style_configured = document.cursor_style.has_value();
+  settings.cursor_blink_configured = document.cursor_blink.has_value();
   return settings;
 }
 
@@ -935,6 +982,51 @@ bool is_tui_image_width_reset_value(std::string_view value)
 std::string tui_image_width_setting_usage()
 {
   return "usage: /image-width <8..160>|reset";
+}
+
+std::optional<ava::tui::TerminalCursorStyle> normalize_tui_cursor_style_setting(std::string_view value)
+{
+  auto const normalized = lower_ascii(trim_ascii(value));
+  if (normalized == "default")
+    return ava::tui::TerminalCursorStyle::Default;
+  if (normalized == "block")
+    return ava::tui::TerminalCursorStyle::Block;
+  if (normalized == "underline")
+    return ava::tui::TerminalCursorStyle::Underline;
+  if (normalized == "bar")
+    return ava::tui::TerminalCursorStyle::Bar;
+  return std::nullopt;
+}
+
+std::optional<bool> normalize_tui_cursor_blink_setting(std::string_view value)
+{
+  auto const normalized = lower_ascii(trim_ascii(value));
+  if (normalized == "blink")
+    return true;
+  if (normalized == "steady")
+    return false;
+  return std::nullopt;
+}
+
+std::string_view tui_cursor_style_name(ava::tui::TerminalCursorStyle style) noexcept
+{
+  switch (style)
+  {
+    case ava::tui::TerminalCursorStyle::Default:
+      return "default";
+    case ava::tui::TerminalCursorStyle::Block:
+      return "block";
+    case ava::tui::TerminalCursorStyle::Underline:
+      return "underline";
+    case ava::tui::TerminalCursorStyle::Bar:
+      return "bar";
+  }
+  return "default";
+}
+
+std::string tui_cursor_setting_usage()
+{
+  return "usage: /cursor default|block|underline|bar [blink|steady]";
 }
 
 std::string active_tui_theme_summary()
@@ -1487,6 +1579,7 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
   state.theme = settings->theme;
   state.show_images = settings->show_images;
   state.image_width_cells = settings->image_width_cells;
+  state.cursor = settings->cursor;
   state.mermaid = settings->mermaid;
   if (settings->custom_theme)
   {
@@ -1501,7 +1594,7 @@ bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const
 {
   return previous.display_revision != current.display_revision || previous.theme != current.theme || previous.custom_theme_path != current.custom_theme_path ||
          previous.custom_theme_revision != current.custom_theme_revision || previous.show_images != current.show_images ||
-         previous.image_width_cells != current.image_width_cells || previous.mermaid.enabled != current.mermaid.enabled ||
+         previous.image_width_cells != current.image_width_cells || previous.cursor != current.cursor || previous.mermaid.enabled != current.mermaid.enabled ||
          previous.mermaid.argv != current.mermaid.argv || previous.custom_theme_catalog.size() != current.custom_theme_catalog.size() ||
          !std::equal(previous.custom_theme_catalog.begin(), previous.custom_theme_catalog.end(), current.custom_theme_catalog.begin(),
                      [](TuiCustomThemeCatalogEntry const& left, TuiCustomThemeCatalogEntry const& right) {
@@ -1543,6 +1636,17 @@ ava::core::VoidResult store_tui_image_width_setting(ava::config::XdgPaths const&
   if (!document)
     return std::unexpected(std::move(document.error()));
   document->image_width_cells = image_width_cells;
+  return store_display_settings_document(*document);
+}
+
+ava::core::VoidResult store_tui_cursor_setting(ava::config::XdgPaths const& paths, ava::tui::TerminalCursorStyle style, std::optional<bool> blink)
+{
+  auto document = load_or_default_document(paths);
+  if (!document)
+    return std::unexpected(std::move(document.error()));
+  document->cursor_style = style;
+  if (blink)
+    document->cursor_blink = *blink;
   return store_display_settings_document(*document);
 }
 

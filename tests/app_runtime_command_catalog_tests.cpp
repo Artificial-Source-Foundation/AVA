@@ -59,6 +59,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   auto const* providers_item = tui_test_support::find_slash_command_item(slash_items, "/providers");
   auto const* scoped_models_item = tui_test_support::find_slash_command_item(slash_items, "/scoped-models");
   auto const* details_item = tui_test_support::find_slash_command_item(slash_items, "/details");
+  auto const* cursor_item = tui_test_support::find_slash_command_item(slash_items, "/cursor");
   auto const* search_item = tui_test_support::find_slash_command_item(slash_items, "/search");
   auto const* tool_item = tui_test_support::find_slash_command_item(slash_items, "/tool");
   auto const* diff_item = tui_test_support::find_slash_command_item(slash_items, "/diff");
@@ -71,6 +72,14 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   expect(setup_item == nullptr && setup_matches.empty(), "removed /setup command is absent from the slash catalog and completion matches");
   expect(details_item != nullptr && details_item->hint == "[compact|rich|expanded]" && details_item->description.find("Rich") != std::string::npos,
          "slash catalog exposes explicit Compact, Rich, and Expanded tool-card modes");
+  expect(cursor_item != nullptr && cursor_item->hint == "default|block|underline|bar [blink|steady]" &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 0, "default") &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 0, "block") &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 0, "underline") &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 0, "bar") &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 1, "blink", {"bar"}) &&
+             tui_test_support::has_slash_argument_completion(cursor_item, 1, "steady", {"underline"}),
+         "slash catalog exposes cursor style and blink argument completions");
   expect(search_item != nullptr && search_item->hint == "[query]" && search_item->description.find("currently rendered") != std::string::npos,
          "slash catalog exposes TUI transcript literal search with a truthful rendered-scope description");
   expect(tool_item != nullptr && tool_item->hint == "[query]" && has_alias(*tool_item, "/tools") &&

@@ -763,7 +763,10 @@ void run_tui_selector_tests()
              std::ranges::none_of(settings_theme.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("settings:images"); }) &&
              settings_display.title == "Settings › Display" &&
              labels(settings_display) == std::vector<std::string>({"Images on", "Images off", "Images default", "Width 40", "Width 60", "Width 80", "Width 120",
-                                                                   "Width default", "Thinking blocks"}) &&
+                                                                   "Width default", "Cursor default", "Cursor block", "Cursor underline", "Cursor bar",
+                                                                   "Cursor blink", "Cursor steady", "Thinking blocks"}) &&
+             settings_display.items[8].description == "current" && settings_display.items[8].value == "settings:cursor.style.default" &&
+             settings_display.items[12].description == "current" && settings_display.items[12].value == "settings:cursor.blink" &&
              std::ranges::none_of(settings_display.items, [](ava::tui::SelectListItemView const& item) { return item.value.starts_with("theme:"); }),
          "theme choices are isolated from display while both retain their stable action tokens");
 
@@ -881,9 +884,10 @@ void run_tui_selector_tests()
     using ava::tui::runtime_views::settings_preview_overlay_for_action;
 
     expect(settings_action_is_previewable("theme:light") && settings_action_is_previewable("settings:images.off") &&
-               settings_action_is_previewable("settings:image-width.80") && !settings_action_is_previewable("theme:reset") &&
+               settings_action_is_previewable("settings:image-width.80") && settings_action_is_previewable("settings:cursor.style.bar") &&
+               settings_action_is_previewable("settings:cursor.steady") && !settings_action_is_previewable("theme:reset") &&
                !settings_action_is_previewable("settings:models.open"),
-           "only validated theme/image actions are previewable; reset and route actions stay confirm-only");
+           "only validated theme/image/cursor actions are previewable; reset and route actions stay confirm-only");
 
     auto snapshot = make_settings_snapshot({ava::tui::ThemeOptionItem{
         .name = "sunrise",
@@ -926,6 +930,13 @@ void run_tui_selector_tests()
     expect(!overlay_snapshot.show_images && overlay_snapshot.image_width_cells == 60 && overlay_snapshot.pending_attachments.size() == 1 &&
                !overlay_snapshot.pending_attachments.front().preview,
            "image highlight overlays snapshot presentation without loading attachment bytes");
+
+    auto cursor_style_overlay = settings_preview_overlay_for_action("settings:cursor.style.bar", snapshot);
+    auto cursor_blink_overlay = settings_preview_overlay_for_action("settings:cursor.steady", snapshot);
+    expect(cursor_style_overlay && cursor_style_overlay->cursor_style && *cursor_style_overlay->cursor_style == ava::tui::TerminalCursorStyle::Bar &&
+               cursor_blink_overlay && cursor_blink_overlay->cursor_blink && !*cursor_blink_overlay->cursor_blink &&
+               !settings_preview_overlay_for_action("settings:cursor.style.beam", snapshot),
+           "cursor row highlights stage only validated style and blink previews");
 
     auto width_overlay = settings_preview_overlay_for_action("settings:image-width.80", snapshot);
     expect(width_overlay && width_overlay->image_width_cells && *width_overlay->image_width_cells == 80,

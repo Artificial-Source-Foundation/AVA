@@ -44,6 +44,9 @@ inline constexpr std::string_view kSettingsImagesOff = "settings:images.off";
 inline constexpr std::string_view kSettingsImagesReset = "settings:images.reset";
 inline constexpr std::string_view kSettingsImageWidthReset = "settings:image-width.reset";
 inline constexpr std::string_view kSettingsImageWidthPrefix = "settings:image-width.";
+inline constexpr std::string_view kSettingsCursorStylePrefix = "settings:cursor.style.";
+inline constexpr std::string_view kSettingsCursorBlink = "settings:cursor.blink";
+inline constexpr std::string_view kSettingsCursorSteady = "settings:cursor.steady";
 inline constexpr std::string_view kSettingsTrustStatus = "settings:trust.status";
 inline constexpr std::string_view kSettingsTrustProject = "settings:trust.project";
 inline constexpr std::string_view kSettingsTrustDeny = "settings:trust.deny";
@@ -77,6 +80,7 @@ struct DisplayPresentationBaseline
 {
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  TerminalCursorSettings cursor = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -88,6 +92,8 @@ struct DisplayPreviewOverlay
   std::optional<TuiThemeInfo> theme;
   std::optional<bool> show_images;
   std::optional<std::size_t> image_width_cells;
+  std::optional<TerminalCursorStyle> cursor_style;
+  std::optional<bool> cursor_blink;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

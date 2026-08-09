@@ -128,7 +128,8 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
              keybindings_import_existing->output[0].find("keybindings file already exists") != std::string::npos &&
              keybindings_import_existing->output[0].find("/keybindings import <path> --force") != std::string::npos,
          "command dispatcher /keybindings import refuses accidental overwrite");
-  auto keybindings_import_force = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import import-keybinds.json --force"});
+  auto keybindings_import_force =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import import-keybinds.json --force"});
   auto const imported_keybinds = ava::tui::load_key_bindings(keybinds_file);
   auto const installed_import_content = read_keybinds_file();
   expect(keybindings_import_force && keybindings_import_force->handled && !keybindings_import_force->output.empty() &&
@@ -198,13 +199,15 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   auto const invalid_import_source = workspace / "bad-keybinds.json";
   write_app_test_file(invalid_import_source, "{\"submit\":\"Ctrl+P\",\"model_cycle_forward\":\"Ctrl+P\"}\n");
   auto const before_invalid_import_content = read_keybinds_file();
-  auto keybindings_import_invalid = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import bad-keybinds.json --force"});
+  auto keybindings_import_invalid =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import bad-keybinds.json --force"});
   expect(keybindings_import_invalid && keybindings_import_invalid->handled && !keybindings_import_invalid->output.empty() &&
              keybindings_import_invalid->output[0].find("keybindings import source is invalid") != std::string::npos &&
              keybindings_import_invalid->output[0].find("conflicting TUI keybinding") != std::string::npos &&
              keybindings_import_invalid->output[0].find("Target was not changed") != std::string::npos && read_keybinds_file() == before_invalid_import_content,
          "command dispatcher /keybindings import validates before replacing the target file");
-  auto keybindings_import_missing = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import missing-keybinds.json --force"});
+  auto keybindings_import_missing =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/keybindings import missing-keybinds.json --force"});
   expect(keybindings_import_missing && keybindings_import_missing->handled && !keybindings_import_missing->output.empty() &&
              keybindings_import_missing->output[0].find("keybindings import source does not exist") != std::string::npos,
          "command dispatcher /keybindings import reports missing source files");
@@ -667,15 +670,18 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\"\n}\n");
     auto legacy_defaults = ava::app::load_tui_display_settings(paths);
     expect(legacy_defaults && legacy_defaults->theme && *legacy_defaults->theme == "light" && legacy_defaults->show_images &&
-               legacy_defaults->image_width_cells == 60 && !legacy_defaults->show_images_configured && !legacy_defaults->image_width_configured,
-           "theme-only legacy display.json uses show_images=true and image_width_cells=60 defaults");
+               legacy_defaults->image_width_cells == 60 && !legacy_defaults->show_images_configured && !legacy_defaults->image_width_configured &&
+               legacy_defaults->cursor.style == ava::tui::TerminalCursorStyle::Default && legacy_defaults->cursor.blink &&
+               !legacy_defaults->cursor_style_configured && !legacy_defaults->cursor_blink_configured,
+           "theme-only legacy display.json uses image and non-interfering cursor defaults");
 
     auto missing_defaults = ava::app::load_tui_display_settings(paths);
     std::error_code remove_display_error;
     std::filesystem::remove(paths.ava_config_dir / "display.json", remove_display_error);
     missing_defaults = ava::app::load_tui_display_settings(paths);
-    expect(missing_defaults && !missing_defaults->theme && missing_defaults->show_images && missing_defaults->image_width_cells == 60,
-           "missing display.json uses all effective image defaults");
+    expect(missing_defaults && !missing_defaults->theme && missing_defaults->show_images && missing_defaults->image_width_cells == 60 &&
+               missing_defaults->cursor == ava::tui::TerminalCursorSettings{},
+           "missing display.json uses all effective image and cursor defaults");
 
     auto images_status = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images"});
     expect(images_status && images_status->handled && !images_status->output.empty() && images_status->output[0].find("TUI images:") != std::string::npos &&
@@ -684,33 +690,44 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     auto images_off = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images off"});
     auto theme_after_images = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/theme dark"});
     auto width_set = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/image-width 80"});
+    auto cursor_set = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/cursor underline steady"});
+    auto cursor_style_only = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/cursor bar"});
     auto preserved = ava::app::load_tui_display_settings(paths);
     auto preserved_document = ava::app::load_display_settings_document(paths);
-    expect(images_off && images_off->handled && theme_after_images && theme_after_images->handled && width_set && width_set->handled && preserved &&
-               preserved->theme && *preserved->theme == "dark" && !preserved->show_images && preserved->image_width_cells == 80 && preserved_document &&
-               preserved_document->theme && *preserved_document->theme == "dark" && preserved_document->show_images && !*preserved_document->show_images &&
-               preserved_document->image_width_cells && *preserved_document->image_width_cells == 80,
-           "alternating theme/image setters preserve every recognized display field");
+    expect(images_off && images_off->handled && theme_after_images && theme_after_images->handled && width_set && width_set->handled && cursor_set &&
+               cursor_set->handled && !cursor_set->output.empty() && cursor_set->output[0].find("Stored TUI cursor underline steady") != std::string::npos &&
+               cursor_style_only && cursor_style_only->handled && preserved && preserved->theme && *preserved->theme == "dark" && !preserved->show_images &&
+               preserved->image_width_cells == 80 && preserved->cursor.style == ava::tui::TerminalCursorStyle::Bar && !preserved->cursor.blink &&
+               preserved_document && preserved_document->theme && *preserved_document->theme == "dark" && preserved_document->show_images &&
+               !*preserved_document->show_images && preserved_document->image_width_cells && *preserved_document->image_width_cells == 80 &&
+               preserved_document->cursor_style == ava::tui::TerminalCursorStyle::Bar && preserved_document->cursor_blink && !*preserved_document->cursor_blink,
+           "alternating theme/image/cursor setters preserve every recognized field and omitted blink retains its prior value");
 
     write_app_test_file(paths.ava_config_dir / "display.json",
-                        "{\n  \"theme\": \"light\",\n  \"show_images\": false,\n  \"image_width_cells\": 72,\n  \"future_flag\": true\n}\n");
+                        "{\n  \"theme\": \"light\",\n  \"show_images\": false,\n  \"image_width_cells\": 72,\n  \"cursor_style\": \"block\",\n  "
+                        "\"cursor_blink\": false,\n  \"future_flag\": {\"nested\": true}\n}\n");
     auto with_unknown = ava::app::load_display_settings_document(paths);
     auto store_width = ava::app::store_tui_image_width_setting(paths, 96);
+    auto store_cursor = ava::app::store_tui_cursor_setting(paths, ava::tui::TerminalCursorStyle::Underline, std::nullopt);
     auto after_unknown = ava::app::load_display_settings_document(paths);
     std::ifstream after_unknown_input(paths.ava_config_dir / "display.json", std::ios::binary);
     std::string after_unknown_text((std::istreambuf_iterator<char>(after_unknown_input)), std::istreambuf_iterator<char>());
     expect(with_unknown && with_unknown->unknown_fields.size() == 1 && with_unknown->unknown_fields.front().first == "future_flag" && store_width &&
-               after_unknown && after_unknown->theme && *after_unknown->theme == "light" && after_unknown->show_images && !*after_unknown->show_images &&
-               after_unknown->image_width_cells && *after_unknown->image_width_cells == 96 && after_unknown->unknown_fields.size() == 1 &&
-               after_unknown->unknown_fields.front().first == "future_flag" && after_unknown_text.find("future_flag") != std::string::npos,
-           "unknown top-level display.json fields survive successful field-specific updates");
+               store_cursor && after_unknown && after_unknown->theme && *after_unknown->theme == "light" && after_unknown->show_images &&
+               !*after_unknown->show_images && after_unknown->image_width_cells && *after_unknown->image_width_cells == 96 &&
+               after_unknown->cursor_style == ava::tui::TerminalCursorStyle::Underline && after_unknown->cursor_blink && !*after_unknown->cursor_blink &&
+               after_unknown->unknown_fields.size() == 1 && after_unknown->unknown_fields.front().first == "future_flag" &&
+               after_unknown_text.find("\"future_flag\": {\"nested\": true}") != std::string::npos,
+           "recognized cursor fields and raw unknown display.json fields survive field-specific updates");
 
     auto reset_images = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/images reset"});
     auto reset_width = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/image-width reset"});
     auto after_resets = ava::app::load_display_settings_document(paths);
     expect(reset_images && reset_images->handled && reset_width && reset_width->handled && after_resets && after_resets->theme &&
-               *after_resets->theme == "light" && !after_resets->show_images && !after_resets->image_width_cells && after_resets->unknown_fields.size() == 1,
-           "each image reset removes only its key and preserves theme plus unknown fields");
+               *after_resets->theme == "light" && !after_resets->show_images && !after_resets->image_width_cells &&
+               after_resets->cursor_style == ava::tui::TerminalCursorStyle::Underline && after_resets->cursor_blink && !*after_resets->cursor_blink &&
+               after_resets->unknown_fields.size() == 1,
+           "each image reset removes only its key and preserves theme, cursor, and unknown fields");
 
     write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"theme\": \"light\",\n  \"show_images\": \"yes\"\n}\n");
     auto invalid_show = ava::app::load_tui_display_settings(paths);
@@ -720,6 +737,23 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     expect(!invalid_show && invalid_show.error().format().find("show_images") != std::string::npos && !rejected_store &&
                invalid_text.find("\"show_images\": \"yes\"") != std::string::npos,
            "malformed recognized display fields reject load/update and leave the file unchanged");
+
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"cursor_style\": \"Block\"\n}\n");
+    auto invalid_cursor_style = ava::app::load_tui_display_settings(paths);
+    auto rejected_cursor_store = ava::app::store_tui_cursor_setting(paths, ava::tui::TerminalCursorStyle::Bar, true);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"cursor_blink\": \"yes\"\n}\n");
+    auto invalid_cursor_blink = ava::app::load_tui_display_settings(paths);
+    expect(!invalid_cursor_style && invalid_cursor_style.error().format().find("cursor_style") != std::string::npos && !rejected_cursor_store &&
+               !invalid_cursor_blink && invalid_cursor_blink.error().format().find("cursor_blink") != std::string::npos,
+           "malformed recognized cursor fields fail closed and block field-specific updates");
+
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"cursor_style\": \"block\",\n  \"cursor_blink\": true\n}\n");
+    auto cursor_watch_before = ava::app::load_tui_display_settings_watch_state(paths);
+    write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"cursor_style\": \"bar\",\n  \"cursor_blink\": false\n}\n");
+    auto cursor_watch_after = ava::app::load_tui_display_settings_watch_state(paths);
+    expect(cursor_watch_before && cursor_watch_after && ava::app::tui_display_settings_watch_state_changed(*cursor_watch_before, *cursor_watch_after) &&
+               cursor_watch_after->cursor.style == ava::tui::TerminalCursorStyle::Bar && !cursor_watch_after->cursor.blink,
+           "display reload watch detects persistent cursor style and blink changes");
 
     write_app_test_file(paths.ava_config_dir / "display.json", "{\n  \"image_width_cells\": 7\n}\n");
     auto invalid_width_low = ava::app::load_tui_display_settings(paths);
@@ -740,6 +774,16 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     expect(bad_width_command && bad_width_command->handled && !bad_width_command->output.empty() &&
                bad_width_command->output[0].find("usage: /image-width <8..160>|reset") != std::string::npos,
            "command dispatcher /image-width rejects out-of-range widths with usage");
+    auto bad_cursor_style = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/cursor beam"});
+    auto bad_cursor_blink = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/cursor block pulse"});
+    auto default_cursor = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/cursor default blink"});
+    auto default_cursor_settings = ava::app::load_tui_display_settings(paths);
+    expect(bad_cursor_style && bad_cursor_style->handled && !bad_cursor_style->output.empty() &&
+               bad_cursor_style->output[0].find("usage: /cursor default|block|underline|bar [blink|steady]") != std::string::npos && bad_cursor_blink &&
+               bad_cursor_blink->handled && !bad_cursor_blink->output.empty() &&
+               bad_cursor_blink->output[0].find("unsupported cursor blink mode") != std::string::npos && default_cursor && default_cursor->handled &&
+               default_cursor_settings && default_cursor_settings->cursor == ava::tui::TerminalCursorSettings{},
+           "command dispatcher validates cursor arguments and persists the non-interfering default");
   }
   auto details = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/details"});
   expect(details && details->handled && !details->output.empty() && details->output[0].find("default to Rich") != std::string::npos &&
@@ -816,11 +860,12 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
     ava::tui::set_tui_config_theme(std::nullopt);
   }
   auto unsupported_reload = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/reload no-such"});
-  expect(unsupported_reload && unsupported_reload->handled && !unsupported_reload->output.empty() &&
-             unsupported_reload->output[0].find("unsupported reload target: no-such") != std::string::npos &&
-             unsupported_reload->output[0].find(
-                 "supported: all, theme, models, prompts, trust, compaction, keybindings, auth, providers, permissions, lsp, mcp, plugins") != std::string::npos,
-         "command dispatcher reports unsupported reload targets");
+  expect(
+      unsupported_reload && unsupported_reload->handled && !unsupported_reload->output.empty() &&
+          unsupported_reload->output[0].find("unsupported reload target: no-such") != std::string::npos &&
+          unsupported_reload->output[0].find(
+              "supported: all, theme, models, prompts, trust, compaction, keybindings, auth, providers, permissions, lsp, mcp, plugins") != std::string::npos,
+      "command dispatcher reports unsupported reload targets");
   auto help = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&
              help->output[0].find("/keybindings") != std::string::npos && help->output[0].find("/sidebar") != std::string::npos &&
@@ -856,11 +901,11 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   std::optional<ava::permissions::PermissionPrompt> explicit_bash_prompt;
   auto explicit_bash = ava::app::run_command(
       unlocked_session, ava::app::CommandRequest{.command = "/bash git status",
-                                           .permission_resolver = [&explicit_bash_prompt](ava::permissions::PermissionPrompt const& prompt)
-                                               -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-                                             explicit_bash_prompt = prompt;
-                                             return ava::permissions::PermissionResolution::Deny;
-                                           }});
+                                                 .permission_resolver = [&explicit_bash_prompt](ava::permissions::PermissionPrompt const& prompt)
+                                                     -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+                                                   explicit_bash_prompt = prompt;
+                                                   return ava::permissions::PermissionResolution::Deny;
+                                                 }});
   expect(explicit_bash && explicit_bash->handled && explicit_bash_prompt && explicit_bash_prompt->command_metadata &&
              explicit_bash_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
              explicit_bash_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
@@ -887,15 +932,6 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   expect(missing_find_alias && missing_find_alias->handled && !missing_find_alias->output.empty() &&
              missing_find_alias->output[0].find("/find <pattern>") != std::string::npos,
          "empty /find alias reports Pi-style usage instead of the native /glob name");
-
-  auto overview_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/overview"});
-  expect(overview_cmd && overview_cmd->handled && !overview_cmd->output.empty() && overview_cmd->output[0].find("/overview") != std::string::npos &&
-             overview_cmd->output[0].find("interactive TUI") != std::string::npos,
-         "command dispatcher /overview is a TUI-owned view with a non-mutating headless notice");
-  auto setup_cmd = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/setup"});
-  expect(setup_cmd && setup_cmd->handled && !setup_cmd->output.empty() && setup_cmd->output[0].find("interactive TUI") != std::string::npos &&
-             setup_cmd->output[0].find("/setup") != std::string::npos,
-         "command dispatcher /setup is local-only with a non-mutating headless notice");
 
   auto plugins_usage = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins"});
   expect(plugins_usage && plugins_usage->handled && !plugins_usage->output.empty() && plugins_usage->output[0].find("usage: /plugins") != std::string::npos,

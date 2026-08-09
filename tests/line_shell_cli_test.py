@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -113,6 +114,20 @@ def main() -> int:
     require(
         fallback.returncode == 0 and fallback.stderr == b"" and b"line shell" in fallback.stdout and b"[build] ava>" in fallback.stdout,
         f"non-TTY automatic line-shell fallback changed: rc={fallback.returncode} stdout={fallback.stdout!r} stderr={fallback.stderr!r}",
+    )
+
+    cursor = run(ava, ["--line-shell", "--offline", "--no-session"], environment, workspace, b"/cursor bar steady\n/exit\n")
+    display_path = pathlib.Path(environment["XDG_CONFIG_HOME"]) / "ava" / "display.json"
+    display = json.loads(display_path.read_text(encoding="utf-8")) if display_path.is_file() else {}
+    require(
+        cursor.returncode == 0
+        and cursor.stderr == b""
+        and b"Stored TUI cursor bar steady" in cursor.stdout
+        and b"\x1b[" not in cursor.stdout
+        and display.get("cursor_style") == "bar"
+        and display.get("cursor_blink") is False,
+        f"line-shell cursor persistence emitted a full-screen protocol or stored the wrong fields: "
+        f"rc={cursor.returncode} stdout={cursor.stdout!r} stderr={cursor.stderr!r} display={display!r}",
     )
 
     at_limit_line = b"/unknown " + b"x" * (65536 - len(b"/unknown "))

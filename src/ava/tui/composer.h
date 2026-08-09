@@ -648,6 +648,7 @@ struct ComposerSnapshot
   // Effective image presentation from the application-owned display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  TerminalCursorSettings cursor = {};
   // Application-owned, path-free startup/resources snapshot. Omitted rather than
   // rebuilt inside the TUI. Presentation-only; never session/provider content.
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;

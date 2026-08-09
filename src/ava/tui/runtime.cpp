@@ -211,6 +211,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     return 1;
   }
   ComposerTerminalGraphicsGuard graphics_cleanup;
+  apply_terminal_cursor_settings(options.cursor);
   // Probe the direct terminal background once after enter and before first paint.
   // No re-probe on suspend/resume and no late theme flip after presentation starts.
   TerminalBackgroundDetectionGuard terminal_background_detection;
@@ -284,7 +285,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     settings_nav.preview.apply_image_overlay(snapshot);
   };
   auto begin_settings_preview_baseline = [&]() {
-    settings_nav.preview.begin(DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells});
+    settings_nav.preview.begin(
+        DisplayPresentationBaseline{.show_images = snapshot.show_images, .image_width_cells = snapshot.image_width_cells, .cursor = snapshot.cursor});
   };
   auto ensure_settings_session = [&]() {
     if (settings_session_open)
@@ -300,6 +302,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     // Build rows from authoritative presentation so preview overlays do not rewrite candidate labels.
     settings_snapshot.show_images = settings_nav.preview.authoritative.show_images;
     settings_snapshot.image_width_cells = settings_nav.preview.authoritative.image_width_cells;
+    settings_snapshot.cursor = settings_nav.preview.authoritative.cursor;
     // active_tui_theme() consults the presentation overlay; clear it only while constructing rows.
     auto const restage_theme_preview = settings_nav.preview.active();
     settings_nav.preview.clear_theme_overlay();

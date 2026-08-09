@@ -4,6 +4,8 @@ AVA's interactive TUI is a native wide-character ncurses (`ncursesw`) applicatio
 
 Use this guide when the TUI fails to start, keys or mouse events behave differently across terminals, image previews fall back to text, copy reports success but the OS clipboard is unchanged, or remote/tmux/screen sessions lose terminal features.
 
+`ava --line-shell` bypasses ncurses/full-screen protocols for a bounded sanitized line-oriented accessibility and scrollback interface with numbered permission/question flows. It is not screen-reader certification and cannot be combined with print, RPC, or ACP.
+
 For general command usage see [USAGE.md](../core/usage.md); for persisted display/theme files see [CONFIG.md](../core/configuration.md); for terminal smoke coverage see [TESTING.md](testing.md).
 
 ## Quick Health Check
@@ -69,6 +71,8 @@ AVA works inside tmux and screen, but multiplexers intentionally hide or transfo
 
 AVA requests the Kitty keyboard protocol on startup and falls back to xterm `modifyOtherKeys` when Kitty-style negotiation is not available. This improves detection for keys that legacy terminals often collapse, such as `Ctrl+Space`, `Ctrl+/`, `Ctrl+digit`, `Shift+Ctrl+P`, and modified arrow/delete combinations.
 
+Direct environment-identified Alacritty uses a best-effort asynchronous strict DA2 version check: versions through 0.14.0 (packed through 2401) request conservative Kitty flags 5, while 2402 and later request flags 7. AVA skips DA2 probing through tmux/screen and other mux paths, places a finite bound on the asynchronous reply, and never blocks startup for it.
+
 Expected behavior:
 
 - Plain printable text should insert normally.
@@ -84,6 +88,8 @@ If a key inserts stray text or does nothing:
 4. Prefer a custom keybinding in `$XDG_CONFIG_HOME/ava/keybinds.json` when your terminal cannot report the desired chord reliably.
 
 ## Suspend, External Editor, And Exit Cleanup
+
+Persist cursor shape with `/cursor <default|block|underline|bar> [blink|steady]`. AVA emits DECSCUSR only while a non-default shape/blink policy is forced, resets it before suspend or external-editor handoff, reapplies it after return, and restores the terminal default on exit.
 
 Ctrl+Z (suspend) and Ctrl+G (external editor) temporarily return the TTY to shell mode. After `def_prog_mode`/`endwin`, AVA balances and disables the protocols it owns—Kitty keyboard stack entry, negotiated `modifyOtherKeys`, bracketed paste, and mouse—so the shell or `$VISUAL`/`$EDITOR` does not inherit a leaked Kitty stack or sticky paste/mouse modes. After `reset_prog_mode`, AVA refreshes geometry from `TIOCGWINSZ` (including resizes that happened while SIGTSTP-stopped), then re-arms paste, mouse, and the already-negotiated keyboard mode exactly once. Resume never re-probes OSC 11 and never grows the Kitty keyboard stack.
 
@@ -140,7 +146,7 @@ Reference: [iTerm2 OSC 8 documentation](https://iterm2.com/documentation-escape-
 
 ## OSC 52 Clipboard Copy
 
-The TUI `/copy` command copies through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation.
+The TUI plain `/copy` command and F5 copy the latest assistant response through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation. Under tmux AVA uses a bounded passthrough-safe form and reports terminal write/filtering failures truthfully. Double-click selects a word, triple-click selects a rendered line, drag selects a range, and navigation shows a transient scrollbar.
 
 AVA rejects empty clipboard text and any payload larger than 64 KiB (65,536 raw bytes) without emitting a partial sequence or spawning an external clipboard helper. Oversized copies report the existing clipboard failure status.
 

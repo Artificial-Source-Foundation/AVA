@@ -928,6 +928,18 @@ No test plugin receives credentials or network access.
 
 Disable/remove UI capability negotiation and TUI event consumption. Existing plugin tools, commands, prompts, skills, and events remain compatible because additions are optional.
 
+## 2026-08-09 TUI parity closure
+
+The current retained-feature tree has 23 isolated tmux scenarios; `mermaid` is the new scenario. Run the complete wave with `AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'`. The completed contracts are:
+
+- `--line-shell` is a bounded, sanitized, line-oriented accessibility and scrollback frontend. It bypasses ncurses and full-screen protocols, presents numbered permission/question choices, and is incompatible with print, RPC, and ACP modes. It is a useful text interface, not screen-reader certification.
+- Transcript interaction includes tmux-safe bounded OSC 52 copy, double/triple-click selection, a transient scrollbar, previous/next user-turn navigation, latest-assistant copy on plain `/copy` or F5, and configurable unbound half-page actions.
+- Optional Mermaid projection is disabled by default and runs only a bounded application-owned absolute helper for completed assistant `mermaid` fences. It is literal presentation only; disabled, pending, failed, or stale work falls back to the original fence. No TUI subprocess, semantic transcript mutation, arbitrary renderer, or full Mermaid support is implied.
+- Display cursor fields and `/cursor <style> [blink|steady]` force DECSCUSR only while configured, restoring and reapplying it across terminal handoff. Direct environment-identified Alacritty uses a best-effort asynchronous strict DA2 version gate: versions through 0.14.0 (packed through 2401) keep conservative Kitty flags 5, while 2402 and later use 7. Mux paths skip the probe; startup never blocks on it.
+- `app.prompt.stash` defaults to F6 and uses a process-only bounded stack: 16 entries, 64 KiB expanded per entry, 256 KiB aggregate, and no eviction. `/stash`, `/stash pop`, and `/stash clear` preserve drafts across in-process session transitions but not exit; pending images cannot be stashed, and restore cannot overwrite a nonempty draft.
+
+Retained non-goals are session-tree transcript/content filters, LaTeX, arbitrary extension-owned renderers, blocking startup probes, and broad screen-reader certification. A dated reference rebaseline records Pi `936aff00918de1187f085f123c2812d8f2d67745` (`coding-agent`/TUI `0.84.1`), OpenCode `38e10eb1408feb700021b8e8766fb0ab41bf84e2` (TUI `1.18.15`), and Grok Build `8a14c91d88875a831a38b3a066b1683116bcb31c`; earlier dated pins/evidence remain unchanged.
+
 ## Integrated Validation
 
 **Status: Complete — 2026-08-03.** The original six-wave integrated tree passed the following gates without a paid or live-provider call:
@@ -940,7 +952,7 @@ Disable/remove UI capability negotiation and TUI event consumption. Existing plu
 - the integrated review and focused `W6-001` re-review closed all material in-scope findings; and
 - `git diff --check`, Markdown links, documentation structure, and changed-line clang-format checks passed.
 
-The subsequent Wave 4 removal and modal-padding closure was validated separately on the current retained-feature tree: normal build and full default CTest passed 129/129, all 22 current tmux scenarios passed together, all four direct PTY smokes passed, and documentation/diff checks passed. No post-removal sanitizer rerun is claimed; the sanitizer results above describe the original six-wave tree.
+The subsequent Wave 4 removal and modal-padding closure was validated separately on the current retained-feature tree: normal build and full default CTest passed 129/129, all 22 then-current tmux scenarios passed together, all four direct PTY smokes passed, and documentation/diff checks passed. No post-removal sanitizer rerun is claimed; the sanitizer results above describe the original six-wave tree.
 
 An intentionally broader, non-gating TSan run reported an RPC output/session lock-order inversion in unchanged `rpc_mode.cpp`; the integrated reviewer classified it as unrelated to these waves. The focused affected-surface TSan gate above remained clean.
 
@@ -957,7 +969,7 @@ scripts/run-tests.sh --build-dir build
 Real terminal wave:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 22 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run relevant direct PTY/Kitty/iTerm2 tests with their documented gates for image and terminal-protocol behavior. Use private XDG/session/plugin roots and fake providers.

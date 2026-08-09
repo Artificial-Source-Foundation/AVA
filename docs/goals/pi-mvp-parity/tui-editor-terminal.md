@@ -84,28 +84,28 @@ AVA already has a strong native ncurses TUI with editor, palettes, tool cards, p
 Targeted deterministic tests:
 
 ```sh
-ctest --test-dir build -R 'ava_tests\.tui_composer$' --output-on-failure
+scripts/run-tests.sh --build-dir build -R '^ava_tests\.tui_composer$'
 ```
 
 Runtime/app tests for TUI-backed commands:
 
 ```sh
-ctest --test-dir build -R 'ava_tests\.(app_runtime|app_rpc|session)$' --output-on-failure
+scripts/run-tests.sh --build-dir build -R '^ava_tests\.(app_runtime|app_rpc|session)$'
 ```
 
 Opt-in terminal smokes:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 ctest --test-dir build -R ava_tui.tmux_smoke --output-on-failure
-AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R ava_tui.kitty_image_smoke --output-on-failure
-AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R ava_tui.osc8_smoke --output-on-failure
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh --build-dir build -R '^ava_tui\.kitty_image_smoke$'
+AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh --build-dir build -R '^ava_tui\.osc8_smoke$'
 ```
 
 Before area completion:
 
 ```sh
-cmake --build --preset dev
-ctest --preset dev --output-on-failure
+scripts/build.sh --build-dir build
+scripts/run-tests.sh --build-dir build
 git --no-pager diff --check
 ```
 
@@ -150,3 +150,4 @@ git --no-pager diff --check
   - Capture inspection confirmed visible startup/onboarding composer state, settings/model/scoped-model selectors, active-run queue/restore state, OpenCode-aligned permission prompt with request id/risk/reason/remembered-rule choices, denied/narrow plain permission details, write success, diff/tool cards, permission audit summary, session selector, large-paste marker, resize redraw, slash attach palette, and tmux text-only attachment fallback. A direct scan of the evidence files found no ESC/control-sequence bytes in the saved pane captures.
   - Additional PTY evidence passed: `AVA_TUI_KITTY_IMAGE_SMOKE=1 ctest --test-dir build -R '^ava_tui\.kitty_image_smoke$' --output-on-failure` verified Kitty graphics transmit command and visible attachment metadata; `AVA_TUI_OSC8_SMOKE=1 ctest --test-dir build -R '^ava_tui\.osc8_smoke$' --output-on-failure` verified OSC 8 hyperlink emission and visible Markdown fallback behavior. Provider request logs for active-run and OSC8 fake-provider flows remain in `build/tui-tmux-smoke/*provider-requests.log` and `build/tui-osc8-smoke/provider-requests.log`.
 - 2026-08-03 historical note, superseded: a local-only Wave 4 setup wizard was implemented after the 2026-07-03 residual record. A later product decision removed that wizard completely; current AVA retains only ordinary auth-first `/connect` guidance and no-telemetry behavior.
+- 2026-08-09: Current parity closure records 23 isolated tmux scenarios including `mermaid`, the bounded `--line-shell`, bounded OSC 52 and transcript selection/navigation affordances, disabled-by-default literal Mermaid projection, cursor/Alacritty contracts, latest-assistant copy plus half-page actions, and the bounded process-only prompt stash. The current reference pins are Pi `936aff00918de1187f085f123c2812d8f2d67745` (`coding-agent`/TUI `0.84.1`), OpenCode `38e10eb1408feb700021b8e8766fb0ab41bf84e2` (TUI `1.18.15`), and Grok Build `8a14c91d88875a831a38b3a066b1683116bcb31c`. Retained non-goals are session-tree transcript/content filters, LaTeX, arbitrary extension renderers, blocking startup probes, and broad screen-reader certification.

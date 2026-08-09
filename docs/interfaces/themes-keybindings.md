@@ -10,7 +10,7 @@ AVA falls back to `~/.config`.
 | Setting | Path |
 | --- | --- |
 | AVA config directory | `$XDG_CONFIG_HOME/ava` or `~/.config/ava` |
-| Display theme, image visibility, and image width | `$XDG_CONFIG_HOME/ava/display.json` |
+| Display theme, image visibility/width, cursor, and Mermaid projection | `$XDG_CONFIG_HOME/ava/display.json` |
 | Custom theme files | `$XDG_CONFIG_HOME/ava/themes/*.json` |
 | Keybinding overrides | `$XDG_CONFIG_HOME/ava/keybinds.json` |
 
@@ -41,7 +41,13 @@ The theme is stored in the shared display document:
 {
   "theme": "light",
   "show_images": true,
-  "image_width_cells": 60
+  "image_width_cells": 60,
+  "cursor_style": "bar",
+  "cursor_blink": true,
+  "mermaid": {
+    "enabled": false,
+    "argv": ["/absolute/helper", "..."]
+  }
 }
 ```
 
@@ -49,6 +55,9 @@ The theme is stored in the shared display document:
 historical defaults `true` and `60`. `/theme`, `/images`, and `/image-width` each
 update or erase only their owned key and preserve every other field, including
 unknown top-level members.
+`cursor_style` (`default|block|underline|bar`) and boolean `cursor_blink` are also optional; absence leaves cursor shape and blinking terminal-owned. `/cursor <style> [blink|steady]` persists them. A forced shape uses DECSCUSR only inside the TUI, resetting for shell/editor/suspend handoff and reapplying after return.
+
+The optional `mermaid` object defaults disabled. Its bounded `argv` starts with an absolute application-owned helper. Only completed assistant `mermaid` fences are projected, literally and presentation-only; original fences remain on disabled, pending, failure, or stale results. No TUI subprocess, transcript mutation, full Mermaid implementation, or extension renderer contract is provided. Invalid reload keeps the last good config.
 
 ```text
 /images                 # show configured and effective visibility
@@ -301,9 +310,9 @@ Common user-facing action groups:
 | Input submission | `tui.input.submit` (`submit`), `tui.input.newLine` (`new_line`, `newLine`), `app.message.followUp` (`message_follow_up`, `followUp`) |
 | Composer editing | `tui.editor.cursorLeft/Right/Up/Down`, `cursor_left`/`cursorLeft`; `tui.editor.cursorLineStart/End`; `tui.editor.cursorWordLeft/Right`; `tui.editor.deleteCharBackward/Forward`; `tui.editor.deleteWordBackward/Forward`; `tui.editor.deleteToLineStart/End`; `tui.editor.undo`, `tui.editor.redo`, `tui.editor.yank`, `tui.editor.yankPop` |
 | App controls | `app.clear` (`clear_input`, `clear`), `app.interrupt` (`interrupt`), `app.exit` (`exit`), `app.editor.external` (`external_editor`, `externalEditor`), `app.suspend` (`suspend`), `app.clipboard.pasteImage` (`clipboard_paste_image`, `pasteImage`) |
-| Completion and palettes | `tui.input.tab` (`autocomplete_accept`), `history_prev`, `history_next`, `palette_prev`, `palette_next`, `mode_toggle` |
+| Completion and palettes | `tui.input.tab` (`autocomplete_accept`), `history_prev`, `history_next`, `palette_prev`, `palette_next`, `mode_toggle`, `app.prompt.stash` (default F6) |
 | Select-list modals | `tui.select.up/down/pageUp/pageDown/confirm/cancel`, plus aliases like `select_prev`, `selectPrev`, `select_confirm`, and `selectConfirm` |
-| Transcript and tool details | `tui.editor.pageUp`, `tui.editor.pageDown`, `app.tools.expand` (`details_toggle`, `expandTools`), `jump_to_bottom` (default Ctrl+End), `message_prev` (default Alt+K), `message_next` (default Alt+J) |
+| Transcript and tool details | `tui.editor.pageUp`, `tui.editor.pageDown`, unbound `app.transcript.halfPageUp`/`app.transcript.halfPageDown`, `app.transcript.copyLatestAssistant` (default F5), `app.tools.expand` (`details_toggle`, `expandTools`), `jump_to_bottom` (default Ctrl+End), `message_prev` (default Alt+K), `message_next` (default Alt+J) |
 | Models and thinking | `app.model.select`, `app.model.cycleForward`, `app.model.cycleBackward`, `app.thinking.cycle`, `app.thinking.toggle`, `app.overview.toggle` (unbound by default; toggles the path-free startup overview), `app.models.save`, `app.models.enableAll`, `app.models.clearAll`, `app.models.toggleProvider`, `app.models.reorderUp`, `app.models.reorderDown` |
 | Sessions and trees | `app.session.new/tree/fork/resume/togglePath/toggleSort/toggleNamedFilter/rename/delete/deleteNoninvasive`, unbound-by-default `app.sessions.summarizeParent` for an eligible direct abandoned parent, `app.tree.foldOrUp/unfoldOrDown/editLabel/toggleLabelTimestamp/filter.labeledOnly/filter.all` |
 
@@ -313,10 +322,9 @@ labels and bound keys; machine action ids remain secondary for config JSON and
 `/keybindings set` drafts and are the insertion authority when completing an
 action argument. Human labels never replace that authority. Some actions
 intentionally have no default key until a modal or feature makes them useful.
-Defaults include `message_prev`=Alt+K, `message_next`=Alt+J, and
-`jump_to_bottom`=Ctrl+End. Plain Up/Down remain transcript scroll only.
+Defaults include `message_prev`=Alt+K, `message_next`=Alt+J, `jump_to_bottom`=Ctrl+End, `app.transcript.copyLatestAssistant`=F5, and `app.prompt.stash`=F6. The two half-page transcript actions remain configurable but unbound. Plain Up/Down remain transcript scroll only.
 Alt+J/Alt+K can be rebound as editor aliases only by overriding `message_next` /
-`message_prev`; until then those keys jump between transcript messages rather
+`message_prev`; until then those keys jump between user turns rather
 than moving the composer cursor.
 
 ## Key names and conflict rules

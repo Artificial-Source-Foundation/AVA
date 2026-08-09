@@ -76,11 +76,19 @@ The settings are stored in `$XDG_CONFIG_HOME/ava/display.json`:
 {
   "theme": "light",
   "show_images": true,
-  "image_width_cells": 60
+  "image_width_cells": 60,
+  "cursor_style": "bar",
+  "cursor_blink": true,
+  "mermaid": {
+    "enabled": false,
+    "argv": ["/absolute/helper", "..."]
+  }
 }
 ```
 
-Defaults when keys are absent preserve historical behavior: automatic theme selection, `show_images=true`, and `image_width_cells=60`. Width accepts integers only in the inclusive range 8–160 and is clamped again to the current content viewport when rendering. Field-specific writes update or erase only the owned key and preserve every other recognized or unknown top-level field. A malformed recognized field rejects load and update, leaves the file unchanged, and keeps the last known-good presentation active.
+Defaults when keys are absent preserve historical behavior: automatic theme selection, `show_images=true`, `image_width_cells=60`, terminal-owned cursor shape/blink, and Mermaid disabled. `cursor_style` accepts `default`, `block`, `underline`, or `bar`; `cursor_blink` is boolean. `/cursor <style> [blink|steady]` updates both. AVA emits DECSCUSR only while a non-default cursor is forced, resets it for shell/editor/suspend handoff, reapplies it on return, and restores the terminal default on exit. Width accepts integers only in the inclusive range 8–160 and is clamped again to the current content viewport when rendering. Field-specific writes update or erase only the owned key and preserve every other recognized or unknown top-level field. A malformed recognized field rejects load and update, leaves the file unchanged, and keeps the last known-good presentation active.
+
+`mermaid` is optional and disabled by default. When enabled, `argv` must begin with an absolute application-owned helper path and remains bounded. Only completed assistant fenced blocks labelled `mermaid` are eligible. The helper receives literal diagram text for a presentation-only projection; disabled, pending, failed, or stale projection shows the original fence. The TUI never launches the subprocess, transcript/session/provider semantics are unchanged, and this is not full Mermaid support or an arbitrary renderer interface. Invalid automatic reload retains the last good display configuration.
 
 After editing `display.json` by hand, the interactive TUI automatically reloads the file without restarting. `/reload theme` is still available for an explicit retry or diagnostic. Invalid JSON, unsupported theme values, non-boolean `show_images`, or out-of-range/`float`/`string` `image_width_cells` values are reported with the config path, and the previous active presentation remains in use.
 

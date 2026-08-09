@@ -65,9 +65,9 @@ well-bounded polish.
 | Application integration | `src/ava/app/line_shell.cpp`, `command_palette.*`, `display_settings.*`, `interactive_run_queue.*`, `events.*`, `onboarding.*`, `clipboard_image.*`, `reasoning_controls.*`, `runtime_sessions.*` | semantic boundaries, application state, settings, session integration |
 | Tests | `tests/tui_composer_tests.cpp`, `tests/tui_tmux_smoke.py`, `tests/tui_smoke_helpers.py`, `tests/tui_kitty_image_smoke.py` (shared parameterized Kitty/iTerm2 driver), `tests/tui_terminal_lifecycle_smoke.py`, `tests/tui_osc8_smoke.py`, `tests/CMakeLists.txt` | deterministic behavior and terminal evidence |
 
-Current CTest inventory has 22 tmux scenarios:
+Current CTest inventory has 23 tmux scenarios:
 `suspend_resume`, `keybind_conflict`, `theme_env`, `theme_persisted`,
-`nested_settings_preview`, `startup_overview`, `active_run`,
+`nested_settings_preview`, `startup_overview`, `mermaid`, `active_run`,
 `restore_followup`, `streaming_scroll`, `transcript_search`,
 `transcript_selection`, `subagent_workspace`, `branch_summary`,
 `main_startup_trust_keybinds`, `main_models_selectors`, `main_editor_input`,
@@ -87,6 +87,8 @@ The local behavior reference is `docs/reference-code/opencode/`, snapshot
 commit `7a8e7c8` dated 2026-07-04, with `packages/tui` version `1.17.13`.
 It is useful for comparing user-visible quality, not for copying source,
 architecture, data flow, or implementation details.
+
+A dated 2026-08-09 rebaseline records Pi `936aff00918de1187f085f123c2812d8f2d67745` (`coding-agent`/TUI `0.84.1`), OpenCode `38e10eb1408feb700021b8e8766fb0ab41bf84e2` (TUI `1.18.15`), and Grok Build `8a14c91d88875a831a38b3a066b1683116bcb31c`. Earlier snapshot pins and their evidence remain historical.
 
 | Reference area | OpenCode paths to compare behaviorally |
 | --- | --- |
@@ -113,7 +115,7 @@ AVA already has a strong terminal frontend foundation:
 - light, dark, plain, and local custom theme support, plus terminal capability
   handling for resize, paste, keyboard protocols, mouse, OSC 8/52, and
   Kitty/iTerm2 image paths with textual fallbacks; and
-- deterministic renderer/editor tests, 22 opt-in tmux scenarios, and four
+- deterministic renderer/editor tests, 23 opt-in tmux scenarios, and four
   direct PTY CTests for Kitty image transmit/delete, iTerm2 OSC 1337 emission,
   terminal lifecycle/termios cleanup, and OSC 8 links plus OSC 52 decoding.
 
@@ -289,7 +291,7 @@ unshipped-current claim.
 | Permissions/questions | Prompt risk, reason, choices, and outcome are easy to understand in narrow/plain layouts | Structured flows and remembered rules exist | Normalize geometry; treat `permission required / awaiting decision` as a safety-critical state distinct from queued/pending/running; narrow choices without hiding allow/deny meaning | Deterministic narrow/plain and Python tmux evidence cover the permission-required prompt/tool state, its human action, risk/reason, allow/reject follow-up, choices, denial, and result card; expanded/copy evidence retains request identity | Existing permission/question request and resolution events |
 | Sessions/navigation | Switching, tree navigation, and session context are discoverable without permanent density | Session/tree contracts and selectors are present | Responsive sidebar and session-overlay information hierarchy | Session selector captures with keyboard and mouse continuity | Existing session-tree/name/label state; no pathname reconstruction |
 | Status/attention | Existing completion, failure, queued, and attention states are visible without noisy persistent chrome | Startup, active-run, and auth diagnostics exist | Refine quiet in-TUI status treatment; keep every new notification surface behind F7 approval | Captures distinguish transient from persistent status | Event severity/terminal state if already exposed; otherwise backend work |
-| Mouse/clipboard/images/links | Capability-enhanced paths degrade to useful text and clean up terminal state | Mouse, OSC 8/52, Kitty transmit/delete, iTerm2 OSC 1337 emission, and text fallback exist; the fallback size is fixed | Verify fallback, selection, link, image-row, and cleanup behavior | 15 tmux scenarios; four direct PTY CTests for Kitty, iTerm2, lifecycle, and OSC8/OSC52; manual pixel supplement | Terminal capability data only; no backend presentation contract |
+| Mouse/clipboard/images/links | Capability-enhanced paths degrade to useful text and clean up terminal state | Mouse, OSC 8/52, Kitty transmit/delete, iTerm2 OSC 1337 emission, and text fallback exist; the fallback size is fixed | Verify fallback, selection, link, image-row, and cleanup behavior | 23-scenario tmux suite; four direct PTY CTests for Kitty, iTerm2, lifecycle, and OSC8/OSC52; manual pixel supplement | Terminal capability data only; no backend presentation contract |
 | Themes/accessibility | Meaning survives plain mode and themes remain coherent | Light/dark/plain/local custom themes and keyboard paths exist | Audit contrast/text affordances, names, and narrow plain layout; defer screen-reader breadth | Deterministic plain/theme cases and documented manual audit | None |
 | Performance/testing | Layout behavior is repeatable and real terminals leave no state behind | Renderer budgets, terminal lifecycle, and tmux smokes are shipped MVP evidence | Retain deterministic budget and cleanup regressions; future-audit broader physical-terminal/external workloads | Focused C++ suite, isolated Python tmux scenarios, pane-capture inspection, control-sequence and cleanup checks | None |
 
@@ -1431,11 +1433,11 @@ assertion/result:
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 1 -R '^ava_tui\.tmux_smoke_main_slash_completions$'
 ```
 
-Run the 22 isolated tmux scenarios only when the change touches their
+Run the 23 isolated tmux scenarios only when the change touches their
 behavior or required visual evidence:
 
 ```sh
-AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --jobs 22 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'
 ```
 
 Run protocol-specific opt-ins when the implementation affects them:
@@ -1557,7 +1559,7 @@ Deterministic tests cover scheduler deadlines/failure, 100-request coalescing,
 frame-scoped wheel runs, frozen detached layouts, streaming text projection,
 Rich/Compact/Expanded cards, 1,000-line shell tails, near-512-KiB single-line
 output, permission-audit omission, wrapped question surfaces, and cache identity.
-The credential-free fake-provider tmux matrix now has 22 isolated scenarios, including `nested_settings_preview`, `startup_overview`, `branch_summary`, and `plugin_ui`;
+The credential-free fake-provider tmux matrix now has 23 isolated scenarios, including `nested_settings_preview`, `startup_overview`, `branch_summary`, `plugin_ui`, and `mermaid`;
 `streaming_scroll` and `active_run` measure idle/streaming flood responsiveness, active presentation
 commands, draft preservation, detached stability, prompt wheel ordering, resize
 synchronization, terminal hygiene, and cleanup.

@@ -13,8 +13,10 @@
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/result.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
@@ -50,6 +52,34 @@ struct LineResult
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+inline constexpr std::size_t kLineShellMaxSubmittedBytes = 64 * 1024;
+inline constexpr std::size_t kLineShellMaxPromptAnswerBytes = 8 * 1024;
+
+enum class BoundedLineStatus
+{
+  Line,
+  EndOfInput,
+  TooLong,
+  InputError,
+};
+
+enum class LinePermissionChoice
+{
+  Deny,
+  Allow,
+  AllowSession,
+  AllowRemember,
+  DenyRemember,
+  Cancel,
+};
+
+[[nodiscard]] BoundedLineStatus read_bounded_line(std::istream& input, std::string& line, std::size_t maximum_bytes);
+[[nodiscard]] LinePermissionChoice resolve_line_permission_prompt(ava::permissions::PermissionPrompt const& prompt, bool allow_session_available,
+                                                                  bool allow_remember_available, bool deny_remember_available, std::istream& input,
+                                                                  std::ostream& output, std::string& user_guidance);
+[[nodiscard]] ava::core::Result<ava::agent::QuestionAnswer> resolve_line_question_prompt(ava::agent::QuestionPrompt const& prompt, std::istream& input,
+                                                                                         std::ostream& output);
+
 void append_status_line(std::string& target, std::string line);
 [[nodiscard]] std::string git_branch_for_sidebar(std::filesystem::path const& workspace);
 [[nodiscard]] std::vector<CommandHotkey> command_hotkeys_from_key_bindings(ava::tui::TuiKeyBindings const& key_bindings);
@@ -80,7 +110,8 @@ void append_status_line(std::string& target, std::string line);
 [[nodiscard]] ava::core::Result<std::string> save_scoped_model_cycle(runtime::session_ts& unlocked_session);
 [[nodiscard]] ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(runtime::session_ts const& unlocked_session,
                                                                                                            ava::permissions::PermissionPrompt const& prompt,
-                                                                                                           ava::permissions::PermissionAction action);
+                                                                                                           ava::permissions::PermissionAction action,
+                                                                                                           std::string actor = "tui_prompt");
 
 [[nodiscard]] bool workspace_catalog_changed(LineResult const& result);
 [[nodiscard]] bool workspace_catalog_reload_requested(std::string_view submitted);
@@ -101,6 +132,7 @@ void add_output(LineResult& result, std::string text);
                                      ava::agent::SubagentLaunchSink on_subagent_launch = nullptr,
                                      std::shared_ptr<PluginUiInvocationCapability> plugin_ui_capability = nullptr);
 
+[[nodiscard]] int run_line_shell(ShellState state, std::istream& input, std::ostream& output);
 [[nodiscard]] int run_tui(ShellState state);
 
 }  // namespace ava::app::line_shell_internal

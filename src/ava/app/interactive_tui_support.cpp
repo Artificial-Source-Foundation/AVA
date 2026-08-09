@@ -523,8 +523,7 @@ std::vector<std::string> normalized_model_scope(std::vector<std::string> const& 
   return normalized;
 }
 
-void store_model_scope(ava::app::runtime::session_ts& unlocked_session, std::vector<std::string> candidate,
-                       std::vector<std::string> const& all_values,
+void store_model_scope(ava::app::runtime::session_ts& unlocked_session, std::vector<std::string> candidate, std::vector<std::string> const& all_values,
                        bool reset_full_scope_to_all)
 {
   auto normalized = normalized_model_scope(candidate, all_values);
@@ -537,8 +536,7 @@ void store_model_scope(ava::app::runtime::session_ts& unlocked_session, std::vec
   session_w->model_selection().scoped_model_cycle = std::move(normalized);
 }
 
-std::vector<std::string> active_model_scope_or_all(ava::app::runtime::session_ts const& unlocked_session,
-                                                   std::vector<std::string> const& all_values)
+std::vector<std::string> active_model_scope_or_all(ava::app::runtime::session_ts const& unlocked_session, std::vector<std::string> const& all_values)
 {
   auto const scoped_cycle = runtime::session_ts::crat(unlocked_session)->scoped_model_cycle();
   if (scoped_cycle)
@@ -575,14 +573,12 @@ ava::tui::SelectListView preserve_scoped_model_selector_state(ava::tui::SelectLi
   return view;
 }
 
-ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::session_ts const& unlocked_session,
-                                                         ava::tui::SelectListView const& previous)
+ava::tui::SelectListView refreshed_scoped_model_selector(ava::app::runtime::session_ts const& unlocked_session, ava::tui::SelectListView const& previous)
 {
   return preserve_scoped_model_selector_state(ava::app::scoped_model_selector_view_1(unlocked_session, scoped_model_selector_footer_hint()), previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::session_ts& unlocked_session,
-                                                                ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                 std::string_view value)
 {
   auto const all_values = registered_model_cycle_values(unlocked_session);
@@ -603,8 +599,7 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model(ava::app::runtim
   return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::session_ts& unlocked_session,
-                                                                 ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                  std::vector<std::string> targets)
 {
   auto const all_values = registered_model_cycle_values(unlocked_session);
@@ -618,8 +613,7 @@ ava::core::Result<ava::tui::SelectListView> enable_scoped_models(ava::app::runti
   return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::session_ts& unlocked_session,
-                                                                ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                 std::vector<std::string> targets)
 {
   auto const all_values = registered_model_cycle_values(unlocked_session);
@@ -633,8 +627,7 @@ ava::core::Result<ava::tui::SelectListView> clear_scoped_models(ava::app::runtim
 }
 
 ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::app::runtime::session_ts& unlocked_session,
-                                                                         ava::tui::SelectListView const& previous,
-                                                                         std::string_view selected_value)
+                                                                         ava::tui::SelectListView const& previous, std::string_view selected_value)
 {
   auto const provider = provider_from_model_value(selected_value);
   if (provider.empty())
@@ -665,8 +658,7 @@ ava::core::Result<ava::tui::SelectListView> toggle_scoped_model_provider(ava::ap
   return refreshed_scoped_model_selector(unlocked_session, previous);
 }
 
-ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::session_ts& unlocked_session,
-                                                                 ava::tui::SelectListView const& previous,
+ava::core::Result<ava::tui::SelectListView> reorder_scoped_model(ava::app::runtime::session_ts& unlocked_session, ava::tui::SelectListView const& previous,
                                                                  std::string_view selected_value, bool up)
 {
   auto const all_values = registered_model_cycle_values(unlocked_session);
@@ -718,12 +710,13 @@ ava::permissions::PermissionRuleMode permission_rule_mode_for_agent_mode(ava::co
   return ava::permissions::PermissionRuleMode::Any;
 }
 
-ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(
-    ava::app::runtime::session_ts const& unlocked_session,
-                                                                                              ava::permissions::PermissionPrompt const& prompt,
-                                                                                             ava::permissions::PermissionAction action)
+ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rule_for_prompt(ava::app::runtime::session_ts const& unlocked_session,
+                                                                                             ava::permissions::PermissionPrompt const& prompt,
+                                                                                             ava::permissions::PermissionAction action, std::string actor)
 {
-  auto reason = prompt.reason.empty() ? std::string("remembered from TUI permission prompt") : prompt.reason;
+  auto reason = prompt.reason.empty() ? (actor == "tui_prompt" ? std::string("remembered from TUI permission prompt")
+                                                               : std::string("remembered from line-shell permission prompt"))
+                                      : prompt.reason;
   std::string recipe_key;
   std::string recipe_display;
   if (prompt.operation == ava::permissions::Operation::RunCommand)
@@ -742,19 +735,18 @@ ava::core::Result<ava::tui::TuiRememberedPermissionRule> remember_permission_rul
   }
   auto const rule_store = runtime::session_ts::crat(unlocked_session)->permission_rule_store();
   auto added = ava::permissions::add_persistent_permission_rule(
-      rule_store,
-      ava::permissions::PermissionRuleDraft{
-          .scope = ava::permissions::PermissionRuleScope::Workspace,
-          .action = action,
-          .operation = prompt.operation,
-          .mode = permission_rule_mode_for_agent_mode(prompt.mode),
-          .tool_name = prompt.tool_name,
-          .target_path = prompt.target_path,
-          .command = prompt.operation == ava::permissions::Operation::RunCommand && !recipe_key.empty() ? std::string{} : prompt.command,
-          .command_recipe_key = std::move(recipe_key),
-          .recipe_display = std::move(recipe_display),
-          .reason = std::move(reason),
-          .actor = "tui_prompt"});
+      rule_store, ava::permissions::PermissionRuleDraft{
+                      .scope = ava::permissions::PermissionRuleScope::Workspace,
+                      .action = action,
+                      .operation = prompt.operation,
+                      .mode = permission_rule_mode_for_agent_mode(prompt.mode),
+                      .tool_name = prompt.tool_name,
+                      .target_path = prompt.target_path,
+                      .command = prompt.operation == ava::permissions::Operation::RunCommand && !recipe_key.empty() ? std::string{} : prompt.command,
+                      .command_recipe_key = std::move(recipe_key),
+                      .recipe_display = std::move(recipe_display),
+                      .reason = std::move(reason),
+                      .actor = std::move(actor)});
   if (!added)
     return std::unexpected(std::move(added.error()));
   return ava::tui::TuiRememberedPermissionRule{.rule_id = added->rule_id};

@@ -39,6 +39,7 @@ void run_provider_user_catalog_tests();
 void run_provider_builtin_generic_tests();
 void run_command_tests();
 void run_app_compaction_tests();
+void run_app_line_shell_tests();
 void run_app_print_tests();
 void run_app_event_serialization_tests();
 void run_app_rpc_queue_tests();
@@ -97,6 +98,7 @@ constexpr std::array kTestSuites{
     TestSuite{"provider_builtin_generic", run_provider_builtin_generic_tests},
     TestSuite{"command", run_command_tests},
     TestSuite{"app_compaction", run_app_compaction_tests},
+    TestSuite{"app_line_shell", run_app_line_shell_tests},
     TestSuite{"app_print", run_app_print_tests},
     TestSuite{"app_event_serialization", run_app_event_serialization_tests},
     TestSuite{"app_event_bus", run_app_event_bus_tests},

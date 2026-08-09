@@ -258,6 +258,12 @@ std::string text_body(std::string_view text)
          "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
 }
 
+std::string hostile_terminal_text_body()
+{
+  return "{\"choices\":[{\"message\":{\"content\":\"safe\\u001b]8;;https://example.invalid\\u0007link\\u001b]8;;\\u0007 output\"},"
+         "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
+}
+
 std::string tool_body(std::string_view call_id, std::string_view name, std::string_view arguments)
 {
   return "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"" + json_escape(call_id) +
@@ -549,6 +555,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
                                 "{\"error\":{\"type\":\"FAKE_UNKNOWN_DISCRIMINATOR_CANARY\",\"message\":\"provider unavailable\","
                                 "\"reasoning_content\":\"secret reasoning\","
                                 "\"thinking\":\"secret thinking\",\"api_key\":\"secret-key\"}}"};
+  }
+  if (scenario == "terminal-hostile-text")
+  {
+    return ProviderResponse{.body = hostile_terminal_text_body()};
   }
   if (scenario == "read-tool")
   {

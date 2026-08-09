@@ -38,6 +38,7 @@ void print_help()
   std::cout << "Usage:\n";
   std::cout << "  ava [--help]\n";
   std::cout << "  ava [prompt]\n";
+  std::cout << "  ava --line-shell  # line-oriented interactive frontend\n";
   std::cout << "  ava @file [prompt]\n";
   std::cout << "  ava login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
   std::cout << "  ava auth login [provider] [--api-key|--browser-oauth|--headless-oauth]\n";
@@ -82,8 +83,8 @@ bool is_cli_option(std::string_view arg)
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
          arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" ||
-         arg == "--append-system-prompt" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" || arg == "--output" ||
-         arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
+         arg == "--append-system-prompt" || arg == "--line-shell" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" ||
+         arg == "--output" || arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
          arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
 }
 
@@ -244,13 +245,20 @@ int run(int argc, char** argv)
 
   int acp_flags = 0;
   int acp_trace_flags = 0;
+  int acp_line_shell_flags = 0;
   for (int index = 1; index < argc; ++index)
   {
     acp_flags += std::string_view(argv[index]) == "--acp" ? 1 : 0;
     acp_trace_flags += std::string_view(argv[index]) == "--trace" ? 1 : 0;
+    acp_line_shell_flags += std::string_view(argv[index]) == "--line-shell" ? 1 : 0;
   }
   if (acp_flags > 0)
   {
+    if (acp_line_shell_flags > 0)
+    {
+      std::cerr << "use either --line-shell or --acp, not both\n";
+      return 2;
+    }
     bool const valid = acp_flags == 1 && acp_trace_flags <= 1 && argc == 2 + acp_trace_flags;
     if (!valid)
     {
@@ -280,6 +288,7 @@ int run(int argc, char** argv)
   bool sessionless = false;
   bool offline = false;
   bool trace_requested = false;
+  bool line_shell = false;
   bool print_mode = false;
   bool rpc_mode = false;
   std::optional<std::string> print_prompt;
@@ -482,6 +491,11 @@ int run(int argc, char** argv)
         return 2;
       }
       mode = *parsed;
+      continue;
+    }
+    if (arg == "--line-shell")
+    {
+      line_shell = true;
       continue;
     }
     if (arg == "--print" || arg == "-p")
@@ -709,6 +723,16 @@ int run(int argc, char** argv)
     return 2;
   }
 
+  if (line_shell && print_mode)
+  {
+    std::cerr << "use either --line-shell or --print, not both\n";
+    return 2;
+  }
+  if (line_shell && rpc_mode)
+  {
+    std::cerr << "use either --line-shell or --rpc, not both\n";
+    return 2;
+  }
   if (print_mode && rpc_mode)
   {
     std::cerr << "use either --print or --rpc, not both\n";
@@ -822,8 +846,8 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  bool const print_farewell = stdin_is_tty() && stdout_is_tty();
-  int const status = run_interactive(*unlocked_session_result);
+  bool const print_farewell = !line_shell && stdin_is_tty() && stdout_is_tty();
+  int const status = run_interactive(*unlocked_session_result, line_shell);
   if (print_farewell)
     print_exit_card(*unlocked_session_result, status);
   return status;

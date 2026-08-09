@@ -412,9 +412,9 @@ void run_tui_transcript_selection_tests()
   static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftDrag, 2, 6), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
   static_cast<void>(handle(state, mouse_event(ava::tui::Key::MouseLeftRelease, 2, 6), snapshot, cache, &draft, scroll, toggle_tool, never_toggle));
   expect(state.range().has_value() && !state.dragging(), "transcript body drag remains selected after release");
-  snapshot.status = "copied selection to clipboard";
+  snapshot.status = "selection copy request sent";
   auto const copied_frame = ava::tui::render_composer(snapshot);
-  expect(std::ranges::any_of(copied_frame, [](std::string const& line) { return strip_sgr(line).find("copied selection to clipboard") != std::string::npos; }),
+  expect(std::ranges::any_of(copied_frame, [](std::string const& line) { return strip_sgr(line).find("selection copy request sent") != std::string::npos; }),
          "successful transcript copy status is visible in the terminal frame");
 
   // SEL-004: allowlisted clipboard failure and oversize statuses render in-frame.
@@ -810,7 +810,7 @@ void run_tui_transcript_selection_tests()
 
     expect(copy_range && expected_sequence && expected_text.find("rdinary header") != std::string::npos &&
                expected_text.find("ordinary following") != std::string::npos && expected_text.find("PRIVATE FROZEN LAUNCH") == std::string::npos && copied &&
-               copy_snapshot.status == "copied selection to clipboard" && captured == *expected_sequence,
+               copy_snapshot.status == "selection copy request sent" && captured == *expected_sequence,
            "frozen detached selection copy emits an OSC52 payload containing ordinary cross-row text but no private launch bytes");
   }
 }

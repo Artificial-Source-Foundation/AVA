@@ -86,7 +86,7 @@ bool RuntimeDraftState::copy_selection(ComposerSnapshot& snapshot)
     return false;
   }
   auto const copied = runtime_transcript::copy_text_to_terminal_clipboard(*text);
-  snapshot.status = copied ? "copied selection to clipboard" : "clipboard copy failed";
+  snapshot.status = copied ? "selection copy request sent" : "clipboard copy failed";
   if (!copied)
     static_cast<void>(beep());
   return copied;

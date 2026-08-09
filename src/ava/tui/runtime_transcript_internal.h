@@ -50,7 +50,7 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 
 enum class LatestAssistantCopyResult
 {
-  Copied,
+  RequestSent,
   NoMessage,
   Oversize,
   WriteFailure,
@@ -58,7 +58,8 @@ enum class LatestAssistantCopyResult
 
 // Shared by /copy and app.transcript.copyLatestAssistant. The bound is checked
 // before invoking the supplied terminal writer, so oversize and write failures
-// remain distinguishable and no payload is silently truncated.
+// remain distinguishable and no payload is silently truncated. RequestSent means
+// AVA wrote the request; downstream terminal or multiplexer delivery is unknowable.
 [[nodiscard]] LatestAssistantCopyResult copy_latest_assistant_message(
     std::vector<TranscriptItem> const& transcript, std::function<bool(std::string_view)> const& terminal_writer = copy_text_to_terminal_clipboard);
 [[nodiscard]] std::string latest_assistant_copy_status(LatestAssistantCopyResult result);

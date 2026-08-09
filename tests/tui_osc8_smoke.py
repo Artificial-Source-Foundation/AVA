@@ -329,7 +329,7 @@ def main() -> int:
                 process,
                 lambda data: (
                     re.search(rb"\x1b\]52;c;[A-Za-z0-9+/]*={0,2}\x1b\\", data) is not None
-                    and b"copied last AVA message to clipboard" in strip_control_sequences(data)
+                    and b"last AVA message copy request sent" in strip_control_sequences(data)
                 ),
                 "OSC 52 clipboard copy",
             )
@@ -347,9 +347,9 @@ def main() -> int:
                     f"decoded={clipboard_payload!r}"
                 )
             copied_visible = strip_control_sequences(copied)
-            if b"copied last AVA message to clipboard" not in copied_visible:
+            if b"last AVA message copy request sent" not in copied_visible:
                 raise RuntimeError(
-                    "OSC 52 emission did not retain visible copy-success status; "
+                    "OSC 52 emission did not retain visible request-sent status; "
                     f"captured={copied_visible.decode(errors='replace')}"
                 )
             os.write(master_fd, b"\x04")

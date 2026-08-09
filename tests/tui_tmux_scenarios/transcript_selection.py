@@ -108,7 +108,7 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
         raise RuntimeError(f"header drag toggled the tool card instead of selecting\nscreen:\n{selected}")
 
     send_keys(ctx.tmux, session, "C-c")
-    copied = wait_for(ctx.tmux, session, r"copied selection to clipboard", "transcript-selection CopySelection status")
+    copied = wait_for(ctx.tmux, session, r"selection copy request sent", "transcript-selection CopySelection status")
     copied_styled = capture_styled(ctx.tmux, session)
     if "tool details expanded" in copied or "tool details collapsed" in copied:
         raise RuntimeError(f"CopySelection surfaced a header toggle status\nscreen:\n{copied}")

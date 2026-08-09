@@ -547,7 +547,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
     {
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        snapshot.status = copy_text_to_terminal_clipboard(input_result.copy_text) ? "copied to clipboard" : "clipboard copy failed";
+        snapshot.status = copy_text_to_terminal_clipboard(input_result.copy_text) ? "clipboard copy request sent" : "clipboard copy failed";
       }
       emit_prompt_audit("tui:question_copy", "question copy");
       if (!render())
@@ -578,7 +578,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
         {
           {
             std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-            snapshot.status = copy_text_to_terminal_clipboard(*copy_text) ? "copied to clipboard" : "clipboard copy failed";
+            snapshot.status = copy_text_to_terminal_clipboard(*copy_text) ? "clipboard copy request sent" : "clipboard copy failed";
           }
           static_cast<void>(render());
         }

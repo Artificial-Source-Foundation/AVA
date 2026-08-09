@@ -1371,9 +1371,9 @@ void run_tui_selector_tests()
         copied_payload = std::string(text);
         return true;
       });
-  expect(copy_callback_id == "entry_user_a" && copy_ok.action == ava::tui::UserTurnCopySelectionAction::Copied && copy_ok.transcript_label == "status" &&
-             copied_payload == "alpha first line body" && copy_ok.status.find("copied user turn") != std::string::npos,
-         "copy selection re-reads the selected stable id at action time and reports truthful success");
+  expect(copy_callback_id == "entry_user_a" && copy_ok.action == ava::tui::UserTurnCopySelectionAction::RequestSent && copy_ok.transcript_label == "status" &&
+             copied_payload == "alpha first line body" && copy_ok.status == "user turn copy request sent",
+         "copy selection re-reads the selected stable id at action time and reports a request without claiming delivery");
 
   auto copy_read_fail = ava::tui::evaluate_copy_user_turn_selection(
       selected_entry_id,

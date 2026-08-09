@@ -537,26 +537,26 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       if (target.name.empty() || target.name == "last")
       {
         auto const result = runtime_transcript::copy_latest_assistant_message(snapshot.transcript);
-        copied = result == runtime_transcript::LatestAssistantCopyResult::Copied;
+        copied = result == runtime_transcript::LatestAssistantCopyResult::RequestSent;
         snapshot.status = runtime_transcript::latest_assistant_copy_status(result);
         handled_latest_assistant = true;
       }
       else if (target.name == "tool" || target.name == "tools")
       {
         copy_text = latest_tool_copy_text(snapshot.transcript, target.query);
-        copied_status = target.query.empty() ? "copied latest tool details to clipboard" : "copied matching tool details to clipboard";
+        copied_status = target.query.empty() ? "latest tool details copy request sent" : "matching tool details copy request sent";
         missing_status = target.query.empty() ? "no tool details to copy" : "no matching tool details to copy";
       }
       else if (target.name == "diff" || target.name == "diffs")
       {
         copy_text = latest_tool_diff_copy_text(snapshot.transcript, target.query);
-        copied_status = target.query.empty() ? "copied latest tool diff to clipboard" : "copied matching tool diff to clipboard";
+        copied_status = target.query.empty() ? "latest tool diff copy request sent" : "matching tool diff copy request sent";
         missing_status = target.query.empty() ? "no tool diff to copy" : "no matching tool diff to copy";
       }
       else if (target.name == "permission" || target.name == "permissions")
       {
         copy_text = latest_permission_copy_text(snapshot.transcript, target.query);
-        copied_status = target.query.empty() ? "copied latest permission details to clipboard" : "copied matching permission details to clipboard";
+        copied_status = target.query.empty() ? "latest permission details copy request sent" : "matching permission details copy request sent";
         missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
       }
       else if (target.name == "user")

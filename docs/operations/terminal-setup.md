@@ -2,7 +2,7 @@
 
 AVA's interactive TUI is a native wide-character ncurses (`ncursesw`) application. It relies on the terminal's `TERM`/terminfo entry for screen mode, keyboard decoding, mouse events, resize handling, colors, and Unicode cell widths, then emits a small set of terminal extension sequences for enhanced keys, links, clipboard copy, bracketed paste, and inline image previews.
 
-Use this guide when the TUI fails to start, keys or mouse events behave differently across terminals, image previews fall back to text, copy reports success but the OS clipboard is unchanged, or remote/tmux/screen sessions lose terminal features.
+Use this guide when the TUI fails to start, keys or mouse events behave differently across terminals, image previews fall back to text, a clipboard copy request is sent but the OS clipboard is unchanged, or remote/tmux/screen sessions lose terminal features.
 
 `ava --line-shell` bypasses ncurses/full-screen protocols for a bounded sanitized line-oriented accessibility and scrollback interface with numbered permission/question flows. It is not screen-reader certification and cannot be combined with print, RPC, or ACP.
 
@@ -57,7 +57,7 @@ AVA works inside tmux and screen, but multiplexers intentionally hide or transfo
 - Inside tmux, use `tmux-256color` when the terminfo entry exists; otherwise use `screen-256color`.
 - Do not set `TERM=xterm-kitty`, `TERM=wezterm`, or another outer-terminal name inside tmux. tmux is the terminal AVA sees.
 - Mouse selection, wheel scrolling, and modal row clicks depend on tmux forwarding mouse events to the pane. If mouse actions do nothing, check tmux mouse support, for example `set -g mouse on` in tmux configuration.
-- OSC 52 clipboard copy can be filtered by tmux. If `/copy` reports success but the system clipboard is unchanged, check tmux's clipboard settings such as `set-clipboard` and the outer terminal's OSC 52 policy.
+- OSC 52 clipboard copy can be filtered by tmux. If `/copy` reports that its request was sent but the system clipboard is unchanged, check tmux's clipboard settings such as `set-clipboard` and the outer terminal's OSC 52 policy.
 - AVA currently disables inline image protocols under tmux and shows textual image metadata instead. Use a direct Kitty/Ghostty/WezTerm/Warp/iTerm2 session when inline previews are required.
 - OSC 8 hyperlinks are also conservative under tmux in AVA's current detection path. Expect visible URL fallback/text unless running in a direct hyperlink-capable terminal.
 
@@ -146,13 +146,13 @@ Reference: [iTerm2 OSC 8 documentation](https://iterm2.com/documentation-escape-
 
 ## OSC 52 Clipboard Copy
 
-The TUI plain `/copy` command and F5 copy the latest assistant response through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation. Under tmux AVA uses a bounded passthrough-safe form and reports terminal write/filtering failures truthfully. Double-click selects a word, triple-click selects a rendered line, drag selects a range, and navigation shows a transient scrollbar.
+The TUI plain `/copy` command and F5 copy the latest assistant response through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation. Under tmux AVA uses a bounded passthrough-safe form. AVA reports local construction or terminal-write failures, and labels a successful write only as a request sent because downstream terminal, SSH, or multiplexer delivery is unknowable. Double-click selects a word, triple-click selects a rendered line, drag selects a range, and navigation shows a transient scrollbar.
 
 AVA rejects empty clipboard text and any payload larger than 64 KiB (65,536 raw bytes) without emitting a partial sequence or spawning an external clipboard helper. Oversized copies report the existing clipboard failure status.
 
 Troubleshooting:
 
-- If AVA says it copied but the OS clipboard did not change, your terminal, SSH client, tmux, or screen likely blocked OSC 52.
+- If AVA says the copy request was sent but the OS clipboard did not change, your terminal, SSH client, tmux, or screen likely blocked OSC 52.
 - Check terminal security settings for clipboard writes from shell applications.
 - In tmux, check clipboard forwarding/settings such as `set-clipboard`; also confirm the outer terminal allows OSC 52.
 - Over SSH, both the remote session and local terminal path must allow OSC 52. Some bastions and terminal gateways strip OSC sequences.
@@ -191,7 +191,7 @@ If mouse actions do not work:
 - In tmux, check `set -g mouse on` and retry in a fresh pane.
 - In screen, expect more conservative behavior; test outside screen before filing an AVA bug.
 - Remember that terminal mouse mode changes normal text selection. Hold Shift for terminal-native selection; AVA ignores Shift-modified button reports while preserving wheel scrolling.
-- Transcript copy is bounded to 64 KiB and uses OSC 52. A truthful status reports success, an empty/oversize selection, or terminal write failure; the highlight remains after successful copy.
+- Transcript copy is bounded to 64 KiB and uses OSC 52. Status distinguishes a sent request, an empty/oversize selection, or local terminal-write failure without claiming clipboard delivery; the highlight remains after a request is sent.
 
 ## Color And Theme Environment
 
@@ -246,7 +246,7 @@ Checklist:
 | Mouse clicks/wheel do nothing | Terminal or mux is not forwarding mouse reports | Enable application mouse support; in tmux check `set -g mouse on`. |
 | Paste submits multiple commands | Bracketed paste not delivered | Test outside multiplexer; check terminal paste mode/settings. |
 | `/attach` works but no inline preview | Text-only image capability | Check `/settings` image preview row; use direct Kitty/Ghostty/WezTerm/Warp/iTerm2. |
-| `/copy` says copied but clipboard unchanged | OSC 52 blocked | Check terminal clipboard policy, SSH path, and tmux/screen settings. |
+| `/copy` says request sent but clipboard unchanged | OSC 52 blocked downstream | Check terminal clipboard policy, SSH path, and tmux/screen settings. |
 | Markdown links are not clickable | OSC 8 disabled or filtered | Check terminal hyperlink setting; avoid tmux/screen for clickable link testing. |
 | Colors are too bright/dim or absent | Theme override or `NO_COLOR` | Check `/settings`; unset `NO_COLOR`; set `AVA_TUI_THEME=dark` or `light`. |
 

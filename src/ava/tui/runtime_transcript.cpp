@@ -262,15 +262,15 @@ LatestAssistantCopyResult copy_latest_assistant_message(std::vector<TranscriptIt
     return LatestAssistantCopyResult::NoMessage;
   if (text->size() > kMaxTerminalClipboardTextBytes)
     return LatestAssistantCopyResult::Oversize;
-  return terminal_writer(*text) ? LatestAssistantCopyResult::Copied : LatestAssistantCopyResult::WriteFailure;
+  return terminal_writer(*text) ? LatestAssistantCopyResult::RequestSent : LatestAssistantCopyResult::WriteFailure;
 }
 
 std::string latest_assistant_copy_status(LatestAssistantCopyResult result)
 {
   switch (result)
   {
-    case LatestAssistantCopyResult::Copied:
-      return "copied last AVA message to clipboard";
+    case LatestAssistantCopyResult::RequestSent:
+      return "last AVA message copy request sent";
     case LatestAssistantCopyResult::NoMessage:
       return "no AVA messages to copy";
     case LatestAssistantCopyResult::Oversize:

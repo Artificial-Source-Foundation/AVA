@@ -245,15 +245,15 @@ void test_latest_assistant_copy_decisions()
     return true;
   });
   auto const failed = ava::tui::runtime_transcript::copy_latest_assistant_message(transcript, [](std::string_view) { return false; });
-  expect(success == LatestAssistantCopyResult::Copied && copied == "latest answer" && transcript.size() == 2 && transcript.front().text == "draft" &&
+  expect(success == LatestAssistantCopyResult::RequestSent && copied == "latest answer" && transcript.size() == 2 && transcript.front().text == "draft" &&
              transcript.back().text == "latest answer" && missing == LatestAssistantCopyResult::NoMessage && oversized == LatestAssistantCopyResult::Oversize &&
              failed == LatestAssistantCopyResult::WriteFailure && !writer_called &&
-             ava::tui::runtime_transcript::latest_assistant_copy_status(success) == "copied last AVA message to clipboard" &&
+             ava::tui::runtime_transcript::latest_assistant_copy_status(success) == "last AVA message copy request sent" &&
              ava::tui::runtime_transcript::latest_assistant_copy_status(missing) == "no AVA messages to copy" &&
              ava::tui::runtime_transcript::latest_assistant_copy_status(oversized).find("64 KiB") != std::string::npos &&
              ava::tui::runtime_transcript::latest_assistant_copy_status(failed) == "clipboard copy failed",
-         "idle and active-run copy action authority reports truthful success, no-message, oversize, and writer-failure status without draft or transcript "
-         "mutation");
+         "idle and active-run copy action authority reports request-sent, no-message, oversize, and writer-failure status without claiming delivery or "
+         "mutating draft/transcript state");
 }
 
 }  // namespace

@@ -47,7 +47,7 @@ enum class UserTurnCopySelectionAction
   MissingSelection,
   ReadFailure,
   ClipboardFailure,
-  Copied,
+  RequestSent,
 };
 
 struct UserTurnCopySelectionDecision
@@ -63,7 +63,8 @@ struct UserTurnCopySelectionDecision
 
 // Re-reads exact turn text by the selected stable entry id at action time, then
 // attempts clipboard copy. Truthful failure covers read errors and OSC/bound
-// clipboard rejection without claiming success.
+// clipboard rejection. RequestSent means AVA wrote the terminal request; downstream
+// delivery remains unknowable.
 [[nodiscard]] UserTurnCopySelectionDecision evaluate_copy_user_turn_selection(
     std::string_view selected_entry_id, std::function<ava::core::Result<std::string>(std::string_view entry_id)> const& on_read_user_turn_text,
     std::function<bool(std::string_view text)> const& copy_to_clipboard);

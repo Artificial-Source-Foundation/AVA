@@ -170,9 +170,9 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy tool")
     send_keys(tmux_exe, session, "Enter")
-    copied_tool = wait_for(tmux_exe, session, r"copied latest tool details to clipboard", "copy latest tool details")
-    if "copied latest tool details to clipboard" not in copied_tool:
-        raise RuntimeError(f"/copy tool did not report a copied tool-detail payload\nscreen:\n{copied_tool}")
+    copied_tool = wait_for(tmux_exe, session, r"latest tool details copy request sent", "copy latest tool details")
+    if "latest tool details copy request sent" not in copied_tool:
+        raise RuntimeError(f"/copy tool did not report a tool-detail copy request\nscreen:\n{copied_tool}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/permissions audit bash")
@@ -189,11 +189,11 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     copied_permission = wait_for(
         tmux_exe,
         session,
-        r"copied matching permission details to clipboard",
+        r"matching permission details copy request sent",
         "copy matching permission details",
     )
-    if "copied matching permission details to clipboard" not in copied_permission:
-        raise RuntimeError(f"/copy permission did not report a copied audit payload\nscreen:\n{copied_permission}")
+    if "matching permission details copy request sent" not in copied_permission:
+        raise RuntimeError(f"/copy permission did not report an audit copy request\nscreen:\n{copied_permission}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/write src/main.cpp int changed() { return 1; }")
@@ -414,18 +414,18 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy diff")
     send_keys(tmux_exe, session, "Enter")
-    copied_diff = wait_for(tmux_exe, session, r"copied latest tool diff to clipboard", "copy latest tool diff")
-    if "copied latest tool diff to clipboard" not in copied_diff:
-        raise RuntimeError(f"/copy diff did not report a copied unified diff\nscreen:\n{copied_diff}")
+    copied_diff = wait_for(tmux_exe, session, r"latest tool diff copy request sent", "copy latest tool diff")
+    if "latest tool diff copy request sent" not in copied_diff:
+        raise RuntimeError(f"/copy diff did not report a unified-diff copy request\nscreen:\n{copied_diff}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/copy diff main.cpp")
     send_keys(tmux_exe, session, "Enter")
     copied_matching_diff = wait_for(
-        tmux_exe, session, r"copied matching tool diff to clipboard", "copy matching tool diff"
+        tmux_exe, session, r"matching tool diff copy request sent", "copy matching tool diff"
     )
-    if "copied matching tool diff to clipboard" not in copied_matching_diff:
-        raise RuntimeError(f"/copy diff <query> did not report a copied matching diff\nscreen:\n{copied_matching_diff}")
+    if "matching tool diff copy request sent" not in copied_matching_diff:
+        raise RuntimeError(f"/copy diff <query> did not report a matching-diff copy request\nscreen:\n{copied_matching_diff}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/diff main.cpp")
@@ -446,10 +446,10 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "/copy tool write")
     send_keys(tmux_exe, session, "Enter")
     copied_matching_tool = wait_for(
-        tmux_exe, session, r"copied matching tool details to clipboard", "copy matching tool details"
+        tmux_exe, session, r"matching tool details copy request sent", "copy matching tool details"
     )
-    if "copied matching tool details to clipboard" not in copied_matching_tool:
-        raise RuntimeError(f"/copy tool <query> did not report a copied matching tool\nscreen:\n{copied_matching_tool}")
+    if "matching tool details copy request sent" not in copied_matching_tool:
+        raise RuntimeError(f"/copy tool <query> did not report a matching-tool copy request\nscreen:\n{copied_matching_tool}")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, f"/permissions audit {permission_request_prefix}")

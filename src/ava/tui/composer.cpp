@@ -1532,8 +1532,8 @@ std::vector<std::string> render_status_alert_lines(std::string_view status, std:
 {
   std::vector<std::string> lines;
   auto const alert = status_is_alert(status);
-  auto const copied_selection = status == "copied selection to clipboard";
-  if (max_lines == 0 || status.empty() || (!alert && !copied_selection))
+  auto const selection_copy_request_sent = status == "selection copy request sent";
+  if (max_lines == 0 || status.empty() || (!alert && !selection_copy_request_sent))
     return lines;
 
   auto const parts = split_lines(status);

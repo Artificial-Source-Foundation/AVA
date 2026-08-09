@@ -332,7 +332,7 @@ bool RuntimeActionController::copy_latest_assistant_message()
   auto& snapshot = presentation_state_.snapshot;
   auto const result = runtime_transcript::copy_latest_assistant_message(snapshot.transcript);
   snapshot.status = runtime_transcript::latest_assistant_copy_status(result);
-  if (result != runtime_transcript::LatestAssistantCopyResult::Copied)
+  if (result != runtime_transcript::LatestAssistantCopyResult::RequestSent)
     static_cast<void>(beep());
   return renderer_.request_render();
 }

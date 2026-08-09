@@ -100,7 +100,7 @@ UserTurnCopySelectionDecision evaluate_copy_user_turn_selection(
         .action = UserTurnCopySelectionAction::ClipboardFailure, .status = "clipboard copy failed", .beep = true, .transcript_label = "error"};
   }
   return UserTurnCopySelectionDecision{
-      .action = UserTurnCopySelectionAction::Copied, .status = "copied user turn to clipboard", .beep = false, .transcript_label = "status"};
+      .action = UserTurnCopySelectionAction::RequestSent, .status = "user turn copy request sent", .beep = false, .transcript_label = "status"};
 }
 
 }  // namespace ava::tui

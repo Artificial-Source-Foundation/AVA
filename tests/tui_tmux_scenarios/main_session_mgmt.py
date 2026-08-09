@@ -508,11 +508,11 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     copy_status = wait_for(
         tmux_exe,
         picker_session,
-        r"copied user turn to clipboard|clipboard copy failed",
+        r"user turn copy request sent|clipboard copy failed",
         "copy user Enter status",
     )
     wait_for_absent(tmux_exe, picker_session, r"Copy user turn", "copy user selector cleared after resolve")
-    if "copied user turn to clipboard" not in copy_status and "clipboard copy failed" not in copy_status:
+    if "user turn copy request sent" not in copy_status and "clipboard copy failed" not in copy_status:
         raise RuntimeError(f"copy user did not report a truthful status\nscreen:\n{copy_status}")
     save_evidence(root, "user-turn-copy-user", copy_status)
 

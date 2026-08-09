@@ -100,9 +100,6 @@ class TmuxClient:
             )
         return result
 
-    def start(self) -> None:
-        self.run(["start-server"])
-
     def close(self) -> None:
         self.run(["kill-server"], check=False)
 
@@ -476,7 +473,9 @@ class SmokeContext:
             self._environment = _compatibility_environment(home=tmux_home, tmpdir=tmpdir)
             self.tmux = TmuxClient(self.tmux_exe, self.root / "tmux.sock", self._environment)
             self._prepare_fixture()
-            self.tmux.start()
+            # The first new-session command starts the private server atomically.
+            # A separate start-server races tmux's default exit-empty teardown
+            # because no session exists yet.
         except BaseException:
             self.close()
             raise

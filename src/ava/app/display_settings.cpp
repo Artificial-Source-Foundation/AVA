@@ -457,6 +457,100 @@ ava::core::Result<bool> decode_json_bool_value(std::string_view raw_value, std::
   return std::unexpected(invalid_display_error(std::string(field) + " must be a JSON boolean", path, field));
 }
 
+ava::core::Result<std::vector<std::string>> decode_mermaid_argv(std::string_view raw_value, std::filesystem::path const& path)
+{
+  if (raw_value.empty() || raw_value.front() != '[')
+    return std::unexpected(invalid_display_error("mermaid.argv must be an array of strings", path, "mermaid.argv"));
+
+  std::vector<std::string> argv;
+  std::size_t total_bytes = 0;
+  std::size_t offset = 1;
+  skip_json_whitespace(raw_value, offset);
+  if (offset < raw_value.size() && raw_value[offset] == ']')
+  {
+    ++offset;
+    skip_json_whitespace(raw_value, offset);
+    if (offset == raw_value.size())
+      return argv;
+  }
+
+  while (offset < raw_value.size())
+  {
+    if (argv.size() == kMaxMermaidArgCount || raw_value[offset] != '"')
+      return std::unexpected(invalid_display_error("mermaid.argv must contain at most 32 strings", path, "mermaid.argv"));
+    auto const literal_end = json_string_literal_end(raw_value, offset);
+    if (!literal_end)
+      return std::unexpected(invalid_display_error("mermaid.argv must be an array of strings", path, "mermaid.argv"));
+    auto decoded = decode_json_string_value(raw_value.substr(offset, *literal_end - offset + 1), path, "mermaid.argv");
+    if (!decoded)
+      return std::unexpected(std::move(decoded.error()));
+    if (decoded->size() > kMaxMermaidArgBytes || decoded->find('\0') != std::string::npos || total_bytes > kMaxMermaidArgvBytes - decoded->size())
+    {
+      return std::unexpected(invalid_display_error("mermaid.argv exceeds its argument byte limits", path, "mermaid.argv"));
+    }
+    total_bytes += decoded->size();
+    argv.push_back(std::move(*decoded));
+    offset = *literal_end + 1;
+    skip_json_whitespace(raw_value, offset);
+    if (offset < raw_value.size() && raw_value[offset] == ',')
+    {
+      ++offset;
+      skip_json_whitespace(raw_value, offset);
+      continue;
+    }
+    if (offset < raw_value.size() && raw_value[offset] == ']')
+    {
+      ++offset;
+      skip_json_whitespace(raw_value, offset);
+      if (offset == raw_value.size())
+        break;
+    }
+    return std::unexpected(invalid_display_error("mermaid.argv must be an array of strings", path, "mermaid.argv"));
+  }
+
+  if (!argv.empty() && !std::filesystem::path(argv.front()).is_absolute())
+    return std::unexpected(invalid_display_error("mermaid.argv[0] must be an absolute path", path, "mermaid.argv"));
+  return argv;
+}
+
+ava::core::Result<MermaidDisplaySettings> decode_mermaid_settings(std::string_view raw_value, std::filesystem::path const& path)
+{
+  auto entries = top_level_display_entries(raw_value);
+  if (!entries)
+    return std::unexpected(invalid_display_error("mermaid must be a JSON object", path, "mermaid"));
+
+  MermaidDisplaySettings settings;
+  for (auto const& entry : *entries)
+  {
+    if (entry.key == "enabled")
+    {
+      if (settings.enabled_configured)
+        return std::unexpected(invalid_display_error("duplicate mermaid.enabled field", path, "mermaid.enabled"));
+      auto enabled = decode_json_bool_value(entry.raw_value, path, "mermaid.enabled");
+      if (!enabled)
+        return std::unexpected(std::move(enabled.error()));
+      settings.enabled = *enabled;
+      settings.enabled_configured = true;
+      continue;
+    }
+    if (entry.key == "argv")
+    {
+      if (settings.argv_configured)
+        return std::unexpected(invalid_display_error("duplicate mermaid.argv field", path, "mermaid.argv"));
+      auto argv = decode_mermaid_argv(entry.raw_value, path);
+      if (!argv)
+        return std::unexpected(std::move(argv.error()));
+      settings.argv = std::move(*argv);
+      settings.argv_configured = true;
+      continue;
+    }
+    settings.unknown_fields.emplace_back(entry.key, entry.raw_value);
+  }
+  if (settings.enabled && settings.argv.empty())
+    return std::unexpected(invalid_display_error("enabled mermaid rendering requires nonempty argv", path, "mermaid.argv"));
+  return settings;
+}
+
 ava::core::Result<std::size_t> decode_image_width_value(std::string_view raw_value, std::filesystem::path const& path)
 {
   if (raw_value.empty() || raw_value.front() == '"' || raw_value.front() == '{' || raw_value.front() == '[' || raw_value == "true" || raw_value == "false" ||
@@ -511,11 +605,16 @@ ava::core::Result<DisplaySettingsDocument> parse_display_settings_document(std::
   if (!entries)
     return std::unexpected(invalid_display_error("invalid TUI display settings JSON object", path));
 
-  DisplaySettingsDocument document{
-      .theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .unknown_fields = {}, .path = std::move(path)};
+  DisplaySettingsDocument document{.theme = std::nullopt,
+                                   .show_images = std::nullopt,
+                                   .image_width_cells = std::nullopt,
+                                   .mermaid = std::nullopt,
+                                   .unknown_fields = {},
+                                   .path = std::move(path)};
   bool saw_theme = false;
   bool saw_show_images = false;
   bool saw_image_width = false;
+  bool saw_mermaid = false;
   for (auto const& entry : *entries)
   {
     if (entry.key == "theme")
@@ -552,21 +651,70 @@ ava::core::Result<DisplaySettingsDocument> parse_display_settings_document(std::
       document.image_width_cells = *decoded;
       continue;
     }
+    if (entry.key == "mermaid")
+    {
+      if (saw_mermaid)
+        return std::unexpected(invalid_display_error("duplicate mermaid field", document.path, "mermaid"));
+      saw_mermaid = true;
+      auto decoded = decode_mermaid_settings(entry.raw_value, document.path);
+      if (!decoded)
+        return std::unexpected(std::move(decoded.error()));
+      document.mermaid = std::move(*decoded);
+      continue;
+    }
     document.unknown_fields.emplace_back(entry.key, entry.raw_value);
   }
   return document;
 }
 
+std::string serialize_mermaid_settings(MermaidDisplaySettings const& settings)
+{
+  std::vector<DisplayJsonEntry> entries;
+  entries.reserve(2 + settings.unknown_fields.size());
+  if (settings.enabled_configured)
+    entries.push_back(DisplayJsonEntry{.key = "enabled", .raw_value = settings.enabled ? "true" : "false"});
+  if (settings.argv_configured)
+  {
+    std::string argv = "[";
+    for (std::size_t index = 0; index < settings.argv.size(); ++index)
+    {
+      if (index != 0)
+        argv += ", ";
+      argv += '"';
+      argv += ava::core::json::escape(settings.argv[index]);
+      argv += '"';
+    }
+    argv += ']';
+    entries.push_back(DisplayJsonEntry{.key = "argv", .raw_value = std::move(argv)});
+  }
+  for (auto const& unknown : settings.unknown_fields) entries.push_back(DisplayJsonEntry{.key = unknown.first, .raw_value = unknown.second});
+
+  std::string out = "{";
+  for (std::size_t index = 0; index < entries.size(); ++index)
+  {
+    if (index != 0)
+      out += ", ";
+    out += '"';
+    out += ava::core::json::escape(entries[index].key);
+    out += "\": ";
+    out += entries[index].raw_value;
+  }
+  out += '}';
+  return out;
+}
+
 std::string serialize_display_settings_document(DisplaySettingsDocument const& document)
 {
   std::vector<DisplayJsonEntry> entries;
-  entries.reserve(3 + document.unknown_fields.size());
+  entries.reserve(4 + document.unknown_fields.size());
   if (document.theme)
     entries.push_back(DisplayJsonEntry{.key = "theme", .raw_value = std::string("\"") + ava::core::json::escape(*document.theme) + "\""});
   if (document.show_images)
     entries.push_back(DisplayJsonEntry{.key = "show_images", .raw_value = *document.show_images ? "true" : "false"});
   if (document.image_width_cells)
     entries.push_back(DisplayJsonEntry{.key = "image_width_cells", .raw_value = std::to_string(*document.image_width_cells)});
+  if (document.mermaid)
+    entries.push_back(DisplayJsonEntry{.key = "mermaid", .raw_value = serialize_mermaid_settings(*document.mermaid)});
   for (auto const& unknown : document.unknown_fields) entries.push_back(DisplayJsonEntry{.key = unknown.first, .raw_value = unknown.second});
 
   if (entries.empty())
@@ -640,7 +788,8 @@ ava::core::Result<DisplaySettingsDocument> load_or_default_document(ava::config:
   if (exists_error)
     return std::unexpected(io_error("failed to inspect TUI display settings", path, exists_error));
   if (!exists)
-    return DisplaySettingsDocument{.theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .unknown_fields = {}, .path = path};
+    return DisplaySettingsDocument{
+        .theme = std::nullopt, .show_images = std::nullopt, .image_width_cells = std::nullopt, .mermaid = std::nullopt, .unknown_fields = {}, .path = path};
 
   auto content = read_display_settings_text(path);
   if (!content)
@@ -657,6 +806,7 @@ TuiDisplaySettings display_settings_from_document_fields(DisplaySettingsDocument
                               .image_width_cells = kDefaultTuiImageWidthCells,
                               .show_images_configured = false,
                               .image_width_configured = false,
+                              .mermaid = document.mermaid.value_or(MermaidDisplaySettings{}),
                               .path = document.path};
   settings.show_images = document.show_images.value_or(true);
   settings.image_width_cells = document.image_width_cells.value_or(kDefaultTuiImageWidthCells);
@@ -1337,6 +1487,7 @@ ava::core::Result<TuiDisplaySettingsWatchState> load_tui_display_settings_watch_
   state.theme = settings->theme;
   state.show_images = settings->show_images;
   state.image_width_cells = settings->image_width_cells;
+  state.mermaid = settings->mermaid;
   if (settings->custom_theme)
   {
     state.custom_theme_path = settings->custom_theme->path;
@@ -1350,7 +1501,8 @@ bool tui_display_settings_watch_state_changed(TuiDisplaySettingsWatchState const
 {
   return previous.display_revision != current.display_revision || previous.theme != current.theme || previous.custom_theme_path != current.custom_theme_path ||
          previous.custom_theme_revision != current.custom_theme_revision || previous.show_images != current.show_images ||
-         previous.image_width_cells != current.image_width_cells || previous.custom_theme_catalog.size() != current.custom_theme_catalog.size() ||
+         previous.image_width_cells != current.image_width_cells || previous.mermaid.enabled != current.mermaid.enabled ||
+         previous.mermaid.argv != current.mermaid.argv || previous.custom_theme_catalog.size() != current.custom_theme_catalog.size() ||
          !std::equal(previous.custom_theme_catalog.begin(), previous.custom_theme_catalog.end(), current.custom_theme_catalog.begin(),
                      [](TuiCustomThemeCatalogEntry const& left, TuiCustomThemeCatalogEntry const& right) {
                        return left.name == right.name && left.revision == right.revision;

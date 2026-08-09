@@ -60,6 +60,7 @@ void run_lsp_tests();
 void run_plugin_tests();
 void run_plugin_ui_tests();
 void run_mcp_tests();
+void run_mermaid_render_coordinator_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_run_observer_tests();
@@ -119,6 +120,7 @@ constexpr std::array kTestSuites{
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"plugin_ui", run_plugin_ui_tests},
     TestSuite{"mcp", run_mcp_tests},
+    TestSuite{"mermaid_render", run_mermaid_render_coordinator_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"run_observer", run_run_observer_tests},

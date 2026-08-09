@@ -147,6 +147,9 @@ int run_tui(ShellState state)
                                                                                   .custom_theme = std::nullopt,
                                                                                   .show_images = true,
                                                                                   .image_width_cells = ava::app::kDefaultTuiImageWidthCells,
+                                                                                  .show_images_configured = false,
+                                                                                  .image_width_configured = false,
+                                                                                  .mermaid = {},
                                                                                   .path = ava::app::tui_display_settings_file(invocation_paths)});
   auto effective_display_settings_mutex = std::make_shared<std::mutex>();
   auto remember_effective_display_settings = [effective_display_settings, effective_display_settings_mutex](ava::app::TuiDisplaySettings settings) {

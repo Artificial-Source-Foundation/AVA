@@ -45,6 +45,11 @@ target_link_libraries(ava_fake_mcp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_mcp_server)
 ava_apply_sanitizers(ava_fake_mcp_server)
 
+add_executable(ava_fake_mermaid_helper "support/fake_mermaid_helper.cpp")
+ava_apply_debugging(ava_fake_mermaid_helper)
+ava_apply_warnings(ava_fake_mermaid_helper)
+ava_apply_sanitizers(ava_fake_mermaid_helper)
+
 add_executable(ava_fake_provider_server "support/fake_provider_server.cpp")
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
@@ -116,6 +121,7 @@ set(AVA_TESTS_SOURCES
   "events_tests.cpp"
   "lsp_tests.cpp"
   "mcp_tests.cpp"
+  "mermaid_render_coordinator_tests.cpp"
   "permission_rules_tests.cpp"
   "plugin_tests.cpp"
   "plugin_ui_tests.cpp"
@@ -177,9 +183,10 @@ endif()
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
-add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_provider_server)
+add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_mermaid_helper ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
+target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MERMAID_HELPER_PATH="$<TARGET_FILE:ava_fake_mermaid_helper>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
 target_compile_definitions(ava_tests PRIVATE AVA_M1_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/fixtures/eval/m1")
@@ -232,6 +239,7 @@ set(AVA_TEST_SUITES
   plugin
   plugin_ui
   mcp
+  mermaid_render
   permission_rules
   tui_composer
   run_observer

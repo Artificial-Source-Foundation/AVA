@@ -18,6 +18,9 @@ inline constexpr std::size_t kDefaultTuiImageWidthCells = 60;
 inline constexpr std::size_t kMinTuiImageWidthCells = 8;
 inline constexpr std::size_t kMaxTuiImageWidthCells = 160;
 inline constexpr std::size_t kMaxTuiDisplaySettingsBytes = 64 * 1024;
+inline constexpr std::size_t kMaxMermaidArgCount = 32;
+inline constexpr std::size_t kMaxMermaidArgBytes = 4 * 1024;
+inline constexpr std::size_t kMaxMermaidArgvBytes = 16 * 1024;
 // Conservative application-owned bounds for custom theme discovery and the 500ms display watch.
 // One oversized/invalid unconfigured file is skipped and must not fail built-in display reload.
 inline constexpr std::size_t kMaxTuiCustomThemeFileBytes = 64 * 1024;
@@ -35,17 +38,31 @@ struct TuiCustomThemeSummary
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-// Validated display.json document with field-preserving unknown top-level members.
+// Validated Mermaid helper settings. Missing enabled is equivalent to false.
+// Unknown nested members are retained verbatim by display.json field-specific updates.
+struct MermaidDisplaySettings
+{
+  bool enabled = false;
+  bool enabled_configured = false;
+  std::vector<std::string> argv;
+  bool argv_configured = false;
+  std::vector<std::pair<std::string, std::string>> unknown_fields;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// Validated display.json document with field-preserving unknown members.
 struct DisplaySettingsDocument
 {
   std::optional<std::string> theme;
   std::optional<bool> show_images;
   std::optional<std::size_t> image_width_cells;
+  std::optional<MermaidDisplaySettings> mermaid;
   // Unknown top-level fields retained as raw JSON values for forward-compatible updates.
   std::vector<std::pair<std::string, std::string>> unknown_fields;
   std::filesystem::path path;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiDisplaySettings
@@ -56,9 +73,10 @@ struct TuiDisplaySettings
   std::size_t image_width_cells = kDefaultTuiImageWidthCells;
   bool show_images_configured = false;
   bool image_width_configured = false;
+  MermaidDisplaySettings mermaid;
   std::filesystem::path path;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 // One validated previewable custom theme observed by the application-owned watcher.
@@ -105,11 +123,12 @@ struct TuiDisplaySettingsWatchState
   std::optional<std::string> custom_theme_revision;
   bool show_images = true;
   std::size_t image_width_cells = kDefaultTuiImageWidthCells;
+  MermaidDisplaySettings mermaid;
   // Bounded deterministic catalog of every validated custom theme candidate (stable name order),
   // including themes that are only previewable and not currently configured.
   std::vector<TuiCustomThemeCatalogEntry> custom_theme_catalog;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 [[nodiscard]] std::filesystem::path tui_display_settings_file(ava::config::XdgPaths const& paths);

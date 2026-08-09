@@ -3,6 +3,7 @@
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/prompt_stash_internal.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_active_run_state_internal.h"
@@ -151,6 +152,20 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (auto stash_argument = runtime_commands::stash_command_argument(submitted_command))
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    if (stash_argument->empty())
+      return prompt_stash_.open_selector();
+    if (*stash_argument == "pop")
+      return prompt_stash_.pop_latest();
+    if (*stash_argument == "clear")
+      return prompt_stash_.clear();
+    snapshot.status = "invalid_argument: usage: /stash [pop|clear]";
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
   if (runtime_commands::exact_command(submitted_command, "/jobs"))
   {
     push_history(input_history, submitted_command);
@@ -418,6 +433,8 @@ bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runt
   {
     return true;
   }
+  if (auto handled = prompt_stash_.handle_selector_input(active_input.event))
+    return *handled;
 
   auto result = handle_preemptive_input(state, active_input);
   if (result != InputHandling::Unhandled)

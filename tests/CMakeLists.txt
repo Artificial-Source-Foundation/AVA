@@ -164,6 +164,7 @@ set(AVA_TESTS_SOURCES
   "tui_mermaid_tests.cpp"
   "tui_modal_tests.cpp"
   "tui_permission_tests.cpp"
+  "tui_prompt_stash_tests.cpp"
   "tui_runtime_state_tests.cpp"
   "tui_selector_tests.cpp"
   "tui_terminal_input_tests.cpp"
@@ -630,18 +631,18 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.session_read_authority_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
-    NAME ava_tests.session_reference_inventory
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/session_reference_inventory_test.py
-            --source ${CMAKE_SOURCE_DIR})
-  set_tests_properties(ava_tests.session_reference_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
-
-  add_test(
     NAME ava_tests.plugin_ui_authority_inventory
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/plugin_ui_authority_inventory_test.py
             --source ${CMAKE_SOURCE_DIR})
   set_tests_properties(ava_tests.plugin_ui_authority_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.session_reference_inventory
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/session_reference_inventory_test.py
+            --source ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.session_reference_inventory PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_tests.acp_interop_manifest

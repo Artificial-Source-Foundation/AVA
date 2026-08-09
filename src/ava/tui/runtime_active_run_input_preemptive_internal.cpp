@@ -2,6 +2,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/prompt_stash_internal.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_active_run_state_internal.h"
@@ -73,6 +74,10 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
     }
     jump_mode = ComposerJumpMode::None;
   }
+  if (is_action(active_event, TuiAction::CopyLatestAssistant))
+    return to_input_handling(action_controller_.copy_latest_assistant_message());
+  if (is_action(active_event, TuiAction::PromptStash))
+    return to_input_handling(prompt_stash_.trigger());
   if (active_event.key == Key::Escape || is_action(active_event, TuiAction::Cancel))
   {
     switch (detail::active_run_cancel_disposition(draft_state.selection_bounds().has_value(), renderer_.has_transcript_selection()))

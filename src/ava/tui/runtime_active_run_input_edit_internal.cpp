@@ -157,6 +157,16 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_nav
   auto& draft_input = draft_state_.draft_input;
   auto& input_history = draft_state_.input_history;
 
+  if (is_action(active_event, TuiAction::TranscriptHalfPageUp))
+  {
+    navigation_.scroll_up(navigation_.transcript_page_size());
+    return to_input_handling(renderer_.request_render());
+  }
+  if (is_action(active_event, TuiAction::TranscriptHalfPageDown))
+  {
+    navigation_.scroll_down(navigation_.transcript_page_size());
+    return to_input_handling(renderer_.request_render());
+  }
   if (is_action(active_event, TuiAction::PageUp))
   {
     navigation_.scroll_up(navigation_.transcript_page_size());

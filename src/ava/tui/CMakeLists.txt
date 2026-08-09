@@ -20,6 +20,7 @@ add_library(ava_tui
   "event_state.cpp"
   "keybindings.cpp"
   "mermaid_projection.cpp"
+  "prompt_stash_internal.cpp"
   "runtime.cpp"
   "runtime_active_run_internal.cpp"
   "runtime_active_run_input_internal.cpp"

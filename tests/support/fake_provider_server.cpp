@@ -665,14 +665,15 @@ int main(int argc, char** argv)
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
   int const request_count =
-      scenario == "http-error"            ? 3
-      : scenario == "branch-summary"      ? 12
-      : scenario == "text-three"          ? 3
-      : scenario == "streaming-scroll"    ? 2
-      : scenario == "end-to-end-workflow" ? 6
-      : scenario == "read-tool-twice"     ? 4
-      : scenario == "read-tool-thrice"    ? 6
-      : scenario == "subagent-workspace"  ? 4
+      scenario == "http-error"                 ? 3
+      : scenario == "branch-summary"           ? 12
+      : scenario == "text-three"               ? 3
+      : scenario == "text-three-delayed-third" ? 4
+      : scenario == "streaming-scroll"         ? 2
+      : scenario == "end-to-end-workflow"      ? 6
+      : scenario == "read-tool-twice"          ? 4
+      : scenario == "read-tool-thrice"         ? 6
+      : scenario == "subagent-workspace"       ? 4
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
          scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
          scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "terminal-tool" || scenario == "compact" || scenario == "compact-delayed")
@@ -743,7 +744,10 @@ int main(int argc, char** argv)
     }
     if (scenario == "subagent-workspace" && request_index > 0 && !wait_for_streaming_marker(target_path, "release-live"))
       return 1;
-    if ((scenario == "compact-delayed" && request_index == 1) || (scenario != "compact-delayed" && request_index == 0))
+    auto const delay_this_request = scenario == "compact-delayed"            ? request_index == 1
+                                    : scenario == "text-three-delayed-third" ? request_index == 2
+                                                                             : request_index == 0;
+    if (delay_this_request)
       std::this_thread::sleep_for(delay);
 
     auto provider_response = response_for(scenario, request_index, target_path);

@@ -163,6 +163,18 @@ void run_tui_keybinding_tests()
   auto const ctrl_digit_bindings = ava::tui::parse_key_bindings_json("{\"tui.editor.cursorLineEnd\":\"Ctrl+1\"}");
   expect(ctrl_digit_bindings && ava::tui::key_matches_action(*ctrl_digit_bindings, ava::tui::TuiAction::CursorLineEnd, ava::tui::Key::Ctrl1),
          "tui keybind parser accepts Pi-style Ctrl+digit special keys");
+  auto const prompt_navigation_bindings = ava::tui::parse_key_bindings_json(
+      "{\"app.transcript.copyLatestAssistant\":\"F7\",\"promptStash\":\"F8\","
+      "\"transcriptHalfPageUp\":\"F9\",\"halfPageDown\":\"F10\"}");
+  expect(prompt_navigation_bindings && ava::tui::key_matches_action(*prompt_navigation_bindings, ava::tui::TuiAction::CopyLatestAssistant, ava::tui::Key::F7) &&
+             ava::tui::key_matches_action(*prompt_navigation_bindings, ava::tui::TuiAction::PromptStash, ava::tui::Key::F8) &&
+             ava::tui::key_matches_action(*prompt_navigation_bindings, ava::tui::TuiAction::TranscriptHalfPageUp, ava::tui::Key::F9) &&
+             ava::tui::key_matches_action(*prompt_navigation_bindings, ava::tui::TuiAction::TranscriptHalfPageDown, ava::tui::Key::F10) &&
+             ava::tui::key_binding_config_action_id(ava::tui::TuiAction::CopyLatestAssistant) == "app.transcript.copyLatestAssistant" &&
+             ava::tui::key_binding_config_action_id(ava::tui::TuiAction::PromptStash) == "app.prompt.stash" &&
+             ava::tui::key_binding_config_action_id(ava::tui::TuiAction::TranscriptHalfPageUp) == "app.transcript.halfPageUp" &&
+             ava::tui::key_binding_config_action_id(ava::tui::TuiAction::TranscriptHalfPageDown) == "app.transcript.halfPageDown",
+         "tui keybind parser accepts canonical and supported aliases for copy, prompt stash, and transcript half-page actions");
   auto const default_bindings = ava::tui::default_key_bindings();
   expect(!ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::HistoryNext, ava::tui::Key::ArrowDown) &&
@@ -234,6 +246,12 @@ void run_tui_keybinding_tests()
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::DetailsToggle, ava::tui::Key::CtrlO) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CopySelection, ava::tui::Key::CtrlC) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ClearInput, ava::tui::Key::CtrlC) &&
+             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::CopyLatestAssistant, ava::tui::Key::F5) &&
+             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::PromptStash, ava::tui::Key::F6) &&
+             ava::tui::keys_display(default_bindings, ava::tui::TuiAction::TranscriptHalfPageUp).empty() &&
+             ava::tui::keys_display(default_bindings, ava::tui::TuiAction::TranscriptHalfPageDown).empty() &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TranscriptHalfPageUp, ava::tui::Key::CtrlU) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TranscriptHalfPageDown, ava::tui::Key::CtrlD) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ExternalEditor, ava::tui::Key::CtrlG) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::ShiftTab) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT) &&
@@ -267,6 +285,10 @@ void run_tui_keybinding_tests()
           ava::tui::action_name(ava::tui::TuiAction::SelectConfirm) == "select_confirm" &&
           ava::tui::action_name(ava::tui::TuiAction::SelectCancel) == "select_cancel" &&
           ava::tui::action_name(ava::tui::TuiAction::CopySelection) == "copy_selection" &&
+          ava::tui::action_name(ava::tui::TuiAction::CopyLatestAssistant) == "copy_latest_assistant" &&
+          ava::tui::action_name(ava::tui::TuiAction::PromptStash) == "prompt_stash" &&
+          ava::tui::action_name(ava::tui::TuiAction::TranscriptHalfPageUp) == "transcript_half_page_up" &&
+          ava::tui::action_name(ava::tui::TuiAction::TranscriptHalfPageDown) == "transcript_half_page_down" &&
           ava::tui::action_name(ava::tui::TuiAction::ExternalEditor) == "external_editor" && ava::tui::action_name(ava::tui::TuiAction::Suspend) == "suspend" &&
           ava::tui::action_name(ava::tui::TuiAction::ClipboardPasteImage) == "clipboard_paste_image" &&
           ava::tui::action_name(ava::tui::TuiAction::ModelSelect) == "model_select" &&
@@ -322,6 +344,15 @@ void run_tui_keybinding_tests()
           std::ranges::any_of(
               help_items,
               [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "clear_input" && item.keys.find("Ctrl+C") != std::string::npos; }) &&
+          std::ranges::any_of(help_items,
+                              [](ava::tui::TuiKeyBindingHelpItem const& item) {
+                                return item.action == "copy_latest_assistant" && item.keys.find("F5") != std::string::npos;
+                              }) &&
+          std::ranges::any_of(
+              help_items,
+              [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "prompt_stash" && item.keys.find("F6") != std::string::npos; }) &&
+          std::ranges::none_of(help_items, [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "transcript_half_page_up"; }) &&
+          std::ranges::none_of(help_items, [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "transcript_half_page_down"; }) &&
           std::ranges::any_of(
               help_items,
               [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "external_editor" && item.keys.find("Ctrl+G") != std::string::npos; }) &&
@@ -461,6 +492,8 @@ void run_tui_keybinding_tests()
         ava::tui::TuiAction::Cancel,
         ava::tui::TuiAction::ClearInput,
         ava::tui::TuiAction::CopySelection,
+        ava::tui::TuiAction::CopyLatestAssistant,
+        ava::tui::TuiAction::PromptStash,
         ava::tui::TuiAction::ExternalEditor,
         ava::tui::TuiAction::Suspend,
         ava::tui::TuiAction::ClipboardPasteImage,
@@ -500,6 +533,8 @@ void run_tui_keybinding_tests()
         ava::tui::TuiAction::DetailsToggle,
         ava::tui::TuiAction::PageUp,
         ava::tui::TuiAction::PageDown,
+        ava::tui::TuiAction::TranscriptHalfPageUp,
+        ava::tui::TuiAction::TranscriptHalfPageDown,
         ava::tui::TuiAction::ModeToggle,
         ava::tui::TuiAction::Interrupt,
         ava::tui::TuiAction::Exit,

@@ -19,6 +19,7 @@ void run_tui_composer_tests()
   run_tui_composer_rendering_tests_part_2();
   run_tui_completion_tests();
   run_tui_keybinding_tests();
+  run_tui_prompt_stash_tests();
   run_tui_modal_tests_part_2();
   run_tui_permission_tests_part_2();
   run_tui_composer_rendering_tests_part_3();

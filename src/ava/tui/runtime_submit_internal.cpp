@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
+#include "ava/tui/prompt_stash_internal.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
@@ -33,11 +34,11 @@ using runtime_commands::reload_command_argument;
 using runtime_commands::reload_target_from_argument;
 using runtime_commands::ReloadTarget;
 using runtime_commands::search_command_argument;
+using runtime_commands::stash_command_argument;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::diff_transcript_text;
-using runtime_transcript::latest_ava_message_copy_text;
 using runtime_transcript::latest_permission_copy_text;
 using runtime_transcript::latest_tool_copy_text;
 using runtime_transcript::latest_tool_diff_copy_text;
@@ -47,8 +48,9 @@ using runtime_views::compact_path_leaf;
 
 RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                                                  RuntimeRenderer& renderer, RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                                                 RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
-                                                 RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list)
+                                                 RuntimeActiveRunController& active_run_controller, RuntimePromptStashController& prompt_stash,
+                                                 TranscriptSearchController& transcript_search, RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                 ActiveSelectList& active_select_list)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -56,6 +58,7 @@ RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, Run
       navigation_(navigation),
       action_controller_(action_controller),
       active_run_controller_(active_run_controller),
+      prompt_stash_(prompt_stash),
       transcript_search_(transcript_search),
       subagent_workspace_(subagent_workspace),
       active_select_list_(active_select_list)
@@ -89,7 +92,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
            (exact_command(draft.text, "/scoped-models") && options_.scoped_model_selector_view) ||
            ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
             options_.session_selector_view) ||
-           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview"))
+           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview") || exact_command(draft.text, "/stash"))
   {
     immediate_slash_submission = expanded_composer_draft_text(draft);
   }
@@ -199,6 +202,24 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   path_completion_force_active = false;
   if (!submitted.empty())
   {
+    if (auto stash_argument = stash_command_argument(submitted))
+    {
+      push_history(input_history, submitted);
+      bool success = true;
+      if (stash_argument->empty())
+        success = prompt_stash_.open_selector();
+      else if (*stash_argument == "pop")
+        success = prompt_stash_.pop_latest();
+      else if (*stash_argument == "clear")
+        success = prompt_stash_.clear();
+      else
+      {
+        snapshot.status = "invalid_argument: usage: /stash [pop|clear]";
+        static_cast<void>(beep());
+        success = renderer_.request_render();
+      }
+      return {.disposition = success ? RuntimeSubmitDisposition::ContinueLoop : RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = !success};
+    }
     if (exact_command(submitted, "/jobs"))
     {
       push_history(input_history, submitted);
@@ -512,11 +533,13 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       std::string missing_status;
       bool valid_target = true;
       bool copied = false;
+      bool handled_latest_assistant = false;
       if (target.name.empty() || target.name == "last")
       {
-        copy_text = latest_ava_message_copy_text(snapshot.transcript);
-        copied_status = "copied last AVA message to clipboard";
-        missing_status = "no AVA messages to copy";
+        auto const result = runtime_transcript::copy_latest_assistant_message(snapshot.transcript);
+        copied = result == runtime_transcript::LatestAssistantCopyResult::Copied;
+        snapshot.status = runtime_transcript::latest_assistant_copy_status(result);
+        handled_latest_assistant = true;
       }
       else if (target.name == "tool" || target.name == "tools")
       {
@@ -548,7 +571,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
                           "\n  supported: user [query], tool [query], diff [query], permission [query]";
       }
 
-      if (valid_target)
+      if (valid_target && !handled_latest_assistant)
       {
         copied = copy_text && copy_text_to_terminal_clipboard(*copy_text);
         if (copied)

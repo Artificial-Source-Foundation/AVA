@@ -37,6 +37,7 @@ class RuntimeActionController final
   [[nodiscard]] bool queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
                                                     std::string transcript_prefix);
   [[nodiscard]] bool paste_clipboard_image();
+  [[nodiscard]] bool copy_latest_assistant_message();
   void cycle_reasoning();
   void toggle_thinking_visibility();
   [[nodiscard]] bool open_model_selector();

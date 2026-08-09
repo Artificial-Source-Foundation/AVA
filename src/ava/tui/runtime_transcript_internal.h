@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -46,6 +47,21 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
 [[nodiscard]] std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript);
+
+enum class LatestAssistantCopyResult
+{
+  Copied,
+  NoMessage,
+  Oversize,
+  WriteFailure,
+};
+
+// Shared by /copy and app.transcript.copyLatestAssistant. The bound is checked
+// before invoking the supplied terminal writer, so oversize and write failures
+// remain distinguishable and no payload is silently truncated.
+[[nodiscard]] LatestAssistantCopyResult copy_latest_assistant_message(
+    std::vector<TranscriptItem> const& transcript, std::function<bool(std::string_view)> const& terminal_writer = copy_text_to_terminal_clipboard);
+[[nodiscard]] std::string latest_assistant_copy_status(LatestAssistantCopyResult result);
 [[nodiscard]] std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript);
 void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript);

@@ -20,6 +20,7 @@ struct TuiRuntimeOptions;
 class RuntimeActionController;
 class RuntimeNavigationController;
 class RuntimePromptCoordinator;
+class RuntimePromptStashController;
 class RuntimePluginUiCoordinator;
 class RuntimeRenderer;
 class RuntimeSubagentWorkspaceController;
@@ -105,9 +106,10 @@ class RuntimeActiveRunController final
 {
  public:
   RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
-                             RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator, RuntimePluginUiCoordinator& plugin_ui,
-                             RuntimeNavigationController& navigation, RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
-                             RuntimeSubagentWorkspaceController& subagent_workspace, std::function<bool()> service_mermaid_presentation = {});
+                             RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator, RuntimePromptStashController& prompt_stash,
+                             RuntimePluginUiCoordinator& plugin_ui, RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
+                             TranscriptSearchController& transcript_search, RuntimeSubagentWorkspaceController& subagent_workspace,
+                             std::function<bool()> service_mermaid_presentation = {});
   RuntimeActiveRunController(RuntimeActiveRunController const&) = delete;
   RuntimeActiveRunController& operator=(RuntimeActiveRunController const&) = delete;
 
@@ -156,6 +158,7 @@ class RuntimeActiveRunController final
   RuntimeDraftState& draft_state_;
   RuntimeRenderer& renderer_;
   RuntimePromptCoordinator& prompt_coordinator_;
+  RuntimePromptStashController& prompt_stash_;
   RuntimePluginUiCoordinator& plugin_ui_;
   RuntimeNavigationController& navigation_;
   RuntimeActionController& action_controller_;

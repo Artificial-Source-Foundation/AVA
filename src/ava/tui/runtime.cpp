@@ -3,6 +3,7 @@
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/prompt_stash_internal.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
@@ -259,6 +260,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto& transcript_scroll_offset = renderer.transcript_scroll_offset;
   auto& completion_cache = renderer.completion_cache;
   ActiveSelectList active_select_list = ActiveSelectList::None;
+  RuntimePromptStashController prompt_stash(presentation_state, draft_state, renderer, active_select_list, options.key_bindings);
   struct BranchSummaryUiState
   {
     bool active = false;
@@ -541,7 +543,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
   RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
-  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, plugin_ui, navigation,
+  RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, prompt_stash, plugin_ui, navigation,
                                                    action_controller, transcript_search, subagent_workspace, service_mermaid_presentation);
   auto maybe_reload_display_settings = [&]() -> bool {
     auto const outcome = action_controller.maybe_reload_display_settings();
@@ -627,7 +629,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
   auto scroll_to_message_boundary = [&](bool previous) { navigation.scroll_to_message_boundary(previous); };
 
   RuntimeSubmitController submit_controller(options, presentation_state, draft_state, renderer, navigation, action_controller, active_run_controller,
-                                            transcript_search, subagent_workspace, active_select_list);
+                                            prompt_stash, transcript_search, subagent_workspace, active_select_list);
   auto handle_submit = [&](std::optional<std::string> forced_submission = std::nullopt) {
     auto const outcome = submit_controller.submit(std::move(forced_submission));
     terminal_write_failed = outcome.terminal_write_failed;
@@ -766,6 +768,15 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     clear_reasoning_feedback_for_user_input(snapshot);
     if (auto handled = transcript_search.handle_input(input.event))
+    {
+      if (!*handled)
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
+    if (auto handled = prompt_stash.handle_selector_input(input.event))
     {
       if (!*handled)
       {
@@ -1819,7 +1830,25 @@ int run_interactive_composer(TuiRuntimeOptions options)
         static_cast<void>(insert_composer_draft_text(draft, text));
       }
     };
-    if (event.key == Key::Character)
+    if (is_action(TuiAction::CopyLatestAssistant))
+    {
+      if (!action_controller.copy_latest_assistant_message())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
+    else if (is_action(TuiAction::PromptStash))
+    {
+      if (!prompt_stash.trigger())
+      {
+        terminal_write_failed = true;
+        break;
+      }
+      continue;
+    }
+    else if (event.key == Key::Character)
     {
       insert_input_text();
     }
@@ -2086,6 +2115,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       pending_escape_clear = false;
       snapshot.status = "queued-message restore is available during active runs";
+    }
+    else if (is_action(TuiAction::TranscriptHalfPageUp))
+    {
+      scroll_up(navigation.transcript_page_size());
+    }
+    else if (is_action(TuiAction::TranscriptHalfPageDown))
+    {
+      scroll_down(navigation.transcript_page_size());
     }
     else if (is_action(TuiAction::PageUp))
     {

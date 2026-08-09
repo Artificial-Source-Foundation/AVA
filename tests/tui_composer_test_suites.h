@@ -12,6 +12,7 @@ void run_tui_mermaid_tests();
 void run_tui_composer_rendering_tests_part_2();
 void run_tui_completion_tests();
 void run_tui_keybinding_tests();
+void run_tui_prompt_stash_tests();
 void run_tui_modal_tests_part_2();
 void run_tui_permission_tests_part_2();
 void run_tui_composer_rendering_tests_part_3();

@@ -74,6 +74,7 @@ enum class ActiveSelectList
   TranscriptSearch,
   ForkUserTurn,
   CopyUserTurn,
+  PromptStash,
   Overview
 };
 

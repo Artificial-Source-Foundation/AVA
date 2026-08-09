@@ -5,6 +5,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/keybindings.h"
+#include "ava/tui/prompt_stash_internal.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
@@ -409,11 +410,12 @@ bool test_active_run_session_transition_discards_prior_session_events()
   ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active_select_list);
   std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
   ava::tui::RuntimePromptCoordinator prompt_coordinator(options, presentation.snapshot, presentation.command_session_grants, renderer);
+  ava::tui::RuntimePromptStashController prompt_stash(presentation, draft_state, renderer, active_select_list, options.key_bindings);
   ava::tui::RuntimePluginUiCoordinator plugin_ui;
   ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
   ava::tui::RuntimeSubagentWorkspaceController subagent_workspace(options, presentation.snapshot);
-  ava::tui::RuntimeActiveRunController active_run(options, presentation, draft_state, renderer, prompt_coordinator, plugin_ui, navigation, action_controller,
-                                                  transcript_search, subagent_workspace);
+  ava::tui::RuntimeActiveRunController active_run(options, presentation, draft_state, renderer, prompt_coordinator, prompt_stash, plugin_ui, navigation,
+                                                  action_controller, transcript_search, subagent_workspace);
 
   auto const outcome = active_run.run("OLD SUBMITTED PROMPT");
   auto history_probe = ava::tui::ComposerDraftState{};
@@ -715,9 +717,18 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   navigation.jump_to_bottom("live tail");
   navigation.scroll_up(3);
   auto const plain_arrow_step_offset = renderer.transcript_scroll_offset;
+  navigation.scroll_up(100000);
+  auto const bounded_oldest = renderer.transcript_scroll_offset;
+  navigation.scroll_up(page);
+  auto const clamped_oldest = renderer.transcript_scroll_offset;
+  navigation.scroll_down(100000);
+  auto const clamped_live_tail = renderer.transcript_scroll_offset;
+  static_cast<void>(resizeterm(4, 40));
+  auto const tiny_page = navigation.transcript_page_size();
   bool const body_page_and_plain_arrow_sovereignty =
       body.valid && page == std::max<std::size_t>(1, body.transcript_height / 2) && page != std::size_t{6} && page_offset == page &&
-      plain_arrow_step_offset == 3 && draft_state.draft.text == wrapped_draft_before && draft_state.draft.cursor == wrapped_cursor_before &&
+      plain_arrow_step_offset == 3 && bounded_oldest > 0 && clamped_oldest == bounded_oldest && clamped_live_tail == 0 && tiny_page == 1 &&
+      draft_state.draft.text == wrapped_draft_before && draft_state.draft.cursor == wrapped_cursor_before &&
       !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::HistoryPrev, ava::tui::Key::ArrowUp) &&
       !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::HistoryNext, ava::tui::Key::ArrowDown) &&
       !ava::tui::key_matches_action(options.key_bindings, ava::tui::TuiAction::CursorUp, ava::tui::Key::ArrowUp) &&

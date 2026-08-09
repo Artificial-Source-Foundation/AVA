@@ -327,6 +327,16 @@ bool RuntimeActionController::paste_clipboard_image()
   return queue_pending_image_attachment(**imported, "clipboard image", "pasted clipboard image for next prompt", "attached clipboard image");
 }
 
+bool RuntimeActionController::copy_latest_assistant_message()
+{
+  auto& snapshot = presentation_state_.snapshot;
+  auto const result = runtime_transcript::copy_latest_assistant_message(snapshot.transcript);
+  snapshot.status = runtime_transcript::latest_assistant_copy_status(result);
+  if (result != runtime_transcript::LatestAssistantCopyResult::Copied)
+    static_cast<void>(beep());
+  return renderer_.request_render();
+}
+
 void RuntimeActionController::cycle_reasoning()
 {
   auto& snapshot = presentation_state_.snapshot;

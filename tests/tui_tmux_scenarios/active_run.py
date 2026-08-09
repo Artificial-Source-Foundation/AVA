@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shlex
+import time
+
 from tui_smoke_helpers import (
     SmokeContext,
     save_evidence,
@@ -27,7 +30,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
     )
     active_session = ctx.session_name("active")
-    active_provider = ctx.start_fake_provider("active", delay_ms=12000)
+    active_provider = ctx.start_fake_provider("active", delay_ms=12000, scenario="text-three-delayed-third")
     active_request_log = active_provider.request_log
     active_env_prefix = ctx.fake_provider_command(
         active_provider,
@@ -36,6 +39,18 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         state=ctx.active_state,
         data=ctx.active_data,
     )
+
+    def wait_for_tmux_clipboard_transport(path, label: str) -> bytes:
+        deadline = time.monotonic() + 8.0
+        last = b""
+        while time.monotonic() < deadline:
+            if path.exists():
+                last = path.read_bytes()
+                if b"\x1b]52;c;" in last and b"\x1bPtmux;" in last:
+                    return last
+            time.sleep(0.05)
+        raise RuntimeError(f"timed out waiting for {label}; pane output did not contain bounded tmux OSC 52 transport: {last!r}")
+
     tmux(
         tmux_exe,
         "new-session",
@@ -74,10 +89,45 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if "wrote 18 bytes" not in active_card_seed:
         raise RuntimeError(f"active-run tool-card seed did not complete\nscreen:\n{active_card_seed}")
     wait_for(tmux_exe, active_session, r"changed:.*active-card\.txt", "active-run Rich tool-card seed details")
+
+    send_literal(tmux_exe, active_session, "tmux idle F5 assistant seed")
+    send_keys(tmux_exe, active_session, "Enter")
+    _wait_for_normal_turn_request_count(active_request_log, 1, "idle F5 assistant seed provider request")
+    wait_for(tmux_exe, active_session, r"headless active prompt complete", "idle F5 assistant seed completion", timeout=14.0)
+
+    send_literal(tmux_exe, active_session, "F5-IDLE-DRAFT-KEEP")
+    idle_f5_output = root / "idle-f5-pane-output.bin"
+    tmux(tmux_exe, "pipe-pane", "-t", active_session, f"cat > {shlex.quote(str(idle_f5_output))}")
+    send_literal(tmux_exe, active_session, "\x1b[15~")
+    wait_for_tmux_clipboard_transport(idle_f5_output, "idle F5 latest assistant copy")
+    tmux(tmux_exe, "pipe-pane", "-t", active_session)
+    idle_f5_copy = wait_for(tmux_exe, active_session, r"F5-IDLE-DRAFT-KEEP", "idle F5 preserved draft")
+    if "Type a message" in idle_f5_copy:
+        raise RuntimeError(f"idle F5 copy cleared or submitted the composer draft\nscreen:\n{idle_f5_copy}")
+    send_keys(tmux_exe, active_session, "C-c")
+
+    send_literal(tmux_exe, active_session, "F6-IDLE-STASH-RESTORE")
+    send_literal(tmux_exe, active_session, "\x1b[17~")
+    idle_stashed = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "F6-IDLE-STASH-RESTORE" not in screen and "Type a message" in screen,
+        "idle F6 prompt stash",
+    )
+    if "F6-IDLE-STASH-RESTORE" in idle_stashed:
+        raise RuntimeError(f"idle F6 stash did not clear the composer draft\nscreen:\n{idle_stashed}")
+    send_literal(tmux_exe, active_session, "\x1b[17~")
+    idle_selector = wait_for(tmux_exe, active_session, r"F6-IDLE-STASH-RESTORE", "idle F6 stash selector")
+    if "Prompt stash" not in idle_selector:
+        raise RuntimeError(f"idle F6 did not open the stash selector\nscreen:\n{idle_selector}")
+    send_keys(tmux_exe, active_session, "Enter")
+    wait_for(tmux_exe, active_session, r"F6-IDLE-STASH-RESTORE", "idle stash selector restore")
+    send_keys(tmux_exe, active_session, "C-c")
+
     send_literal(tmux_exe, active_session, "tmux active first prompt")
     wait_for(tmux_exe, active_session, r"tmux active first prompt", "active-run first prompt draft")
     send_keys(tmux_exe, active_session, "Enter")
-    _wait_for_normal_turn_request_count(active_request_log, 1, "active-run first provider request")
+    _wait_for_normal_turn_request_count(active_request_log, 2, "active-run first provider request")
     active_empty_hint = wait_for(tmux_exe, active_session, r"Esc stop.*type a follow-up", "F3 active empty contextual hint")
     active_dimensions = tmux(tmux_exe, "display-message", "-p", "-t", active_session, "#{pane_width},#{pane_height}").stdout.strip()
     if active_dimensions != "110,28":
@@ -88,6 +138,33 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if "\x1b" in active_empty_hint or any(ord(character) < 32 and character != "\n" for character in active_empty_hint):
         raise RuntimeError(f"F3 active contextual hint contained ESC or unexpected C0 controls\nscreen:\n{active_empty_hint}")
     save_evidence(root, "frontend-f3-active-empty-hint", active_empty_hint)
+
+    send_literal(tmux_exe, active_session, "F5-ACTIVE-DRAFT-KEEP")
+    active_f5_output = root / "active-f5-pane-output.bin"
+    tmux(tmux_exe, "pipe-pane", "-t", active_session, f"cat > {shlex.quote(str(active_f5_output))}")
+    send_literal(tmux_exe, active_session, "\x1b[15~")
+    wait_for_tmux_clipboard_transport(active_f5_output, "active-run preemptive F5 copy")
+    tmux(tmux_exe, "pipe-pane", "-t", active_session)
+    active_f5_copy = wait_for(tmux_exe, active_session, r"F5-ACTIVE-DRAFT-KEEP", "active-run F5 preserved draft")
+    if "Type a message" in active_f5_copy:
+        raise RuntimeError(f"active-run F5 copy cleared or queued the composer draft\nscreen:\n{active_f5_copy}")
+    send_literal(tmux_exe, active_session, "\x1b[17~")
+    active_stashed = wait_for_screen_state(
+        tmux_exe,
+        active_session,
+        lambda screen: "F5-ACTIVE-DRAFT-KEEP" not in screen and "type a follow-up" in screen,
+        "active-run preemptive F6 stash",
+    )
+    if "F5-ACTIVE-DRAFT-KEEP" in active_stashed:
+        raise RuntimeError(f"active-run F6 stash did not clear the composer draft\nscreen:\n{active_stashed}")
+    send_literal(tmux_exe, active_session, "\x1b[17~")
+    active_selector = wait_for(tmux_exe, active_session, r"F5-ACTIVE-DRAFT-KEEP", "active-run stash selector")
+    if "Prompt stash" not in active_selector:
+        raise RuntimeError(f"active-run F6 did not open the stash selector\nscreen:\n{active_selector}")
+    send_keys(tmux_exe, active_session, "Enter")
+    wait_for(tmux_exe, active_session, r"F5-ACTIVE-DRAFT-KEEP", "active-run stash selector restore")
+    send_keys(tmux_exe, active_session, "C-c")
+    _assert_normal_turn_request_count_stays(active_request_log, 2, "active F5/F6 actions must not queue or submit drafts")
 
     send_literal(tmux_exe, active_session, "/details compact")
     wait_for(tmux_exe, active_session, r"/details compact", "active /details compact draft before submit")
@@ -149,7 +226,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         lambda screen: "changed:" in screen and "ACTIVE-OLD-LINE-25" not in screen and "/details rich" not in screen,
         "active tool-card Rich restore",
     )
-    _assert_normal_turn_request_count_stays(active_request_log, 1, "active local details commands must not reach the provider")
+    _assert_normal_turn_request_count_stays(active_request_log, 2, "active local details commands must not reach the provider")
     save_evidence(root, "active-run-local-tool-card-controls", per_card_expanded)
 
     send_literal(tmux_exe, active_session, "AGENTS")
@@ -191,7 +268,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     active_path_selected = wait_for(tmux_exe, active_session, r"inspect \./AGENTS\.md", "active-run normal path mouse selection")
     if "inspect ./AGENTS.md" not in active_path_selected:
         raise RuntimeError(f"active path mouse selection did not insert the canonical path\nscreen:\n{active_path_selected}")
-    _assert_normal_turn_request_count_stays(active_request_log, 1, "active palette selections must not queue before cleanup")
+    _assert_normal_turn_request_count_stays(active_request_log, 2, "active palette selections must not queue before cleanup")
     send_keys(tmux_exe, active_session, "C-u")
     send_literal(tmux_exe, active_session, "/share")
     active_disabled_share = wait_for(tmux_exe, active_session, r"│  /share", "active disabled slash draft")
@@ -216,7 +293,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     )
     if "/share" not in active_disabled_mouse or "commands run between turns" in active_disabled_mouse:
         raise RuntimeError(f"disabled slash mouse click mutated or queued the active draft\nscreen:\n{active_disabled_mouse}")
-    _assert_normal_turn_request_count_stays(active_request_log, 1, "disabled active slash acceptance must not queue")
+    _assert_normal_turn_request_count_stays(active_request_log, 2, "disabled active slash acceptance must not queue")
     send_keys(tmux_exe, active_session, "C-u")
 
     send_literal(tmux_exe, active_session, "/")
@@ -282,8 +359,13 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if "tmux active follow-up" not in queued_follow_up:
         raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
     save_evidence(root, "active-run-follow-up-queued", queued_follow_up)
-    active_log = _wait_for_normal_turn_request_count(active_request_log, 2, "active-run queued follow-up provider request", timeout=12.0)
-    if "tmux active first prompt" not in active_log or "tmux active follow-up" not in active_log or "second lineX" not in active_log:
+    active_log = _wait_for_normal_turn_request_count(active_request_log, 3, "active-run queued follow-up provider request", timeout=14.0)
+    if (
+        "tmux idle F5 assistant seed" not in active_log
+        or "tmux active first prompt" not in active_log
+        or "tmux active follow-up" not in active_log
+        or "second lineX" not in active_log
+    ):
         raise RuntimeError(f"active-run follow-up did not reach the fake provider intact\nrequest log:\n{active_log}")
     wait_for(tmux_exe, active_session, r"follow-up started|headless active prompt complete", "active-run follow-up delivery")
     send_keys(tmux_exe, active_session, "C-d")

@@ -60,6 +60,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   auto const* scoped_models_item = tui_test_support::find_slash_command_item(slash_items, "/scoped-models");
   auto const* details_item = tui_test_support::find_slash_command_item(slash_items, "/details");
   auto const* cursor_item = tui_test_support::find_slash_command_item(slash_items, "/cursor");
+  auto const* stash_item = tui_test_support::find_slash_command_item(slash_items, "/stash");
   auto const* search_item = tui_test_support::find_slash_command_item(slash_items, "/search");
   auto const* tool_item = tui_test_support::find_slash_command_item(slash_items, "/tool");
   auto const* diff_item = tui_test_support::find_slash_command_item(slash_items, "/diff");
@@ -80,6 +81,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
              tui_test_support::has_slash_argument_completion(cursor_item, 1, "blink", {"bar"}) &&
              tui_test_support::has_slash_argument_completion(cursor_item, 1, "steady", {"underline"}),
          "slash catalog exposes cursor style and blink argument completions");
+  expect(stash_item != nullptr && stash_item->hint == "[pop|clear]" && stash_item->description.find("process-memory") != std::string::npos,
+         "slash catalog exposes process-memory prompt stash controls");
   expect(search_item != nullptr && search_item->hint == "[query]" && search_item->description.find("currently rendered") != std::string::npos,
          "slash catalog exposes TUI transcript literal search with a truthful rendered-scope description");
   expect(tool_item != nullptr && tool_item->hint == "[query]" && has_alias(*tool_item, "/tools") &&
@@ -316,8 +319,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   expect(filtered_sessions && filtered_sessions->handled && !filtered_sessions->output.empty() &&
              filtered_sessions->output[0].find(session_id()) != std::string::npos,
          "command dispatcher /sessions accepts backend session-id query text");
-  auto archive_active =
-      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions archive " + session_id() + " --confirm"});
+  auto archive_active = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions archive " + session_id() + " --confirm"});
   auto active_metadata_after_archive_attempt = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     return ava::session::load_session_metadata(session_r->store);
@@ -350,7 +352,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   {
     branch->lease = ava::session::SessionLease{};
     auto const branch_session_id = branch->store.session_id();
-    auto target_labels = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id + " triage selected"});
+    auto target_labels =
+        ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id + " triage selected"});
     auto branch_metadata_after_labels = ava::session::load_session_metadata(branch->store);
     auto target_label_status = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions labels " + branch_session_id});
     auto target_label_query = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/sessions triage"});
@@ -397,7 +400,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
          "command dispatcher /permissions lists empty persistent permission rules with storage context");
   auto add_permission_rule =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
-                                                                            "reason=\"trusted local read\""});
+                                                                                  "reason=\"trusted local read\""});
   expect(add_permission_rule && add_permission_rule->handled && !add_permission_rule->output.empty() &&
              add_permission_rule->output[0].find("added permission rule") != std::string::npos &&
              add_permission_rule->output[0].find("Allow file reads · src/main.cpp · Workspace") != std::string::npos &&
@@ -420,22 +423,23 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_explore_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
-                                                                            "reason=\"no explore subagents\""});
+                                                                                  "reason=\"no explore subagents\""});
   expect(add_explore_deny && add_explore_deny->handled && !add_explore_deny->output.empty() &&
              add_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
          "command dispatcher /permissions add claims Explore only for command=explore with default tool=task");
   auto const explore_rule_id = add_explore_deny ? extract_rule_id(add_explore_deny->output[0]) : std::string{};
   expect(!explore_rule_id.empty(), "command dispatcher /permissions add exposes Explore rule id secondarily");
 
-  auto add_skill_deny =
-      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
+  auto add_skill_deny = ava::app::run_command(
+      unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=skill tool=skill reason=\"no skills\""});
   expect(add_skill_deny && add_skill_deny->handled && !add_skill_deny->output.empty() &&
              add_skill_deny->output[0].find("Block skills · Workspace") != std::string::npos,
          "command dispatcher /permissions add summarizes skill blocks in human form");
   auto const skill_rule_id = add_skill_deny ? extract_rule_id(add_skill_deny->output[0]) : std::string{};
 
-  auto add_global_read = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
-                                                                                               "path=/etc/hosts reason=\"global reads\""});
+  auto add_global_read =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read scope=global "
+                                                                                  "path=/etc/hosts reason=\"global reads\""});
   expect(add_global_read && add_global_read->handled && !add_global_read->output.empty() &&
              add_global_read->output[0].find("Allow file reads · /etc/hosts · Global") != std::string::npos,
          "command dispatcher /permissions add summarizes global file-read allows");
@@ -443,7 +447,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_exact_command_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash "
-                                                                            "command=\"git push origin main\" reason=\"block push\""});
+                                                                                  "command=\"git push origin main\" reason=\"block push\""});
   expect(add_exact_command_deny && add_exact_command_deny->handled && !add_exact_command_deny->output.empty() &&
              add_exact_command_deny->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              add_exact_command_deny->output[0].find("git push origin main") == std::string::npos,
@@ -451,8 +455,9 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   auto const exact_command_rule_id = add_exact_command_deny ? extract_rule_id(add_exact_command_deny->output[0]) : std::string{};
   expect(!exact_command_rule_id.empty(), "command dispatcher /permissions add exposes exact-command rule id secondarily");
 
-  auto add_path_command_deny = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
-                                                                                                     "command=\"git status\" reason=\"path qualified bash\""});
+  auto add_path_command_deny =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=bash path=scripts "
+                                                                                  "command=\"git status\" reason=\"path qualified bash\""});
   expect(add_path_command_deny && add_path_command_deny->handled && !add_path_command_deny->output.empty() &&
              add_path_command_deny->output[0].find("Block Exact command · scripts · Workspace") != std::string::npos &&
              add_path_command_deny->output[0].find("git status") == std::string::npos,
@@ -461,7 +466,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_path_explore_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task command=explore "
-                                                                            "path=src reason=\"path qualified explore\""});
+                                                                                  "path=src reason=\"path qualified explore\""});
   expect(add_path_explore_deny && add_path_explore_deny->handled && !add_path_explore_deny->output.empty() &&
              add_path_explore_deny->output[0].find("Block Explore subagents · src · Workspace") != std::string::npos,
          "command dispatcher /permissions add path-qualifies TaskRun Explore summaries");
@@ -469,7 +474,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_forged_task_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=task "
-                                                                            "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
+                                                                                  "command=\"rm -rf /tmp/forged\" reason=\"forged task body\""});
   expect(add_forged_task_deny && add_forged_task_deny->handled && !add_forged_task_deny->output.empty() &&
              add_forged_task_deny->output[0].find("Block subagents · Workspace") != std::string::npos &&
              add_forged_task_deny->output[0].find("rm -rf") == std::string::npos && add_forged_task_deny->output[0].find("/tmp/forged") == std::string::npos,
@@ -478,7 +483,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_typed_task_allow =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=task tool=task command=coder "
-                                                                            "reason=\"typed coder subagent\""});
+                                                                                  "reason=\"typed coder subagent\""});
   expect(add_typed_task_allow && add_typed_task_allow->handled && !add_typed_task_allow->output.empty() &&
              add_typed_task_allow->output[0].find("Allow subagents · coder · Workspace") != std::string::npos,
          "command dispatcher /permissions add appends only identifier-like TaskRun type qualifiers");
@@ -486,7 +491,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_explore_explore_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=explore "
-                                                                            "reason=\"agreeing explore identity\""});
+                                                                                  "reason=\"agreeing explore identity\""});
   expect(add_explore_explore_deny && add_explore_explore_deny->handled && !add_explore_explore_deny->output.empty() &&
              add_explore_explore_deny->output[0].find("Block Explore subagents · Workspace") != std::string::npos,
          "command dispatcher /permissions add claims Explore when command and tool both agree on explore");
@@ -494,7 +499,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_tool_only_explore_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
-                                                                            "reason=\"tool-only explore must not claim class\""});
+                                                                                  "reason=\"tool-only explore must not claim class\""});
   expect(add_tool_only_explore_deny && add_tool_only_explore_deny->handled && !add_tool_only_explore_deny->output.empty() &&
              add_tool_only_explore_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_tool_only_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -503,7 +508,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_freeform_explore_tool_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore "
-                                                                            "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
+                                                                                  "command=\"rm -rf /tmp/rm-secret\" reason=\"free-form plus explore tool\""});
   expect(add_freeform_explore_tool_deny && add_freeform_explore_tool_deny->handled && !add_freeform_explore_tool_deny->output.empty() &&
              add_freeform_explore_tool_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_freeform_explore_tool_deny->output[0].find("Block Explore subagents") == std::string::npos &&
@@ -515,7 +520,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_mixed_coder_explore_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=explore command=coder "
-                                                                            "reason=\"mixed coder command explore tool\""});
+                                                                                  "reason=\"mixed coder command explore tool\""});
   expect(add_mixed_coder_explore_deny && add_mixed_coder_explore_deny->handled && !add_mixed_coder_explore_deny->output.empty() &&
              add_mixed_coder_explore_deny->output[0].find("Block subagents · coder · Workspace") != std::string::npos &&
              add_mixed_coder_explore_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -524,7 +529,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_mixed_explore_coder_deny =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=deny operation=task tool=coder command=explore "
-                                                                            "reason=\"mixed explore command conflicting tool\""});
+                                                                                  "reason=\"mixed explore command conflicting tool\""});
   expect(add_mixed_explore_coder_deny && add_mixed_explore_coder_deny->handled && !add_mixed_explore_coder_deny->output.empty() &&
              add_mixed_explore_coder_deny->output[0].find("Block subagents · explore · Workspace") != std::string::npos &&
              add_mixed_explore_coder_deny->output[0].find("Block Explore subagents") == std::string::npos,
@@ -556,7 +561,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_mcp_read_collision =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=mcp.tool.call tool=read "
-                                                                            "reason=\"mcp read collision\""});
+                                                                                  "reason=\"mcp read collision\""});
   expect(add_mcp_read_collision && add_mcp_read_collision->handled && !add_mcp_read_collision->output.empty() &&
              add_mcp_read_collision->output[0].find("Allow MCP tool calls · read · Workspace") != std::string::npos &&
              add_mcp_read_collision->output[0].find("Allow file reads") == std::string::npos &&
@@ -566,7 +571,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
 
   auto add_plugin_bash_collision =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=plugin.tool.call tool=bash "
-                                                                            "reason=\"plugin bash collision\""});
+                                                                                  "reason=\"plugin bash collision\""});
   expect(add_plugin_bash_collision && add_plugin_bash_collision->handled && !add_plugin_bash_collision->output.empty() &&
              add_plugin_bash_collision->output[0].find("Allow plugin tool calls · bash · Workspace") != std::string::npos &&
              add_plugin_bash_collision->output[0].find("Allow shell commands") == std::string::npos &&
@@ -657,7 +662,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
              permissions_list_human->output[0].find("Block Explore subagents") == std::string::npos,
          "command dispatcher /permissions list filters by human summary words");
 
-  auto permissions_list_command_private = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
+  auto permissions_list_command_private =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions list git push origin main"});
   expect(permissions_list_command_private && permissions_list_command_private->handled && !permissions_list_command_private->output.empty() &&
              permissions_list_command_private->output[0].find("filter: git push origin main") != std::string::npos &&
              permissions_list_command_private->output[0].find("1. Block Exact command · Workspace") != std::string::npos &&
@@ -691,7 +697,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
              permissions_explain->output[0].find("precedence: built-in hard denies run first") != std::string::npos,
          "command dispatcher /permissions explain leads with human summary and retains authority details");
 
-  auto permissions_explain_command = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
+  auto permissions_explain_command =
+      ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions explain " + exact_command_rule_id});
   expect(permissions_explain_command && permissions_explain_command->handled && !permissions_explain_command->output.empty() &&
              permissions_explain_command->output[0].find("Block Exact command · Workspace") != std::string::npos &&
              permissions_explain_command->output[0].find("command: git push origin main") != std::string::npos &&
@@ -714,20 +721,20 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
              permissions_diagnose->output[0].find("outside the model-writable workspace") != std::string::npos,
          "command dispatcher /permissions diagnose reports storage and fail-closed behavior");
   auto const append_route = ava::app::runtime::session_ts::rat(unlocked_session)->owner_append_route_1();
-  auto append_permission_audit = ava::agent::append_permission_decision(
-      append_route, ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
-                                                                          .operation = ava::permissions::Operation::RunCommand,
-                                                                          .mode = ava::agent::Mode::Build,
-                                                                          .tool_name = "bash",
-                                                                          .action = ava::permissions::PermissionAction::Deny,
-                                                                          .reason = "command can change external or destructive state",
-                                                                          .risk = ava::permissions::PermissionRisk::High,
-                                                                          .command = "git push origin main",
-                                                                          .resolution = "deny",
-                                                                          .resolution_source = "resolver",
-                                                                          .resolution_reason = "remembered deny | rule",
-                                                                          .actor = "tui",
-                                                                          .rule_id = permission_rule_id});
+  auto append_permission_audit =
+      ava::agent::append_permission_decision(append_route, ava::tools::PermissionAuditEvent{.permission_request_id = "permreq_runtime_deny",
+                                                                                            .operation = ava::permissions::Operation::RunCommand,
+                                                                                            .mode = ava::agent::Mode::Build,
+                                                                                            .tool_name = "bash",
+                                                                                            .action = ava::permissions::PermissionAction::Deny,
+                                                                                            .reason = "command can change external or destructive state",
+                                                                                            .risk = ava::permissions::PermissionRisk::High,
+                                                                                            .command = "git push origin main",
+                                                                                            .resolution = "deny",
+                                                                                            .resolution_source = "resolver",
+                                                                                            .resolution_reason = "remembered deny | rule",
+                                                                                            .actor = "tui",
+                                                                                            .rule_id = permission_rule_id});
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());
@@ -874,7 +881,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   // Two same-summary rules must stay visually distinct via short refs and still draft separate exact ids.
   auto add_duplicate_permission_rule =
       ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/permissions add action=allow operation=read path=src/main.cpp "
-                                                                            "reason=\"duplicate summary completion fixture\""});
+                                                                                  "reason=\"duplicate summary completion fixture\""});
   expect(add_duplicate_permission_rule && add_duplicate_permission_rule->handled && !add_duplicate_permission_rule->output.empty() &&
              add_duplicate_permission_rule->output[0].find(kPermissionSummary) != std::string::npos,
          "duplicate-summary permission rule fixture adds with the same human summary");

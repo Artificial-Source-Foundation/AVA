@@ -50,12 +50,13 @@ RuntimePromptCoordinator::RuntimePromptCoordinator(TuiRuntimeOptions& options, C
 
 namespace {
 
-void close_overview_for_prompt(ComposerSnapshot& snapshot, ActiveSelectList* active_select_list)
+void close_competing_select_list_for_prompt(ComposerSnapshot& snapshot, ActiveSelectList* active_select_list)
 {
   if (!active_select_list)
     return;
-  // Competing prompt authority closes overview so it cannot hide under the prompt.
-  if (*active_select_list != ActiveSelectList::Overview)
+  // Process-local overview and prompt-stash selectors may be open during an
+  // active run. Prompt authority closes either without mutating its owned state.
+  if (*active_select_list != ActiveSelectList::Overview && *active_select_list != ActiveSelectList::PromptStash)
     return;
   snapshot.select_list.reset();
   *active_select_list = ActiveSelectList::None;
@@ -135,8 +136,8 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
   }
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    // Competing prompt authority closes overview so it cannot hide under the prompt and reappear.
-    close_overview_for_prompt(snapshot, active_select_list_);
+    // Competing prompt authority closes process-local selectors so they cannot hide under the prompt and reappear.
+    close_competing_select_list_for_prompt(snapshot, active_select_list_);
     snapshot.permission_prompt = permission_prompt_view(prompt);
     snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
     snapshot.permission_prompt->allow_session_available = allow_session_available;
@@ -417,8 +418,8 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
   emit_prompt_audit("tui:question_request", prompt.question.empty() ? std::string("question requested") : "question requested: " + prompt.question);
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    // Competing prompt authority closes overview so it cannot hide under the prompt and reappear.
-    close_overview_for_prompt(snapshot, active_select_list_);
+    // Competing prompt authority closes process-local selectors so they cannot hide under the prompt and reappear.
+    close_competing_select_list_for_prompt(snapshot, active_select_list_);
     snapshot.question_prompt = question_prompt_view(prompt);
     snapshot.status =
         prompt.multiple ? "question required: Space toggles, Enter sends, Esc cancels" : "question required: Enter sends, numbers choose, Esc cancels";

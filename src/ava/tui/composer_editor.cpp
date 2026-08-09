@@ -906,6 +906,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::NewLine:
     case TuiAction::Cancel:
     case TuiAction::CopySelection:
+    case TuiAction::CopyLatestAssistant:
+    case TuiAction::PromptStash:
     case TuiAction::ExternalEditor:
     case TuiAction::Suspend:
     case TuiAction::ClipboardPasteImage:
@@ -925,6 +927,8 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::DetailsToggle:
     case TuiAction::PageUp:
     case TuiAction::PageDown:
+    case TuiAction::TranscriptHalfPageUp:
+    case TuiAction::TranscriptHalfPageDown:
     case TuiAction::ModeToggle:
     case TuiAction::Interrupt:
     case TuiAction::Exit:

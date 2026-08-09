@@ -12,6 +12,7 @@ class RuntimeActiveRunController;
 struct RuntimeDraftState;
 class RuntimeNavigationController;
 class RuntimePresentationState;
+class RuntimePromptStashController;
 class RuntimeRenderer;
 class RuntimeSubagentWorkspaceController;
 class TranscriptSearchController;
@@ -37,8 +38,9 @@ class RuntimeSubmitController final
  public:
   RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                           RuntimeNavigationController& navigation, RuntimeActionController& action_controller,
-                          RuntimeActiveRunController& active_run_controller, TranscriptSearchController& transcript_search,
-                          RuntimeSubagentWorkspaceController& subagent_workspace, ActiveSelectList& active_select_list);
+                          RuntimeActiveRunController& active_run_controller, RuntimePromptStashController& prompt_stash,
+                          TranscriptSearchController& transcript_search, RuntimeSubagentWorkspaceController& subagent_workspace,
+                          ActiveSelectList& active_select_list);
   RuntimeSubmitController(RuntimeSubmitController const&) = delete;
   RuntimeSubmitController& operator=(RuntimeSubmitController const&) = delete;
 
@@ -52,6 +54,7 @@ class RuntimeSubmitController final
   RuntimeNavigationController& navigation_;
   RuntimeActionController& action_controller_;
   RuntimeActiveRunController& active_run_controller_;
+  RuntimePromptStashController& prompt_stash_;
   TranscriptSearchController& transcript_search_;
   RuntimeSubagentWorkspaceController& subagent_workspace_;
   ActiveSelectList& active_select_list_;

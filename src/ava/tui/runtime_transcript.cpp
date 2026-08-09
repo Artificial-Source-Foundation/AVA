@@ -254,6 +254,33 @@ std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptIt
   return std::nullopt;
 }
 
+LatestAssistantCopyResult copy_latest_assistant_message(std::vector<TranscriptItem> const& transcript,
+                                                        std::function<bool(std::string_view)> const& terminal_writer)
+{
+  auto const text = latest_ava_message_copy_text(transcript);
+  if (!text)
+    return LatestAssistantCopyResult::NoMessage;
+  if (text->size() > kMaxTerminalClipboardTextBytes)
+    return LatestAssistantCopyResult::Oversize;
+  return terminal_writer(*text) ? LatestAssistantCopyResult::Copied : LatestAssistantCopyResult::WriteFailure;
+}
+
+std::string latest_assistant_copy_status(LatestAssistantCopyResult result)
+{
+  switch (result)
+  {
+    case LatestAssistantCopyResult::Copied:
+      return "copied last AVA message to clipboard";
+    case LatestAssistantCopyResult::NoMessage:
+      return "no AVA messages to copy";
+    case LatestAssistantCopyResult::Oversize:
+      return "latest AVA message exceeds 64 KiB clipboard limit";
+    case LatestAssistantCopyResult::WriteFailure:
+      return "clipboard copy failed";
+  }
+  return "clipboard copy failed";
+}
+
 std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
 {
   for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)

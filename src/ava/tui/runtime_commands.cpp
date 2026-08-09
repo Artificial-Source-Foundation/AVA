@@ -93,6 +93,20 @@ std::optional<std::string> copy_command_argument(std::string_view submitted)
   return std::nullopt;
 }
 
+std::optional<std::string> stash_command_argument(std::string_view submitted)
+{
+  auto const normalized = trim_view_to_string(submitted);
+  submitted = normalized;
+  constexpr std::string_view kStash = "/stash";
+  if (submitted == kStash)
+    return std::string{};
+  if (submitted.starts_with(kStash) && submitted.size() > kStash.size() && std::isspace(static_cast<unsigned char>(submitted[kStash.size()])) != 0)
+  {
+    return trim_view_to_string(submitted.substr(kStash.size() + 1));
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> tool_command_argument(std::string_view submitted)
 {
   auto const normalized = trim_view_to_string(submitted);

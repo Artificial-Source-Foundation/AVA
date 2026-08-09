@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/mermaid_projection.h"
 #include "ava/tui/terminal_image.h"
 #include "ava/tui/text_wrap.h"
 #include "ava/tui/theme.h"
@@ -1031,21 +1032,30 @@ std::string render_wide_content(std::string_view border_sgr, std::string content
   return fit_line_preserving_sgr(std::move(line), width);
 }
 
-std::vector<std::string> render_narrow_assistant_lines(std::vector<std::string> const& content_lines, std::size_t width)
+struct AssistantContent
+{
+  std::vector<std::string> lines;
+  std::vector<bool> preformatted;
+};
+
+std::vector<std::string> render_narrow_assistant_lines(AssistantContent const& content_lines, std::size_t width)
 {
   std::vector<std::string> lines;
   auto const prefix = std::string("  ");
   auto const content_width = width > prefix.size() ? width - prefix.size() : std::size_t{1};
   bool in_code = false;
   std::string code_language;
-  for (auto const& content : content_lines)
+  for (std::size_t index = 0; index < content_lines.lines.size(); ++index)
   {
-    auto const is_fence = content.rfind("```", 0) == 0;
-    auto const format_inline_markup = !is_fence && !in_code;
+    auto const& content = content_lines.lines[index];
+    auto const preformatted = index < content_lines.preformatted.size() && content_lines.preformatted[index];
+    auto const is_fence = !preformatted && content.rfind("```", 0) == 0;
+    auto const format_inline_markup = !preformatted && !is_fence && !in_code;
     auto wrapped = wrap_words_with_prefix(content, content_width);
     for (auto& part : wrapped)
     {
-      auto rendered_part = format_inline_markup
+      auto rendered_part = preformatted ? render_code_line(part, {})
+                           : format_inline_markup
                                ? render_inline_markup(part)
                                : (in_code && !is_fence ? render_code_line(part, code_language) : std::string(kSgrDim) + part + std::string(kSgrReset));
       auto line = prefix + std::move(rendered_part);
@@ -1685,10 +1695,29 @@ void append_blockquote_lines(std::vector<std::string>& output, std::vector<std::
   }
 }
 
-std::vector<std::string> assistant_content_lines(std::string const& text, std::size_t content_width)
+std::vector<std::size_t> markdown_source_line_starts(std::string_view text)
+{
+  std::vector<std::size_t> starts{0};
+  for (std::size_t index = 0; index < text.size(); ++index)
+  {
+    if (text[index] != '\n' && text[index] != '\r')
+      continue;
+    if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n')
+      ++index;
+    starts.push_back(index + 1);
+  }
+  return starts;
+}
+
+AssistantContent assistant_content_lines(TranscriptItem const& item, std::size_t item_index, std::string const& text, std::size_t content_width,
+                                         MermaidTranscriptProjection const* mermaid_projection)
 {
   std::vector<std::string> output;
+  std::vector<std::size_t> preformatted_indices;
   auto const raw_lines = split_lines(text);
+  auto const raw_line_starts = markdown_source_line_starts(text);
+  auto const mermaid_blocks =
+      mermaid_projection && mermaid_projection->contains_item(item_index) ? scan_completed_assistant_mermaid_fences(item) : std::vector<MermaidFenceBlock>{};
   bool in_code = false;
   bool pending_block_separator = false;
   std::string list_continuation_prefix;
@@ -1707,6 +1736,27 @@ std::vector<std::string> assistant_content_lines(std::string const& text, std::s
   for (std::size_t raw_index = 0; raw_index < raw_lines.size(); ++raw_index)
   {
     auto const& raw_line = raw_lines[raw_index];
+    auto const source_offset = raw_index < raw_line_starts.size() ? raw_line_starts[raw_index] : text.size();
+    auto const projected_block = std::ranges::find(mermaid_blocks, source_offset, &MermaidFenceBlock::fence_start);
+    auto const projected_text = projected_block == mermaid_blocks.end() ? std::nullopt : mermaid_projection->accepted_text(item_index, *projected_block);
+    if (projected_text)
+    {
+      flush_pending_block_separator();
+      push_blank_line_once();
+      for (auto const& helper_line : split_lines(*projected_text))
+      {
+        auto wrapped = hard_wrap_sanitized(sanitize_terminal_text(helper_line), content_width > 2 ? content_width - 2 : std::size_t{1});
+        for (auto& part : wrapped)
+        {
+          preformatted_indices.push_back(output.size());
+          output.push_back("  " + std::move(part));
+        }
+      }
+      pending_block_separator = true;
+      while (raw_index + 1 < raw_line_starts.size() && raw_line_starts[raw_index + 1] < projected_block->fence_end) ++raw_index;
+      continue;
+    }
+
     auto const sanitized = sanitize_terminal_text(raw_line);
     if (sanitized.rfind("```", 0) == 0)
     {
@@ -1843,19 +1893,31 @@ std::vector<std::string> assistant_content_lines(std::string const& text, std::s
   }
   if (output.empty())
     output.emplace_back();
-  return output;
+  std::vector<bool> preformatted(output.size(), false);
+  for (auto const index : preformatted_indices)
+  {
+    if (index < preformatted.size())
+      preformatted[index] = true;
+  }
+  return AssistantContent{.lines = std::move(output), .preformatted = std::move(preformatted)};
 }
 
-std::vector<std::string> render_assistant_text_block(std::vector<std::string> const& content, std::size_t width)
+std::vector<std::string> render_assistant_text_block(AssistantContent const& content, std::size_t width)
 {
   std::vector<std::string> lines;
   bool in_code = false;
   std::string code_language;
-  for (auto const& part : content)
+  for (std::size_t index = 0; index < content.lines.size(); ++index)
   {
-    auto const is_fence = part.rfind("```", 0) == 0;
+    auto const& part = content.lines[index];
+    auto const preformatted = index < content.preformatted.size() && content.preformatted[index];
+    auto const is_fence = !preformatted && part.rfind("```", 0) == 0;
     std::string rendered;
-    if (is_fence)
+    if (preformatted)
+    {
+      rendered = render_code_line(part, {});
+    }
+    else if (is_fence)
     {
       rendered = std::string(kSgrDim) + part + std::string(kSgrReset);
     }
@@ -1880,11 +1942,13 @@ std::vector<std::string> render_assistant_text_block(std::vector<std::string> co
   return lines;
 }
 
-std::vector<std::string> render_assistant_block(std::string const& text, std::string const& meta, std::string const& thinking, std::size_t width,
-                                                bool separate_assistant_runs, bool thinking_expanded = false, bool thinking_live = false)
+std::vector<std::string> render_assistant_block(TranscriptItem const& item, std::size_t item_index, std::string const& text, std::string const& meta,
+                                                std::string const& thinking, std::size_t width, bool separate_assistant_runs,
+                                                MermaidTranscriptProjection const* mermaid_projection, bool thinking_expanded = false,
+                                                bool thinking_live = false)
 {
   auto const content_width = width > 4 ? width - 4 : std::size_t{1};
-  auto const content = text.empty() ? std::vector<std::string>{} : assistant_content_lines(text, content_width);
+  auto const content = text.empty() ? AssistantContent{} : assistant_content_lines(item, item_index, text, content_width, mermaid_projection);
   std::vector<std::string> lines;
 
   if (!thinking.empty())
@@ -1893,7 +1957,7 @@ std::vector<std::string> render_assistant_block(std::string const& text, std::st
     lines.insert(lines.end(), thinking_lines.begin(), thinking_lines.end());
   }
 
-  if (!content.empty())
+  if (!content.lines.empty())
   {
     if (separate_assistant_runs && !lines.empty())
       lines.emplace_back();
@@ -2247,8 +2311,9 @@ std::size_t full_thinking_rendered_line_count(TranscriptItem const& item, std::s
   return 0;
 }
 
-TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
-                                                     bool suppress_result_summary, bool compact_spacing)
+TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item, std::size_t item_index, std::size_t width, ToolPresentation tool_presentation,
+                                                     bool thinking_visible, bool suppress_result_summary, bool compact_spacing,
+                                                     MermaidTranscriptProjection const* mermaid_projection)
 {
   if (item.tool)
   {
@@ -2264,8 +2329,9 @@ TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item,
       assistant_text = to_plain_text(item.text_model);
     auto thinking_text = thinking_visible ? text_model_or(item.thinking_model, item.thinking) : std::string{};
     auto const thinking_live = item.append_only_stream && !item.stream_id.empty() && !thinking_text.empty();
-    return TranscriptRenderedBlock{.lines = render_assistant_block(assistant_text, item.meta, thinking_text, width,
-                                                                   roomy_transcript_spacing(width, compact_spacing), item.thinking_expanded, thinking_live)};
+    return TranscriptRenderedBlock{.lines = render_assistant_block(item, item_index, assistant_text, item.meta, thinking_text, width,
+                                                                   roomy_transcript_spacing(width, compact_spacing), mermaid_projection, item.thinking_expanded,
+                                                                   thinking_live)};
   }
   if (item.label == "thinking")
   {
@@ -2309,10 +2375,13 @@ TranscriptRenderedBlock render_transcript_item_block(TranscriptItem const& item,
   return block;
 }
 
-std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
-                                                      bool suppress_result_summary, bool compact_spacing)
+std::vector<std::string> render_transcript_item_lines(TranscriptItem const& item, std::size_t item_index, std::size_t width, ToolPresentation tool_presentation,
+                                                      bool thinking_visible, bool suppress_result_summary, bool compact_spacing,
+                                                      MermaidTranscriptProjection const* mermaid_projection)
 {
-  return render_transcript_item_block(item, width, tool_presentation, thinking_visible, suppress_result_summary, compact_spacing).lines;
+  return render_transcript_item_block(item, item_index, width, tool_presentation, thinking_visible, suppress_result_summary, compact_spacing,
+                                      mermaid_projection)
+      .lines;
 }
 
 }  // namespace
@@ -2376,11 +2445,13 @@ std::size_t restore_transcript_viewport_anchor(TranscriptViewportAnchor anchor, 
 }
 
 TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
-                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                                      MermaidTranscriptProjection const* mermaid_projection)
 {
   if (item_index >= transcript.size() || suppress_adjacent_tool_result(transcript, item_index))
     return {};
-  auto block = render_transcript_item_block(transcript[item_index], width, tool_presentation, thinking_visible, false, compact_spacing);
+  auto block =
+      render_transcript_item_block(transcript[item_index], item_index, width, tool_presentation, thinking_visible, false, compact_spacing, mermaid_projection);
   if (block.lines.empty())
     return block;
   block.presentation_private_rows.resize(block.lines.size(), false);
@@ -2395,18 +2466,19 @@ TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem
 }
 
 std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
-                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                                             MermaidTranscriptProjection const* mermaid_projection)
 {
-  return render_transcript_search_item(transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing).lines;
+  return render_transcript_search_item(transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing, mermaid_projection).lines;
 }
 
 TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
-                                          bool thinking_visible, bool compact_spacing)
+                                          bool thinking_visible, bool compact_spacing, MermaidTranscriptProjection const* mermaid_projection)
 {
   TranscriptLayout layout;
   for (std::size_t index = 0; index < transcript.size(); ++index)
   {
-    auto block = render_transcript_search_item(transcript, index, width, tool_presentation, thinking_visible, compact_spacing);
+    auto block = render_transcript_search_item(transcript, index, width, tool_presentation, thinking_visible, compact_spacing, mermaid_projection);
     if (block.lines.empty())
       continue;
 
@@ -2429,13 +2501,14 @@ TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& tra
 }
 
 std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
-                                                 bool thinking_visible, bool compact_spacing)
+                                                 bool thinking_visible, bool compact_spacing, MermaidTranscriptProjection const* mermaid_projection)
 {
-  return render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing).lines;
+  return render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing, mermaid_projection).lines;
 }
 
 std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, std::size_t max_tail_lines,
-                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+                                                      ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                                      MermaidTranscriptProjection const* mermaid_projection)
 {
   if (max_tail_lines == 0 || transcript.empty())
     return {};
@@ -2448,7 +2521,7 @@ std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem
     if (suppress_adjacent_tool_result(transcript, item_index))
       continue;
     auto const& item = transcript[item_index];
-    auto block = render_transcript_item_lines(item, width, tool_presentation, thinking_visible, false, compact_spacing);
+    auto block = render_transcript_item_lines(item, item_index, width, tool_presentation, thinking_visible, false, compact_spacing, mermaid_projection);
     if (block.empty())
       continue;
 
@@ -2477,12 +2550,24 @@ std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem
 
 std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRenderCache& cache, std::vector<TranscriptItem> const& transcript,
                                                              std::size_t transcript_generation, std::size_t width, std::size_t max_tail_lines,
-                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+                                                             ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                                             MermaidTranscriptProjection const* mermaid_projection)
 {
   auto const plain_output = tui_plain_output();
+  std::vector<std::uint64_t> mermaid_projection_identity;
+  if (mermaid_projection)
+  {
+    mermaid_projection_identity.reserve(1 + mermaid_projection->accepted().size() * 2);
+    mermaid_projection_identity.push_back(mermaid_projection->config_epoch());
+    for (auto const& accepted : mermaid_projection->accepted())
+    {
+      mermaid_projection_identity.push_back(accepted.block_identity);
+      mermaid_projection_identity.push_back(static_cast<std::uint64_t>(accepted.item_index));
+    }
+  }
   if (cache.valid && cache.transcript_generation == transcript_generation && cache.width == width && cache.max_tail_lines == max_tail_lines &&
       cache.tool_presentation == tool_presentation && cache.thinking_visible == thinking_visible && cache.compact_spacing == compact_spacing &&
-      cache.plain_output == plain_output)
+      cache.plain_output == plain_output && cache.mermaid_projection_identity == mermaid_projection_identity)
   {
     return cache.rendered_tail;
   }
@@ -2605,6 +2690,7 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
     cache.thinking_visible = thinking_visible;
     cache.compact_spacing = compact_spacing;
     cache.plain_output = plain_output;
+    cache.mermaid_projection_identity = mermaid_projection_identity;
     cache.source_budget_bytes = source_budget;
     cache.rendered_tail = std::move(rendered);
     cache.rendered_stream_prefix.clear();
@@ -2613,7 +2699,8 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
       return cache.rendered_tail;
     if (!source_is_tool)
     {
-      auto const stream_block = render_transcript_item_lines(*streaming_item, width, tool_presentation, thinking_visible, false, compact_spacing);
+      auto const stream_block = render_transcript_item_lines(*streaming_item, transcript.size() - 1, width, tool_presentation, thinking_visible, false,
+                                                             compact_spacing, mermaid_projection);
       auto overlap = std::min(cache.rendered_tail.size(), stream_block.size());
       while (overlap > 0 && !std::equal(cache.rendered_tail.end() - static_cast<std::ptrdiff_t>(overlap), cache.rendered_tail.end(),
                                         stream_block.end() - static_cast<std::ptrdiff_t>(overlap)))
@@ -2659,10 +2746,12 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
                              cache.source_is_thinking == source_is_thinking && cache.source_is_tool == source_is_tool && tool_identity_unchanged &&
                              cache.counterpart_size == counterpart_size && source.size() >= cache.source_size && cache.width == width &&
                              cache.max_tail_lines == max_tail_lines && cache.tool_presentation == tool_presentation &&
-                             cache.thinking_visible == thinking_visible && cache.compact_spacing == compact_spacing && cache.plain_output == plain_output;
+                             cache.thinking_visible == thinking_visible && cache.compact_spacing == compact_spacing && cache.plain_output == plain_output &&
+                             cache.mermaid_projection_identity == mermaid_projection_identity;
   if (!append_update)
   {
-    return remember_baseline(render_transcript_tail_lines(transcript, width, max_tail_lines, tool_presentation, thinking_visible, compact_spacing));
+    return remember_baseline(
+        render_transcript_tail_lines(transcript, width, max_tail_lines, tool_presentation, thinking_visible, compact_spacing, mermaid_projection));
   }
 
   if (source_is_tool)
@@ -2671,7 +2760,8 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
     if (!cache.tool_prefix_saturated || !cache.tool_source_safe || appended.find('\x1b') != std::string_view::npos ||
         appended.find('/') != std::string_view::npos)
     {
-      return remember_baseline(render_transcript_tail_lines(transcript, width, max_tail_lines, tool_presentation, thinking_visible, compact_spacing));
+      return remember_baseline(
+          render_transcript_tail_lines(transcript, width, max_tail_lines, tool_presentation, thinking_visible, compact_spacing, mermaid_projection));
     }
     cache.transcript_generation = transcript_generation;
     cache.incremental_source_bytes += appended.size();
@@ -2757,13 +2847,14 @@ std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRende
 }
 
 std::vector<std::size_t> transcript_message_start_lines(std::vector<TranscriptItem> const& transcript, std::size_t width, ToolPresentation tool_presentation,
-                                                        bool thinking_visible, bool compact_spacing)
+                                                        bool thinking_visible, bool compact_spacing, MermaidTranscriptProjection const* mermaid_projection)
 {
-  return render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing).message_starts;
+  return render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing, mermaid_projection).message_starts;
 }
 
 void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<TranscriptItem> const& transcript, std::size_t transcript_generation,
-                                     std::size_t width, ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing)
+                                     std::size_t width, ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                     MermaidTranscriptProjection const* mermaid_projection)
 {
   if (cache.valid && cache.transcript_generation == transcript_generation && cache.width == width && cache.tool_presentation == tool_presentation &&
       cache.thinking_visible == thinking_visible && cache.compact_spacing == compact_spacing)
@@ -2775,7 +2866,7 @@ void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<T
   cache.tool_presentation = tool_presentation;
   cache.thinking_visible = thinking_visible;
   cache.compact_spacing = compact_spacing;
-  cache.layout = render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing);
+  cache.layout = render_transcript_layout(transcript, width, tool_presentation, thinking_visible, compact_spacing, mermaid_projection);
   cache.valid = true;
   ++cache.layout_build_count;
 }

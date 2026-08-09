@@ -438,6 +438,7 @@ class SmokeContext:
     root: pathlib.Path
     ava_exe: pathlib.Path
     fake_provider_exe: pathlib.Path
+    fake_mermaid_helper_exe: pathlib.Path
     tmux_exe: str
     tmux: TmuxClient = field(init=False)
     workspace: pathlib.Path = field(init=False)

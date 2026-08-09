@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/mermaid_projection.h"
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/runtime_state_internal.h"
@@ -350,7 +351,8 @@ void TranscriptSearchProjectionCache::rebuild_affected_direct(ComposerSnapshot c
     for (auto item_index = std::min(interval.first, past_last); item_index < past_last; ++item_index)
     {
       auto const context_run_offset = projections_[item_index].context_run_offset;
-      auto const block = render_transcript_search_item(snapshot.transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing);
+      auto const block = render_transcript_search_item(snapshot.transcript, item_index, width, tool_presentation, thinking_visible, compact_spacing,
+                                                       active_mermaid_projection(snapshot));
       ++authoritative_mutation_item_render_count_;
       if (block.lines.empty())
         continue;

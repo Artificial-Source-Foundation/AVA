@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
+#include "ava/tui/mermaid_projection.h"
 #include "ava/tui/runtime_transcript_selection_internal.h"
 #include "ava/tui/theme.h"
 
@@ -1995,7 +1996,7 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
     if (!selection_active && (!freeze_transcript_layout || !frozen_cache_compatible))
     {
       detail::refresh_transcript_layout_cache(active_cache, snapshot.transcript, transcript_generation, width, snapshot.tool_presentation,
-                                              snapshot.thinking_visible, compact_spacing);
+                                              snapshot.thinking_visible, compact_spacing, detail::active_mermaid_projection(snapshot));
     }
     visible_transcript = detail::cached_visible_transcript_lines(active_cache, transcript_height, snapshot.transcript_scroll_offset);
     if (selection_active && active_cache.valid)
@@ -2031,9 +2032,9 @@ ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snaps
   else
   {
     auto& active_cache = transcript_cache ? *transcript_cache : local_transcript_cache;
-    auto const rendered_transcript = detail::render_transcript_tail_lines_cached(active_cache.tail, snapshot.transcript, transcript_generation, width,
-                                                                                 transcript_height, snapshot.tool_presentation, snapshot.thinking_visible,
-                                                                                 detail::composer_layout_policy(snapshot, height).compact_transcript_spacing);
+    auto const rendered_transcript = detail::render_transcript_tail_lines_cached(
+        active_cache.tail, snapshot.transcript, transcript_generation, width, transcript_height, snapshot.tool_presentation, snapshot.thinking_visible,
+        detail::composer_layout_policy(snapshot, height).compact_transcript_spacing, detail::active_mermaid_projection(snapshot));
     visible_transcript = detail::visible_transcript_lines(rendered_transcript, width, transcript_height, 0);
   }
   frame.lines.insert(frame.lines.end(), visible_transcript.begin(), visible_transcript.end());
@@ -2195,7 +2196,8 @@ TranscriptHeaderHitGeometry transcript_header_hit_geometry(ComposerSnapshot cons
     return {};
 
   auto const layout = detail::render_transcript_layout(snapshot.transcript, width, snapshot.tool_presentation, snapshot.thinking_visible,
-                                                       detail::composer_layout_policy(snapshot, height).compact_transcript_spacing);
+                                                       detail::composer_layout_policy(snapshot, height).compact_transcript_spacing,
+                                                       detail::active_mermaid_projection(snapshot));
   if (layout.lines.empty())
     return {};
   auto const max_scroll = layout.lines.size() > transcript_height ? layout.lines.size() - transcript_height : std::size_t{0};
@@ -2355,7 +2357,7 @@ std::size_t detail::composer_max_transcript_scroll_offset_cached(ComposerSnapsho
   if (vertical_layout.transcript_height == 0)
     return 0;
   refresh_transcript_layout_cache(transcript_cache, snapshot.transcript, transcript_generation, width, snapshot.tool_presentation, snapshot.thinking_visible,
-                                  detail::composer_layout_policy(snapshot, height).compact_transcript_spacing);
+                                  detail::composer_layout_policy(snapshot, height).compact_transcript_spacing, detail::active_mermaid_projection(snapshot));
   return cached_transcript_max_scroll_offset(transcript_cache, vertical_layout.transcript_height);
 }
 

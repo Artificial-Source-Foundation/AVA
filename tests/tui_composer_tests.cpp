@@ -15,6 +15,7 @@ void run_tui_composer_tests()
   run_tui_terminal_input_tests_part_2();
   run_tui_composer_rendering_tests_part_1();
   run_tui_markdown_tests();
+  run_tui_mermaid_tests();
   run_tui_composer_rendering_tests_part_2();
   run_tui_completion_tests();
   run_tui_keybinding_tests();

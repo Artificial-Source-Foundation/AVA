@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -279,6 +280,7 @@ struct TranscriptTailRenderCache
   bool thinking_visible = true;
   bool compact_spacing = false;
   bool plain_output = false;
+  std::vector<std::uint64_t> mermaid_projection_identity = {};
   std::string meta = {};
   std::vector<std::string> rendered_stream_prefix = {};
   std::vector<std::string> rendered_tail = {};
@@ -397,12 +399,14 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 [[nodiscard]] std::string render_generic_line(std::string const& text, std::size_t width);
 [[nodiscard]] TranscriptLayout render_transcript_layout(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                         ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
-                                                        bool compact_spacing = false);
+                                                        bool compact_spacing = false, MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] TranscriptRenderedBlock render_transcript_search_item(std::vector<TranscriptItem> const& transcript, std::size_t item_index, std::size_t width,
-                                                                    ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing);
+                                                                    ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                                                    MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::vector<std::string> render_transcript_search_item_lines(std::vector<TranscriptItem> const& transcript, std::size_t item_index,
                                                                            std::size_t width, ToolPresentation tool_presentation, bool thinking_visible,
-                                                                           bool compact_spacing);
+                                                                           bool compact_spacing,
+                                                                           MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::optional<std::size_t> transcript_tool_card_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 // Click target for the first rendered "Thinking:" header line of a boundable completed thinking item.
 [[nodiscard]] std::optional<std::size_t> transcript_thinking_header_for_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
@@ -427,21 +431,25 @@ inline constexpr std::size_t kThinkingBoundedContentRows = 11;
 [[nodiscard]] bool transcript_item_has_boundable_thinking(TranscriptItem const& item, std::size_t width, bool thinking_visible);
 [[nodiscard]] std::vector<std::string> render_transcript_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
-                                                               bool compact_spacing = false);
+                                                               bool compact_spacing = false, MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::vector<std::string> render_transcript_tail_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                     std::size_t max_tail_lines, ToolPresentation tool_presentation = ToolPresentation::Rich,
-                                                                    bool thinking_visible = true, bool compact_spacing = false);
+                                                                    bool thinking_visible = true, bool compact_spacing = false,
+                                                                    MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::vector<std::string> render_transcript_tail_lines_cached(TranscriptTailRenderCache& cache, std::vector<TranscriptItem> const& transcript,
                                                                            std::size_t transcript_generation, std::size_t width, std::size_t max_tail_lines,
                                                                            ToolPresentation tool_presentation = ToolPresentation::Rich,
-                                                                           bool thinking_visible = true, bool compact_spacing = false);
+                                                                           bool thinking_visible = true, bool compact_spacing = false,
+                                                                           MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::vector<std::size_t> transcript_message_start_lines(std::vector<TranscriptItem> const& transcript, std::size_t width,
                                                                       ToolPresentation tool_presentation = ToolPresentation::Rich, bool thinking_visible = true,
-                                                                      bool compact_spacing = false);
+                                                                      bool compact_spacing = false,
+                                                                      MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::vector<std::string> visible_transcript_lines(std::vector<std::string> const& rendered_transcript, std::size_t width,
                                                                 std::size_t transcript_height, std::size_t transcript_scroll_offset);
 void refresh_transcript_layout_cache(TranscriptLayoutCache& cache, std::vector<TranscriptItem> const& transcript, std::size_t transcript_generation,
-                                     std::size_t width, ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing);
+                                     std::size_t width, ToolPresentation tool_presentation, bool thinking_visible, bool compact_spacing,
+                                     MermaidTranscriptProjection const* mermaid_projection = nullptr);
 [[nodiscard]] std::size_t cached_transcript_max_scroll_offset(TranscriptLayoutCache const& cache, std::size_t transcript_height);
 [[nodiscard]] std::vector<std::string> cached_visible_transcript_lines(TranscriptLayoutCache const& cache, std::size_t transcript_height,
                                                                        std::size_t transcript_scroll_offset);

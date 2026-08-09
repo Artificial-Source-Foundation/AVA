@@ -9,6 +9,7 @@
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_input_internal.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_mermaid_internal.h"
 #include "ava/tui/runtime_navigation_internal.h"
 #include "ava/tui/runtime_plugin_ui_internal.h"
 #include "ava/tui/runtime_prompts_internal.h"
@@ -86,6 +87,39 @@ constexpr std::size_t kKeyboardScrollRows = 3;
 constexpr auto kIdleInputPollDelay = std::chrono::milliseconds(250);
 constexpr auto kTerminalBackgroundProbeDeadline = std::chrono::milliseconds(50);
 
+class RuntimeBeforeShutdownGuard
+{
+ public:
+  explicit RuntimeBeforeShutdownGuard(TuiRuntimeOptions& options) : options_(options) { }
+  RuntimeBeforeShutdownGuard(RuntimeBeforeShutdownGuard const&) = delete;
+  RuntimeBeforeShutdownGuard& operator=(RuntimeBeforeShutdownGuard const&) = delete;
+  ~RuntimeBeforeShutdownGuard() { static_cast<void>(invoke()); }
+
+  [[nodiscard]] bool invoke() noexcept
+  {
+    if (invoked_)
+      return true;
+    invoked_ = true;
+    if (!options_.on_before_tui_shutdown)
+      return true;
+    try
+    {
+      options_.on_before_tui_shutdown();
+      return true;
+    }
+    catch (...)
+    {
+      return false;
+    }
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  TuiRuntimeOptions& options_;
+  bool invoked_ = false;
+};
+
 class ComposerTerminalGraphicsGuard
 {
  public:
@@ -162,6 +196,7 @@ void clear_reasoning_feedback_for_user_input(ComposerSnapshot& snapshot)
 
 int run_interactive_composer(TuiRuntimeOptions options)
 {
+  RuntimeBeforeShutdownGuard before_shutdown(options);
   if (!terminal_is_tty())
   {
     std::cerr << "interactive TUI requires stdin and stdout to be terminals\n";
@@ -478,10 +513,33 @@ int run_interactive_composer(TuiRuntimeOptions options)
     return poll_branch_summary();
   };
 
+  RuntimeMermaidPresentationController mermaid_presentation(options.mermaid_render);
+  auto service_mermaid_presentation = [&]() -> bool {
+    auto old_anchor = detail::TranscriptViewportAnchor{};
+    auto const preserve_viewport = transcript_scroll_offset > 0;
+    if (preserve_viewport && !renderer.has_deferred_detached_transcript_update())
+    {
+      auto const old_max_scroll =
+          detail::composer_max_transcript_scroll_offset_cached(snapshot, snapshot.width, snapshot.height, completion_cache, snapshot.file_references_generation,
+                                                               renderer.transcript_layout_cache, snapshot.transcript_generation);
+      old_anchor = detail::capture_transcript_viewport_anchor(renderer.transcript_layout_cache.layout, old_max_scroll, transcript_scroll_offset);
+    }
+    auto const update = mermaid_presentation.service(snapshot);
+    if (!update.visual_changed)
+      return true;
+    transcript_search.refresh_after_transcript_mutation(0, update.earliest_changed_item);
+    if (preserve_viewport)
+    {
+      renderer.defer_detached_transcript_update(old_anchor, 0);
+      renderer.synchronize_detached_transcript_layout();
+    }
+    return renderer.request_render(FrameRenderKind::Full);
+  };
+
   RuntimeActionController action_controller(options, presentation_state, draft_state, renderer, active_select_list, session_archive_confirmation);
   RuntimeSubagentWorkspaceController subagent_workspace(options, snapshot);
   RuntimeActiveRunController active_run_controller(options, presentation_state, draft_state, renderer, prompt_coordinator, plugin_ui, navigation,
-                                                   action_controller, transcript_search, subagent_workspace);
+                                                   action_controller, transcript_search, subagent_workspace, service_mermaid_presentation);
   auto maybe_reload_display_settings = [&]() -> bool {
     auto const outcome = action_controller.maybe_reload_display_settings();
     if (outcome == DisplaySettingsReloadPollOutcome::TerminalFailure)
@@ -575,11 +633,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   if (terminal_signal_received())
     return 130;
-  if (!render())
+  if (!service_mermaid_presentation() || !render())
     return 1;
 
   while (true)
   {
+    if (!service_mermaid_presentation())
+    {
+      terminal_write_failed = true;
+      break;
+    }
     if (!poll_branch_summary())
     {
       terminal_write_failed = true;
@@ -2461,18 +2524,10 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
   }
 
+  mermaid_presentation.shutdown();
   plugin_ui.shutdown(snapshot);
-  if (options.on_before_tui_shutdown)
-  {
-    try
-    {
-      options.on_before_tui_shutdown();
-    }
-    catch (...)
-    {
-      terminal_write_failed = true;
-    }
-  }
+  if (!before_shutdown.invoke())
+    terminal_write_failed = true;
   return terminal_signal_received() ? 130 : (terminal_write_failed ? 1 : 0);
 }
 

@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--scenario", required=True, choices=SCENARIOS)
     parser.add_argument("--ava", required=True)
     parser.add_argument("--fake-provider", required=True)
+    parser.add_argument("--fake-mermaid-helper", required=True)
     parser.add_argument("--root", required=True)
     args = parser.parse_args()
 
@@ -33,10 +34,13 @@ def main() -> int:
 
     ava_exe = pathlib.Path(args.ava).absolute()
     fake_provider_exe = pathlib.Path(args.fake_provider).absolute()
+    fake_mermaid_helper_exe = pathlib.Path(args.fake_mermaid_helper).absolute()
     if not ava_exe.exists():
         raise RuntimeError(f"AVA executable does not exist: {ava_exe}")
     if not fake_provider_exe.exists():
         raise RuntimeError(f"fake provider executable does not exist: {fake_provider_exe}")
+    if not fake_mermaid_helper_exe.exists():
+        raise RuntimeError(f"fake Mermaid helper executable does not exist: {fake_mermaid_helper_exe}")
 
     context: SmokeContext | None = None
 
@@ -59,6 +63,7 @@ def main() -> int:
             root=pathlib.Path(args.root),
             ava_exe=ava_exe,
             fake_provider_exe=fake_provider_exe,
+            fake_mermaid_helper_exe=fake_mermaid_helper_exe,
             tmux_exe=tmux_exe,
         )
         SCENARIO_HANDLERS[args.scenario](context)

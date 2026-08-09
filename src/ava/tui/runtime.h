@@ -43,6 +43,46 @@ struct TuiRememberedPermissionRule
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TuiMermaidRenderRequest
+{
+  std::uint64_t identity = 0;
+  std::uint64_t config_epoch = 0;
+  std::string source;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+enum class TuiMermaidEnqueueResult : std::uint8_t
+{
+  Accepted,
+  QueueFull,
+  Rejected,
+};
+
+struct TuiMermaidRenderCompletion
+{
+  std::uint64_t identity = 0;
+  std::uint64_t config_epoch = 0;
+  bool accepted = false;
+  std::string text;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// Process-neutral nonblocking application bridge. The TUI owns only opaque
+// identities and bounded payload DTOs; helper execution remains entirely
+// application-owned.
+struct TuiMermaidRenderBridge
+{
+  std::uint64_t config_epoch = 0;
+  bool enabled = false;
+  std::function<TuiMermaidEnqueueResult(TuiMermaidRenderRequest)> enqueue;
+  std::function<bool(std::uint64_t identity, std::uint64_t config_epoch)> cancel;
+  std::function<std::vector<TuiMermaidRenderCompletion>()> drain;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TuiActiveRunQueues
 {
   std::string active_request_id;
@@ -85,6 +125,8 @@ struct TuiRuntimeStateSnapshot
   // Effective display presentation owned by the application display document.
   bool show_images = true;
   std::size_t image_width_cells = 60;
+  std::uint64_t mermaid_config_epoch = 0;
+  bool mermaid_enabled = false;
   // Application-owned path-free startup/resources snapshot. Omitted rather than
   // rebuilt by the TUI. Never contains paths, credentials, or prompt contents.
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
@@ -254,6 +296,7 @@ struct TuiRuntimeOptions
   bool show_images = true;
   std::size_t image_width_cells = 60;
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
+  TuiMermaidRenderBridge mermaid_render;
   TuiKeyBindings key_bindings = default_key_bindings();
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;

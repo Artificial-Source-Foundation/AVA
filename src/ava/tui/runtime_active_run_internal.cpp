@@ -135,7 +135,8 @@ RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& option
                                                        RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator,
                                                        RuntimePluginUiCoordinator& plugin_ui, RuntimeNavigationController& navigation,
                                                        RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
-                                                       RuntimeSubagentWorkspaceController& subagent_workspace)
+                                                       RuntimeSubagentWorkspaceController& subagent_workspace,
+                                                       std::function<bool()> service_mermaid_presentation)
     : options_(options),
       presentation_state_(presentation_state),
       draft_state_(draft_state),
@@ -145,7 +146,8 @@ RuntimeActiveRunController::RuntimeActiveRunController(TuiRuntimeOptions& option
       navigation_(navigation),
       action_controller_(action_controller),
       transcript_search_(transcript_search),
-      subagent_workspace_(subagent_workspace)
+      subagent_workspace_(subagent_workspace),
+      service_mermaid_presentation_(service_mermaid_presentation ? std::move(service_mermaid_presentation) : std::function<bool()>{[] { return true; }})
 {
 }
 
@@ -621,7 +623,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       }
 
       auto const drain_result = drain_events(state);
-      if (drain_result == RuntimeEventDrainResult::RenderFailed)
+      if (drain_result == RuntimeEventDrainResult::RenderFailed || !service_mermaid_presentation_())
       {
         fail_active_run();
         break;
@@ -751,7 +753,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   }
   refresh_token_status();
   refresh_active_context_status();
-  if (!render())
+  if (!service_mermaid_presentation_() || !render())
   {
     terminal_write_failed = true;
     return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};

@@ -642,6 +642,10 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = text_body("[Docs](https://e.test/d) https://e.test/b u@e.test")};
   }
+  if (scenario == "mermaid")
+  {
+    return ProviderResponse{.body = text_body("before mermaid\n```mermaid\nTMUX_MERMAID_SOURCE_A-->B\n```\nafter mermaid")};
+  }
   return ProviderResponse{.body = text_body("headless active prompt complete")};
 }
 

@@ -8,6 +8,7 @@
 #include "ava/app/display_settings.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell_internal.h"
+#include "ava/app/mermaid_tui_bridge.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/plugin_ui_capability.h"
 #include "ava/app/reasoning_controls.h"
@@ -152,9 +153,20 @@ int run_tui(ShellState state)
                                                                                   .mermaid = {},
                                                                                   .path = ava::app::tui_display_settings_file(invocation_paths)});
   auto effective_display_settings_mutex = std::make_shared<std::mutex>();
-  auto remember_effective_display_settings = [effective_display_settings, effective_display_settings_mutex](ava::app::TuiDisplaySettings settings) {
+  auto mermaid_bridge_created = ava::app::MermaidTuiBridge::create(effective_display_settings->mermaid);
+  if (!mermaid_bridge_created)
+  {
+    std::cerr << mermaid_bridge_created.error().format() << '\n';
+    return 1;
+  }
+  auto mermaid_bridge = std::move(*mermaid_bridge_created);
+  auto remember_effective_display_settings = [effective_display_settings, effective_display_settings_mutex,
+                                              mermaid_bridge](ava::app::TuiDisplaySettings settings) -> ava::core::VoidResult {
+    if (auto applied = mermaid_bridge->apply(settings.mermaid); !applied)
+      return std::unexpected(std::move(applied.error()));
     std::lock_guard lock(*effective_display_settings_mutex);
     *effective_display_settings = std::move(settings);
+    return {};
   };
   auto copy_effective_display_presentation = [effective_display_settings, effective_display_settings_mutex]() {
     std::lock_guard lock(*effective_display_settings_mutex);
@@ -166,7 +178,8 @@ int run_tui(ShellState state)
   }
   else
   {
-    remember_effective_display_settings(*display_settings);
+    if (auto remembered = remember_effective_display_settings(*display_settings); !remembered)
+      append_status_line(keybind_status, remembered.error().format());
     if (auto watched = refresh_display_watch_state(); !watched)
       append_status_line(keybind_status, watched.error().format());
   }
@@ -249,13 +262,14 @@ int run_tui(ShellState state)
                                .project_trust = project_trust_snapshot(session_r->project_trust())};
   };
   auto state_snapshot = [&unlocked_session, &application_catalog, &custom_theme_options, &refresh_title_catalog, &session_presentation, &key_bindings,
-                         copy_effective_display_presentation](std::string status) {
+                         copy_effective_display_presentation, mermaid_bridge](std::string status) {
     static_cast<void>(refresh_title_catalog());
     auto delivery = application_catalog.delivery_snapshot();
     // Overview uses already-open session context/freshness only; do not snapshot or scan the
     // application catalog / session tree (titles and ids are intentionally omitted).
     // Copy presentation fields under the effective-settings lock, then release before assembling the snapshot.
     auto const [show_images, image_width_cells] = copy_effective_display_presentation();
+    auto const mermaid_configuration = mermaid_bridge->presentation_configuration();
     auto startup_overview = build_startup_overview_snapshot(unlocked_session, key_bindings, ava::tui::active_tui_theme());
     auto presentation = session_presentation();
     return ava::tui::TuiRuntimeStateSnapshot{
@@ -277,6 +291,8 @@ int run_tui(ShellState state)
         .todos = todos_for_session(unlocked_session),
         .show_images = show_images,
         .image_width_cells = image_width_cells,
+        .mermaid_config_epoch = mermaid_configuration.epoch,
+        .mermaid_enabled = mermaid_configuration.enabled,
         .startup_overview = std::move(startup_overview)};
   };
   auto session_selector_sort = ava::app::SessionSelectorSort::Recent;
@@ -393,6 +409,7 @@ int run_tui(ShellState state)
       .show_images = initial_show_images,
       .image_width_cells = initial_image_width_cells,
       .startup_overview = std::move(initial_startup_overview),
+      .mermaid_render = mermaid_bridge->tui_bridge(),
       .key_bindings = key_bindings,
       .token_status_provider = [&unlocked_session]() { return token_status_for_session(unlocked_session); },
       .active_context_status_provider = [&unlocked_session]() { return active_context_status_for_session(unlocked_session); },
@@ -485,7 +502,10 @@ int run_tui(ShellState state)
             if (is_display_settings_command(submitted))
             {
               if (auto loaded = ava::app::load_tui_display_settings(invocation_paths); loaded)
-                remember_effective_display_settings(*loaded);
+              {
+                if (auto remembered = remember_effective_display_settings(*loaded); !remembered)
+                  add_output(line_result, remembered.error().format());
+              }
               else
                 add_output(line_result, loaded.error().format());
               if (auto watched = refresh_display_watch_state(); !watched)
@@ -597,7 +617,8 @@ int run_tui(ShellState state)
         auto loaded = ava::app::apply_tui_display_settings(invocation_paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
-        remember_effective_display_settings(*loaded);
+        if (auto remembered = remember_effective_display_settings(*loaded); !remembered)
+          return std::unexpected(std::move(remembered.error()));
         if (auto watched = refresh_display_watch_state(); !watched)
           return std::unexpected(std::move(watched.error()));
         application_catalog.refresh_values(unlocked_session, hotkeys);
@@ -620,7 +641,8 @@ int run_tui(ShellState state)
         auto loaded = ava::app::apply_tui_display_settings(invocation_paths);
         if (!loaded)
           return std::unexpected(std::move(loaded.error()));
-        remember_effective_display_settings(*loaded);
+        if (auto remembered = remember_effective_display_settings(*loaded); !remembered)
+          return std::unexpected(std::move(remembered.error()));
         {
           std::lock_guard lock(*display_watch_mutex);
           *display_watch_state = std::move(*watched);
@@ -794,7 +816,8 @@ int run_tui(ShellState state)
           auto loaded = ava::app::load_tui_display_settings(invocation_paths);
           if (!loaded)
             return std::unexpected(std::move(loaded.error()));
-          remember_effective_display_settings(*loaded);
+          if (auto remembered = remember_effective_display_settings(*loaded); !remembered)
+            return std::unexpected(std::move(remembered.error()));
           if (auto watched = refresh_display_watch_state(); !watched)
             return std::unexpected(std::move(watched.error()));
           application_catalog.refresh_values(unlocked_session, hotkeys);
@@ -964,7 +987,12 @@ int run_tui(ShellState state)
         application_catalog.refresh_values(unlocked_session, hotkeys);
         return state_snapshot("session opened");
       },
-      .on_before_tui_shutdown = [branch_summary_coordinator]() { branch_summary_coordinator->shutdown(); }});
+      .on_before_tui_shutdown =
+          [mermaid_bridge, branch_summary_coordinator]() {
+            mermaid_bridge->shutdown();
+            branch_summary_coordinator->shutdown();
+          }});
+  mermaid_bridge->shutdown();
   branch_summary_coordinator->shutdown();
   std::cout << std::flush;
   return result;

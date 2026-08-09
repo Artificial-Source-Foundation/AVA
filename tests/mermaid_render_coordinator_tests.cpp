@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/mermaid_render_coordinator.h"
+#include "ava/app/mermaid_tui_bridge.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -16,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 #include <signal.h>
 #include <sys/stat.h>
@@ -412,6 +414,63 @@ void test_queue_deduplication_cache_and_bounds()
   std::filesystem::remove_all(root, ignored);
 }
 
+void test_tui_bridge_epoch_reload_and_callback_lifetime()
+{
+  ava::app::MermaidDisplaySettings disabled;
+  auto created = ava::app::MermaidTuiBridge::create(disabled);
+  if (!created)
+  {
+    expect(false, created.error().format());
+    return;
+  }
+  auto bridge = *created;
+  auto callbacks = bridge->tui_bridge();
+  auto initial = bridge->presentation_configuration();
+  auto const disabled_result = callbacks.enqueue({.identity = 1, .config_epoch = initial.epoch, .source = "graph TD; A-->B"});
+
+  ava::app::MermaidDisplaySettings enabled{
+      .enabled = true, .enabled_configured = true, .argv = {AVA_FAKE_MERMAID_HELPER_PATH, "echo"}, .argv_configured = true, .unknown_fields = {}};
+  auto applied = bridge->apply(enabled);
+  auto configured = bridge->presentation_configuration();
+  auto unchanged = bridge->apply(enabled);
+  auto configured_again = bridge->presentation_configuration();
+  auto queued = callbacks.enqueue({.identity = 2, .config_epoch = configured.epoch, .source = "graph TD; A-->B\n"});
+  std::optional<ava::tui::TuiMermaidRenderCompletion> completion;
+  auto const deadline = std::chrono::steady_clock::now() + 4s;
+  while (!completion && std::chrono::steady_clock::now() < deadline)
+  {
+    for (auto& candidate : callbacks.drain())
+    {
+      if (candidate.identity == 2)
+        completion = std::move(candidate);
+    }
+    if (!completion)
+      std::this_thread::sleep_for(1ms);
+  }
+  expect(initial.epoch != 0 && !initial.enabled && disabled_result == ava::tui::TuiMermaidEnqueueResult::Rejected && applied && configured.enabled &&
+             configured.epoch > initial.epoch && unchanged && configured_again.epoch == configured.epoch &&
+             queued == ava::tui::TuiMermaidEnqueueResult::Accepted && completion && completion->accepted && completion->text == "graph TD; A-->B",
+         "app TUI bridge keeps disabled mode process-free, advances only effective configuration changes, and projects accepted helper completions");
+
+  auto invalid = enabled;
+  invalid.argv = {"relative-helper"};
+  auto invalid_reload = bridge->apply(invalid);
+  auto after_invalid = bridge->presentation_configuration();
+  auto stale_enqueue = callbacks.enqueue({.identity = 3, .config_epoch = initial.epoch, .source = "stale"});
+  expect(!invalid_reload && after_invalid.epoch == configured.epoch && after_invalid.enabled && stale_enqueue == ava::tui::TuiMermaidEnqueueResult::Rejected,
+         "invalid bridge reloads retain last-known-good settings and old-epoch requests fail closed");
+
+  std::weak_ptr<ava::app::MermaidTuiBridge> weak = bridge;
+  bridge->shutdown();
+  bridge.reset();
+  created->reset();
+  auto const after_shutdown = callbacks.enqueue({.identity = 4, .config_epoch = configured.epoch, .source = "after shutdown"});
+  expect(!weak.expired() && after_shutdown == ava::tui::TuiMermaidEnqueueResult::Rejected,
+         "coordinator shutdown precedes callback-capture teardown and retained callbacks fail closed");
+  callbacks = {};
+  expect(weak.expired(), "destroying the final neutral callback bridge releases the shut-down application adapter");
+}
+
 void test_configuration_and_immediate_request_bounds()
 {
   auto invalid_relative = ava::app::MermaidRenderCoordinator::create({.epoch = 1, .enabled = true, .argv = {"relative"}});
@@ -443,5 +502,6 @@ void run_mermaid_render_coordinator_tests()
   test_typed_process_and_output_failures();
   test_timeout_group_cleanup_cancel_reconfigure_and_shutdown();
   test_queue_deduplication_cache_and_bounds();
+  test_tui_bridge_epoch_reload_and_callback_lifetime();
   test_configuration_and_immediate_request_bounds();
 }

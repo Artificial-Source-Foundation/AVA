@@ -161,6 +161,7 @@ set(AVA_TESTS_SOURCES
   "tui_composer_rendering_tests.cpp"
   "tui_keybinding_tests.cpp"
   "tui_markdown_tests.cpp"
+  "tui_mermaid_tests.cpp"
   "tui_modal_tests.cpp"
   "tui_permission_tests.cpp"
   "tui_runtime_state_tests.cpp"
@@ -786,6 +787,7 @@ if(Python3_Interpreter_FOUND)
     active_run
     restore_followup
     streaming_scroll
+    mermaid
     transcript_search
     transcript_selection
     subagent_workspace
@@ -807,6 +809,7 @@ if(Python3_Interpreter_FOUND)
               --scenario ${AVA_TUI_TMUX_SMOKE_SCENARIO}
               --ava $<TARGET_FILE:ava>
               --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+              --fake-mermaid-helper $<TARGET_FILE:ava_fake_mermaid_helper>
               --root ${CMAKE_BINARY_DIR}/tui-tmux-smoke/${AVA_TUI_TMUX_SMOKE_SCENARIO})
     set_tests_properties(
       ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}

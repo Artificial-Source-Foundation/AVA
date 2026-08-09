@@ -107,7 +107,7 @@ class RuntimeActiveRunController final
   RuntimeActiveRunController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
                              RuntimeRenderer& renderer, RuntimePromptCoordinator& prompt_coordinator, RuntimePluginUiCoordinator& plugin_ui,
                              RuntimeNavigationController& navigation, RuntimeActionController& action_controller, TranscriptSearchController& transcript_search,
-                             RuntimeSubagentWorkspaceController& subagent_workspace);
+                             RuntimeSubagentWorkspaceController& subagent_workspace, std::function<bool()> service_mermaid_presentation = {});
   RuntimeActiveRunController(RuntimeActiveRunController const&) = delete;
   RuntimeActiveRunController& operator=(RuntimeActiveRunController const&) = delete;
 
@@ -161,6 +161,7 @@ class RuntimeActiveRunController final
   RuntimeActionController& action_controller_;
   TranscriptSearchController& transcript_search_;
   RuntimeSubagentWorkspaceController& subagent_workspace_;
+  std::function<bool()> service_mermaid_presentation_;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/mermaid_projection.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/terminal.h"
 
@@ -220,7 +221,7 @@ bool RuntimeRenderer::prepare_transcript_selection_authority()
     auto const width = composer_canvas_layout(snapshot_).content_width;
     auto const compact = detail::composer_layout_policy(snapshot_, height).compact_transcript_spacing;
     detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot_.transcript, snapshot_.transcript_generation, width, snapshot_.tool_presentation,
-                                            snapshot_.thinking_visible, compact);
+                                            snapshot_.thinking_visible, compact, detail::active_mermaid_projection(snapshot_));
     if (pending_live_selection_item_index_shift_ != 0)
     {
       transcript_selection_.apply_item_index_shift(pending_live_selection_item_index_shift_, transcript_layout_cache.layout);
@@ -487,7 +488,7 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
         auto const width = composer_canvas_layout(snapshot).content_width;
         auto const compact = detail::composer_layout_policy(snapshot, height).compact_transcript_spacing;
         detail::refresh_transcript_layout_cache(transcript_layout_cache, snapshot.transcript, snapshot.transcript_generation, width, snapshot.tool_presentation,
-                                                snapshot.thinking_visible, compact);
+                                                snapshot.thinking_visible, compact, detail::active_mermaid_projection(snapshot));
       }
       if (!freeze_detached_viewport && pending_live_selection_item_index_shift_ != 0)
       {

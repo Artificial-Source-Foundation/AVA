@@ -23,6 +23,9 @@ struct PermissionPrompt;
 namespace ava::tui {
 
 struct TuiKeyBindings;
+namespace detail {
+class MermaidTranscriptProjection;
+}  // namespace detail
 
 enum class ToolTimelineStatus
 {
@@ -597,6 +600,11 @@ struct ComposerSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::size_t transcript_generation = 0;
+  // Immutable TUI-only presentation results. Semantic TranscriptItem text is
+  // never rewritten; renderer lookup revalidates every fence before use.
+  std::shared_ptr<detail::MermaidTranscriptProjection const> mermaid_projection = {};
+  std::uint64_t mermaid_config_epoch = 0;
+  bool mermaid_enabled = false;
   std::vector<SlashCommandItem> slash_commands = {};
   std::vector<FileReferenceItem> file_references = {};
   std::size_t file_references_generation = 0;

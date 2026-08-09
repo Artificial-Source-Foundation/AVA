@@ -9,6 +9,7 @@ from .startup_overview import scenario_startup_overview
 from .active_run import scenario_active_run
 from .restore_followup import scenario_restore_followup
 from .streaming_scroll import scenario_streaming_scroll
+from .mermaid import scenario_mermaid
 from .transcript_search import scenario_transcript_search
 from .transcript_selection import scenario_transcript_selection
 from .subagent_workspace import scenario_subagent_workspace
@@ -34,6 +35,7 @@ SCENARIOS = (
     "active_run",
     "restore_followup",
     "streaming_scroll",
+    "mermaid",
     "transcript_search",
     "transcript_selection",
     "subagent_workspace",
@@ -59,6 +61,7 @@ SCENARIO_HANDLERS = {
     "active_run": scenario_active_run,
     "restore_followup": scenario_restore_followup,
     "streaming_scroll": scenario_streaming_scroll,
+    "mermaid": scenario_mermaid,
     "transcript_search": scenario_transcript_search,
     "transcript_selection": scenario_transcript_selection,
     "subagent_workspace": scenario_subagent_workspace,

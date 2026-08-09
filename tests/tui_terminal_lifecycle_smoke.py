@@ -55,9 +55,12 @@ ENVIRONMENT_ALLOWLIST = (
 )
 BRACKETED_PASTE_ENABLE = b"\x1b[?2004h"
 BRACKETED_PASTE_DISABLE = b"\x1b[?2004l"
-KITTY_KEYBOARD_PUSH = b"\x1b[>7u"
+KITTY_KEYBOARD_PUSH_FLAGS_5 = b"\x1b[>5u"
+KITTY_KEYBOARD_PUSH_FLAGS_7 = b"\x1b[>7u"
 KITTY_KEYBOARD_QUERY = b"\x1b[?u"
 DEVICE_ATTRIBUTES_QUERY = b"\x1b[c"
+ALACRITTY_DA2_QUERY = b"\x1b[>c"
+ALACRITTY_DA2_2402_RESPONSE = b"\x1b[>0;2402;1c"
 MODIFY_OTHER_KEYS_ENABLE = b"\x1b[>4;2m"
 MODIFY_OTHER_KEYS_DISABLE = b"\x1b[>4;0m"
 KITTY_KEYBOARD_POP = b"\x1b[<u"
@@ -65,6 +68,9 @@ ALT_SCREEN_ENTER = b"\x1b[?1049h"
 ALT_SCREEN_EXIT = b"\x1b[?1049l"
 CURSOR_HIDE = b"\x1b[?25l"
 CURSOR_SHOW = b"\x1b[?25h"
+CURSOR_STEADY_BAR = b"\x1b[6 q"
+CURSOR_STYLE_RESET = b"\x1b[0 q"
+CURSOR_STYLE_SEQUENCES = tuple(f"\x1b[{parameter} q".encode() for parameter in range(7))
 CONTROL_CHARACTER_NAMES = {}
 for control_name in (
     "VINTR", "VQUIT", "VERASE", "VKILL", "VEOF", "VTIME", "VMIN", "VSWTC", "VSTART", "VSTOP",
@@ -232,7 +238,15 @@ def require_order(data: bytes, sequences: list[tuple[str, bytes]]) -> None:
         previous = position
 
 
-def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
+def run_case(
+    ava_exe: pathlib.Path,
+    case_root: pathlib.Path,
+    case: str,
+    teardown_method: str,
+    *,
+    direct_alacritty: bool = False,
+    forced_cursor: bool = False,
+) -> None:
     workspace = case_root / "workspace"
     home = case_root / "home"
     config = case_root / "config"
@@ -244,6 +258,13 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
         path.mkdir(parents=True, exist_ok=True)
     runtime.chmod(0o700)
     (workspace / "AGENTS.md").write_text(f"terminal lifecycle {case}\n", encoding="utf-8")
+    if forced_cursor:
+        ava_config = config / "ava"
+        ava_config.mkdir()
+        (ava_config / "display.json").write_text(
+            '{\n  "cursor_style": "bar",\n  "cursor_blink": false\n}\n',
+            encoding="utf-8",
+        )
 
     env = allowlisted_environment()
     env.update(
@@ -255,7 +276,7 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
             "XDG_CACHE_HOME": str(cache),
             "XDG_RUNTIME_DIR": str(runtime),
             "TERM": "xterm-256color",
-            "TERM_PROGRAM": "xterm",
+            "TERM_PROGRAM": "Alacritty" if direct_alacritty else "xterm",
             "COLORTERM": "truecolor",
         }
     )
@@ -279,48 +300,106 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
     )
     pgid = process.pid
     try:
+        initial_kitty_push = KITTY_KEYBOARD_PUSH_FLAGS_5 if direct_alacritty else KITTY_KEYBOARD_PUSH_FLAGS_7
         startup = read_until(
             master_fd,
             process,
             lambda output: (
                 (b"Type a message" in output or b"live session" in output)
                 and BRACKETED_PASTE_ENABLE in output
-                and KITTY_KEYBOARD_PUSH in output
+                and initial_kitty_push in output
                 and KITTY_KEYBOARD_QUERY in output
                 and DEVICE_ATTRIBUTES_QUERY in output
+                and (not direct_alacritty or ALACRITTY_DA2_QUERY in output)
+                and (not forced_cursor or CURSOR_STEADY_BAR in output)
             ),
             f"{case} synchronized startup",
         )
-        if not (startup.find(KITTY_KEYBOARD_PUSH) < startup.find(KITTY_KEYBOARD_QUERY) < startup.find(DEVICE_ATTRIBUTES_QUERY)):
-            raise RuntimeError(f"keyboard push/query/device-attributes order was invalid; startup={startup!r}")
-
-        os.write(master_fd, b"\x1b[?1;2c")
-        negotiation = read_until(
-            master_fd,
-            process,
-            lambda output: MODIFY_OTHER_KEYS_ENABLE in output,
-            f"{case} modifyOtherKeys fallback enable",
-        )
-        if MODIFY_OTHER_KEYS_ENABLE not in negotiation:
-            raise RuntimeError("device-attributes response did not enable modifyOtherKeys fallback")
-
-        if case == "ctrl_d":
-            os.write(master_fd, b"\x04")
+        startup_protocols = [
+            ("initial Kitty keyboard push", initial_kitty_push),
+            ("Kitty keyboard query", KITTY_KEYBOARD_QUERY),
+            ("device-attributes query", DEVICE_ATTRIBUTES_QUERY),
+        ]
+        if direct_alacritty:
+            startup_protocols.append(("Alacritty DA2 query", ALACRITTY_DA2_QUERY))
+        try:
+            require_order(startup, startup_protocols)
+        except RuntimeError as error:
+            raise RuntimeError(f"{case} startup protocol order was invalid: {error}") from error
+        if direct_alacritty and KITTY_KEYBOARD_PUSH_FLAGS_7 in startup:
+            raise RuntimeError(f"{case} pushed healthy Kitty flags before the DA2 response; startup={startup!r}")
+        if forced_cursor:
+            if startup.count(CURSOR_STEADY_BAR) != 1 or CURSOR_STYLE_RESET in startup:
+                raise RuntimeError(f"{case} did not force one steady bar cursor without resetting it during entry; startup={startup!r}")
         else:
+            for sequence in CURSOR_STYLE_SEQUENCES:
+                if sequence in startup:
+                    raise RuntimeError(f"{case} default cursor perturbed DECSCUSR during entry with {sequence!r}; startup={startup!r}")
+
+        if direct_alacritty:
+            # This capture begins only after the strict response is written. The
+            # replacement assertion therefore cannot match the initial flags-5 push.
+            os.write(master_fd, ALACRITTY_DA2_2402_RESPONSE)
+            negotiation = read_until(
+                master_fd,
+                process,
+                lambda output: (
+                    KITTY_KEYBOARD_POP in output
+                    and KITTY_KEYBOARD_PUSH_FLAGS_7 in output
+                    and output.find(KITTY_KEYBOARD_POP) < output.find(KITTY_KEYBOARD_PUSH_FLAGS_7)
+                ),
+                f"{case} Alacritty DA2 upgrade",
+            )
+            if (
+                negotiation.count(KITTY_KEYBOARD_POP) != 1
+                or negotiation.count(KITTY_KEYBOARD_PUSH_FLAGS_7) != 1
+                or KITTY_KEYBOARD_PUSH_FLAGS_5 in negotiation
+            ):
+                raise RuntimeError(f"{case} DA2 upgrade was not one balanced pop/re-push to flags 7; negotiation={negotiation!r}")
+        else:
+            os.write(master_fd, b"\x1b[?1;2c")
+            negotiation = read_until(
+                master_fd,
+                process,
+                lambda output: MODIFY_OTHER_KEYS_ENABLE in output,
+                f"{case} modifyOtherKeys fallback enable",
+            )
+            if MODIFY_OTHER_KEYS_ENABLE not in negotiation:
+                raise RuntimeError("device-attributes response did not enable modifyOtherKeys fallback")
+
+        if teardown_method == "ctrl_d":
+            os.write(master_fd, b"\x04")
+        elif teardown_method == "sigterm":
             os.kill(process.pid, signal.SIGTERM)
+        else:
+            raise RuntimeError(f"unsupported teardown method: {teardown_method}")
         returncode, teardown = drain_exit(master_fd, process)
-        expected_returncode = 0 if case == "ctrl_d" else 130
+        expected_returncode = 0 if teardown_method == "ctrl_d" else 130
         if returncode != expected_returncode:
             raise RuntimeError(f"{case} exited with {returncode}, expected {expected_returncode}; teardown={teardown!r}")
 
-        require_order(
-            teardown,
+        teardown_protocols = []
+        if not direct_alacritty:
+            teardown_protocols.append(("modifyOtherKeys disable", MODIFY_OTHER_KEYS_DISABLE))
+        teardown_protocols.extend(
             [
-                ("modifyOtherKeys disable", MODIFY_OTHER_KEYS_DISABLE),
                 ("Kitty keyboard pop", KITTY_KEYBOARD_POP),
                 ("bracketed-paste disable", BRACKETED_PASTE_DISABLE),
-            ],
+            ]
         )
+        if forced_cursor:
+            teardown_protocols.append(("forced cursor reset", CURSOR_STYLE_RESET))
+        require_order(teardown, teardown_protocols)
+
+        if direct_alacritty:
+            lifecycle = startup + negotiation + teardown
+            if (
+                lifecycle.count(KITTY_KEYBOARD_PUSH_FLAGS_5) != 1
+                or lifecycle.count(KITTY_KEYBOARD_PUSH_FLAGS_7) != 1
+                or lifecycle.count(KITTY_KEYBOARD_POP) != 2
+                or lifecycle.count(ALACRITTY_DA2_QUERY) != 1
+            ):
+                raise RuntimeError(f"{case} direct-Alacritty Kitty lifecycle was not balanced; lifecycle={lifecycle!r}")
         if ALT_SCREEN_ENTER in startup and ALT_SCREEN_EXIT not in teardown:
             raise RuntimeError(f"xterm alternate-screen entry was not paired with exit; teardown={teardown!r}")
         cursor_show_at = teardown.find(CURSOR_SHOW)
@@ -329,6 +408,16 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
                 f"{case} teardown did not explicitly restore the cursor with {CURSOR_SHOW!r}; "
                 f"teardown={teardown!r}"
             )
+        if forced_cursor:
+            if teardown.count(CURSOR_STYLE_RESET) != 1:
+                raise RuntimeError(f"{case} did not reset the forced cursor exactly once during teardown; teardown={teardown!r}")
+        else:
+            for phase, captured in (("negotiation", negotiation), ("teardown", teardown)):
+                for sequence in CURSOR_STYLE_SEQUENCES:
+                    if sequence in captured:
+                        raise RuntimeError(
+                            f"{case} default cursor perturbed DECSCUSR during {phase} with {sequence!r}; captured={captured!r}"
+                        )
 
         after = termios.tcgetattr(slave_fd)
         normalized_before = normalized_termios(before)
@@ -338,10 +427,10 @@ def run_case(ava_exe: pathlib.Path, case_root: pathlib.Path, case: str) -> None:
             raise RuntimeError(f"{case} did not exactly restore normalized termios state: {differences}")
         wait_for_no_process_group(pgid)
         print(
-            f"{case}: exit={returncode} startup={len(startup)} teardown={len(teardown)} "
+            f"{case}: exit={returncode} startup={len(startup)} negotiation={len(negotiation)} teardown={len(teardown)} "
             f"disable_at={teardown.find(MODIFY_OTHER_KEYS_DISABLE)} pop_at={teardown.find(KITTY_KEYBOARD_POP)} "
-            f"paste_disable_at={teardown.find(BRACKETED_PASTE_DISABLE)} cursor_show_at={cursor_show_at} "
-            f"alt_exit_at={teardown.find(ALT_SCREEN_EXIT)} termios_exact=True"
+            f"paste_disable_at={teardown.find(BRACKETED_PASTE_DISABLE)} cursor_reset_at={teardown.find(CURSOR_STYLE_RESET)} "
+            f"cursor_show_at={cursor_show_at} alt_exit_at={teardown.find(ALT_SCREEN_EXIT)} termios_exact=True"
         )
     finally:
         terminate_group(process, pgid)
@@ -369,8 +458,11 @@ def main() -> int:
         shutil.rmtree(root)
     root.mkdir(parents=True, mode=0o700)
 
-    run_case(ava_exe, root / "ctrl-d", "ctrl_d")
-    run_case(ava_exe, root / "sigterm", "sigterm")
+    run_case(ava_exe, root / "default-ctrl-d", "default_ctrl_d", "ctrl_d")
+    run_case(ava_exe, root / "default-sigterm", "default_sigterm", "sigterm")
+    run_case(ava_exe, root / "alacritty-ctrl-d", "alacritty_ctrl_d", "ctrl_d", direct_alacritty=True)
+    run_case(ava_exe, root / "forced-cursor-ctrl-d", "forced_cursor_ctrl_d", "ctrl_d", forced_cursor=True)
+    run_case(ava_exe, root / "forced-cursor-sigterm", "forced_cursor_sigterm", "sigterm", forced_cursor=True)
     return 0
 
 

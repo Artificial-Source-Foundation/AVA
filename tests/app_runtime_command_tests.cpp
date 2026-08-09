@@ -141,13 +141,12 @@ void test_app_command_dispatcher()
   expect(ava::app::is_backend_command("/model") && ava::app::is_backend_command("/models") && ava::app::is_backend_command("/providers") &&
              ava::app::is_backend_command("/hotkeys") && ava::app::is_backend_command("/keybindings") && ava::app::is_backend_command("/theme") &&
              ava::app::is_backend_command("/images") && ava::app::is_backend_command("/image-width") && ava::app::is_backend_command("/cursor") &&
-             ava::app::is_backend_command("/details") &&
-             ava::app::is_backend_command("/sidebar") && ava::app::is_backend_command("/overview") && ava::app::is_backend_command("/tool") &&
-             ava::app::is_backend_command("/tools write") && ava::app::is_backend_command("/diff") && ava::app::is_backend_command("/copy") &&
-             ava::app::is_backend_command("/find src/*.cpp") && ava::app::is_backend_command("/ls src") && ava::app::is_backend_command("/thinking") &&
-             ava::app::is_backend_command("/status") && ava::app::is_backend_command("/reload") && ava::app::is_backend_command("/plugins") &&
-             ava::app::is_backend_command("/packages") && ava::app::is_backend_command("/permissions") && ava::app::is_backend_command("/permission-rules") &&
-             ava::app::is_backend_command("!pwd") && ava::app::is_backend_command("!!pwd"),
+             ava::app::is_backend_command("/details") && ava::app::is_backend_command("/sidebar") && ava::app::is_backend_command("/overview") &&
+             ava::app::is_backend_command("/tool") && ava::app::is_backend_command("/tools write") && ava::app::is_backend_command("/diff") &&
+             ava::app::is_backend_command("/copy") && ava::app::is_backend_command("/find src/*.cpp") && ava::app::is_backend_command("/ls src") &&
+             ava::app::is_backend_command("/thinking") && ava::app::is_backend_command("/status") && ava::app::is_backend_command("/reload") &&
+             ava::app::is_backend_command("/plugins") && ava::app::is_backend_command("/packages") && ava::app::is_backend_command("/permissions") &&
+             ava::app::is_backend_command("/permission-rules") && ava::app::is_backend_command("!pwd") && ava::app::is_backend_command("!!pwd"),
          "command catalog classifies display toggles, status aliases, disabled aliases, hotkeys, and shell helpers as backend commands");
 
   std::vector<ava::app::CommandHotkey> const custom_hotkeys = {

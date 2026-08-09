@@ -9,6 +9,7 @@ import time
 from tui_smoke_helpers import (
     SmokeContext,
     capture,
+    capture_styled,
     save_evidence,
     send_keys,
     send_literal,
@@ -22,6 +23,7 @@ from .common import _wait_for_normal_turn_request_count
 
 
 _NUMBERED_LINE = re.compile(r"stream line (\d{3})")
+_SGR_SEQUENCE = re.compile(r"\x1b\[[0-9;]*m")
 _DELETED_SCROLLBACK_TEXT = ("scrollback detached", "updates below", "jump_to_bottom")
 # Role-specific final chrome: footer uses the catalog display name; assistant turn meta may render
 # either the display name or the bare model id depending on the meta assembly path.
@@ -63,6 +65,81 @@ def _assert_no_deleted_scrollback_text(screen: str, label: str) -> None:
         raise RuntimeError(f"{label} surfaced deleted scrollback chrome {surfaced}\nscreen:\n{screen}")
 
 
+def _plain_styled_capture(styled: str) -> str:
+    return "\n".join(_SGR_SEQUENCE.sub("", line).rstrip() for line in styled.splitlines())
+
+
+def _right_edge_reverse_rows(styled: str, pane_width: int) -> list[int]:
+    rows: list[int] = []
+    marker = "\x1b[7m"
+    for row, line in enumerate(styled.splitlines()):
+        marker_at = line.rfind(marker)
+        if marker_at < 0:
+            continue
+        prefix = _SGR_SEQUENCE.sub("", line[:marker_at])
+        suffix = _SGR_SEQUENCE.sub("", line[marker_at + len(marker) :])
+        # tmux trims the styled final blank cell but retains the SGR that starts
+        # it, yielding a marker after exactly width - 1 visible columns.
+        if len(prefix) == pane_width - 1 and not suffix:
+            rows.append(row)
+    return rows
+
+
+def _wait_for_transient_scrollbar(
+    ctx: SmokeContext,
+    session: str,
+    expected_numbers: list[int],
+    draft: str,
+    started: float,
+    timeout: float = 1.0,
+) -> tuple[str, str]:
+    pane_width = int(tmux(ctx.tmux, "display-message", "-p", "-t", session, "#{pane_width}").stdout.strip())
+    deadline = started + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        last = capture_styled(ctx.tmux, session)
+        plain = _plain_styled_capture(last)
+        thumb_rows = _right_edge_reverse_rows(last, pane_width)
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(plain)]
+        if thumb_rows and numbers == expected_numbers and draft in plain:
+            lines = plain.splitlines()
+            if not all(row < len(lines) and _NUMBERED_LINE.search(lines[row]) for row in thumb_rows):
+                raise RuntimeError(f"transient scrollbar replaced ordinary transcript cells\nstyled screen:\n{last!r}")
+            return last, plain
+        time.sleep(0.02)
+    raise RuntimeError(f"timed out waiting for transient right-edge scrollbar and numbered window\nstyled screen:\n{last!r}")
+
+
+def _wait_for_transient_scrollbar_expiry(
+    ctx: SmokeContext,
+    session: str,
+    expected_numbers: list[int],
+    draft: str,
+    started: float,
+    timeout: float = 2.5,
+) -> tuple[str, str]:
+    pane_width = int(tmux(ctx.tmux, "display-message", "-p", "-t", session, "#{pane_width}").stdout.strip())
+    deadline = started + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        last = capture_styled(ctx.tmux, session)
+        if _right_edge_reverse_rows(last, pane_width):
+            time.sleep(0.02)
+            continue
+        elapsed = time.monotonic() - started
+        if elapsed < 0.8:
+            raise RuntimeError(f"transient scrollbar disappeared too early after {elapsed:.3f}s\nstyled screen:\n{last!r}")
+        plain = _plain_styled_capture(last)
+        numbers = [int(value) for value in _NUMBERED_LINE.findall(plain)]
+        if numbers != expected_numbers or draft not in plain:
+            raise RuntimeError(
+                "numbered transcript cells or composer draft changed when the transient scrollbar expired\n"
+                f"expected numbers: {expected_numbers}\nactual numbers: {numbers}\nstyled screen:\n{last!r}"
+            )
+        return last, plain
+    raise RuntimeError(f"timed out waiting for transient right-edge scrollbar expiry\nstyled screen:\n{last!r}")
+
+
 def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     tmux_exe = ctx.tmux
     root = ctx.root
@@ -78,6 +155,9 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
         '"supports_streaming":true,"supports_reasoning":false,"reports_usage":true}]}\n'
     )
     ctx.active_ava_config.joinpath("models.json").write_text(streaming_models, encoding="utf-8")
+    ctx.active_ava_config.joinpath("keybinds.json").write_text(
+        '{"app.transcript.halfPageUp":"F9","app.transcript.halfPageDown":"F10"}\n', encoding="utf-8"
+    )
 
     provider = ctx.start_fake_provider("streaming-scroll", delay_ms=20, scenario="streaming-scroll", target=controls)
     command = ctx.fake_provider_command(
@@ -86,6 +166,7 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
         config=ctx.active_config,
         state=ctx.active_state,
         data=ctx.active_data,
+        no_color=False,
     )
     ctx.launch_ava(session, workspace=ctx.active_workspace, command=command, width=120, height=32)
     wait_for(tmux_exe, session, r"Type a message|live session", "streaming-scroll initial frame")
@@ -304,6 +385,71 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     if complete_draft not in down_scrolled:
         raise RuntimeError(f"plain Down altered the composer draft\nscreen:\n{down_scrolled}")
     _assert_no_deleted_scrollback_text(down_scrolled, "plain Down keyboard-step scroll")
+
+    # This detached middle window consists entirely of one-row numbered transcript
+    # lines, so its observed size is the real transcript body height after the
+    # wrapped composer has reserved its rows. Production halves that height with
+    # floor division and keeps a one-row minimum.
+    visible_transcript_rows = len(down_numbers)
+    half_page_rows = max(1, visible_transcript_rows // 2)
+    expected_half_up = list(range(down_numbers[0] - half_page_rows, down_numbers[0] - half_page_rows + visible_transcript_rows))
+    half_page_started = time.monotonic()
+    send_keys(tmux_exe, session, "F9")
+    indicator_styled, half_page_up = _wait_for_transient_scrollbar(
+        ctx, session, expected_half_up, complete_draft, half_page_started
+    )
+    half_page_up_numbers = _numbered_window(half_page_up, "configured F9 half-page upward scroll")
+    expired_styled, expired_plain = _wait_for_transient_scrollbar_expiry(
+        ctx, session, expected_half_up, complete_draft, half_page_started
+    )
+    if expired_plain != half_page_up:
+        raise RuntimeError(
+            "transient scrollbar expiry changed ordinary visible transcript or composer cells\n"
+            f"before:\n{half_page_up}\nafter:\n{expired_plain}"
+        )
+    save_evidence(root, "streaming-scroll-indicator-immediate-styled", indicator_styled)
+    save_evidence(root, "streaming-scroll-indicator-expired-styled", expired_styled)
+    if complete_draft not in half_page_up:
+        raise RuntimeError(f"configured F9 altered the composer draft\nscreen:\n{half_page_up}")
+    _assert_no_deleted_scrollback_text(half_page_up, "configured F9 half-page upward scroll")
+
+    expected_half_down = list(
+        range(half_page_up_numbers[0] + half_page_rows, half_page_up_numbers[0] + half_page_rows + visible_transcript_rows)
+    )
+    send_keys(tmux_exe, session, "F10")
+    half_page_down = wait_for_screen_state(
+        tmux_exe,
+        session,
+        lambda screen: complete_draft in screen and [int(value) for value in _NUMBERED_LINE.findall(screen)] == expected_half_down,
+        "streaming-scroll configured F10 moves exactly half the visible transcript body downward",
+    )
+    if expected_half_down != down_numbers or complete_draft not in half_page_down:
+        raise RuntimeError(
+            "configured F10 did not restore the pre-F9 numbered window with the composer draft intact\n"
+            f"visible transcript rows: {visible_transcript_rows}; half-page rows: {half_page_rows}\n"
+            f"expected: {down_numbers}\nactual: {expected_half_down}\nscreen:\n{half_page_down}"
+        )
+    _assert_no_deleted_scrollback_text(half_page_down, "configured F10 half-page downward scroll")
+
+    half_page_live = half_page_down
+    for step in range(4):
+        if restored_live_tail(half_page_live):
+            break
+        send_keys(tmux_exe, session, "F10")
+        half_page_live = wait_for_screen_state(
+            tmux_exe,
+            session,
+            lambda screen: complete_draft in screen
+            and (
+                restored_live_tail(screen)
+                or [int(value) for value in _NUMBERED_LINE.findall(screen)]
+                != [int(value) for value in _NUMBERED_LINE.findall(half_page_live)]
+            ),
+            f"streaming-scroll configured F10 live-tail restore step {step + 1}",
+        )
+    if not restored_live_tail(half_page_live):
+        raise RuntimeError(f"configured F10 did not restore live tail without changing the composer draft\nscreen:\n{half_page_live}")
+    _assert_no_deleted_scrollback_text(half_page_live, "configured F10 restored live tail")
 
     send_keys(tmux_exe, session, "M-k")
     alt_k_screen = wait_for_screen_state(

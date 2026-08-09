@@ -60,10 +60,17 @@ def _send_sgr_clicks(ctx: SmokeContext, session: str, column: int, row: int, cou
 
 def _copy_selection_payload(ctx: SmokeContext, session: str, name: str, expected: bytes) -> str:
     # Selection copy shares the terminal clipboard's existing 64 KiB limit. The
-    # small fixture must produce both the direct and tmux-passthrough copies.
+    # small fixture must produce one complete direct request followed by one
+    # complete tmux DCS passthrough request. This proves only the emitted request
+    # bytes, not downstream delivery to a desktop clipboard.
     max_clipboard_bytes = 64 * 1024
     if not expected or len(expected) > max_clipboard_bytes:
         raise RuntimeError(f"invalid bounded OSC52 smoke expectation: {len(expected)} bytes")
+
+    encoded = base64.b64encode(expected)
+    raw_request = b"\x1b]52;c;" + encoded + b"\x1b\\"
+    tmux_request = b"\x1bPtmux;" + raw_request.replace(b"\x1b", b"\x1b\x1b") + b"\x1b\\"
+    complete_transport = raw_request + tmux_request
 
     pane_output = ctx.root / f"{name}-pane-output.bin"
     pane_output.unlink(missing_ok=True)
@@ -72,31 +79,27 @@ def _copy_selection_payload(ctx: SmokeContext, session: str, name: str, expected
         send_keys(ctx.tmux, session, "C-c")
         deadline = time.monotonic() + 8.0
         last = b""
-        matches: list[re.Match[bytes]] = []
-        osc52 = re.compile(rb"\x1b+\]52;c;([A-Za-z0-9+/]+={0,2})\x1b+\\")
         while time.monotonic() < deadline:
             if pane_output.exists():
                 last = pane_output.read_bytes()
-                matches = list(osc52.finditer(last))
-                if len(matches) >= 2 and b"\x1bPtmux;\x1b\x1b]52;c;" in last:
+                if complete_transport in last:
                     break
             time.sleep(0.05)
         else:
             raise RuntimeError(
-                f"timed out waiting for {name}; pane output did not contain complete raw and tmux OSC52 copies: {last!r}"
+                f"timed out waiting for {name}; pane output did not contain the complete raw-plus-tmux OSC52 transport: {last!r}"
             )
 
-        decoded: list[bytes] = []
-        for match in matches:
-            try:
-                payload = base64.b64decode(match.group(1), validate=True)
-            except (ValueError, binascii.Error) as error:
-                raise RuntimeError(f"{name} OSC52 payload was not valid base64: {match.group(1)!r}") from error
-            if len(payload) > max_clipboard_bytes:
-                raise RuntimeError(f"{name} OSC52 payload exceeded 64 KiB: {len(payload)} bytes")
-            decoded.append(payload)
-        if not decoded or any(payload != expected for payload in decoded):
-            raise RuntimeError(f"{name} copied the wrong transcript text: decoded={decoded!r}, expected={expected!r}")
+        try:
+            decoded = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise RuntimeError(f"{name} OSC52 request payload was not valid base64: {encoded!r}") from error
+        if decoded != expected or len(decoded) > max_clipboard_bytes:
+            raise RuntimeError(f"{name} emitted the wrong bounded OSC52 request: decoded={decoded!r}, expected={expected!r}")
+        if last.count(complete_transport) != 1 or last.count(tmux_request) != 1:
+            raise RuntimeError(
+                f"{name} did not emit one exact raw-plus-complete-tmux OSC52 transport; pane output={last!r}"
+            )
     finally:
         tmux(ctx.tmux, "pipe-pane", "-t", session, check=False)
 
@@ -160,18 +163,26 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
     # Rapid ordinary header clicks remain actions rather than body multi-click
     # seeds. Re-read geometry after each redraw because expansion changes the
     # tmux pane rows, and synchronize on visible detail content.
+    rapid_click_interval = 0.5
+    rapid_started = time.monotonic()
     _send_sgr_clicks(ctx, session, header_column, header_row, 1)
     expanded = wait_for_screen_state(
         ctx.tmux,
         session,
         lambda screen: "output:" in screen,
         "transcript-selection header expanded state",
+        timeout=0.35,
     )
     if "\x1b[7m" in capture_styled(ctx.tmux, session):
         raise RuntimeError(f"header click started transcript selection while expanding\nscreen:\n{expanded}")
     expanded_header_row, expanded_header_line = _last_row_matching(expanded, header_pattern)
     expanded_header_column = max(1, len(expanded_header_line) - len(expanded_header_line.lstrip()) + 2)
     _send_sgr_clicks(ctx, session, expanded_header_column, expanded_header_row, 1)
+    rapid_elapsed = time.monotonic() - rapid_started
+    if rapid_elapsed >= rapid_click_interval:
+        raise RuntimeError(
+            f"header click chain took {rapid_elapsed:.3f}s, so it did not exercise AVA's 500 ms multi-click interval"
+        )
     collapsed = wait_for_screen_state(
         ctx.tmux,
         session,

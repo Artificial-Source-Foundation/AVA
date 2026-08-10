@@ -150,6 +150,12 @@ class SessionDebugMutex final : public AIMutex
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// Register the calling thread with libcwd under `label`, so that debug output
+// can be attributed to it and the thread is named.
+//
+// Returns void. No-op when libcwd (CWDEBUG) is not enabled.
+void init_thread(std::string const& label);
+
 // Assert that the current thread owns no session mutex before entering a potentially blocking operation.
 //
 // `operation` describes the wait or other slow boundary.
@@ -177,21 +183,12 @@ inline void assert_session_unlocked(UnlockedSession const& unlocked_session, std
 }
 
 // Do not use the above functions directory. Use these macro's instead.
-#ifdef CWDEBUG
 #define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ::ava::core::assert_no_session_lock_held(operation)
 #define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ::ava::core::assert_session_unlocked(unlocked_session, operation)
-#else
+#else   // CWDEBUG
 #define AVA_ASSERT_NO_SESSION_LOCK_HELD(operation) ((void)0)
 #define AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, operation) ((void)0)
-#endif
-
-// Register the calling thread with libcwd under `label`, so that debug output
-// can be attributed to it and the thread is named.
-//
-// Returns void. No-op when libcwd (CWDEBUG) is not enabled.
-void init_thread(std::string const& label);
-
-#endif // CWDEBUG
+#endif  // CWDEBUG
 
 // Own a cooperative thread and reject implicit or explicit joins while the current thread holds a debug lock that forbids long waits.
 //
@@ -284,17 +281,19 @@ class JoinThread
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
-  explicit JoinThread(std::jthread thread, std::string label) : CWDEBUG_ONLY(label_(std::move(label)),) thread_(std::move(thread)) { }
+  explicit JoinThread(std::jthread thread COMMA_CWDEBUG_ONLY(std::string label)) : thread_(std::move(thread)) COMMA_CWDEBUG_ONLY(label_(std::move(label))) { }
 
 #ifdef CWDEBUG
   void assert_join_allowed(std::string_view CWDEBUG_ONLY(operation)) const
   {
     Debug(assert_no_session_lock_held(operation));
   }
+#endif
 
+  std::jthread thread_;
+#ifdef CWDEBUG
   std::string label_;
 #endif
-  std::jthread thread_;
 };
 
 // Start a plain (non-cooperative) thread whose first action is init_thread(label).

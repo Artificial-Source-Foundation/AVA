@@ -19,7 +19,7 @@ add_library(ava_test_support
   "support/session_test_support.cpp"
   "support/test_harness.cpp"
 )
-target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES})
+target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES} ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_test_support)
 ava_apply_sanitizers(ava_test_support)

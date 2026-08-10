@@ -1,5 +1,7 @@
 #include "sys.h"
+#ifdef CWDEBUG
 #include "ava/debug/debug_ostream_operators.h"
+#endif
 #include "ava/core/thread.h"
 #include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"

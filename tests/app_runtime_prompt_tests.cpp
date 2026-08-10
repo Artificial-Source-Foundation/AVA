@@ -756,9 +756,6 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
   run_options.cancel_requested = [&runtime_retry_cancel] { return runtime_retry_cancel; };
 
   auto result = ava::app::run_prompt(*unlocked_session_result, "retry runtime", provider, transport, run_options);
-
-  SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
-
   expect(result && result->final_text == "retried answer" && transport.requests().size() == 2,
          "runtime run_prompt retries transient provider transport failures when enabled");
   expect(std::ranges::any_of(events,
@@ -770,7 +767,7 @@ void test_app_run_prompt_emits_provider_retry_events_when_enabled()
                              }),
          "runtime run_prompt emits provider retry metadata through the shared event sink");
   events.clear();
-  auto retry_options = ava::app::runtime::runtime_retry_options(*session_r, run_options);
+  auto retry_options = ava::app::runtime::runtime_retry_options(*unlocked_session_result, run_options);
   expect(retry_options.on_retry != nullptr, "runtime retry options expose provider retry event mapping");
   expect(retry_options.response_retry_decision != nullptr, "runtime retry options install provider response retry classification");
   if (retry_options.response_retry_decision)

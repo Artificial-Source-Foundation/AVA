@@ -129,7 +129,7 @@ runtime::RunOptions print_runtime_options(runtime::RunOptions options)
   return options;
 }
 
-ava::event::RuntimeEvent runtime_error_event(runtime::Session const& session, ava::core::Error const& error)
+ava::event::RuntimeEvent runtime_error_event(runtime::session_ts const& unlocked_session, ava::core::Error const& error)
 {
   ava::event::ErrorPayload payload;
   payload.error_category = ava::core::to_string(error.category());
@@ -137,7 +137,7 @@ ava::event::RuntimeEvent runtime_error_event(runtime::Session const& session, av
   payload.error_details = error.format();
   return ava::event::RuntimeEvent{ava::event::RuntimeEventMetadata{
                                       .timestamp = ava::session::now_timestamp(),
-                                      .session_id = session.store.session_id(),
+                                      .session_id = runtime::session_ts::crat(unlocked_session)->store.session_id(),
                                   },
                                   ava::event::ErrorEvent{.payload = std::move(payload)}};
 }
@@ -208,8 +208,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_print_prompt(runtime::session
       if (options.output_format == PrintOutputFormat::Json)
       {
         // Best-effort fallback: preserve the runtime/provider error that caused the failed turn.
-        SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-        static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(*session_r, result.error()))));
+        static_cast<void>(event_bus.publish(ava::event::to_event_envelope(runtime_error_event(unlocked_session, result.error()))));
       }
       else
       {

@@ -19,7 +19,7 @@
 
 namespace ava::app::rpc {
 
-// Session-owned serializers are invoked with *this while the owning session is already protected.
+// Session-owned serializers are invoked with *this while the owning session is already locked.
 std::string model_info_json(ava::config::ModelInfo const& model, runtime::Session const& session, bool configured);
 
 namespace {

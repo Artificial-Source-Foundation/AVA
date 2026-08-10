@@ -175,7 +175,7 @@ std::string_view exit_status_text(int status, bool sessionless)
   return sessionless ? "session discarded with warnings" : "session saved with warnings";
 }
 
-void print_exit_card(ava::app::runtime::Session const& session, int status)
+void print_exit_card(ava::app::runtime::session_ts const& unlocked_session, int status)
 {
   bool const use_color = stdout_is_tty() && std::getenv("NO_COLOR") == nullptr;
   auto const blue = use_color ? std::string_view("\x1b[38;2;77;158;246m") : std::string_view("");
@@ -196,14 +196,15 @@ void print_exit_card(ava::app::runtime::Session const& session, int status)
   art(" █████   █████    ░░███      █████   █████");
   art("░░░░░   ░░░░░      ░░░      ░░░░░   ░░░░░");
   std::cout << '\n';
-  std::cout << bold << "AVA " << reset << exit_status_text(status, session.sessionless()) << ". " << muted << "Ready when you are." << reset << '\n';
-  if (session.sessionless())
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  std::cout << bold << "AVA " << reset << exit_status_text(status, session_r->sessionless()) << ". " << muted << "Ready when you are." << reset << '\n';
+  if (session_r->sessionless())
   {
     std::cout << muted << "History: " << reset << "not saved (--no-session)\n";
     return;
   }
-  std::cout << muted << "Resume: " << reset << "ava --session " << session.store.session_id() << '\n';
-  std::cout << muted << "Saved:  " << reset << session.store.session_path().string() << '\n';
+  std::cout << muted << "Resume: " << reset << "ava --session " << session_r->store.session_id() << '\n';
+  std::cout << muted << "Saved:  " << reset << session_r->store.session_path().string() << '\n';
 }
 
 }  // namespace
@@ -815,10 +816,7 @@ int run(int argc, char** argv)
   bool const print_farewell = stdin_is_tty() && stdout_is_tty();
   int const status = run_interactive(*unlocked_session_result);
   if (print_farewell)
-  {
-    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
-    print_exit_card(*session_r, status);
-  }
+    print_exit_card(*unlocked_session_result, status);
   return status;
 }
 

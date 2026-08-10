@@ -216,7 +216,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::event::RuntimeEventSink event_sink = options.event_sink;
   if (!options.isolate_ambient_extensions)
   {
-    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver, options.session_mutex);
+    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver, options.ro_session_mutex);
     plugin_observer_options.permission_audit_sink = [&append_route](ava::tools::PermissionAuditEvent const& event) {
       return ava::agent::append_permission_decision(append_route, event);
     };
@@ -281,10 +281,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::http::Transport* runtime_transport = &transport;
   if (runtime_options.enable_transport_retries)
   {
-    {
-      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-      retry_transport.emplace(transport, runtime::runtime_retry_options(*session_r, runtime_options));
-    }
+    retry_transport.emplace(transport, runtime::runtime_retry_options(unlocked_session, runtime_options));
     runtime_transport = &*retry_transport;
     runtime_options.enable_transport_retries = false;
   }

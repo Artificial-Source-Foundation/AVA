@@ -691,9 +691,9 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
 
     ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
         std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
-    if (options.session_mutex)
+    if (options.ro_session_mutex)
     {
-      std::lock_guard lock(*options.session_mutex);
+      std::lock_guard lock(*options.ro_session_mutex);
       entries = read_authority.load();
     }
     else
@@ -805,9 +805,9 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
       return true;
     };
     ava::core::Result<bool> appended = false;
-    if (options.session_mutex)
+    if (options.ro_session_mutex)
     {
-      std::lock_guard lock(*options.session_mutex);
+      std::lock_guard lock(*options.ro_session_mutex);
       appended = validate_and_append();
     }
     else

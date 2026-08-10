@@ -452,7 +452,7 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
     std::filesystem::create_directories(options.workspace_dir);
     return ava::app::runtime::Session::open(options);
   };
-  auto append_v4_text_turn = [](ava::app::runtime::Session& session, std::size_t index, std::string text) {
+  auto append_v4_text_turn = [](ava::app::runtime::session_ts& unlocked_session, std::size_t index, std::string text) {
     auto const turn_id = "rpc_cap_turn_" + std::to_string(index);
     auto const item_id = "rpc_cap_item_" + std::to_string(index);
     auto item_data = ava::session::serialize_assistant_output_item_data_json(ava::session::AssistantOutputItem{
@@ -466,12 +466,13 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
         .assistant_turn_id = turn_id, .item_count = 1, .provider = "openai", .model = "gpt-5.5", .finish_reason = "completed", .usage_json = std::nullopt});
     if (!item_data || !commit_data)
       return false;
-    auto item = session.append_owned(ava::session::SessionEntry{.id = item_id,
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    auto item = session_w->append_owned(ava::session::SessionEntry{.id = item_id,
                                                                 .parent_id = "",
                                                                 .type = ava::session::EntryType::AssistantOutputItem,
                                                                 .timestamp = ava::session::now_timestamp(),
                                                                 .data_json = std::move(*item_data)});
-    auto commit = session.append_owned(ava::session::SessionEntry{.id = "rpc_cap_commit_" + std::to_string(index),
+    auto commit = session_w->append_owned(ava::session::SessionEntry{.id = "rpc_cap_commit_" + std::to_string(index),
                                                                   .parent_id = item_id,
                                                                   .type = ava::session::EntryType::AssistantTurnCommit,
                                                                   .timestamp = ava::session::now_timestamp(),
@@ -479,16 +480,15 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
     return item.has_value() && commit.has_value();
   };
 
-  auto single_session = open_session("single");
+  auto single_session_result = open_session("single");
   bool appended_single = false;
   std::optional<std::string> single_json;
-  if (single_session)
+  if (single_session_result)
   {
-    SCOPED_CRITICAL_AREA_W(single_session_w, *single_session);
-    appended_single = append_v4_text_turn(*single_session_w, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
+    appended_single = append_v4_text_turn(*single_session_result, 0, "RPC_SINGLE_" + std::string(6'000, 's'));
     if (appended_single)
     {
-      auto serialized = single_session_w->messages_result_json();
+      auto serialized = ava::app::runtime::session_ts::wat(*single_session_result)->messages_result_json();
       if (serialized)
         single_json = std::move(*serialized);
     }
@@ -498,18 +498,17 @@ void test_app_rpc_messages_keep_v1_payloads_when_ordered_output_does_not_fit()
              single_json->find("\"ordered_output_truncated\":true") != std::string::npos && single_json->find("PRIVATE_RPC_CAP_ITEM") == std::string::npos,
          "RPC keeps a 5--8 KiB v1 assistant payload when additive ordered output exceeds its per-entry cap");
 
-  auto near_cap_session = open_session("near-cap");
+  auto near_cap_session_result = open_session("near-cap");
   bool appended_near_cap = false;
   std::optional<std::string> near_cap_json;
-  if (near_cap_session)
+  if (near_cap_session_result)
   {
-    SCOPED_CRITICAL_AREA_W(near_cap_session_w, *near_cap_session);
     appended_near_cap = true;
     for (std::size_t index = 0; appended_near_cap && index < 190; ++index)
-      appended_near_cap = append_v4_text_turn(*near_cap_session_w, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));
+      appended_near_cap = append_v4_text_turn(*near_cap_session_result, index, "RPC_CAP_" + std::to_string(index) + "_" + std::string(6'000, 'n'));
     if (appended_near_cap)
     {
-      auto serialized = near_cap_session_w->messages_result_json();
+      auto serialized = ava::app::runtime::session_ts::wat(*near_cap_session_result)->messages_result_json();
       if (serialized)
         near_cap_json = std::move(*serialized);
     }

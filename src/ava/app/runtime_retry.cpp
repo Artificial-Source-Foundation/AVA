@@ -10,31 +10,14 @@
 #include <utility>
 
 namespace ava::app::runtime {
-namespace {
 
-ava::event::RuntimeEventMetadata runtime_event_metadata(Session const& session, RunOptions const& options)
-{
-  auto build = [&] {
-    return ava::event::RuntimeEventMetadata{
-        .timestamp = ava::session::now_timestamp(),
-        .session_id = session.store.session_id(),
-    };
-  };
-  if (!options.session_mutex)
-    return build();
-  std::lock_guard lock(*options.session_mutex);
-  return build();
-}
-
-}  // namespace
-
-ava::http::RetryOptions runtime_retry_options(Session const& session, RunOptions const& options)
+ava::http::RetryOptions runtime_retry_options(session_ts const& unlocked_session, RunOptions const& options)
 {
   ava::http::RetryOptions retry_options;
   retry_options.cancel_requested = options.cancel_requested;
   retry_options.observation = {.observation = options.observation, .context = options.trace_context};
   retry_options.response_retry_decision = ava::provider::provider_retry_decision;
-  retry_options.on_retry = [&session, &options](ava::http::RetryOptions::Event const& retry) {
+  retry_options.on_retry = [&unlocked_session, &options](ava::http::RetryOptions::Event const& retry) {
     ava::event::RetryPayload payload;
     if (retry.status_code > 0)
     {
@@ -47,7 +30,10 @@ ava::http::RetryOptions runtime_retry_options(Session const& session, RunOptions
     payload.max_attempts = retry.max_attempts;
     payload.delay_ms = retry.delay_ms;
     payload.remaining_ms = retry.remaining_ms;
-    auto metadata = runtime_event_metadata(session, options);
+    ava::event::RuntimeEventMetadata metadata{
+      .timestamp = ava::session::now_timestamp(),
+      .session_id = session_ts::crat(unlocked_session)->store.session_id(),
+    };
     if (retry.countdown_tick)
     {
       return ava::event::emit_event(

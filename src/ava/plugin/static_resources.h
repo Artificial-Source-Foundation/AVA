@@ -2,6 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/plugin/diagnostics.h"
+#include "ava/context/skill_loader.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -36,5 +37,10 @@ struct PluginStaticSkillFile
                                                                                         PluginResourceContribution const& resource,
                                                                                         std::size_t max_bytes = kStaticPluginResourceMaxBytes);
 [[nodiscard]] std::vector<PluginStaticSkillFile> enabled_plugin_static_skill_files(PluginDiagnostics const& diagnostics);
+
+// Convert enabled static plugin skills from `diagnostics` into declarations consumed by the context skill loader.
+//
+// Disabled plugins and static resources that failed inspection are absent because enabled_plugin_static_skill_files already filters them.
+[[nodiscard]] std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(PluginDiagnostics const& diagnostics);
 
 }  // namespace ava::plugin

@@ -85,8 +85,8 @@ void test_prompt_commands_load_project_global_and_expand_arguments()
   write_app_test_file(workspace / ".ava" / "commands" / "defaults.md", "Default ${1:-release} ${2:-notes}\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
-      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  auto registry = ava::app::load_command_registry(unlocked_session,
+                                                  ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   auto const* review = find_entry(registry, "/review");
   expect(review != nullptr && review->source == ava::app::UnifiedCommandSource::PromptProject && review->description == "Project review" &&
              review->hint == "<topic>",
@@ -123,7 +123,7 @@ void test_skill_commands_are_registry_entries_and_permissioned_prompts()
                       "---\nname: release\ndescription: Prepare release work\n---\nRelease skill body\n");
 
   auto unlocked_session = open_test_session(root, workspace);
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry();
+  auto registry = ava::app::load_command_registry(unlocked_session);
   ava::app::CommandRegistryEntry const* entry_skill_release = find_entry(registry, "/skill:release");
   ava::app::CommandRegistryEntry const* entry_release = find_entry(registry, "/release");
   bool namespaced_and_unnamespaced_success = entry_skill_release != nullptr && entry_release != nullptr;
@@ -157,7 +157,7 @@ void test_plugin_commands_are_registry_entries()
   auto enabled = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/plugins enable com.example.cmd"});
   expect(enabled && enabled->handled, "plugin command registry test enables a project plugin without execution");
 
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry();
+  auto registry = ava::app::load_command_registry(unlocked_session);
   auto const* entry = find_entry(registry, "/plugin:com.example.cmd:todo");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::PluginCommand && entry->enabled && entry->plugin_id == "com.example.cmd" &&
              entry->plugin_command_name == "todo",
@@ -179,7 +179,8 @@ void test_mcp_prompts_are_registry_entries_and_permissioned_prompts()
 
   auto unlocked_session = open_test_session(root, workspace);
   std::vector<ava::permissions::Operation> operations;
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
+  auto registry = ava::app::load_command_registry(
+      unlocked_session,
       ava::app::CommandRegistryOptions{.include_mcp_prompts = true, .permission_resolver = allow_all_permissions(&operations)});
   auto const* entry = find_entry(registry, "/mcp:demo:release-notes");
   expect(entry != nullptr && entry->source == ava::app::UnifiedCommandSource::McpPrompt && entry->mcp_server_id == "demo" &&
@@ -208,8 +209,11 @@ void test_builtin_session_alias_registers_as_current_stats_command()
   std::filesystem::create_directories(workspace);
 
   auto unlocked_session = open_test_session(root, workspace);
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(ava::app::CommandRegistryOptions{
-      .include_prompt_commands = false, .include_skills = false, .include_plugin_commands = false, .include_mcp_prompts = false});
+  auto registry = ava::app::load_command_registry(unlocked_session, ava::app::CommandRegistryOptions{
+                                                                                           .include_prompt_commands = false,
+                                                                                           .include_skills = false,
+                                                                                           .include_plugin_commands = false,
+                                                                                           .include_mcp_prompts = false});
   auto const* entry = find_entry(registry, "/session");
   expect(entry != nullptr && entry->command == "/stats" && entry->source == ava::app::UnifiedCommandSource::Builtin &&
              entry->kind == ava::app::UnifiedCommandKind::Backend && std::ranges::find(entry->aliases, "/session") != entry->aliases.end(),
@@ -475,8 +479,8 @@ void test_project_trust_gates_project_resource_commands()
               system_prompt().find("Project append instruction") == std::string::npos && system_prompt().find("local-skill") == std::string::npos,
           "project AGENTS context loads while project system prompt files and skills remain gated");
 
-  auto registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
-      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  auto registry = ava::app::load_command_registry(unlocked_session,
+                                                  ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/global") != nullptr && find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,
          "untrusted sessions load global prompt commands but skip project prompt and skill commands");
   auto context_before = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/context"});
@@ -504,8 +508,8 @@ void test_project_trust_gates_project_resource_commands()
               system_prompt().find("local-skill") != std::string::npos,
           "trusted project resources replace/append the active system prompt after reload");
 
-  registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
-      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  registry = ava::app::load_command_registry(unlocked_session,
+                                             ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/local") != nullptr && find_entry(registry, "/skill:local-skill") != nullptr,
          "trusted sessions expose project prompt and skill commands");
   auto local = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/local topic"});
@@ -565,8 +569,8 @@ void test_project_trust_gates_project_resource_commands()
   expect(system_prompt().find("Project system replacement") == std::string::npos && system_prompt().find("Project append instruction") == std::string::npos &&
               system_prompt().find("local-skill") == std::string::npos,
           "/reload trust removes trusted project prompt content after denial");
-  registry = ava::app::runtime::session_ts::wat(unlocked_session)->load_command_registry(
-      ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
+  registry = ava::app::load_command_registry(unlocked_session,
+                                             ava::app::CommandRegistryOptions{.include_mcp_prompts = false});
   expect(find_entry(registry, "/local") == nullptr && find_entry(registry, "/skill:local-skill") == nullptr,
          "/reload trust removes project prompt and skill commands after denial");
 }

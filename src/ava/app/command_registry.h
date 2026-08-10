@@ -114,6 +114,11 @@ class Session;
 [[nodiscard]] CommandRegistryEntry const* find_command_registry_entry(CommandRegistry const& registry, std::string_view line) noexcept;
 [[nodiscard]] bool command_registry_contains(runtime::session_ts& unlocked_session, std::string_view line);
 [[nodiscard]] ava::core::Result<std::string> expand_prompt_command_template(std::string_view template_text, std::string_view argument_text);
-[[nodiscard]] ava::core::Result<std::string> mcp_prompt_arguments_json(CommandRegistryEntry const& entry, std::string_view argument_text);
+
+// Build a command registry from `unlocked_session` according to the source categories and callbacks in `options`.
+//
+// Returns discovered entries plus non-fatal diagnostics. Loading can inspect files and plugins, and MCP prompt
+// discovery can request permission, append an audit entry, launch configured servers, and block on protocol I/O.
+[[nodiscard]] CommandRegistry load_command_registry(runtime::session_ts& unlocked_session, CommandRegistryOptions options = {});
 
 }  // namespace ava::app

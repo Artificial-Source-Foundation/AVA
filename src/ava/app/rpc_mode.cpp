@@ -528,7 +528,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         continue;
       }
       std::lock_guard lock(session_mutex);      // FIXME: remove this once all session_mutex have been replaced by the mutex in unlocked_session.
-      auto registry = runtime::session_ts::wat(unlocked_session)->load_command_registry(
+      auto registry = load_command_registry(unlocked_session,
           CommandRegistryOptions{.include_builtins = true,
                                  .include_prompt_commands = true,
                                  .include_skills = true,

@@ -335,7 +335,7 @@ ava::core::Result<CommandResult> run_context_command(runtime::session_ts& unlock
   CommandResult result;
   result.handled = true;
   auto const trimmed_query = trim_ascii(query);
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     return std::tuple{session_r->workspace_dir(), session_r->anchor_set(), session_r->mode(), session_r->model(), session_r->project_trust().decision,

@@ -506,7 +506,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
   auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
   auto const usage = [&]() {
     add_output(result, missing_argument("/plugins "
@@ -888,7 +888,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
 {
   CommandResult result;
   result.handled = true;
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
   auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));
   if (!run_args)

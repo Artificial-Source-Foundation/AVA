@@ -150,7 +150,7 @@ void add_permission_request_ids(ava::agent::ToolTimelineEntry& entry, std::vecto
 
 ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session, ava::permissions::PermissionResolver permission_resolver)
 {
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*runtime::session_ts::rat(unlocked_session));
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     return std::tuple{session_r->workspace_dir(),

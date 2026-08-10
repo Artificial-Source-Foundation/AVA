@@ -22,8 +22,6 @@
 #include "ava/tui/theme.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/static_resources.h"
-#include "ava/mcp/config.h"
-#include "ava/mcp/stdio_client.h"
 #include "ava/permissions/permission.h"
 #include "ava/context/skill_loader.h"
 #include "ava/core/atomic_file.h"
@@ -822,31 +820,17 @@ std::string dynamic_command_argument(std::string_view line)
   return std::string(rest);
 }
 
-std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
-{
-  std::vector<ava::context::DeclaredSkillFileOptions> files;
-  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
-  {
-    files.push_back(ava::context::DeclaredSkillFileOptions{.path = skill.path,
-                                                           .name = skill.name,
-                                                           .description = skill.description,
-                                                           .source_type = ava::context::SkillSourceType::Plugin,
-                                                           .preloaded_content = skill.content});
-  }
-  return files;
-}
-
 ava::core::Result<std::string> skill_prompt_message(runtime::session_ts& unlocked_session, CommandRequest const& request, CommandRegistryEntry const& entry)
 {
+  auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
   CRITICAL_AREA_BEGIN_R(session);
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*session_r);
   auto plugin_diagnostics =
       ava::plugin::collect_plugin_diagnostics(resource_policy.plugin_discovery, resource_policy.plugin_enablement_file, session_r->workspace_dir());
   auto loaded = ava::context::load_skills(ava::context::SkillLoadOptions{
       .workspace_root = session_r->workspace_dir(),
       .global_skill_dirs = resource_policy.global_skill_dirs,
       .project_skill_dirs = resource_policy.project_skill_dirs,
-      .declared_skill_files = declared_plugin_skill_files(plugin_diagnostics),
+      .declared_skill_files = ava::plugin::declared_plugin_skill_files(plugin_diagnostics),
       .include_project_skills = resource_policy.include_project_resources,
   });
   CRITICAL_AREA_END_R(session);
@@ -870,88 +854,6 @@ ava::core::Result<std::string> skill_prompt_message(runtime::session_ts& unlocke
   }
   auto sampled_files = ava::context::sample_skill_files(match->directory);
   return ava::context::format_loaded_skill_for_tool(*match, sampled_files);
-}
-
-std::string mcp_command_text(ava::mcp::McpServerConfig const& server)
-{
-  std::string text = server.command;
-  for (auto const& arg : server.args) text += " " + arg;
-  return text;
-}
-
-ava::core::VoidResult ensure_mcp_prompt_permissions(ava::tools::ToolContext const& context, ava::mcp::McpServerConfig const& server,
-                                                    CommandRegistryEntry const& entry)
-{
-  if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::McpServerLaunch, server.source_path, mcp_command_text(server),
-                                                      "mcp_prompt", "MCP server launch requires permission");
-      !permission)
-  {
-    return std::unexpected(std::move(permission.error()));
-  }
-  if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::McpServerConnect, server.source_path, server.id, "mcp_prompt",
-                                                      "MCP server connection requires permission");
-      !permission)
-  {
-    return std::unexpected(std::move(permission.error()));
-  }
-  auto const command = entry.mcp_server_id + ":" + entry.mcp_prompt_name;
-  if (auto permission = ava::tools::ensure_permission(context, ava::permissions::Operation::McpToolCall, server.source_path, command, "mcp_prompt",
-                                                      "MCP prompt retrieval requires permission");
-      !permission)
-  {
-    return std::unexpected(std::move(permission.error()));
-  }
-  return {};
-}
-
-ava::core::Result<std::string> mcp_prompt_message(runtime::session_ts& unlocked_session, CommandRequest const& request, CommandRegistryEntry const& entry,
-                                                  std::string_view argument_text)
-{
-  CRITICAL_AREA_BEGIN_R(session);
-  auto const resource_policy = runtime::make_extension_resource_policy_1(*session_r);
-  CRITICAL_AREA_END_R(session);
-  auto config = ava::mcp::load_mcp_config(resource_policy.mcp_config);
-  if (!config)
-    return std::unexpected(std::move(config.error()));
-  auto const server = std::ranges::find_if(config->servers, [&](ava::mcp::McpServerConfig const& item) { return item.id == entry.mcp_server_id; });
-  if (server == config->servers.end() || !server->enabled)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "MCP server not found");
-    error.with_context("mcp_server", entry.mcp_server_id);
-    return std::unexpected(std::move(error));
-  }
-
-  auto arguments = mcp_prompt_arguments_json(entry, argument_text);
-  if (!arguments)
-    return std::unexpected(std::move(arguments.error()));
-
-  auto context = make_tool_context(unlocked_session, request.permission_resolver);
-  context.permission_tool_name = "mcp_prompt";
-  context.current_tool_name = "mcp_prompt";
-  context.cancel_requested = request.cancel_requested;
-  if (auto permission = ensure_mcp_prompt_permissions(context, *server, entry); !permission)
-  {
-    return std::unexpected(std::move(permission.error()));
-  }
-
-  std::filesystem::path workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
-  auto client = ava::mcp::McpStdioClient::start(*server, ava::mcp::McpStdioClientOptions{.workspace_dir = std::move(workspace_dir)}, request.cancel_requested);
-  if (!client)
-    return std::unexpected(std::move(client.error()));
-  auto prompt = (*client)->get_prompt(entry.mcp_prompt_name, *arguments, request.cancel_requested);
-  auto shutdown = (*client)->shutdown();
-  if (!prompt)
-    return std::unexpected(std::move(prompt.error()));
-  if (!shutdown)
-    return std::unexpected(std::move(shutdown.error()));
-  if (prompt->content.empty())
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "MCP prompt returned no text");
-    error.with_context("mcp_server", entry.mcp_server_id);
-    error.with_context("mcp_prompt", entry.mcp_prompt_name);
-    return std::unexpected(std::move(error));
-  }
-  return std::move(prompt->content);
 }
 
 ava::core::Result<CommandResult> run_registry_command(runtime::session_ts& unlocked_session, CommandRequest request, CommandRegistryEntry const& entry)
@@ -1028,10 +930,8 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
   auto const* entry = find_command_catalog_entry(request.command);
   if (!entry)
   {
-    CRITICAL_AREA_BEGIN_W(session);
-
     auto const token = command_token(request.command);
-    auto registry = session_w->load_command_registry(CommandRegistryOptions{.include_builtins = false,
+    auto registry = load_command_registry(unlocked_session, CommandRegistryOptions{.include_builtins = false,
                                                                              .include_prompt_commands = true,
                                                                              .include_skills = true,
                                                                              .include_plugin_commands = true,
@@ -1039,13 +939,10 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
                                                                              .permission_resolver = request.permission_resolver,
                                                                              .cancel_requested = request.cancel_requested});
     if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
-    {
-      CRITICAL_AREA_END_W(session);
       return run_registry_command(unlocked_session, std::move(request), *registry_entry);
-    }
     if (!token.starts_with("/skill:") && !token.starts_with("/mcp:") && !token.starts_with("/plugin:"))
     {
-      registry = session_w->load_command_registry(CommandRegistryOptions{.include_builtins = false,
+      registry = load_command_registry(unlocked_session, CommandRegistryOptions{.include_builtins = false,
                                                                          .include_prompt_commands = false,
                                                                          .include_skills = false,
                                                                          .include_plugin_commands = false,
@@ -1053,13 +950,8 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
                                                                          .permission_resolver = request.permission_resolver,
                                                                          .cancel_requested = request.cancel_requested});
       if (auto const* registry_entry = find_command_registry_entry(registry, request.command))
-      {
-        CRITICAL_AREA_END_W(session);
         return run_registry_command(unlocked_session, std::move(request), *registry_entry);
-      }
     }
-
-    CRITICAL_AREA_END_W(session);
 
     if (token.starts_with("/skill:") || token.starts_with("/mcp:") || token.starts_with("/plugin:"))
     {

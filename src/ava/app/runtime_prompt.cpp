@@ -326,8 +326,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   }
 
   auto const resource_policy = [&] {
-    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return make_extension_resource_policy_1(*session_r);
+    return make_extension_resource_policy_1(unlocked_session);
   }();
   bool const include_ambient = !runtime_options.isolate_ambient_extensions;
   bool const include_project_resources = include_ambient && resource_policy.include_project_resources;

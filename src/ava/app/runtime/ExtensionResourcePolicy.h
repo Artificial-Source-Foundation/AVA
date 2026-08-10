@@ -1,5 +1,6 @@
 #pragma once
 
+#include "session_ts.h"
 #include "ava/debug/print_members_on.h"
 #include "ava/plugin/discovery.h"
 #include "ava/mcp/config.h"
@@ -28,7 +29,6 @@ struct ExtensionResourcePolicy
 
 [[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
                                                                      bool include_project_resources);
-// Called from Session::load_command_registry that passes *this: session is already locked.
-[[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy_1(Session const& session);
+[[nodiscard]] ExtensionResourcePolicy make_extension_resource_policy_1(session_ts const& unlocked_session);
 
 }  // namespace ava::app::runtime

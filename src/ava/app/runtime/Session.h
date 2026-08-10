@@ -8,7 +8,6 @@
 #include "ReasoningSelection.h"
 #include "SessionLifecycleRequest.h"
 #include "ava/debug/print_members_on.h"
-#include "ava/app/command_registry.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime/session_ts.h"
 #include "ava/app/session_run_controller.h"
@@ -38,6 +37,8 @@ class SubagentDeliveryManager;
 } // namespace ava::app
 
 namespace ava::app::runtime {
+
+struct PromptState;
 
 // Invocation inputs.
 //
@@ -359,7 +360,6 @@ class Session : protected Session_aggregate_base
     return resources_.run_controller ? resources_.run_controller->owner_append_route() : ava::agent::SessionAppendSink{};
   }
 
-  [[nodiscard]] CommandRegistry load_command_registry(CommandRegistryOptions options = {});
   [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route_1()
   {
     return resources_.run_controller ? resources_.run_controller->owner_append_batch_route() : ava::agent::SessionAppendBatchSink{};

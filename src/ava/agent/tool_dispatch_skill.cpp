@@ -33,20 +33,6 @@ std::filesystem::path plugin_enablement_file_for_context(ava::tools::ToolContext
   return ava::plugin::default_plugin_enablement_file();
 }
 
-std::vector<ava::context::DeclaredSkillFileOptions> declared_plugin_skill_files(ava::plugin::PluginDiagnostics const& diagnostics)
-{
-  std::vector<ava::context::DeclaredSkillFileOptions> files;
-  for (auto const& skill : ava::plugin::enabled_plugin_static_skill_files(diagnostics))
-  {
-    files.push_back(ava::context::DeclaredSkillFileOptions{.path = skill.path,
-                                                           .name = skill.name,
-                                                           .description = skill.description,
-                                                           .source_type = ava::context::SkillSourceType::Plugin,
-                                                           .preloaded_content = skill.content});
-  }
-  return files;
-}
-
 }  // namespace
 
 ToolDispatchResult skill_result(ava::tools::ToolContext const& context, ProviderToolCall const& call)
@@ -59,7 +45,7 @@ ToolDispatchResult skill_result(ava::tools::ToolContext const& context, Provider
   {
     auto plugin_diagnostics = ava::plugin::collect_plugin_diagnostics(plugin_discovery_options_for_context(context),
                                                                       plugin_enablement_file_for_context(context), context.workspace_dir);
-    plugin_skill_files = declared_plugin_skill_files(plugin_diagnostics);
+    plugin_skill_files = ava::plugin::declared_plugin_skill_files(plugin_diagnostics);
   }
   auto skills = ava::context::load_skills(ava::context::SkillLoadOptions{.workspace_root = context.workspace_dir,
                                                                          .global_skill_dirs = context.skill_global_dirs,

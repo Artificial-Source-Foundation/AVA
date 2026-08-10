@@ -119,14 +119,16 @@ void test_app_runtime_open_session_and_context_prompt()
 
   std::string session_id;
   {
-    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
-
+    ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+    CRITICAL_AREA_BEGIN_R(session);
     expect(session_r->created && session_r->mode() == ava::agent::Mode::Plan && session_r->model().model_id == "gpt-5.5",
            "runtime session records created state, mode, and model");
-    auto const resource_policy = ava::app::runtime::make_extension_resource_policy_1(*session_r);
+    CRITICAL_AREA_END_R(session);
+    auto const resource_policy = ava::app::runtime::make_extension_resource_policy_1(unlocked_session);
     expect(!resource_policy.include_project_resources && resource_policy.plugin_discovery.global_plugins_dir == paths.ava_config_dir / "plugins" &&
                resource_policy.plugin_discovery.project_plugins_dir.empty() && resource_policy.mcp_config.workspace_dir == workspace,
            "runtime session extension resource policy overload derives paths and the fail-closed trust decision");
+    CRITICAL_AREA_CONTINUE_R(session);
     expect(session_r->context_sources().size() == 3, "runtime session records workspace and global context metadata");
     expect(!session_r->base_prompt().from_override && !session_r->base_prompt().source_path && session_r->base_prompt().byte_count > 0 &&
                session_r->base_prompt().content_fingerprint != 0,

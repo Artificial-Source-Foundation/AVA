@@ -485,7 +485,6 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
           return transport;
         },
         .subagent_coordinator = session_r->subagent_coordinator(),
-        .session_mutex = runtime_options.session_mutex,
         .append_entry = append_route,
         .append_batch = std::move(append_batch_route),
         .session_read_authority = std::move(*session_read_authority),

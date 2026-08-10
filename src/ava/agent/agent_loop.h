@@ -26,7 +26,6 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -141,7 +140,6 @@ struct AgentLoopOptions
   // Production and tests use one application-scoped coordinator as the sole
   // task-subagent owner. BackgroundJobRegistry remains an internal engine.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;
-  std::mutex* session_mutex = nullptr;
   // Immutable generation routes for records produced by this run. Persistent
   // provider assistant turns require the batch route so v4 staging and its
   // commit are appended through one guarded authority.

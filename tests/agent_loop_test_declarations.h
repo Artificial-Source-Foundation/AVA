@@ -52,7 +52,7 @@ void test_agent_loop_invalid_utf8_function_arguments_prevent_dispatch();
 void test_agent_loop_stream_unended_documented_function_prevents_dispatch();
 void test_agent_loop_stream_post_terminal_function_prevents_dispatch();
 void test_agent_loop_compaction_status_metadata();
-void test_agent_loop_compaction_callback_runs_without_session_mutex();
+void test_agent_loop_invokes_compaction_callback();
 void test_agent_loop_two_provider_tool_turn_phase_and_persistence_order();
 void test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
 void test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();

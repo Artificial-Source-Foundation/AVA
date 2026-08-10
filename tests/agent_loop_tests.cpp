@@ -54,7 +54,7 @@ void run_agent_loop_tests()
   test_agent_loop_stream_unended_documented_function_prevents_dispatch();
   test_agent_loop_stream_post_terminal_function_prevents_dispatch();
   test_agent_loop_compaction_status_metadata();
-  test_agent_loop_compaction_callback_runs_without_session_mutex();
+  test_agent_loop_invokes_compaction_callback();
   test_agent_loop_two_provider_tool_turn_phase_and_persistence_order();
   test_agent_loop_replays_steering_after_mid_turn_auto_compaction();
   test_agent_loop_context_overflow_retry_skips_duplicate_auto_compaction();

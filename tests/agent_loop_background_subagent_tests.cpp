@@ -56,7 +56,6 @@ void test_agent_loop_background_task_starts_child_session()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  std::mutex session_mutex;
   auto coordinator_result = ava::agent::SubagentCoordinator::create();
   expect(coordinator_result.has_value(), "background start fixture creates coordinator");
   if (!coordinator_result)
@@ -97,7 +96,6 @@ void test_agent_loop_background_task_starts_child_session()
         return transport;
       },
       .subagent_coordinator = coordinator,
-      .session_mutex = &session_mutex,
       .append_entry = parent_append,
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
@@ -214,7 +212,6 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
   auto const session_root = root / "sessions";
   ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = session_root, .workspace_dir = workspace, .session_id = "parent-bg-fail"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
-  std::mutex session_mutex;
   auto background_responses = std::make_shared<std::vector<ava::http::HttpResponse>>();
   auto background_requests = std::make_shared<std::vector<ava::http::HttpRequest>>();
   auto background_mutex = std::make_shared<std::mutex>();
@@ -250,7 +247,6 @@ void test_agent_loop_background_task_failure_records_parent_and_child_errors()
         return transport;
       },
       .subagent_coordinator = coordinator,
-      .session_mutex = &session_mutex,
       .append_entry = parent_append,
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),

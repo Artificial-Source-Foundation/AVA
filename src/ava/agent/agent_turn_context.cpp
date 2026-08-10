@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,17 +18,6 @@
 
 namespace ava::agent::detail {
 namespace {
-
-template <typename Operation>
-auto with_session_lock(AgentLoopOptions const& options, Operation&& operation) -> decltype(operation())
-{
-  if (options.session_mutex)
-  {
-    std::lock_guard lock(*options.session_mutex);
-    return operation();
-  }
-  return operation();
-}
 
 ava::core::Result<std::unordered_set<std::string>> load_persisted_provider_tool_call_ids(ava::session::SessionReadAuthority read_authority,
                                                                                          ava::session::SessionReadLimits const& read_limits)
@@ -107,7 +95,7 @@ ava::core::VoidResult AgentTurnSession::check_canceled(std::string_view boundary
 {
   if (!is_canceled())
     return {};
-  static_cast<void>(with_session_lock(options_, [&] { return append_cancel(options_.append_entry, boundary); }));
+  static_cast<void>(append_cancel(options_.append_entry, boundary));
   auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "agent loop canceled");
   error.with_context("boundary", std::string(boundary));
   return std::unexpected(std::move(error));
@@ -115,52 +103,48 @@ ava::core::VoidResult AgentTurnSession::check_canceled(std::string_view boundary
 
 ava::core::Result<std::string> AgentTurnSession::append_user_message(std::string const& text, std::vector<ava::session::ImageAttachmentRef> const& attachments)
 {
-  return with_session_lock(
-      options_, [&] { return ava::agent::append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance); });
+  return ava::agent::append_user_message(options_.append_entry, text, attachments, options_.synthetic_user_message_provenance);
 }
 
 ava::core::VoidResult AgentTurnSession::append_replay_user_message(ActiveTurnUserMessage const& message)
 {
-  return with_session_lock(options_,
-                           [&] { return ava::agent::append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id); });
+  return ava::agent::append_replay_user_message(options_.append_entry, message.text, message.image_attachments, message.id);
 }
 
 ava::core::Result<PersistedAssistantTurn> AgentTurnSession::append_assistant_turn(ParsedAssistantTurn const& turn, ava::provider::TokenUsage const& usage,
                                                                                   std::optional<long double> const& cost_usd)
 {
-  return with_session_lock(options_, [&]() -> ava::core::Result<PersistedAssistantTurn> {
-    auto const source_api_family =
-        options_.model.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.api_family};
-    auto const source_reasoning_format =
-        options_.model.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.reasoning_format};
-    return ava::agent::append_assistant_turn(options_.append_batch, turn, options_.model.provider_id, options_.model.model_id, usage, cost_usd,
-                                             source_api_family, source_reasoning_format);
-  });
+  auto const source_api_family =
+      options_.model.api_family.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.api_family};
+  auto const source_reasoning_format =
+      options_.model.reasoning_format.empty() ? std::optional<std::string_view>{} : std::optional<std::string_view>{options_.model.reasoning_format};
+  return ava::agent::append_assistant_turn(options_.append_batch, turn, options_.model.provider_id, options_.model.model_id, usage, cost_usd,
+                                           source_api_family, source_reasoning_format);
 }
 
 ava::core::VoidResult AgentTurnSession::append_tool_result(ToolDispatchResult const& dispatch_result, std::optional<std::string_view> assistant_output_entry_id)
 {
-  return with_session_lock(options_, [&] { return ava::agent::append_tool_result(options_.append_entry, dispatch_result, assistant_output_entry_id); });
+  return ava::agent::append_tool_result(options_.append_entry, dispatch_result, assistant_output_entry_id);
 }
 
 ava::core::VoidResult AgentTurnSession::append_permission_decision(ava::tools::PermissionAuditEvent const& event)
 {
-  return with_session_lock(options_, [&] { return ava::agent::append_permission_decision(options_.append_entry, event); });
+  return ava::agent::append_permission_decision(options_.append_entry, event);
 }
 
 ava::core::VoidResult AgentTurnSession::append_error(ava::core::Error const& error)
 {
-  return with_session_lock(options_, [&] { return ava::agent::append_error(options_.append_entry, error); });
+  return ava::agent::append_error(options_.append_entry, error);
 }
 
 ava::core::Result<BuiltProviderMessages> AgentTurnSession::build_messages(MessageBuildOptions options)
 {
-  return with_session_lock(options_, [&] { return ava::agent::build_messages(*options_.session_read_authority, std::move(options)); });
+  return ava::agent::build_messages(*options_.session_read_authority, std::move(options));
 }
 
 ava::core::Result<std::unordered_set<std::string>> AgentTurnSession::persisted_provider_tool_call_ids()
 {
-  return with_session_lock(options_, [&] { return load_persisted_provider_tool_call_ids(*options_.session_read_authority, options_.session_read_limits); });
+  return load_persisted_provider_tool_call_ids(*options_.session_read_authority, options_.session_read_limits);
 }
 
 ava::core::VoidResult AgentTurnSession::attach_verified_image_payloads(ava::provider::ProviderRequest& request) const
@@ -173,7 +157,7 @@ ava::core::VoidResult AgentTurnSession::attach_verified_image_payloads(ava::prov
         continue;
       ava::session::ImageAttachmentRef const attachment{
           .id = part.attachment_id, .mime_type = part.mime_type, .storage_path = part.storage_path, .sha256 = part.sha256, .byte_size = part.byte_size};
-      auto loaded = with_session_lock(options_, [&] { return ava::session::load_image_attachment(store_, attachment); });
+      auto loaded = ava::session::load_image_attachment(store_, attachment);
       if (!loaded)
         return std::unexpected(std::move(loaded.error()));
       part.data_base64 = ava::provider::base64_encode(loaded->bytes);

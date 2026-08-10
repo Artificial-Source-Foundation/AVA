@@ -19,7 +19,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -521,42 +520,36 @@ void test_agent_loop_compaction_status_metadata()
          "agent loop sends compacted context in initial provider request");
 }
 
-void test_agent_loop_compaction_callback_runs_without_session_mutex()
+void test_agent_loop_invokes_compaction_callback()
 {
-  auto const root = create_empty_root("agent-compaction-unlocked-session-mutex");
+  auto const root = create_empty_root("agent-invokes-compaction-callback");
   auto const workspace = root / "workspace";
   std::filesystem::create_directories(workspace);
   ava::session::SessionStore store(
-      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "compaction-unlocked-session-mutex"});
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "invokes-compaction-callback"});
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport(
       {sse_response("data: {\"type\":\"response.output_text.delta\",\"delta\":\"compaction callback completed\"}\n\n"
                     "data: [DONE]\n\n")});
-  std::mutex session_mutex;
   bool compact_callback_observed = false;
-  bool session_mutex_was_available = false;
   ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
       .workspace_dir = workspace,
       .mode = ava::agent::Mode::Build,
       .model = agent_loop_test::model_invocation_options(),
       .access_token = "token",
-      .compact_context = [&compact_callback_observed, &session_mutex, &session_mutex_was_available](
-                             ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const&) -> ava::core::Result<bool> {
+      .compact_context = [&compact_callback_observed](ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const&)
+                               -> ava::core::Result<bool> {
         compact_callback_observed = true;
-        session_mutex_was_available = session_mutex.try_lock();
-        if (session_mutex_was_available)
-          session_mutex.unlock();
         return false;
       },
-      .session_mutex = &session_mutex,
       .append_entry = append_route_for_test(store),
       .append_batch = append_batch_route_for_test(store),
       .session_read_authority = read_authority_for_test(store),
   });
 
   auto result = loop.run_turn("continue", store, provider, transport);
-  expect(result && result->final_text == "compaction callback completed" && compact_callback_observed && session_mutex_was_available,
-         "agent loop invokes context compaction without holding the caller session mutex");
+  expect(result && result->final_text == "compaction callback completed" && compact_callback_observed,
+         "agent loop invokes the context compaction callback");
 }
 
 void test_agent_loop_two_provider_tool_turn_phase_and_persistence_order()

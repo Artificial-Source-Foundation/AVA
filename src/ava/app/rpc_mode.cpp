@@ -215,8 +215,7 @@ ava::core::JoinThread make_rpc_direct_command_worker(RpcDirectCommandWorkerOptio
                               CommandRequest{.command = "/bash " + options.command,
                                              .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(options.request_id)),
                                              .permission_resolver = std::move(permission_resolver),
-                                             .cancel_requested = std::move(command_cancel_requested),
-                                             .session_mutex = &options.session_mutex});
+                                             .cancel_requested = std::move(command_cancel_requested)});
     if (!result)
     {
       finish(std::unexpected(std::move(result.error())));
@@ -335,7 +334,6 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
                                          .permission_resolver = compact_runtime_options->permission_resolver,
                                          .compaction_summary_generator = std::move(summary_generator),
                                          .cancel_requested = std::move(compact_cancel_requested),
-                                         .session_mutex = &options.session_mutex,
                                          .propagate_compaction_errors = true,
                                      });
     if (!command_result)
@@ -578,8 +576,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
         auto result =
             run_command(unlocked_session, CommandRequest{.command = std::move(slash_command),
                                                 .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
-                                                .permission_resolver = runtime_options.permission_resolver,
-                                                .session_mutex = &session_mutex});
+                                                .permission_resolver = runtime_options.permission_resolver});
         if (!result)
         {
           if (auto written = rpc::write_error(output, command->id, result.error()); !written)
@@ -928,8 +925,7 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
       auto result =
           run_command(unlocked_session, CommandRequest{.command = std::move(slash_command),
                                                  .event_sink = ava::event::make_runtime_event_bus_adapter(event_bus, rpc::rpc_event_context(command->id)),
-                                                 .permission_resolver = runtime_options.permission_resolver,
-                                                 .session_mutex = &session_mutex});
+                                                 .permission_resolver = runtime_options.permission_resolver});
       if (!result)
       {
         if (auto written = rpc::write_error(output, command->id, result.error()); !written)

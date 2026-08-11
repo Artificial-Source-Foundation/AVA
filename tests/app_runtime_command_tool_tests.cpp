@@ -196,7 +196,6 @@ void app_command_dispatcher_tool_part(ava::app::runtime::session_ts& unlocked_se
          "command dispatcher /compact persists generated summary and instructions");
 
   auto const compactions_before_stale = entries ? count_compaction_entries(*entries) : 0;
-  std::mutex session_mutex;
   bool introduced_manual_stale_snapshot = false;
   std::size_t manual_stale_generator_calls = 0;
   auto stale_compact = ava::app::run_command(
@@ -219,8 +218,7 @@ void app_command_dispatcher_tool_part(ava::app::runtime::session_ts& unlocked_se
                                  return std::string(
                                      "# Goal\nStale\n# Constraints / Preferences\nNone noted.\n# Decisions\nNone noted.\n"
                                      "# Files Read or Modified\nNone noted.\n# Unresolved Tasks\nNone noted.\n# Next Steps\nContinue.");
-                               },
-                               .session_mutex = &session_mutex});
+                               }});
   entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
   expect(stale_compact && stale_compact->handled && !stale_compact->output.empty() &&
              stale_compact->output[0].find("compaction summary recorded") != std::string::npos,

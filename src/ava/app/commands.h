@@ -23,7 +23,6 @@ struct CommandRequest
   ava::agent::QuestionResolver question_resolver = nullptr;
   CompactionSummaryGenerator compaction_summary_generator = nullptr;
   std::function<bool()> cancel_requested = nullptr;
-  std::mutex* session_mutex = nullptr;
   bool propagate_compaction_errors = false;
   std::vector<CommandHotkey> hotkeys = {};
 

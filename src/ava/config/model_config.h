@@ -84,6 +84,10 @@ struct ModelRegistry
 [[nodiscard]] ModelRegistry parse_model_registry(std::string_view content);
 [[nodiscard]] ava::core::Result<ModelRegistry> load_model_registry(XdgPaths const& paths);
 [[nodiscard]] ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths, std::optional<std::vector<std::string>> scoped_model_cycle);
+
+// Return the effective entries from `registry`, retaining only the last definition of each provider/model pair while preserving survivor order.
+[[nodiscard]] std::vector<ModelInfo> effective_models(ModelRegistry const& registry);
+
 [[nodiscard]] std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id);
 [[nodiscard]] ModelInfo select_default_model(ModelRegistry const& registry);
 [[nodiscard]] std::string_view proven_configured_model_display_name(ModelInfo const& model) noexcept;

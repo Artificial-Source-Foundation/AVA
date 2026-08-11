@@ -341,22 +341,6 @@ void add_glob_completions(tui::SlashCommandItem& item, std::vector<WorkspacePath
   }
 }
 
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
-{
-  std::vector<ava::config::ModelInfo> models;
-  std::vector<std::string> seen;
-  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model)
-  {
-    auto const key = model->provider_id + "\n" + model->model_id;
-    if (std::ranges::find(seen, key) != seen.end())
-      continue;
-    seen.push_back(key);
-    models.push_back(*model);
-  }
-  std::reverse(models.begin(), models.end());
-  return models;
-}
-
 std::string model_completion_description(ava::config::ModelInfo const& model, bool registered)
 {
   auto description = model.provider_id + "/" + model.model_id;
@@ -683,7 +667,7 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     auto const providers = ava::provider::builtin_provider_registry();
     if (auto registry = ava::config::load_model_registry(paths))
     {
-      for (auto const& model : effective_models(*registry))
+      for (auto const& model : ava::config::effective_models(*registry))
       {
         auto const registered = providers.contains(model.provider_id);
         add_completion(item, 0, model.provider_id + "/" + model.model_id, model_completion_description(model, registered), "Models", {}, false, registered,
@@ -1305,7 +1289,7 @@ std::vector<tui::FileReferenceItem> file_reference_items(runtime::session_ts con
 tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model, std::string footer_hint)
 {
   auto const providers = ava::provider::builtin_provider_registry();
-  auto models = effective_models(registry);
+  auto models = ava::config::effective_models(registry);
   auto const current_in_catalog = std::ranges::any_of(
       models, [&](auto const& model) { return model.provider_id == current_model.provider_id && model.model_id == current_model.model_id; });
   if (!current_in_catalog && !current_model.provider_id.empty() && !current_model.model_id.empty())
@@ -1371,7 +1355,7 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
                                                std::optional<std::vector<std::string>> const& scoped_model_cycle, std::string footer_hint)
 {
   auto const providers = ava::provider::builtin_provider_registry();
-  auto models = scoped_model_selector_models(effective_models(registry), scoped_model_cycle);
+  auto models = scoped_model_selector_models(ava::config::effective_models(registry), scoped_model_cycle);
   auto const enabled_count = scoped_model_cycle ? scoped_model_cycle->size() : models.size();
 
   tui::SelectListView view{.title = "Scoped model cycle",

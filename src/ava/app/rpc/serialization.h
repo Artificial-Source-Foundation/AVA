@@ -5,7 +5,6 @@
 #include "ava/app/runtime.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/question.h"
-#include "ava/config/model_config.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
@@ -17,8 +16,6 @@
 #include <vector>
 
 namespace ava::app::rpc {
-
-[[nodiscard]] std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry);
 
 [[nodiscard]] std::string command_result_json(CommandResult const& result);
 [[nodiscard]] std::string command_registry_result_json(CommandRegistry const& registry);

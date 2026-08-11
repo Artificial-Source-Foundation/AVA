@@ -3,9 +3,9 @@
 #include "serialization.h"
 #include "serialization_detail.h"
 #include "serialization_json.h"
-#include "serialization_models.h"
 #include "ava/app/command_session_support_internal.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/config/model_config.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/session_tree.h"
 #include "ava/session/stats.h"
@@ -18,10 +18,6 @@
 #include <vector>
 
 namespace ava::app::rpc {
-
-// Session-owned serializers are invoked with *this while the owning session is already locked.
-std::string model_info_json(ava::config::ModelInfo const& model, runtime::Session const& session, bool configured);
-
 namespace {
 
 std::string joined_output(std::vector<std::string> const& output)
@@ -983,7 +979,7 @@ ava::core::Result<std::string> SessionResultSerializer::list_models_result_json(
   if (!registry)
     return std::unexpected(std::move(registry.error()));
 
-  auto models = effective_models(*registry);
+  auto models = ava::config::effective_models(*registry);
   bool current_in_catalog = false;
   for (auto const& model : models)
   {
@@ -1002,13 +998,13 @@ ava::core::Result<std::string> SessionResultSerializer::list_models_result_json(
   {
     if (index > 0)
       json += ',';
-    json += model_info_json(models[index], session_, true);
+    json += model_info_json(models[index], true);
   }
   if (!current_in_catalog)
   {
     if (!models.empty())
       json += ',';
-    json += model_info_json(session_.model(), session_, false);
+    json += model_info_json(session_.model(), false);
   }
   json += "]}";
   return json;

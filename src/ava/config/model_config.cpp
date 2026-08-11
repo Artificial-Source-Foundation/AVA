@@ -781,6 +781,21 @@ ava::core::VoidResult store_scoped_model_cycle(XdgPaths const& paths, std::optio
   return ava::core::write_text_file_atomic(paths.models_file, *updated, "model config");
 }
 
+std::vector<ModelInfo> effective_models(ModelRegistry const& registry)
+{
+  std::vector<ModelInfo> models;
+  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model)
+  {
+    auto const duplicate = std::ranges::find_if(models, [&](ModelInfo const& existing) {
+      return existing.provider_id == model->provider_id && existing.model_id == model->model_id;
+    });
+    if (duplicate == models.end())
+      models.push_back(*model);
+  }
+  std::reverse(models.begin(), models.end());
+  return models;
+}
+
 std::optional<ModelInfo> find_model(ModelRegistry const& registry, std::string_view provider_id, std::string_view model_id)
 {
   for (auto it = registry.models.rbegin(); it != registry.models.rend(); ++it)

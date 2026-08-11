@@ -112,6 +112,9 @@ class SessionResultSerializer
   [[nodiscard]] ava::core::Result<std::string> session_validation_result_json() const;
 
  private:
+  // Serialize `model` against this serializer's locked session, including whether it is configured and currently selected.
+  [[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, bool configured) const;
+
   runtime::Session const& session_;
 
   // References live session content that may carry provider credentials.

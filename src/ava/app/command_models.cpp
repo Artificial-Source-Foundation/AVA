@@ -18,27 +18,6 @@
 namespace ava::app {
 namespace {
 
-std::string model_key(std::string_view provider_id, std::string_view model_id)
-{
-  return std::string(provider_id) + "\n" + std::string(model_id);
-}
-
-std::vector<ava::config::ModelInfo> effective_models(ava::config::ModelRegistry const& registry)
-{
-  std::vector<ava::config::ModelInfo> models;
-  std::vector<std::string> seen;
-  for (auto model = registry.models.rbegin(); model != registry.models.rend(); ++model)
-  {
-    auto const key = model_key(model->provider_id, model->model_id);
-    if (std::ranges::find(seen, key) != seen.end())
-      continue;
-    seen.push_back(key);
-    models.push_back(*model);
-  }
-  std::reverse(models.begin(), models.end());
-  return models;
-}
-
 std::string trim_ascii(std::string_view text)
 {
   while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) text.remove_prefix(1);
@@ -178,7 +157,7 @@ std::string format_models_text(runtime::session_ts const& unlocked_session, ava:
     current_reasoning = session_r->reasoning();
   }
   auto const providers = ava::provider::builtin_provider_registry();
-  auto models = effective_models(registry);
+  auto models = ava::config::effective_models(registry);
   bool current_in_catalog = false;
 
   std::string output = "Models:\n";
@@ -252,7 +231,7 @@ bool provider_matches_query(ava::config::ProviderProfile const& profile, std::st
 std::size_t model_count_for_provider(ava::config::ModelRegistry const& registry, std::string_view provider_id)
 {
   std::size_t count = 0;
-  for (auto const& model : effective_models(registry))
+  for (auto const& model : ava::config::effective_models(registry))
   {
     if (model.provider_id == provider_id)
       ++count;

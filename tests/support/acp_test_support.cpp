@@ -8,6 +8,7 @@
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 #include "ava/core/result.h"
+#include "ava/app/runtime/Session.h"
 
 #include <algorithm>
 #include <atomic>

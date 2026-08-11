@@ -149,11 +149,10 @@ void test_app_rpc_resolver_output_failure_callback_preserves_lock_order()
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
-  std::mutex session_mutex;
   std::ostringstream stream;
   stream.setstate(std::ios::badbit);
   ava::app::rpc::output_ts output(stream, [&] { static_cast<void>(ava::app::rpc::cancel_pending_resolvers(output, pending_state)); });
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, session_mutex, nullptr, "prompt-write-fail");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, nullptr, "prompt-write-fail");
   auto result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq_write_fail",
                                                             .operation = ava::permissions::Operation::ReadFile,
                                                             .mode = ava::agent::Mode::Build,
@@ -323,11 +322,10 @@ void test_app_rpc_resolver_exact_request_identity_gates_publication_and_cleanup(
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
-  std::mutex session_mutex;
   ResolverPublicationStreamBuf output_buffer(true, true);
   std::ostream out(&output_buffer);
   ava::app::rpc::output_ts output(out, [] { });
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, session_mutex, nullptr, "prompt-identity");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, nullptr, "prompt-identity");
   ava::core::Result<ava::permissions::PermissionResolutionDecision> result = ava::permissions::PermissionResolution::Deny;
   ava::core::JoinThread resolver_thread = ava::core::JoinThread::create("resolver_thread", [&] {
     result = resolver(ava::permissions::PermissionPrompt{.permission_request_id = "permreq-identity",
@@ -585,7 +583,6 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
-  std::mutex session_mutex;
   ThreadSafeStringBuf output_buffer;
   std::ostream output_stream(&output_buffer);
   ava::app::rpc::output_ts output(output_stream, [] { });
@@ -624,7 +621,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
         .risk = prompt.risk,
     });
   }
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, session_mutex, nullptr, "prompt_1");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, nullptr, "prompt_1");
   auto matched = resolver(prompt);
   expect(matched && *matched == ava::permissions::PermissionResolution::AllowSessionGrant,
          "a session grant authorizes a matching stable workspace recipe rather than an execution fingerprint");
@@ -681,7 +678,7 @@ void test_app_rpc_session_grants_are_exact_session_scoped_and_cannot_override_de
     });
   }
   auto hard_deny = ava::app::rpc::make_rpc_permission_resolver(
-      pending_state, output, run_state, unlocked_session, session_mutex,
+      pending_state, output, run_state, unlocked_session,
       [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
         ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Deny, "hard policy deny"};
         decision.authoritative = true;
@@ -714,7 +711,6 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
 
   ava::app::rpc::PendingResolverState pending_state;
   ava::app::rpc::RpcRunState run_state;
-  std::mutex session_mutex;
   ThreadSafeStringBuf output_buffer;
   std::ostream output_stream(&output_buffer);
   ava::app::rpc::output_ts output(output_stream, [] { });
@@ -739,7 +735,7 @@ void test_app_rpc_command_one_shot_blocks_reusable_grants()
                                                   .risk = ava::permissions::PermissionRisk::Critical,
                                                   .command_metadata = metadata};
 
-  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, session_mutex, nullptr, "prompt_os");
+  auto resolver = ava::app::rpc::make_rpc_permission_resolver(pending_state, output, run_state, unlocked_session, nullptr, "prompt_os");
 
   auto wait_for_permission_request = [&] {
     bool const published = output_buffer.wait_contains("\"name\":\"permission_requested\"", std::chrono::seconds(5));

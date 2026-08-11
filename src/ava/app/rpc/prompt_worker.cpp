@@ -23,8 +23,6 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 
   return ava::core::JoinThread::create("rpc_prompt", [options = std::move(options)](std::stop_token stop_token) mutable {
     runtime::session_ts& unlocked_session = options.unlocked_session;
-    // Legacy RPC resolver/output helpers still require a mutex argument. Session access remains protected by session_ts guards, not this adapter mutex.
-    std::mutex adapter_mutex;
 
     auto publish_terminal = [&](std::string const& request_id, ava::core::Result<std::string> result, bool allow_follow_up,
                                 std::string_view terminal_reason) -> ava::core::Result<RpcFollowUpTransition> {
@@ -59,14 +57,14 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       {
         auto started_event = *transition.follow_up;
         started_event.correlation_id = started_event.request_id;
-        if (auto started = write_queue_event(options.output, unlocked_session, adapter_mutex, "follow_up_started", started_event);
+        if (auto started = write_queue_event(options.output, unlocked_session, "follow_up_started", started_event);
             !started)
           return fail_publication(std::move(started.error()));
       }
       else
       {
         auto const reason = transition.kind == RpcFollowUpTransitionKind::Skipped ? std::string_view("canceled") : terminal_reason;
-        if (auto skipped = write_skipped_queue_events(options.output, unlocked_session, adapter_mutex, transition.cleared, reason);
+        if (auto skipped = write_skipped_queue_events(options.output, unlocked_session, transition.cleared, reason);
             !skipped)
           return fail_publication(std::move(skipped.error()));
         if (auto follow_up_errors = write_follow_up_errors(options.output, options.run_state, transition.cleared.follow_up_messages, reason); !follow_up_errors)
@@ -102,10 +100,10 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
 
       // These callbacks run synchronously inside run_prompt's write critical area and retain the Session reference only until run_prompt returns.
-      prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, unlocked_session, adapter_mutex,
+      prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, unlocked_session,
                                                                          policy_permission_resolver, request_id);
       prompt_options->question_resolver =
-          make_rpc_question_resolver(options.pending_state, options.output, options.run_state, unlocked_session, adapter_mutex, request_id);
+          make_rpc_question_resolver(options.pending_state, options.output, options.run_state, unlocked_session, request_id);
 
       // This callback runs inside run_prompt's write critical area, so retain an owning snapshot instead of relocking or capturing Session storage.
       auto const session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
@@ -136,13 +134,13 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
 
       ClearedRpcQueues skipped_steering;
       skipped_steering.steering_messages = clear_queued_steering_messages(options.run_state);
-      if (auto written = write_skipped_queue_events(options.output, unlocked_session, adapter_mutex, skipped_steering, "run_completed_before_safe_point"); !written)
+      if (auto written = write_skipped_queue_events(options.output, unlocked_session, skipped_steering, "run_completed_before_safe_point"); !written)
       {
         return std::unexpected(std::move(written.error()));
       }
       if (!result)
         return std::unexpected(std::move(result.error()));
-      return prompt_result_json(session_id_snapshot(unlocked_session, adapter_mutex), *result);
+      return prompt_result_json(session_id_snapshot(unlocked_session), *result);
     };
 
     std::string request_id = options.request_id;

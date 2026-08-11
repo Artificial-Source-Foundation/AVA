@@ -125,7 +125,7 @@ ava::event::EventEnvelopeContext rpc_event_context(std::string_view request_id)
   return context;
 }
 
-std::string session_id_snapshot(runtime::session_ts const& unlocked_session, std::mutex&)
+std::string session_id_snapshot(runtime::session_ts const& unlocked_session)
 {
   return runtime::session_ts::crat(unlocked_session)->store.session_id();
 }
@@ -162,28 +162,27 @@ ava::event::EventEnvelope resolver_event_envelope(std::string name, std::string 
   return envelope;
 }
 
-ava::core::VoidResult write_queue_event(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex, std::string_view name,
+ava::core::VoidResult write_queue_event(output_ts& output, runtime::session_ts const& unlocked_session, std::string_view name,
                                         QueuedRpcMessage const& queued, std::string_view reason)
 {
   auto envelope = resolver_event_envelope(std::string(name), queued.request_id, queued.correlation_id,
-                                          session_id_snapshot(unlocked_session, session_mutex),
-                                           queued_message_payload_json(queued.message, reason));
+                                          session_id_snapshot(unlocked_session), queued_message_payload_json(queued.message, reason));
   return Output::write_record(output, ava::event::serialize_event_envelope_jsonl(envelope));
 }
 
-ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::session_ts const& unlocked_session, std::mutex& session_mutex, ClearedRpcQueues const& cleared,
+ava::core::VoidResult write_skipped_queue_events(output_ts& output, runtime::session_ts const& unlocked_session, ClearedRpcQueues const& cleared,
                                                  std::string_view reason)
 {
   for (auto const& queued : cleared.steering_messages)
   {
-    if (auto written = write_queue_event(output, unlocked_session, session_mutex, "steer_skipped", queued, reason); !written)
+    if (auto written = write_queue_event(output, unlocked_session, "steer_skipped", queued, reason); !written)
     {
       return written;
     }
   }
   for (auto const& queued : cleared.follow_up_messages)
   {
-    if (auto written = write_queue_event(output, unlocked_session, session_mutex, "follow_up_skipped", queued, reason); !written)
+    if (auto written = write_queue_event(output, unlocked_session, "follow_up_skipped", queued, reason); !written)
     {
       return written;
     }

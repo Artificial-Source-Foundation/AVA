@@ -170,7 +170,8 @@ ava::core::Result<ProviderTurn> AgentTurnExecutor::request_provider_turn()
                                                     .tools_json = tool_schemas,
                                                     .stream = options_.model.stream && options_.model.supports_streaming,
                                                     .max_output_tokens = options_.model.max_output_tokens,
-                                                    .reasoning = options_.model.reasoning};
+                                                    .reasoning = options_.model.reasoning,
+                                                    .compatibility_quirks = options_.model.compatibility_quirks};
     bool const model_supports_images =
         std::find(options_.model.input_modalities.begin(), options_.model.input_modalities.end(), "image") != options_.model.input_modalities.end();
     if (auto valid_images = ava::provider::validate_image_content_parts(provider_request, model_supports_images); !valid_images)

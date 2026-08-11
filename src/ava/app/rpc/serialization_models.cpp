@@ -2,6 +2,7 @@
 #include "serialization_detail.h"
 #include "serialization_json.h"
 #include "ava/config/model_config.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
 
@@ -41,7 +42,7 @@ std::string reasoning_level_map_json(std::vector<ava::config::ModelReasoningLeve
 
 std::string SessionResultSerializer::model_info_json(ava::config::ModelInfo const& model, bool configured) const
 {
-  bool const registered = ava::provider::builtin_provider_registry().contains(model.provider_id);
+  bool const registered = ava::provider::ProviderCatalog::build_builtins_only()->contains(model.provider_id);
   std::string json = "{";
   json += string_field_json("provider", model.provider_id);
   json += ',';

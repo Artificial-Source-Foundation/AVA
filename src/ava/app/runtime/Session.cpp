@@ -15,6 +15,7 @@
 #include "ava/config/session_title_config.h"
 #include "ava/session/session_branch.h"
 #include "ava/session/session_metadata.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/ids.h"
 #include "ava/core/string_utils.h"
@@ -351,6 +352,12 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   // This function ends with a move of the newly created Session, after which that moved Session is destructed.
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::construct");
 
+  // Provider catalog is application-scoped authority. Resolve it before any
+  // session-file mutation so unsafe providers.json fails closed at startup.
+  auto provider_catalog = ava::provider::ensure_provider_catalog(context.provider_catalog, context.paths);
+  if (!provider_catalog)
+    return std::unexpected(std::move(provider_catalog.error()));
+
   auto directories = resolve_runtime_directories(context);
   if (!directories)
     return std::unexpected(std::move(directories.error()));
@@ -377,6 +384,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
     registry = std::move(*loaded_registry);
   }
   auto model = context.default_model_override.value_or(ava::config::select_default_model(registry));
+  if (auto valid = (*provider_catalog)->validate_active_model(model); !valid)
+    return std::unexpected(std::move(valid.error()));
 
   std::optional<std::vector<ava::session::SessionEntry>> loaded_entries;
   if (load_existing_entries)
@@ -392,6 +401,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
       if (auto persisted_model = latest_persisted_model(registry, *entries))
         model = std::move(*persisted_model);
     }
+    if (auto valid = (*provider_catalog)->validate_active_model(model); !valid)
+      return std::unexpected(std::move(valid.error()));
     loaded_entries = std::move(*entries);
     if (request.expected_original_cwd)
     {
@@ -577,7 +588,8 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                              .subagent_coordinator = delivery_manager->coordinator(),
                              .subagent_delivery_manager = std::move(delivery_manager),
                              .session_title_coordinator = std::move(title_coordinator),
-                             .diagnostics = context.diagnostics};
+                             .diagnostics = context.diagnostics,
+                             .provider_catalog = std::move(*provider_catalog)};
   Session session({.invocation_inputs_ = std::move(invocation_inputs),
                    .resolved_prompt_state_ = std::move(resolved_prompt_state),
                    .model_selection_ = std::move(model_selection),
@@ -635,7 +647,8 @@ Session_aggregate_base Session::create_detached_state(ava::session::SessionLease
                                      .subagent_delivery_manager = std::move(manager),
                                      .session_title_coordinator = session_title_coordinator(),
                                      .diagnostics = diagnostics(),
-                                     .mcp_config = mcp_config()};
+                                     .mcp_config = mcp_config(),
+                                     .provider_catalog = provider_catalog()};
   return Session_aggregate_base{.invocation_inputs_ = invocation_inputs(),
                                 .resolved_prompt_state_ = resolve_prompt_state(),
                                 .model_selection_ = model_selection(),
@@ -796,6 +809,7 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.subagent_delivery_manager = subagent_delivery_manager();
   context.session_title_coordinator = session_title_coordinator();
   context.diagnostics = diagnostics();
+  context.provider_catalog = provider_catalog();
   return context;
 }
 

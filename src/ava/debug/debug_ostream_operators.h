@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <variant>
 #include "NAMESPACE_DEBUG.h"
@@ -140,6 +141,13 @@ std::ostream& operator<<(std::ostream& os, T const& e);
 template<typename T>
 std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt);
 
+// Non-inline, defined below.
+// std::span does not satisfy cwds' ConceptNonCharContainer (value_type is
+// remove_cv_t<element_type>, so iterator dereference is not value_type&),
+// so provide an explicit debug printer matching container brace formatting.
+template<typename T, std::size_t Extent>
+std::ostream& operator<<(std::ostream& os, std::span<T, Extent> const& sp);
+
 // Non-inline, defined in maxlen.cpp.
 std::ostream& operator<<(std::ostream& os, std::string const& str);
 
@@ -151,11 +159,16 @@ std::ostream& operator<<(std::ostream& os, struct termios const& te);
 } // namespace debug::ostream_operators
 
 // Include all operator<<'s before defining ones that use LIBCWD_USING_OSTREAM_PRELUDE.
+// clang-format off
+// cwds must stay before print_reference/print_pointer/to_string: those headers
+// depend on cwds symbols (type_name_of) and on AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+// becoming available only after the cwds debug ostream machinery is visible.
 #include <cwds/debug_ostream_operators.h>
 #include "print_reference.h"
 #include <threadsafe/threadsafe.h>
 #include "utils/print_pointer.h"
 #include "utils/to_string.h"
+// clang-format on
 
 namespace debug::ostream_operators {
 
@@ -271,10 +284,33 @@ std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
     // There is no need to write std::boolalpha here because we can only get here if LIBCWD_USING_OSTREAM_PRELUDE
     // was already used, in which case that should already have been taken care of.
     LIBCWD_USING_OSTREAM_PRELUDE;
+    using ::debug::ostream_operators::print_members::operator<<;
     os << opt.value();
   }
   else
     os.write("$no_value$", 10);
+  return os;
+}
+
+template<typename T, std::size_t Extent>
+std::ostream& operator<<(std::ostream& os, std::span<T, Extent> const& sp)
+{
+  os << '{';
+  bool first = true;
+  for (auto const& val : sp)
+  {
+    // Write separators with os.write: unqualified lookup inside this namespace would
+    // otherwise bind os << char const* to the quoting debug inserter.
+    if (!first)
+      os.write(", ", 2);
+    first = false;
+    // There is no need to write std::boolalpha here because we should only get here if
+    // LIBCWD_USING_OSTREAM_PRELUDE was already used.
+    LIBCWD_USING_OSTREAM_PRELUDE;
+    using ::debug::ostream_operators::print_members::operator<<;
+    os << val;
+  }
+  os << '}';
   return os;
 }
 

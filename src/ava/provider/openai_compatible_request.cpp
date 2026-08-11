@@ -249,9 +249,45 @@ std::string reasoning_effort_value(std::string_view level)
   return "high";
 }
 
+bool has_request_quirk(ProviderRequest const& request, std::string_view quirk)
+{
+  return std::ranges::find(request.compatibility_quirks, quirk) != request.compatibility_quirks.end();
+}
+
+bool zai_reasoning_enabled(ProviderRequest const& request)
+{
+  if (!request.reasoning)
+    return false;
+  auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
+  return type != "disabled" && type != "off" && type != "none";
+}
+
+std::string zai_reasoning_options_json(ProviderRequest const& request)
+{
+  if (!zai_reasoning_enabled(request))
+    return ",\"thinking\":{\"type\":\"disabled\"}";
+
+  std::string json = ",\"thinking\":{\"type\":\"enabled\",\"clear_thinking\":false}";
+  if (!has_request_quirk(request, "zai_reasoning_effort"))
+    return json;
+
+  // After ModelInfo reasoning_level_mappings, effort-capable Z.AI models only
+  // retain string efforts such as high/max. Boolean-style levels (enabled/
+  // minimal) intentionally omit reasoning_effort.
+  auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
+  if (type == "high" || type == "max" || type == "low" || type == "medium" || type == "xhigh")
+  {
+    auto const effort = (type == "xhigh") ? "max" : (type == "low" || type == "medium") ? "high" : std::string(type);
+    json += ",\"reasoning_effort\":\"" + ava::core::json::escape(effort) + "\"";
+  }
+  return json;
+}
+
 std::string reasoning_options_json(ProviderRequest const& request, bool preserve_reasoning_content, std::string_view reasoning_request_field,
                                    bool effort_string)
 {
+  if (has_request_quirk(request, "zai"))
+    return zai_reasoning_options_json(request);
   if (!request.reasoning || reasoning_request_field.empty())
     return {};
   auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
@@ -380,7 +416,9 @@ std::string openai_compatible_request_body_json(ProviderRequest const& request, 
   body += ']';
   if (request.max_output_tokens && *request.max_output_tokens > 0)
   {
-    body += ",\"max_tokens\":";
+    // Z.AI Coding Plan (and any model that opts in) rejects chat-completions
+    // max_tokens and expects the OpenAI completions-compatible field name.
+    body += has_request_quirk(request, "max_completion_tokens") ? ",\"max_completion_tokens\":" : ",\"max_tokens\":";
     body += std::to_string(*request.max_output_tokens);
   }
   if (options.default_temperature)
@@ -399,7 +437,10 @@ std::string openai_compatible_request_body_json(ProviderRequest const& request, 
     if (tool)
       body += *tool;
   }
-  body += "]}";
+  body += ']';
+  if (!request.tools_json.empty() && has_request_quirk(request, "tool_stream"))
+    body += ",\"tool_stream\":true";
+  body += '}';
   return body;
 }
 

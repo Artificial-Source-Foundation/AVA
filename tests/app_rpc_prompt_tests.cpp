@@ -4,11 +4,15 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
+#include "ava/app/rpc/session_operators.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/config/auth.h"
+#include "ava/config/model_config.h"
 #include "ava/session/record.h"
+#include "ava/provider/catalog.h"
+#include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/core/json.h"
@@ -18,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <istream>
 #include <ostream>
 #include <ranges>
@@ -25,6 +30,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <sys/stat.h>
 
 namespace ava::tests::app_rpc_test {
 
@@ -506,6 +512,138 @@ void test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request()
   auto persisted = ava::config::load_openai_credential(paths);
   expect(persisted && persisted->has_value() && (*persisted)->access_token == "rpc-refreshed-access" && (*persisted)->refresh_token == "rpc-rotated-refresh",
          "RPC OAuth preflight persists refreshed credential before provider startup");
+}
+
+void test_app_rpc_prompt_uses_pinned_catalog_credential_policy()
+{
+  auto const root = create_empty_root("app-rpc-catalog-creds");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  {
+    std::ofstream file(paths.providers_file, std::ios::binary | std::ios::trunc);
+    file << R"JSON({
+  "version": 1,
+  "providers": [
+    {
+      "id": "safe-provider",
+      "display_name": "Safe Provider",
+      "protocol": "openai_chat_completions",
+      "base_url": "http://127.0.0.1:11434",
+      "auth": "api_key",
+      "api_key_env": "SAFE_PROVIDER_KEY"
+    },
+    {
+      "id": "none-provider",
+      "display_name": "None Provider",
+      "protocol": "openai_chat_completions",
+      "base_url": "http://127.0.0.1:11435",
+      "auth": "none"
+    }
+  ]
+})JSON";
+  }
+  ::chmod(paths.providers_file.c_str(), 0600);
+
+  auto catalog = ava::provider::ProviderCatalog::build(paths);
+  expect(catalog.has_value(), catalog ? "RPC catalog credential test builds providers.json catalog" : catalog.error().format());
+  if (!catalog)
+    return;
+
+  // Derived-name trap for safe-provider is SAFE_PROVIDER_API_KEY; configured env is SAFE_PROVIDER_KEY.
+  ScopedEnvVar trap_safe("SAFE_PROVIDER_API_KEY", "trap-derived-secret");
+  ScopedEnvVar intended_safe("SAFE_PROVIDER_KEY", "intended-safe-secret");
+  ScopedEnvVar trap_none("NONE_PROVIDER_API_KEY", "trap-none-secret");
+  ScopedEnvVar trap_generic("OPENAI_API_KEY", "trap-openai-secret");
+
+  ava::tests::FakeTransport auth_transport({});
+
+  // ensure_prompt_runtime_options is the RPC credential boundary used by the prompt worker.
+  {
+    auto prepared = ava::app::rpc::ensure_prompt_runtime_options(paths, "safe-provider", {}, auth_transport, "prompt", *catalog);
+    expect(prepared && prepared->access_token == "intended-safe-secret" && prepared->credential_type == "api_key",
+           "RPC ensure_prompt_runtime_options uses catalog api_key_env, not derived-name trap");
+  }
+
+  {
+    auto stored = ava::config::store_provider_credential(
+        paths, ava::config::ProviderCredential{
+                   .provider_id = "safe-provider", .access_token = "stored-safe-secret", .credential_type = "api_key", .account_id = "", .source = "test"});
+    expect(stored.has_value(), "RPC catalog credential test stores provider-scoped API key");
+    auto prepared = ava::app::rpc::ensure_prompt_runtime_options(paths, "safe-provider", {}, auth_transport, "prompt", *catalog);
+    expect(prepared && prepared->access_token == "stored-safe-secret" && prepared->credential_type == "api_key",
+           "RPC ensure_prompt_runtime_options prefers stored key over configured env and trap env");
+    std::error_code ec;
+    std::filesystem::remove(paths.auth_file, ec);
+  }
+
+  {
+    auto prepared = ava::app::rpc::ensure_prompt_runtime_options(paths, "none-provider", {}, auth_transport, "prompt", *catalog);
+    expect(prepared && prepared->credential_type == "none" && prepared->access_token.empty(),
+           "RPC ensure_prompt_runtime_options honors auth:none without consuming trap env secrets");
+  }
+
+  // Full RPC prompt path: empty runtime token forces catalog-bound resolution; Authorization must be intended secret.
+  ava::config::ModelInfo model;
+  model.provider_id = "safe-provider";
+  model.model_id = "safe-model";
+  model.display_name = "Safe Model";
+  model.api_family = "openai_chat_completions";
+  model.supports_tools = true;
+  model.supports_streaming = true;
+
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.mode = ava::agent::Mode::Build;
+  open_context.paths = paths;
+  open_context.provider_catalog = *catalog;
+  open_context.default_model_override = model;
+  open_context.pin_model_override = true;
+  auto session = ava::app::runtime::Session::open(open_context);
+  expect(session.has_value(), session ? "RPC catalog credential prompt opens session on safe-provider" : session.error().format());
+  if (!session)
+    return;
+
+  ava::provider::OpenAICompatibleProvider const provider(ava::provider::OpenAICompatibleProviderOptions{
+      .base_url = "http://127.0.0.1:11434",
+      .chat_completions_path = "/v1/chat/completions",
+      .endpoint = "http://127.0.0.1:11434/v1/chat/completions",
+      .provider_name = "Safe Provider",
+      .follow_redirects = false,
+  });
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"safe ok\"}}]}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  BlockingInputBuf input_buffer;
+  std::istream in(&input_buffer);
+  ThreadSafeStringBuf output_buffer;
+  std::ostream out(&output_buffer);
+  ava::core::VoidResult result;
+  ava::app::runtime::session_ts unlocked_session(std::move(*session));
+  std::jthread rpc_thread([&] {
+    result = ava::app::run_rpc_loop(unlocked_session, open_context, provider, transport, ava::app::runtime::RunOptions{}, in, out,
+                                    [&] noexcept { input_buffer.close(); });
+  });
+  input_buffer.push("{\"id\":\"p-safe\",\"type\":\"prompt\",\"message\":\"hello safe\"}\n");
+  bool const completed = output_buffer.wait_contains("safe ok", std::chrono::seconds(2));
+  input_buffer.close();
+  rpc_thread.join();
+  expect(result.has_value(), "RPC prompt with catalog credential policy completes");
+  expect(completed && transport.requests().size() == 1, "RPC prompt issues one provider request under catalog credentials");
+  if (!transport.requests().empty())
+  {
+    auto const auth = transport.requests()[0].headers.find("Authorization");
+    expect(auth != transport.requests()[0].headers.end() && auth->second == "Bearer intended-safe-secret",
+           "RPC prompt Authorization uses SAFE_PROVIDER_KEY, not derived-name trap secret");
+    expect(transport.requests()[0].headers.find("Authorization") != transport.requests()[0].headers.end() &&
+               transport.requests()[0].headers.at("Authorization").find("trap-") == std::string::npos,
+           "RPC prompt never sends trap env secret material");
+  }
 }
 
 }  // namespace ava::tests::app_rpc_test

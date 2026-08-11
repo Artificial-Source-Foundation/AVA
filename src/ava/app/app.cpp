@@ -12,6 +12,7 @@
 #include "ava/agent/mode.h"
 #include "ava/tui/composer.h"
 #include "ava/config/xdg_paths.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/version.h"
 
@@ -433,7 +434,8 @@ int run(int argc, char** argv)
     if (arg == "packages" || arg == "package")
     {
       std::cout << "AVA package manager is deferred pending local-source, provenance, trust, rollback, and compatibility policy.\n"
-                   "Install resources manually under $XDG_CONFIG_HOME/ava or trusted project .ava directories; see docs/core/configuration.md and docs/extensions/plugin-system.md.\n";
+                   "Install resources manually under $XDG_CONFIG_HOME/ava or trusted project .ava directories; see docs/core/configuration.md and "
+                   "docs/extensions/plugin-system.md.\n";
       return 0;
     }
     if (arg == "--help" || arg == "-h")
@@ -777,6 +779,13 @@ int run(int argc, char** argv)
   open_context.prompt_overrides = std::move(prompt_overrides);
   open_context.offline = offline;
   open_context.diagnostics = *diagnostics;
+  auto provider_catalog = ava::provider::ProviderCatalog::build(runtime_paths);
+  if (!provider_catalog)
+  {
+    std::cerr << provider_catalog.error().format() << '\n';
+    return 1;
+  }
+  open_context.provider_catalog = std::move(*provider_catalog);
   ava::app::runtime::SessionLifecycleRequest lifecycle_request;
   lifecycle_request.sessionless = sessionless;
   lifecycle_request.requested_session_id = std::move(requested_session_id);

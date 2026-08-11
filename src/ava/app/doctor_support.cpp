@@ -6,6 +6,7 @@
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
@@ -219,7 +220,7 @@ DoctorReport collect_passive_doctor_report(ava::config::XdgPaths const& paths, s
       auto const model = ava::config::find_model(registry, registry.default_provider_id, registry.default_model_id);
       if (model)
       {
-        auto const provider = ava::config::provider_profile_for_model(*model);
+        auto const provider = ava::provider::ProviderCatalog::build_builtins_only()->profile_for_model(*model);
         default_ready = provider && provider->runtime_selectable;
       }
     }

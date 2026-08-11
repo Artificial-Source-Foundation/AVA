@@ -7,6 +7,7 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/result.h"
 
 #include <algorithm>
@@ -241,7 +242,8 @@ std::vector<ConnectProviderMenuItem> connect_provider_menu_items()
     groups.push_back(std::move(group));
     items.push_back(std::move(item));
   };
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  auto const builtin_catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  for (auto const& profile : builtin_catalog->profiles())
   {
     if (profile.provider_id == "kimi")
       continue;
@@ -768,6 +770,26 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
     err << "provider id must contain only letters, numbers, '-' or '_'\n";
     return 2;
   }
+  {
+    auto catalog = ava::provider::ProviderCatalog::build(paths);
+    if (!catalog)
+    {
+      err << ava::tui::sanitize_terminal_text(catalog.error().format()) << '\n';
+      return 1;
+    }
+    if ((*catalog)->provider_auth_is_none(provider_id))
+    {
+      out << ava::tui::sanitize_terminal_text((*catalog)->display_name(provider_id))
+          << " requires no credential (auth:none). auth.json was not modified.\n";
+      return 0;
+    }
+    if ((*catalog)->provider_is_user_defined(provider_id) && options.credential_type &&
+        *options.credential_type != ConnectCredentialType::ApiKey)
+    {
+      err << "user-defined providers only support API key credentials\n";
+      return 2;
+    }
+  }
   if (provider_id == "openai" && !options.credential_type)
   {
     return run_connect_openai_wizard(paths, ConnectProviderWizardOptions{.provider_id = provider_id, .stdin_is_tty = options.stdin_is_tty}, in, out, err);
@@ -803,6 +825,25 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
 int run_connect_provider_credential(ava::config::XdgPaths const& paths, ConnectProviderCredentialOptions const& options, std::istream& in, std::ostream& out,
                                     std::ostream& err)
 {
+  {
+    auto catalog = ava::provider::ProviderCatalog::build(paths);
+    if (!catalog)
+    {
+      err << ava::tui::sanitize_terminal_text(catalog.error().format()) << '\n';
+      return 1;
+    }
+    if ((*catalog)->provider_auth_is_none(options.provider_id))
+    {
+      out << ava::tui::sanitize_terminal_text((*catalog)->display_name(options.provider_id))
+          << " requires no credential (auth:none). auth.json was not modified.\n";
+      return 0;
+    }
+    if ((*catalog)->provider_is_user_defined(options.provider_id) && options.credential_type != ConnectCredentialType::ApiKey)
+    {
+      err << "user-defined providers only support API key credentials\n";
+      return 2;
+    }
+  }
   auto secret = read_connect_secret(options, in);
   if (!secret)
   {

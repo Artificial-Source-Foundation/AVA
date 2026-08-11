@@ -10,12 +10,15 @@ Primary source files:
 - Runtime provider factories: [`src/ava/provider/registry.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/provider/registry.cpp)
 - Provider metadata: [`src/ava/config/provider_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/provider_profiles.cpp)
 - Built-in model metadata: [`src/ava/config/model_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/model_profiles.cpp)
+- Declarative generic built-ins (xAI/Groq/Cerebras/Together/Fireworks/Mistral): [`src/ava/config/builtin_generic_providers.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/builtin_generic_providers.cpp)
+- User-defined providers: [`docs/core/custom-providers.md`](custom-providers.md) and [`src/ava/config/provider_config.h`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/provider_config.h)
 - Auth resolution: [`src/ava/config/auth.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/auth.cpp)
 - Reasoning profiles: [`src/ava/config/reasoning_profiles.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/src/ava/config/reasoning_profiles.cpp)
 - Live provider smoke harness: [`tests/provider_live_smoke_tests.cpp`](https://github.com/Artificial-Source/AVA/blob/develop/tests/provider_live_smoke_tests.cpp)
 - Pi provider registry reference: [`packages/ai/src/providers/all.ts`](https://github.com/earendil-works/pi/blob/main/packages/ai/src/providers/all.ts)
 
-Related user docs: [`docs/core/configuration.md#auth`](configuration.md#auth),
+Related user docs: [`docs/core/custom-providers.md`](custom-providers.md),
+[`docs/core/configuration.md#auth`](configuration.md#auth),
 [`docs/core/configuration.md#models`](configuration.md#models),
 [`docs/operations/testing.md#provider-live-smoke-matrix`](../operations/testing.md#provider-live-smoke-matrix),
 and [`docs/core/usage.md#current-limits`](usage.md#current-limits).
@@ -33,6 +36,23 @@ These provider ids have a built-in runtime factory and can back model selection.
 | `kimi` | OpenAI-compatible chat-completions shim; default endpoint `https://api.kimi.com/coding/v1/chat/completions`, override `KIMI_BASE_URL`; sends `KimiCLI/1.5` user agent and default temperature `1.0`. | `kimi-k2-thinking`, `kimi-for-coding`. | Stored API key or `KIMI_API_KEY`. | OpenAI-compatible `reasoning_content` with provider-scoped preservation/replay when metadata declares the matching format and quirk. | `KIMI_API_KEY`; default model `kimi-k2-thinking`, override `AVA_LIVE_KIMI_MODEL`. |
 | `moonshot` | OpenAI-compatible chat-completions shim; default endpoint `https://api.moonshot.ai/v1/chat/completions`, override `MOONSHOT_BASE_URL`. | `kimi-k2.6`. | Stored API key or `MOONSHOT_API_KEY`. | OpenAI-compatible `reasoning_content` level metadata. The built-in profile does not preserve prior reasoning content by default. | `MOONSHOT_API_KEY`; default model `kimi-k2.6`, override `AVA_LIVE_MOONSHOT_MODEL`. |
 | `openrouter` | OpenAI-compatible chat-completions shim; default endpoint `https://openrouter.ai/api/v1/chat/completions`, override `OPENROUTER_BASE_URL`. | `moonshotai/kimi-k2.6`. | Stored API key or `OPENROUTER_API_KEY`. | Runtime can parse compatible `reasoning_content`, but the current built-in OpenRouter model is marked non-reasoning. Custom OpenRouter models must opt in with `api_family`, `reasoning_format`, and compatibility metadata. | `OPENROUTER_API_KEY`; default model `moonshotai/kimi-k2.6`, override `AVA_LIVE_OPENROUTER_MODEL`. |
+| `zai` | OpenAI-compatible Coding Plan chat-completions shim; default endpoint `https://api.z.ai/api/coding/paas/v4/chat/completions`, override `ZAI_BASE_URL`. | `glm-4.5-air`, `glm-4.7`, `glm-5-turbo`, `glm-5.1`, `glm-5.2`, `glm-5v-turbo` (image-capable). | Stored API key or `ZAI_API_KEY`. | Z.AI `thinking` controls: enabled sends `thinking.type=enabled` with `clear_thinking=false` and preserves/replays `reasoning_content`; cleared reasoning sends `thinking.type=disabled`. Most GLM models stay level-only (`enabled`); glm-5.2 maps AVA `minimal` to enabled-without-effort, `low`/`medium`/`high` to `reasoning_effort=high`, and `xhigh` to `reasoning_effort=max`. Models that opt in send `tool_stream=true` only when tools are present. | Optional opt-in only; no required live-smoke gate. |
+| `zai-coding-cn` | Same Coding Plan runtime as `zai` against the China endpoint `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`, override `ZAI_CODING_CN_BASE_URL`. | Same six GLM Coding Plan models as Global. | Stored API key or `ZAI_CODING_CN_API_KEY`. | Same Z.AI thinking/tool-stream/effort semantics as Global. | Optional opt-in only; no required live-smoke gate. |
+| `xai` | Generic OpenAI Responses adapter; default endpoint `https://api.x.ai/v1/responses`, override `XAI_BASE_URL`. Built-in xAI never enables OpenAI Codex OAuth mutations. Offline contract only (research date 2026-08-03 from public docs; no live qualification). | `grok-4.5` (text+image, tools). Context 500K; max output omitted; tiered pricing omitted rather than misstated. | Stored API key or `XAI_API_KEY`. | Responses-native `reasoning.effort` levels `low`, `medium`, `high`; uses `max_output_tokens`. | Optional only; no required live-smoke gate. Official docs: [xAI API](https://docs.x.ai/docs). |
+| `groq` | Generic OpenAI Chat Completions adapter; default endpoint `https://api.groq.com/openai/v1/chat/completions`, override `GROQ_BASE_URL`. Uses `max_completion_tokens`; omits `stream_options`. Offline contract only (2026-08-03). | `openai/gpt-oss-120b` (131072/65536, $0.15/$0.60), `openai/gpt-oss-20b` (131072/65536, $0.075/$0.30); text+tools. No AVA reasoning controls (Groq include_reasoning not mapped). | Stored API key or `GROQ_API_KEY`. | None advertised. | Optional only. Official docs: [Groq API](https://console.groq.com/docs). |
+| `cerebras` | Generic OpenAI Chat Completions adapter; default endpoint `https://api.cerebras.ai/v1/chat/completions`, override `CEREBRAS_BASE_URL`. Uses `max_completion_tokens`; omits `stream_options`. Offline contract only (2026-08-03). | `gpt-oss-120b`; text+tools; pricing $0.35/$0.75. Context/max omitted (account-tier dependent). No AVA reasoning controls. | Stored API key or `CEREBRAS_API_KEY`. | None advertised. | Optional only. Official docs: [Cerebras inference](https://inference-docs.cerebras.ai/). |
+| `together` | Generic OpenAI Chat Completions adapter; default endpoint `https://api.together.ai/v1/chat/completions`, override `TOGETHER_BASE_URL`. Uses `max_tokens`; omits `stream_options`. Offline contract only (2026-08-03). | `moonshotai/Kimi-K2.7-Code` (262144, $0.95/$4.00, cache read $0.19), `openai/gpt-oss-120b` (128000, $0.15/$0.60); max output omitted; text+tools. No AVA reasoning controls. | Stored API key or `TOGETHER_API_KEY`. | None advertised. | Optional only. Official docs: [Together AI](https://docs.together.ai/). |
+| `fireworks` | Generic OpenAI Chat Completions adapter; default endpoint `https://api.fireworks.ai/inference/v1/chat/completions`, override `FIREWORKS_BASE_URL`. Uses `max_tokens`; includes stream usage. Offline contract only (2026-08-03). | `accounts/fireworks/models/deepseek-v4-pro` ($1.74/$3.48, cache read $0.145), `accounts/fireworks/models/deepseek-v4-flash` ($0.14/$0.28, cache read $0.028); context/max omitted; text+tools. No advertised AVA reasoning controls. | Stored API key or `FIREWORKS_API_KEY`. | None advertised. | Optional only. Official docs: [Fireworks](https://docs.fireworks.ai/). |
+| `mistral` | Generic OpenAI Chat Completions adapter; default endpoint `https://api.mistral.ai/v1/chat/completions`, override `MISTRAL_BASE_URL`. Uses `max_tokens`; includes stream usage. Offline contract only (2026-08-03). | `mistral-medium-latest` (256000, $1.5/$7.5), `mistral-small-latest` (256000, $0.15/$0.6), `codestral-latest` (128000, $0.3/$0.9); max output omitted; text+tools. No AVA reasoning (ThinkChunks not parsed). | Stored API key or `MISTRAL_API_KEY`. | None advertised. | Optional only. Official docs: [Mistral AI](https://docs.mistral.ai/). |
+
+## User-defined custom providers
+
+AVA loads optional `$XDG_CONFIG_HOME/ava/providers.json` at process start into the
+same immutable catalog. Supported protocols: `openai_chat_completions`,
+`openai_responses`, and `anthropic_messages`. Auth modes: `api_key` and `auth:none`.
+Models remain in `models.json` and must set a matching `api_family`. Provider
+definitions require a process restart (`/reload providers` reports restart-required).
+Authoring guide: [`custom-providers.md`](custom-providers.md).
 
 ## Metadata-Only Provider Entries
 
@@ -50,18 +70,18 @@ Credential resolution is provider-scoped and never prints secret values.
 | Stored auth file | `$XDG_CONFIG_HOME/ava/auth.json` or `~/.config/ava/auth.json`. Provider objects use `{"provider":{"type":"api_key","api_key":"..."}}`; OpenAI and Anthropic also accept OAuth-shaped objects. |
 | OpenAI interactive auth | `ava connect openai` supports browser OAuth, headless device OAuth, and API-key setup. OpenAI OAuth entries are refreshed before use when possible. |
 | Non-OpenAI interactive auth | `ava connect <provider> --api-key`, `/connect`, and `/login` store API keys for runtime provider ids. Non-OpenAI provider-specific OAuth is not faked. |
-| Environment API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, and `OPENROUTER_API_KEY`. Other provider ids use the generic uppercase `<PROVIDER_ID>_API_KEY` convention if a future runtime provider is added. |
+| Environment API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `KIMI_API_KEY`, `MOONSHOT_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `ZAI_CODING_CN_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `TOGETHER_API_KEY`, `FIREWORKS_API_KEY`, and `MISTRAL_API_KEY`. User-defined `api_key` providers use only their configured `api_key_env` (default `<ID>_API_KEY`). |
 | Anthropic OAuth bearer | `ANTHROPIC_OAUTH_TOKEN` is preferred over `ANTHROPIC_AUTH_TOKEN`; both are preferred over `ANTHROPIC_API_KEY` when no stored Anthropic credential exists. Stored Anthropic OAuth can refresh with `refresh_token` and `expires_at`, but AVA does not initiate Anthropic interactive OAuth because there is no documented third-party flow for AVA-style clients. |
-| Base URL overrides | Implemented runtime overrides are `ANTHROPIC_BASE_URL`, `DEEPSEEK_BASE_URL`, `GEMINI_BASE_URL`, `KIMI_BASE_URL`, `MOONSHOT_BASE_URL`, and `OPENROUTER_BASE_URL`. OpenAI's built-in runtime uses its default base URL. |
+| Base URL overrides | Implemented runtime overrides are `ANTHROPIC_BASE_URL`, `DEEPSEEK_BASE_URL`, `GEMINI_BASE_URL`, `KIMI_BASE_URL`, `MOONSHOT_BASE_URL`, `OPENROUTER_BASE_URL`, `ZAI_BASE_URL`, `ZAI_CODING_CN_BASE_URL`, `XAI_BASE_URL`, `GROQ_BASE_URL`, `CEREBRAS_BASE_URL`, `TOGETHER_BASE_URL`, `FIREWORKS_BASE_URL`, and `MISTRAL_BASE_URL`. OpenAI's built-in runtime uses its default base URL. User-defined providers fix the endpoint in `providers.json` (no separate env override). |
 
 ## Reasoning Support Summary
 
 | API family / format | Providers and models | Supported request shape | Replay/storage note |
 | --- | --- | --- | --- |
-| `openai_responses` / `openai_responses` | `openai/gpt-5.5`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, and `openai/gpt-5.6-luna`; custom OpenAI Responses models can opt in with matching metadata. | `request.reasoning.effort=<level>` and `request.reasoning.summary=auto` for non-`none` effort. | Reasoning events are surfaced through provider stream events; controls are effort-only. |
+| `openai_responses` / `openai_responses` | `openai/gpt-5.5`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-5.6-luna`, built-in `xai/grok-4.5`, and custom OpenAI Responses models with matching metadata. | `request.reasoning.effort=<level>` and `request.reasoning.summary=auto` for non-`none` effort. | Reasoning events are surfaced through provider stream events; controls are effort-only. |
 | `anthropic_messages` / `anthropic_thinking` | `anthropic/claude-sonnet-4-5`. | `request.thinking.type=<level>`; `enabled` requires `budget_tokens`, and manual budget must be below max output. | Native thinking signatures/redacted data remain provider-private and are replayed only through Anthropic-compatible content parts. |
-| `openai_chat_completions` / `reasoning_content` | `kimi`, `moonshot`, `deepseek`, and custom compatible models that opt in. | Kimi/Moonshot-style profiles use level-only `request.thinking.type=<level>`. DeepSeek uses `reasoning_effort=high|max` for AVA `high`/`xhigh`. | Exact-compatible native reasoning may replay natively. Every request otherwise uses a copy-only target-aware portable projection that strips incompatible private/native reasoning and metadata while preserving visible text and complete representable tool pairs; persisted sessions are not rewritten. The next request fails closed for malformed committed v4 output or a committed v4 function call without its exact bound result. |
-| No reasoning metadata | `openai/gpt-4.1-mini`, `gemini/gemini-2.5-pro`, built-in `openrouter/moonshotai/kimi-k2.6`, and custom models that omit reasoning fields. | No reasoning request should be sent. | `/models` reports advisory diagnostics for missing or mismatched reasoning metadata; unregistered providers remain disabled. |
+| `openai_chat_completions` / `reasoning_content` | `kimi`, `moonshot`, `deepseek`, `zai`, `zai-coding-cn`, and custom compatible models that opt in. | Kimi/Moonshot-style profiles use level-only `request.thinking.type=<level>`. DeepSeek uses `reasoning_effort=high|max` for AVA `high`/`xhigh`. Z.AI profiles send `thinking.type=enabled` with `clear_thinking=false` when reasoning is on, `thinking.type=disabled` when cleared, optional glm-5.2 `reasoning_effort`, and opt-in `tool_stream` only when tools are present. | Exact-compatible native reasoning may replay natively. Every request otherwise uses a copy-only target-aware portable projection that strips incompatible private/native reasoning and metadata while preserving visible text and complete representable tool pairs; persisted sessions are not rewritten. The next request fails closed for malformed committed v4 output or a committed v4 function call without its exact bound result. |
+| No reasoning metadata | `openai/gpt-4.1-mini`, `gemini/gemini-2.5-pro`, built-in `openrouter/moonshotai/kimi-k2.6`, built-in Groq/Cerebras/Together/Fireworks/Mistral models, and custom models that omit reasoning fields. | No reasoning request should be sent. | `/models` reports advisory diagnostics for missing or mismatched reasoning metadata; unregistered providers remain disabled. |
 
 ## Live-Smoke Environment Variables
 
@@ -110,12 +130,13 @@ runtime set and documents the rest as deferred or excluded.
 | `azure-openai-responses` | Missing / deferred | Requires Azure endpoint/deployment/auth configuration and enterprise credential safety. |
 | `github-copilot` | Missing / deferred | Requires Copilot-specific auth and endpoint semantics; do not reuse OpenAI auth silently. |
 | `openai-codex` | Missing / deferred | AVA's normal OpenAI path is implemented; Codex-specific protocol/cache/websocket behavior is not MVP scope. |
-| `mistral` | Missing / deferred | Separate protocol and model metadata; broad access can use OpenRouter until first-class support is selected. |
-| `groq`, `together`, `fireworks`, `xai`, `cerebras`, `huggingface`, `nvidia` | Missing / deferred or covered through OpenRouter/custom compatible config | Each needs endpoint quirks, auth, model catalog entries, pricing/context metadata, tests, and live-smoke credentials before first-class support. |
+| `mistral` | Implemented as AVA `mistral` | Generic OpenAI Chat Completions path with curated models; offline contract tests only — no live qualification. |
+| `groq`, `together`, `fireworks`, `xai`, `cerebras` | Implemented as matching AVA ids | Declarative generic built-ins with offline request/profile tests. No live qualification. See runtime table above for contracts. |
+| `huggingface`, `nvidia` | Missing / deferred or covered through OpenRouter/custom compatible config | Each needs endpoint quirks, auth, model catalog entries, pricing/context metadata, tests, and live-smoke credentials before first-class support. |
 | `vercel-ai-gateway` | Metadata-only / deferred | AVA has a non-runtime `vercel` provider profile only. Runtime support waits for gateway-specific request/auth validation. |
 | `cloudflare-ai-gateway`, `cloudflare-workers-ai` | Missing / deferred | Requires Cloudflare account/auth/config, endpoint-specific metadata, and live-smoke design. |
 | `minimax`, `minimax-cn` | Missing / deferred | Regional/provider-zoo routes; add only with owned credentials, protocol quirks, catalog entries, and smokes. |
-| `zai`, `zai-coding-cn` | Missing / deferred | Same as above; low priority unless product selects direct regional support. |
+| `zai`, `zai-coding-cn` | Implemented as AVA `zai` / `zai-coding-cn` | OpenAI-compatible Coding Plan runtime with Z.AI thinking/clear_thinking, optional tool_stream, glm-5.2 effort mapping, preserved reasoning_content, curated GLM catalog, and offline request/profile tests. Live smoke remains optional. |
 | `xiaomi`, `xiaomi-token-plan-cn`, `xiaomi-token-plan-ams`, `xiaomi-token-plan-sgp` | Missing / deferred | Same as above; token-plan variants need explicit auth/region semantics. |
 | `ant-ling` | Missing / deferred | Regional/provider-zoo route; needs auth/protocol/metadata/smoke plan. |
 | `opencode`, `opencode-go` | Excluded for MVP | OpenCode platform/provider compatibility is reference behavior, not an AVA local-terminal MVP provider target. |
@@ -123,9 +144,11 @@ runtime set and documents the rest as deferred or excluded.
 
 ## Future Implementation Order
 
-1. Keep the current seven runtime providers release-grade: local request/parse tests,
-   auth diagnostics, model metadata, and credential-gated live-smoke evidence stay
-   current before broadening provider scope.
+1. Keep existing live-smoke-gated runtime providers release-grade (OpenAI, Anthropic,
+   DeepSeek, Gemini, Kimi, Moonshot, OpenRouter) and keep the declarative generic
+   built-ins (xAI, Groq, Cerebras, Together, Fireworks, Mistral) covered by offline
+   contract tests. Prefer custom `providers.json` for one-off gateways before adding
+   more first-class vendors.
 2. Add enterprise/cloud providers only with a concrete product need and credential
    owner: `google-vertex`, `amazon-bedrock`, `azure-openai-responses`, and
    `github-copilot` each need explicit auth and endpoint contracts.

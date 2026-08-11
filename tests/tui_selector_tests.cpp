@@ -57,7 +57,8 @@ void run_tui_selector_tests()
           ava::config::ModelInfo{
               .provider_id = "openai", .model_id = "diagnostic-local", .display_name = "Diagnostic Local", .family = "custom", .supports_reasoning = true},
           make_model("unregistered", "remote-model", "Remote Model", "remote", std::nullopt)}};
-  auto const model_picker = ava::app::model_selector_view(model_registry, model_registry.models.front(), "Enter choose · Esc cancel");
+  auto const model_picker = ava::app::model_selector_view(model_registry, model_registry.models.front(),
+                                                          ava::provider::ProviderCatalog::build_builtins_only(), "Enter choose · Esc cancel");
   expect(model_picker.title == "Select model" && model_picker.selected_item_index == 1 && model_picker.items.size() == 4 && model_picker.items[1].current &&
              model_picker.items[0].enabled && model_picker.items[0].group == "Anthropic" && model_picker.items[1].group == "OpenAI" &&
              model_picker.items[2].group == "OpenAI" && model_picker.items[2].enabled && model_picker.items[3].group == "Unregistered" &&
@@ -237,10 +238,12 @@ void run_tui_selector_tests()
   }
 
   auto const scoped_all_models =
-      ava::app::scoped_model_selector_view(model_registry, model_registry.models.front(), std::nullopt, "Enter toggle · Ctrl+X clear");
+      ava::app::scoped_model_selector_view(model_registry, model_registry.models.front(), std::nullopt,
+          ava::provider::ProviderCatalog::build_builtins_only(), "Enter toggle · Ctrl+X clear");
   auto const scoped_ordered_models = ava::app::scoped_model_selector_view(
       model_registry, model_registry.models.front(),
-      std::optional<std::vector<std::string>>{std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"}}, "Enter toggle · Ctrl+X clear");
+      std::optional<std::vector<std::string>>{std::vector<std::string>{"anthropic/claude-sonnet-4-5", "openai/gpt-5.5"}},
+      ava::provider::ProviderCatalog::build_builtins_only(), "Enter toggle · Ctrl+X clear");
   expect(scoped_all_models.title == "Scoped model cycle" && scoped_all_models.subtitle.find("All registered models enabled") != std::string::npos &&
              scoped_all_models.items.size() == 4 && scoped_all_models.items[0].badge == "enabled" && scoped_all_models.items[0].description.empty() &&
              !scoped_all_models.items[3].enabled && scoped_all_models.items[3].disabled_reason.find("provider unavailable") != std::string::npos &&

@@ -26,6 +26,10 @@
 #include <unordered_set>
 #include <vector>
 
+namespace ava::provider {
+class ProviderCatalog;
+}  // namespace ava::provider
+
 namespace ava::app {
 class SessionRunController;
 namespace runtime {
@@ -42,6 +46,7 @@ struct SessionTitleGenerationRequest
   ava::config::ModelInfo active_model;
   ava::config::SessionTitleConfig config;
   std::shared_ptr<ava::core::AnchorSet> anchor_set;
+  std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog;
   std::string source_text;
   std::string access_token;
   std::string credential_type = "bearer";

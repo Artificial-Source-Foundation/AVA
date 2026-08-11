@@ -30,7 +30,7 @@ struct ReloadReportRow
 
 std::string reload_supported_targets()
 {
-  return "all, theme, models, prompts, trust, compaction, keybindings, auth, permissions, lsp, mcp, plugins";
+  return "all, theme, models, prompts, trust, compaction, keybindings, auth, providers, permissions, lsp, mcp, plugins";
 }
 
 void append_reload_detail(ReloadReportRow& row, std::string key, std::string value)
@@ -74,6 +74,8 @@ std::string normalize_reload_target(std::string_view target)
     return "keybindings";
   if (target == "auth" || target == "credentials")
     return "auth";
+  if (target == "providers" || target == "provider")
+    return "providers";
   if (target == "permission" || target == "permissions")
     return "permissions";
   if (target == "lsp" || target == "language-server" || target == "language-servers")
@@ -251,6 +253,11 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::session_ts& 
     {
       return restart_required_reload_row("auth", "active provider credentials are resolved when a run starts", {{"config", paths.auth_file}});
     }
+    if (normalized == "providers")
+    {
+      return restart_required_reload_row("providers", "provider catalog composition is fixed at process startup and requires a restart",
+                                         {{"config", paths.providers_file}});
+    }
     if (normalized == "permissions")
     {
       return restart_required_reload_row(
@@ -276,7 +283,7 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::session_ts& 
   if (target != "all")
     return {one(target)};
   return {one("display"), one("models"),      one("trust"), one("prompts"), one("compaction"), one("keybindings"),
-          one("auth"),    one("permissions"), one("lsp"),   one("mcp"),     one("plugins")};
+          one("auth"),    one("providers"), one("permissions"), one("lsp"),   one("mcp"),     one("plugins")};
 }
 
 }  // namespace

@@ -16,6 +16,7 @@ COMPONENT_FILES = {
     "share/doc/ava/docs/core/usage.md",
     "share/doc/ava/docs/core/configuration.md",
     "share/doc/ava/docs/core/context-resources.md",
+    "share/doc/ava/docs/core/custom-providers.md",
     "share/doc/ava/docs/core/environment-variables.md",
     "share/doc/ava/docs/core/providers.md",
     "share/doc/ava/docs/core/subagents.md",

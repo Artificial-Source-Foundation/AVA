@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/event/events.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/command_registry.h"
@@ -17,8 +16,10 @@
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/session/attachments.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/provider_utils.h"
 #include "ava/provider/registry.h"
+#include "ava/core/thread.h"
 
 #include <atomic>
 #include <cerrno>
@@ -247,12 +248,17 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
 
     ava::config::XdgPaths paths;
     std::string provider_id;
+    std::shared_ptr<ava::provider::ProviderCatalog const> prompt_catalog;
     bool session_offline = false;
     ava::core::Result<rpc::ProviderHandle> selected_provider = std::unexpected(rpc::invalid_rpc("compact provider was not selected"));
     ava::core::VoidResult config_valid = {};
     {
-      paths = runtime::session_ts::rat(options.unlocked_session)->paths();
-      session_offline = runtime::session_ts::rat(options.unlocked_session)->is_offline();
+      runtime::session_ts& unlocked_session = options.unlocked_session;
+      CRITICAL_AREA_BEGIN_R(session);
+      paths = session_r->paths();
+      session_offline = session_r->is_offline();
+      prompt_catalog = session_r->provider_catalog();
+      CRITICAL_AREA_END_R(session);
       auto loaded_config = ava::session::load_compaction_config(paths);
       if (!loaded_config)
       {
@@ -260,7 +266,7 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
       }
       else
       {
-        auto config = resolve_compaction_config(options.unlocked_session, std::move(*loaded_config));
+        auto config = resolve_compaction_config(unlocked_session, std::move(*loaded_config));
         if (!config)
         {
           config_valid = std::unexpected(std::move(config.error()));
@@ -268,13 +274,14 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
         else
         {
           provider_id = config->provider_id;
-          if (provider_id == runtime::session_ts::rat(options.unlocked_session)->model().provider_id)
+          if (provider_id == runtime::session_ts::rat(unlocked_session)->model().provider_id)
           {
-            selected_provider = rpc::provider_for_session_model(options.unlocked_session, options.injected_provider_id, options.injected_provider);
+            selected_provider = rpc::provider_for_session_model(unlocked_session, options.injected_provider_id, options.injected_provider);
           }
           else
           {
-            auto provider = ava::provider::builtin_provider_registry().create(provider_id);
+            auto catalog = prompt_catalog ? prompt_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+            auto provider = catalog->create(provider_id);
             if (!provider)
               selected_provider = std::unexpected(std::move(provider.error()));
             else
@@ -299,8 +306,8 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
       return;
     }
 
-    auto compact_runtime_options =
-        rpc::ensure_prompt_runtime_options(paths, provider_id, std::move(options.runtime_options), options.auth_transport, "compact");
+    auto compact_runtime_options = rpc::ensure_prompt_runtime_options(paths, provider_id, std::move(options.runtime_options), options.auth_transport, "compact",
+                                                                      std::move(prompt_catalog));
     if (!compact_runtime_options)
     {
       finish(std::unexpected(std::move(compact_runtime_options.error())));
@@ -344,9 +351,9 @@ ava::core::JoinThread make_rpc_compaction_worker(RpcCompactionWorkerOptions opti
 
 }  // namespace
 
-ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context,
-                                   ava::provider::Provider const& provider, ava::http::Transport& transport, ava::http::Transport& auth_transport,
-                                   runtime::RunOptions runtime_options, rpc::RpcLineReader& input, std::ostream& out)
+ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtime::OpenContext const& open_context, ava::provider::Provider const& provider,
+                                   ava::http::Transport& transport, ava::http::Transport& auth_transport, runtime::RunOptions runtime_options,
+                                   rpc::RpcLineReader& input, std::ostream& out)
 {
 #ifdef CWDEBUG
   {
@@ -1115,8 +1122,8 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     runtime_options.enable_transport_retries = true;
     runtime_options.offline = session_r->is_offline() || options.open_context.offline;
 
-    auto registry = ava::provider::builtin_provider_registry();
-    auto provider_result = registry.create(session_r->model().provider_id);
+    auto catalog = options.open_context.provider_catalog ? options.open_context.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+    auto provider_result = catalog->create(session_r->model().provider_id);
     if (!provider_result)
     {
       err << provider_result.error().format() << '\n';

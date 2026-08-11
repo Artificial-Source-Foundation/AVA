@@ -16,6 +16,7 @@ void run_app_rpc_tests()
   ava::tests::app_rpc_test::test_app_rpc_prompt_retry_transport_cancellation_is_canceled_event();
   ava::tests::app_rpc_test::test_app_rpc_prompt_after_idle_cancel_clears_cancel_flag();
   ava::tests::app_rpc_test::test_app_rpc_prompt_refreshes_expired_oauth_before_provider_request();
+  ava::tests::app_rpc_test::test_app_rpc_prompt_uses_pinned_catalog_credential_policy();
   ava::tests::app_rpc_test::test_app_rpc_malformed_line_recovery_and_unknown_command();
   ava::tests::app_rpc_test::test_app_rpc_state_list_sessions_and_open_session();
   ava::tests::app_rpc_test::test_app_rpc_job_controls_are_active_safe_and_redacted();

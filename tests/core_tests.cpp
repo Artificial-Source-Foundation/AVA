@@ -33,6 +33,9 @@ void run_app_command_classification_tests();
 void run_app_command_registry_tests();
 void run_tools_tests();
 void run_config_context_auth_oauth_tests();
+void run_provider_config_tests();
+void run_provider_user_catalog_tests();
+void run_provider_builtin_generic_tests();
 void run_command_tests();
 void run_app_compaction_tests();
 void run_app_print_tests();
@@ -86,6 +89,9 @@ constexpr std::array kTestSuites{
     TestSuite{"app_command_registry", run_app_command_registry_tests},
     TestSuite{"tools", run_tools_tests},
     TestSuite{"config_context_auth_oauth", run_config_context_auth_oauth_tests},
+    TestSuite{"provider_config", run_provider_config_tests},
+    TestSuite{"provider_user_catalog", run_provider_user_catalog_tests},
+    TestSuite{"provider_builtin_generic", run_provider_builtin_generic_tests},
     TestSuite{"command", run_command_tests},
     TestSuite{"app_compaction", run_app_compaction_tests},
     TestSuite{"app_print", run_app_print_tests},

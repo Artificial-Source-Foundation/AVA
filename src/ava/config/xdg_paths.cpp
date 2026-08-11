@@ -63,6 +63,7 @@ XdgPaths xdg_paths()
       .compaction_file = ava_config / "compaction.json",
       .global_agents_file = ava_config / "AGENTS.md",
       .models_file = ava_config / "models.json",
+      .providers_file = ava_config / "providers.json",
       .prompts_dir = ava_config / "prompts",
       .sessions_dir = ava_state / "sessions",
   };

@@ -9,6 +9,19 @@
 
 namespace ava::provider {
 
+struct AnthropicProviderOptions
+{
+  std::string base_url = {};
+  // When non-empty, used as the exact request URL (no /v1/messages join).
+  std::string endpoint = {};
+  bool require_credential = true;
+  bool send_api_key_header = true;
+  // Built-in Anthropic only: swap x-api-key for Bearer + OAuth beta header.
+  bool enable_oauth_header_swap = true;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
 class AnthropicStreamParser final : public StreamParser
 {
  public:
@@ -51,7 +64,8 @@ class AnthropicProvider final : public Provider
  public:
   using Provider::build_request;
 
-  explicit AnthropicProvider(std::string base_url = "");
+  explicit AnthropicProvider(AnthropicProviderOptions options = {});
+  explicit AnthropicProvider(std::string base_url);
   [[nodiscard]] ava::core::Result<ava::http::HttpRequest> build_request(ProviderRequest const& request, std::string_view access_token) const override;
   [[nodiscard]] ava::core::VoidResult apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const override;
   [[nodiscard]] std::unique_ptr<StreamParser> create_stream_parser() const override;
@@ -60,7 +74,7 @@ class AnthropicProvider final : public Provider
   AVA_DEBUG_PRINT_MEMBERS_ON
 
  private:
-  std::string base_url_;
+  AnthropicProviderOptions options_;
 };
 
 [[nodiscard]] ava::core::Result<std::vector<StreamEvent>> parse_anthropic_sse(std::string_view sse);

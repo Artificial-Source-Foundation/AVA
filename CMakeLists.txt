@@ -201,6 +201,7 @@ install(
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/usage.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/configuration.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/context-resources.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/custom-providers.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/environment-variables.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/providers.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/docs/core/subagents.md"

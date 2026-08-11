@@ -370,13 +370,20 @@ void append_events_for_sse_line(std::vector<StreamEvent>& events, std::map<long 
 
 }  // namespace
 
-AnthropicProvider::AnthropicProvider(std::string base_url) : base_url_(normalize_anthropic_base_url(std::move(base_url)))
+AnthropicProvider::AnthropicProvider(AnthropicProviderOptions options) : options_(std::move(options))
+{
+  if (options_.endpoint.empty())
+    options_.base_url = normalize_anthropic_base_url(std::move(options_.base_url));
+}
+
+AnthropicProvider::AnthropicProvider(std::string base_url)
+    : AnthropicProvider(AnthropicProviderOptions{.base_url = std::move(base_url)})
 {
 }
 
 ava::core::Result<ava::http::HttpRequest> AnthropicProvider::build_request(ProviderRequest const& request, std::string_view access_token) const
 {
-  return build_anthropic_http_request(base_url_, request, access_token);
+  return build_anthropic_http_request(options_, request, access_token);
 }
 
 std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
@@ -386,7 +393,7 @@ std::unique_ptr<StreamParser> AnthropicProvider::create_stream_parser() const
 
 ava::core::VoidResult AnthropicProvider::apply_auth_options(ava::http::HttpRequest& request, ProviderAuthContext const& auth) const
 {
-  if (auth.credential_type != "oauth")
+  if (!options_.enable_oauth_header_swap || auth.credential_type != "oauth")
     return {};
   if (auth.access_token.empty())
   {

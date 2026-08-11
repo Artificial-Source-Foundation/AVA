@@ -8,6 +8,7 @@
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/session/session_metadata.h"
+#include "ava/provider/catalog.h"
 
 #include <filesystem>
 #include <memory>
@@ -69,6 +70,10 @@ struct OpenContext
   // Application-lifetime private diagnostics owner shared by visible,
   // retained, and protocol-managed runtime sessions.
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
+  // Immutable application-scoped provider composition. Built once before any
+  // session opens and pinned through replacement/background work. Null lets
+  // Session::open ensure a catalog from paths (tests/legacy adapters).
+  std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

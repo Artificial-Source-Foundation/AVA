@@ -5,6 +5,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime/session_ts.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/provider.h"
 #include "ava/core/result.h"
 
@@ -24,9 +25,14 @@ struct ProviderHandle
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+// Catalog-bound credential preparation. Callers must snapshot provider_id and
+// the session's pinned ProviderCatalog under the session mutex, then pass the
+// shared_ptr so custom api_key_env / auth:none policy is honored for the full
+// worker lifetime.
 [[nodiscard]] ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                                    runtime::RunOptions options, ava::http::Transport& auth_transport,
-                                                                                   std::string_view purpose);
+                                                                                   std::string_view purpose,
+                                                                                   std::shared_ptr<ava::provider::ProviderCatalog const> catalog);
 
 [[nodiscard]] ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::session_ts::rat const& session_r, RpcCommand const& command);
 [[nodiscard]] ava::core::Result<ProviderHandle> provider_for_session_model(runtime::session_ts const& unlocked_session, std::string_view injected_provider_id,

@@ -405,7 +405,7 @@ void app_command_dispatcher_ui_part(ava::app::runtime::session_ts& unlocked_sess
   expect(unsupported_reload && unsupported_reload->handled && !unsupported_reload->output.empty() &&
              unsupported_reload->output[0].find("unsupported reload target: no-such") != std::string::npos &&
              unsupported_reload->output[0].find(
-                 "supported: all, theme, models, prompts, trust, compaction, keybindings, auth, permissions, lsp, mcp, plugins") != std::string::npos,
+                 "supported: all, theme, models, prompts, trust, compaction, keybindings, auth, providers, permissions, lsp, mcp, plugins") != std::string::npos,
          "command dispatcher reports unsupported reload targets");
   auto help = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/help", .hotkeys = custom_hotkeys});
   expect(help && help->handled && !help->output.empty() && help->output[0].find("/hotkeys") != std::string::npos &&

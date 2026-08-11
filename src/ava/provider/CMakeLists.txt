@@ -1,6 +1,7 @@
 add_library(ava_provider
   "anthropic_provider.cpp"
   "anthropic_request.cpp"
+  "catalog.cpp"
   "gemini_provider.cpp"
   "openai_compatible_provider.cpp"
   "openai_compatible_request.cpp"
@@ -21,7 +22,7 @@ add_library(ava_provider
 )
 
 target_include_directories(ava_provider PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_provider PUBLIC ava_http)
+target_link_libraries(ava_provider PUBLIC ava_http ava_config)
 ava_apply_debugging(ava_provider)
 ava_apply_warnings(ava_provider)
 ava_apply_sanitizers(ava_provider)

@@ -10,6 +10,8 @@
 #include "ava/config/auth.h"
 #include "ava/session/compaction.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
+#include "ava/app/runtime_credentials.h"
 #include "ava/provider/registry.h"
 #include "ava/core/version.h"
 
@@ -75,40 +77,27 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   }
   auto const provider_id = provider_override.empty() ? std::string_view(model_provider_id) : provider_override;
   ava::http::CurlCliTransport transport;
-  auto credential = ava::config::provider_credential_for_request(paths, provider_id, transport);
-  if (!credential)
+  CRITICAL_AREA_BEGIN_R(session);
+  auto ensured_provider_catalog = session_r->ensure_provider_catalog();
+  ava::app::runtime::RunOptions run_options;
+  run_options.enable_transport_retries = true;
+  auto prepared = ava::app::prepare_runtime_credentials(session_r->paths(), provider_id, std::move(run_options), transport, "prompt", ensured_provider_catalog);
+  CRITICAL_AREA_END_R(session);
+  if (!prepared)
   {
-    add_output(line_result, credential.error().format() + std::string(offline_suffix));
-    return line_result;
-  }
-  if (!*credential)
-  {
-    if (provider_override.empty())
-    {
+    if (provider_override.empty() && prepared.error().message().find("requires auth for provider") != std::string::npos)
       add_output(line_result, ava::app::provider_auth_required_message(unlocked_session, offline_suffix));
-    }
     else
-    {
-      add_output(line_result, "Auth is required for compaction provider `" + std::string(provider_id) + "`. Run `ava connect " + std::string(provider_id) +
-                                  "` or configure its API-key environment variable." + std::string(offline_suffix));
-    }
+      add_output(line_result, prepared.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  auto registry = ava::provider::builtin_provider_registry();
-  auto provider = registry.create(provider_id);
+  auto provider = ensured_provider_catalog->create(provider_id);
   if (!provider)
   {
     add_output(line_result, provider.error().format() + std::string(offline_suffix));
     return line_result;
   }
-  ava::app::runtime::RunOptions run_options;
-  run_options.access_token = (*credential)->access_token;
-  run_options.credential_type = (*credential)->credential_type;
-  run_options.openai_oauth = (*credential)->provider_id == "openai" && (*credential)->credential_type == "oauth";
-  run_options.openai_account_id = (*credential)->account_id;
-  run_options.enable_transport_retries = true;
-
-  return callback(**provider, transport, run_options);
+  return callback(**provider, transport, std::move(*prepared));
 }
 
 LineResult handle_line(ShellState& state, std::string const& line, ava::permissions::PermissionResolver permission_resolver,

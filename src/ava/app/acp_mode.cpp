@@ -5,6 +5,7 @@
 #include "ava/app/acp/service.h"
 #include "ava/app/acp/transport.h"
 #include "ava/app/acp_mode.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/json.h"
 #include "ava/core/version.h"
 
@@ -75,6 +76,13 @@ int run_acp_mode(std::ostream& error_output, std::shared_ptr<ava::diagnostics::R
   service_options.agent_version = std::string(ava::core::version::kFullVersion);
   service_options.launch_root = *launch_root;
   service_options.open_context.diagnostics = std::move(diagnostics);
+  auto provider_catalog = ava::provider::ProviderCatalog::build(service_options.open_context.paths);
+  if (!provider_catalog)
+  {
+    error_output << "ACP startup failed: " << provider_catalog.error().format() << '\n';
+    return 1;
+  }
+  service_options.open_context.provider_catalog = std::move(*provider_catalog);
   auto pinned_options = acp::pin_agent_service_model(std::move(service_options));
   if (!pinned_options)
   {

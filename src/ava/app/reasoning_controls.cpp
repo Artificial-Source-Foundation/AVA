@@ -2,6 +2,7 @@
 #include "ava/app/reasoning_controls.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/provider/catalog.h"
 #include "ava/core/error.h"
 
 #include <algorithm>
@@ -176,7 +177,7 @@ ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava
     error.with_context("level", level);
     return std::unexpected(std::move(error));
   }
-  auto profile = ava::config::reasoning_provider_profile_for_model(model);
+  auto profile = ava::provider::ProviderCatalog::build_builtins_only()->reasoning_profile_for_model(model);
   if (!profile || !profile->enabled_reasoning_requires_budget_tokens || level != "enabled")
   {
     return runtime::ReasoningSelection{.level = std::move(level), .provider_level = resolved.provider_level, .budget_tokens = std::nullopt, .display = {}};
@@ -187,7 +188,7 @@ ava::core::Result<runtime::ReasoningSelection> reasoning_selection_for_level(ava
   auto const max_output = model.max_output_tokens.value_or(default_budget);
   if (max_output <= profile->minimum_reasoning_budget_tokens)
   {
-    auto const provider_label = ava::config::provider_display_name(model.provider_id);
+    auto const provider_label = ava::provider::ProviderCatalog::build_builtins_only()->display_name(model.provider_id);
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument,
                                   "reasoning unavailable: " + provider_label + " thinking needs output room for budget_tokens");
     error.with_context("provider", model.provider_id);

@@ -12,6 +12,8 @@ struct OpenAICompatibleProviderOptions
 {
   std::string base_url = "https://api.openai.com";
   std::string chat_completions_path = "/v1/chat/completions";
+  // When non-empty, used as the exact request URL (no base/path joining).
+  std::string endpoint = {};
   std::string provider_name = "OpenAI-compatible";
   std::string reasoning_format = "reasoning_content";
   std::string user_agent = {};
@@ -20,6 +22,10 @@ struct OpenAICompatibleProviderOptions
   bool reasoning_request_effort_string = false;
   bool preserve_reasoning_content = false;
   bool include_stream_usage = false;
+  bool follow_redirects = true;
+  // When false, empty credentials are allowed and Authorization is omitted.
+  bool require_credential = true;
+  bool send_authorization_bearer = true;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

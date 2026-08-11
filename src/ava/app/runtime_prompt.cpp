@@ -21,6 +21,7 @@
 #include "ava/agent/subagent_config.h"
 #include "ava/session/session_store.h"
 #include "ava/permissions/permission_rules.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
@@ -180,7 +181,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
           manager->release_parent_if_unused(session_id, *generation);
       }
     } refresh{options.synthetic_subagent_delivery ? nullptr : session_r->subagent_delivery_manager(), session_r->store.session_id()};
-    CRITICAL_AREA_END_R(session);
+
+  CRITICAL_AREA_END_R(session);
 
     if (refresh.manager)
     {
@@ -366,7 +368,12 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   }
 
   std::optional<ava::core::Error> sink_error;
-  auto run_store = runtime::session_ts::rat(unlocked_session)->store;
+  CRITICAL_AREA_CONTINUE_R(session);
+  auto run_store = session_r->store;
+  auto const paths_copy = session_r->paths();
+  auto const provider_catalog_copy = session_r->provider_catalog();
+  CRITICAL_AREA_END_R(session);
+
   std::optional<ava::agent::AgentLoop> loop;
   {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
@@ -467,14 +474,18 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
         .cancel_requested = [&runtime_options,
                              &sink_error] { return sink_error.has_value() || (runtime_options.cancel_requested && runtime_options.cancel_requested()); },
         .take_steering_messages = runtime_options.take_steering_messages,
-        .compact_context = runtime_options.access_token.empty() ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
-                                                                 : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
-                                                                       std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
+        .compact_context = (runtime_options.access_token.empty() && runtime_options.credential_type != "none") ? decltype(ava::agent::AgentLoopOptions{}.compact_context){}
+                                                                : [&](ava::session::SessionReadAuthority read_authority, std::string_view trigger,
+                                                                      std::vector<std::string> const& replayed_user_messages) -> ava::core::Result<bool> {
           return runtime::compact_runtime_context(unlocked_session, std::move(read_authority), trigger, provider, *runtime_transport, runtime_options,
                                                   replayed_user_messages);
         },
-        .background_provider_factory = [&provider_id = provider_id_copy]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
-          return ava::provider::builtin_provider_registry().create(provider_id);
+        .background_provider_factory = [&provider_catalog = provider_catalog_copy, &paths = paths_copy,
+                                        &provider_id = provider_id_copy]() -> ava::core::Result<std::unique_ptr<ava::provider::Provider>> {
+          auto ensured = ava::provider::ensure_provider_catalog(provider_catalog, paths);
+          if (!ensured)
+            return std::unexpected(std::move(ensured.error()));
+          return (*ensured)->create(provider_id);
         },
         .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
           std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();

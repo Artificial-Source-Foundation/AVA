@@ -1,13 +1,14 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_credentials.h"
 #include "ava/app/runtime_model.h"
 #include "ava/app/session_title_coordinator.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 #include "ava/core/json.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <array>
@@ -291,7 +292,7 @@ ava::core::Result<ava::config::ModelInfo> title_model(SessionTitleGenerationRequ
   if (!request.config.model_id)
     return request.active_model;
   auto const provider = request.config.provider_id.value_or(request.active_model.provider_id);
-  auto model = resolve_runtime_model(request.paths, provider, *request.config.model_id);
+  auto model = resolve_runtime_model(request.paths, request.provider_catalog, provider, *request.config.model_id);
   if (!model)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "configured session title model is unavailable");
@@ -334,11 +335,14 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   if (!auth_inner)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
   DeadlineTransport auth_transport(std::move(auth_inner), stop_token, deadline);
-  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation");
+  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation", generation.provider_catalog);
   if (!prepared)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title credentials are unavailable"));
 
-  auto provider = ava::provider::builtin_provider_registry().create(model->provider_id);
+  auto catalog = ava::provider::ProviderCatalog::build_builtins_only();
+  if (generation.provider_catalog)
+    catalog = generation.provider_catalog;
+  auto provider = catalog->create(model->provider_id);
   if (!provider)
   {
     clear_secret(prepared->access_token);
@@ -354,7 +358,8 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
       .messages = {ava::provider::ChatMessage{.role = "user", .content = generation.source_text}},
       .tools_json = {},
       .stream = stream,
-      .max_output_tokens = max_tokens};
+      .max_output_tokens = max_tokens,
+      .compatibility_quirks = model->compatibility_quirks};
   ava::provider::ProviderAuthContext auth{
       .access_token = prepared->access_token,
       .credential_type = prepared->openai_oauth && prepared->credential_type == "bearer" ? "oauth" : prepared->credential_type,
@@ -645,7 +650,7 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
       {
         return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
                                         std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
-                                        std::shared_ptr<ava::core::AnchorSet>, bool>>{};
+                                        std::shared_ptr<ava::core::AnchorSet>, std::shared_ptr<ava::provider::ProviderCatalog const>, bool>>{};
       }
       auto read_authority = session_r->read_authority_1();
       auto append_route = session_r->owner_append_route_1();
@@ -653,15 +658,15 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
       {
         return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
                                         std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
-                                        std::shared_ptr<ava::core::AnchorSet>, bool>>{};
+                                        std::shared_ptr<ava::core::AnchorSet>, std::shared_ptr<ava::provider::ProviderCatalog const>, bool>>{};
       }
       return std::optional{std::tuple{std::move(*read_authority), std::move(append_route), session_r->run_controller(),
                                       std::string(session_r->store.session_id()), session_r->paths(), session_r->model(), session_r->anchor_set(),
-                                      session_r->is_offline()}};
+                                      session_r->provider_catalog(), session_r->is_offline()}};
     }();
     if (!session_snapshot)
       return;
-    auto [read_authority, append_route, run_controller, session_id, paths, active_model, anchor_set, session_offline] =
+    auto [read_authority, append_route, run_controller, session_id, paths, active_model, anchor_set, provider_catalog, session_offline] =
         std::move(*session_snapshot);
     {
       std::lock_guard lock(mutex_);
@@ -686,6 +691,7 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
                                                        .active_model = std::move(active_model),
                                                        .config = options_.config,
                                                        .anchor_set = std::move(anchor_set),
+                                                       .provider_catalog = std::move(provider_catalog),
                                                        .source_text = source_text,
                                                        .access_token = run_options.access_token,
                                                        .credential_type = run_options.credential_type,

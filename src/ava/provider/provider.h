@@ -117,6 +117,9 @@ struct ProviderRequest
   std::optional<long long> max_output_tokens = std::nullopt;
   std::optional<ProviderReasoningOptions> reasoning = std::nullopt;
   std::string system_prompt_cache_ttl = {};
+  // Per-model transport quirks copied from ModelInfo.compatibility_quirks so
+  // request serializers can stay free of hardcoded model-id special cases.
+  std::vector<std::string> compatibility_quirks = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

@@ -41,6 +41,14 @@ struct ProviderProfile
   // model selection. Some profiles are intentionally connect/auth metadata only
   // until their runtime provider is implemented.
   bool runtime_selectable = true;
+  // User-defined catalog extensions. Built-ins leave these at defaults.
+  bool user_defined = false;
+  // Explicit no-credential policy from providers.json auth:none.
+  bool auth_none = false;
+  // Validated API-key environment variable for user-defined api_key providers.
+  std::string api_key_env = {};
+  // Exact canonical request endpoint when set (user-defined providers).
+  std::string endpoint = {};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -53,6 +61,8 @@ struct ProviderProfile
 [[nodiscard]] ProviderProfile const& openai_provider_profile();
 [[nodiscard]] ProviderProfile const& openrouter_provider_profile();
 [[nodiscard]] ProviderProfile const& vercel_provider_profile();
+[[nodiscard]] ProviderProfile const& zai_provider_profile();
+[[nodiscard]] ProviderProfile const& zai_coding_cn_provider_profile();
 
 [[nodiscard]] std::vector<ProviderProfile> builtin_provider_profiles();
 [[nodiscard]] std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id);

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/provider/catalog.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
@@ -620,7 +621,8 @@ int run_tui(ShellState state)
         {
           return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model selection is missing provider/model"));
         }
-        auto model = ava::app::resolve_runtime_model(invocation_paths, value.substr(0, separator), value.substr(separator + 1));
+        auto provider_catalog = runtime::session_ts::crat(unlocked_session)->provider_catalog();
+        auto model = ava::app::resolve_runtime_model(invocation_paths, std::move(provider_catalog), value.substr(0, separator), value.substr(separator + 1));
         if (!model)
           return std::unexpected(std::move(model.error()));
         auto switched = ava::app::runtime::Session::switch_model_and_refresh(unlocked_session, std::move(*model));

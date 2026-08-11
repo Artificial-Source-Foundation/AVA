@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/config/builtin_generic_providers.h"
 #include "ava/config/model_config.h"
 #include "ava/config/provider_profiles.h"
 #include "ava/config/reasoning_profiles.h"
@@ -176,10 +177,54 @@ ProviderProfile const& vercel_provider_profile()
   return profile;
 }
 
+ProviderProfile const& zai_provider_profile()
+{
+  static ProviderProfile const profile{
+      .provider_id = "zai",
+      .display_name = "Z.AI Coding Plan (Global)",
+      .connect_detail = "API key",
+      .api_family = openai_compatible_reasoning_content_profile().api_family,
+      .default_base_url_env = "ZAI_BASE_URL",
+      .default_base_url = "https://api.z.ai/api/coding/paas/v4",
+      .chat_completions_path = "/chat/completions",
+      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "max_completion_tokens"},
+      .default_reasoning_levels = openai_compatible_reasoning_content_profile().levels,
+      .default_reasoning_format = openai_compatible_reasoning_content_profile().format,
+      .reasoning_request_parameters =
+          "request.thinking.type=enabled|disabled; enabled sends clear_thinking=false; optional request.reasoning_effort when model opts in",
+      .preserve_reasoning_content = true,
+      .include_stream_usage = true};
+  return profile;
+}
+
+ProviderProfile const& zai_coding_cn_provider_profile()
+{
+  static ProviderProfile const profile{
+      .provider_id = "zai-coding-cn",
+      .display_name = "Z.AI Coding Plan (China)",
+      .connect_detail = "API key",
+      .api_family = openai_compatible_reasoning_content_profile().api_family,
+      .default_base_url_env = "ZAI_CODING_CN_BASE_URL",
+      .default_base_url = "https://open.bigmodel.cn/api/coding/paas/v4",
+      .chat_completions_path = "/chat/completions",
+      .default_compatibility_quirks = {"zai", "openai_compatible", "reasoning_content", "preserve_reasoning_content", "max_completion_tokens"},
+      .default_reasoning_levels = openai_compatible_reasoning_content_profile().levels,
+      .default_reasoning_format = openai_compatible_reasoning_content_profile().format,
+      .reasoning_request_parameters =
+          "request.thinking.type=enabled|disabled; enabled sends clear_thinking=false; optional request.reasoning_effort when model opts in",
+      .preserve_reasoning_content = true,
+      .include_stream_usage = true};
+  return profile;
+}
+
 std::vector<ProviderProfile> builtin_provider_profiles()
 {
-  return {openai_provider_profile(),   anthropic_provider_profile(), deepseek_provider_profile(),   gemini_provider_profile(),
-          moonshot_provider_profile(), kimi_provider_profile(),      openrouter_provider_profile(), vercel_provider_profile()};
+  std::vector<ProviderProfile> profiles = {
+      openai_provider_profile(), anthropic_provider_profile(),  deepseek_provider_profile(), gemini_provider_profile(),        moonshot_provider_profile(),
+      kimi_provider_profile(),   openrouter_provider_profile(), zai_provider_profile(),      zai_coding_cn_provider_profile(), vercel_provider_profile()};
+  // Declarative generic built-ins (xAI, Groq, Cerebras, Together, Fireworks, Mistral).
+  for (auto& profile : builtin_generic_provider_profiles()) profiles.push_back(std::move(profile));
+  return profiles;
 }
 
 std::optional<ProviderProfile> find_provider_profile(std::string_view provider_id)

@@ -118,7 +118,7 @@ AVA follows XDG paths on Linux:
 - Sessions: `$XDG_STATE_HOME/ava/sessions/`, fallback `~/.local/state/ava/sessions/`
 - Project trust: `$XDG_STATE_HOME/ava/project-trust.json`, fallback `~/.local/state/ava/project-trust.json`
 
-Use `ava connect` to choose a provider and supported login method. Provider credentials can also be configured in `auth.json`; see [configuration and authentication](docs/core/configuration.md#auth) for formats and secret-handling rules. Use `/providers` to inspect provider availability and credential status without revealing secrets, and `/models` to inspect or select configured models. See [provider and model status](docs/core/providers.md) for the current concise matrix rather than treating this README as a provider catalog.
+Use `ava connect` to choose a provider and supported login method. Provider credentials can also be configured in `auth.json`; see [configuration and authentication](docs/core/configuration.md#auth) for formats and secret-handling rules. Use `/providers` to inspect provider availability and credential status without revealing secrets, and `/models` to inspect or select configured models. See [provider and model status](docs/core/providers.md) for the current concise matrix rather than treating this README as a provider catalog. To add a custom OpenAI-compatible, OpenAI Responses, or Anthropic Messages endpoint, see the [custom providers guide](docs/core/custom-providers.md) (`providers.json` + matching `models.json` entries; restart required).
 
 The default model is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/ava/models.json`, prompts with `$XDG_CONFIG_HOME/ava/prompts/<provider>/<family>/<mode>.txt`, replace the selected system prompt with `SYSTEM.md` or `--system-prompt`, or append with `APPEND_SYSTEM.md` or repeated `--append-system-prompt` flags. Global prompt resources live under `$XDG_CONFIG_HOME/ava`; project prompt resources live under `$WORKSPACE/.ava` and require `/trust project`. CLI prompt flags win over prompt resource files for the current process.
 
@@ -183,7 +183,7 @@ The [documentation index](docs/README.md) is organized by audience and task.
 
 ### Users and operators
 
-- [Usage](docs/core/usage.md), [configuration](docs/core/configuration.md), [environment variables](docs/core/environment-variables.md), and [provider status](docs/core/providers.md)
+- [Usage](docs/core/usage.md), [configuration](docs/core/configuration.md), [custom providers](docs/core/custom-providers.md), [environment variables](docs/core/environment-variables.md), and [provider status](docs/core/providers.md)
 - [Subagents and background jobs](docs/core/subagents.md), [built-in model tools](docs/core/tools.md), [LSP](docs/extensions/lsp.md), [terminal setup](docs/operations/terminal-setup.md), and [troubleshooting](docs/operations/troubleshooting.md)
 - [Diagnostics and support exports](docs/operations/diagnostics.md), [security/sandboxing](docs/security/sandboxing.md), and [support](SUPPORT.md)
 

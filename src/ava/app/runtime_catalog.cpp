@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "ava/app/runtime_catalog.h"
-#include "ava/app/runtime/Session.h"
-#include "ava/provider/registry.h"
+#include "ava/provider/catalog.h"
 
 #include <algorithm>
 #include <string>
@@ -15,22 +14,48 @@ std::string model_key(std::string_view provider_id, std::string_view model_id)
   return std::string(provider_id) + "/" + std::string(model_id);
 }
 
+ava::core::Result<std::shared_ptr<ava::provider::ProviderCatalog const>> session_catalog(runtime::session_ts::crat const& session_r)
+{
+  if (session_r->provider_catalog())
+    return session_r->provider_catalog();
+  return ava::provider::ProviderCatalog::build(session_r->paths());
+}
+
 }  // namespace
+
+ava::core::Result<std::unique_ptr<ava::provider::Provider>> create_runtime_provider(runtime::session_ts const& unlocked_session, std::string_view provider_id)
+{
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+
+  auto catalog = session_r->provider_catalog();
+  if (!catalog)
+  {
+    auto built = ava::provider::ProviderCatalog::build(session_r->paths());
+    if (!built)
+      return std::unexpected(std::move(built.error()));
+    catalog = std::move(*built);
+  }
+  return catalog->create(provider_id);
+}
 
 ava::core::Result<std::unique_ptr<ava::provider::Provider>> create_runtime_provider(std::string_view provider_id)
 {
-  return ava::provider::builtin_provider_registry().create(provider_id);
+  // Compatibility seam for call sites that have not yet threaded a session/catalog.
+  // Prefer create_runtime_provider(session, id).
+  return ava::provider::ProviderCatalog::build_builtins_only()->create(provider_id);
 }
 
 ava::core::Result<std::vector<ava::config::ModelInfo>> runtime_model_catalog(runtime::session_ts::crat const& session_r)
 {
+  auto catalog = session_catalog(session_r);
+  if (!catalog)
+    return std::unexpected(std::move(catalog.error()));
   auto registry = ava::config::load_model_registry(session_r->paths());
   if (!registry)
     return std::unexpected(std::move(registry.error()));
-  auto providers = ava::provider::builtin_provider_registry();
   std::vector<ava::config::ModelInfo> registered;
   for (auto const& model : registry->models)
-    if (providers.contains(model.provider_id))
+    if ((*catalog)->contains(model.provider_id))
       registered.push_back(model);
 
   if (!session_r->scoped_model_cycle())
@@ -52,8 +77,8 @@ ava::core::Result<ava::config::ModelInfo> select_runtime_model(runtime::session_
   if (model_id.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "model is required"));
   if (provider_id && !provider_id->empty())
-    return resolve_runtime_model(session_r->paths(), *provider_id, model_id);
-  if (auto current = resolve_runtime_model(session_r->paths(), session_r->model().provider_id, model_id); current)
+    return resolve_runtime_model(session_r->paths(), session_r->provider_catalog(), *provider_id, model_id);
+  if (auto current = resolve_runtime_model(session_r->paths(), session_r->provider_catalog(), session_r->model().provider_id, model_id); current)
     return current;
 
   auto models = runtime_model_catalog(session_r);

@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "ava/http/curl_transport.h"
 #include "ava/app/browser_open.h"
 #include "ava/app/command_connect.h"
@@ -9,6 +8,8 @@
 #include "ava/config/auth.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/provider_profiles.h"
+#include "ava/provider/catalog.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
@@ -156,8 +157,11 @@ std::string connect_provider_group_id(std::string_view provider_id)
   return std::string(provider_id);
 }
 
-std::string connect_provider_display_name(std::string_view provider_id)
+std::string connect_provider_display_name(runtime::session_ts const& unlocked_session, std::string_view provider_id)
 {
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  if (session_r->provider_catalog())
+    return session_r->provider_catalog()->display_name(provider_id);
   if (connect_provider_group_id(provider_id) == "kimi-moonshot")
     return "Kimi / Moonshot";
   return ava::config::provider_display_name(provider_id);
@@ -176,9 +180,11 @@ std::vector<ava::agent::QuestionOption> provider_options(runtime::session_ts con
   };
   if (!configured_provider_id.empty())
   {
-    add(configured_provider_id, connect_provider_display_name(configured_provider_id) + " ✓", connect_provider_group_id(configured_provider_id));
+    add(configured_provider_id, connect_provider_display_name(unlocked_session, configured_provider_id) + " ✓",
+        connect_provider_group_id(configured_provider_id));
   }
-  for (auto const& profile : ava::config::builtin_provider_profiles())
+  auto ensured_provider_catalog = runtime::session_ts::crat(unlocked_session)->ensure_provider_catalog();
+  for (auto const& profile : ensured_provider_catalog->profiles())
   {
     if (profile.provider_id == "kimi")
       continue;
@@ -344,8 +350,8 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::session_ts cons
   ava::http::CurlCliTransport transport;
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
-  auto credential_future =
-      ava::core::make_async("openai_browser_oauth", [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
+  auto credential_future = ava::core::make_async(
+      "openai_browser_oauth", [&]() { return complete_openai_browser_oauth(*oauth_session, transport, unix_time_seconds(), cancel_requested); });
 
   auto const browser_opened = open_url_in_browser(oauth_session->authorization_url);
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (browser)",
@@ -376,8 +382,8 @@ ava::core::Result<std::string> run_openai_headless_oauth(runtime::session_ts con
 
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
-  auto credential_future =
-      ava::core::make_async("openai_device_oauth", [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
+  auto credential_future = ava::core::make_async(
+      "openai_device_oauth", [&]() { return wait_for_openai_device_oauth(*authorization, transport, unix_time_seconds(), cancel_requested); });
 
   auto prompt = prompt_oauth_wait(request, "ChatGPT Pro/Plus (headless)",
                                   authorization->verification_url + "\n\nEnter code: " + authorization->user_code + "\n\nWaiting for authorization...",
@@ -440,6 +446,18 @@ ava::core::Result<CommandResult> run_connect_command(runtime::session_ts& unlock
     provider_id = std::move(*resolved_provider_id);
     method = selected_method->method;
     break;
+  }
+
+  auto ensured_provider_catalog = runtime::session_ts::crat(unlocked_session)->ensure_provider_catalog();
+  if (ensured_provider_catalog->provider_auth_is_none(provider_id))
+  {
+    add_output(result, ensured_provider_catalog->display_name(provider_id) + " requires no credential (auth:none). auth.json was not modified.");
+    return result;
+  }
+  if (ensured_provider_catalog->provider_is_user_defined(provider_id) && method != ConnectMethod::ApiKey)
+  {
+    add_output(result, "user-defined providers only support API key credentials");
+    return result;
   }
 
   if (method == ConnectMethod::OpenAIBrowserOAuth)

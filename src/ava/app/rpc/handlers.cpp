@@ -7,6 +7,7 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_catalog.h"
 #include "ava/app/runtime_credentials.h"
+#include "ava/provider/catalog.h"
 #include "ava/provider/registry.h"
 
 #include <algorithm>
@@ -17,9 +18,9 @@ namespace ava::app::rpc {
 
 ava::core::Result<runtime::RunOptions> ensure_prompt_runtime_options(ava::config::XdgPaths const& paths, std::string_view provider_id,
                                                                      runtime::RunOptions options, ava::http::Transport& auth_transport,
-                                                                     std::string_view purpose)
+                                                                     std::string_view purpose, std::shared_ptr<ava::provider::ProviderCatalog const> catalog)
 {
-  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose));
+  return prepare_runtime_credentials(paths, provider_id, std::move(options), auth_transport, std::string("RPC ") + std::string(purpose), std::move(catalog));
 }
 
 ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::session_ts::rat const& session_r, RpcCommand const& command)
@@ -28,7 +29,7 @@ ava::core::Result<ava::config::ModelInfo> resolve_requested_model(runtime::sessi
     return std::unexpected(invalid_rpc("set_model requires model"));
   if (command.provider && !command.provider->empty())
   {
-    return resolve_runtime_model(session_r->paths(), *command.provider, *command.model);
+    return resolve_runtime_model(session_r->paths(), session_r->provider_catalog(), *command.provider, *command.model);
   }
 
   return select_runtime_model(session_r, std::nullopt, *command.model);
@@ -52,7 +53,7 @@ ava::core::Result<ProviderHandle> provider_for_session_model(runtime::session_ts
   {
     return ProviderHandle{.provider = &injected_provider, .owned = nullptr};
   }
-  auto provider = create_runtime_provider(provider_id);
+  auto provider = create_runtime_provider(unlocked_session, provider_id);
   if (!provider)
     return std::unexpected(std::move(provider.error()));
   return ProviderHandle{.provider = nullptr, .owned = std::move(*provider)};

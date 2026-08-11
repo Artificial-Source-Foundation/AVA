@@ -1,12 +1,16 @@
 #include "sys.h"
+// clang-format off
 #include "ava/debug/debug_ostream_operators.h"          // This header must be included before test_harness.h
 
 #include "tests/support/test_harness.h"
+// clang-format on
 
+#include <array>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -329,6 +333,28 @@ void test_vector_string_renders_quoted_list()
   expect(ss.str() == "{\"one\", \"two\"}", "vector of strings renders elements quoted");
 }
 
+void test_span_const_char_pointer_renders_quoted_list()
+{
+  // BuiltinGenericModelSpec::reasoning_levels is std::span<char const* const>; Debug
+  // print_members streams that field, so the span inserter must compile and quote
+  // each C string the same way as other debug element formatting.
+  std::array<char const*, 2> const levels = {"low", "high"};
+  std::span<char const* const> const reasoning_levels(levels);
+
+  std::stringstream ss;
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << reasoning_levels;
+  }
+  expect(ss.str() == "{\"low\", \"high\"}", "span of C strings renders quoted elements with container braces");
+
+  std::span<char const* const> const empty_levels;
+  std::stringstream ss_empty;
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss_empty) << empty_levels;
+  }
+  expect(ss_empty.str() == "{}", "empty span renders empty container braces");
+}
+
 void test_optional_bool_renders_with_boolalpha()
 {
   std::stringstream ss;
@@ -385,6 +411,7 @@ void run_debug_tests()
   test_optional_intrusive_ptr_renders();
   test_vector_bool_renders_boolalpha_list();
   test_vector_string_renders_quoted_list();
+  test_span_const_char_pointer_renders_quoted_list();
   test_optional_bool_renders_with_boolalpha();
   test_shared_ptr_uses_print_pointer();
   test_full_render_smoke();

@@ -31,6 +31,10 @@ namespace ava::diagnostics {
 class RuntimeDiagnostics;
 } // namespace ava::diagnostics
 
+namespace ava::provider {
+class ProviderCatalog;
+} // namespace ava::provider
+
 namespace ava::app {
 class SessionTitleCoordinator;
 class SubagentDeliveryManager;
@@ -149,6 +153,8 @@ struct SessionResources
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics = nullptr;
   // Null uses normal global/project discovery; non-null is immutable session-local MCP composition.
   std::shared_ptr<ava::mcp::McpConfig const> mcp_config = nullptr;
+  // Exact application-scoped provider catalog pinned for this session's lifetime.
+  std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog = nullptr;
 
   void swap(SessionResources& other);
 
@@ -334,6 +340,12 @@ class Session : protected Session_aggregate_base
   std::shared_ptr<ava::app::SessionTitleCoordinator> const& session_title_coordinator() const { return resources_.session_title_coordinator; }
   std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> const& diagnostics() const { return resources_.diagnostics; }
   std::shared_ptr<ava::mcp::McpConfig const> const& mcp_config() const { return resources_.mcp_config; }
+  std::shared_ptr<ava::provider::ProviderCatalog const> const& provider_catalog() const { return resources_.provider_catalog; }
+
+  // Convenience accessor that returns ProviderCatalog::build_builtins_only() if no provider_catalog is set.
+  std::shared_ptr<ava::provider::ProviderCatalog const> ensure_provider_catalog() const {
+    return resources_.provider_catalog ? resources_.provider_catalog : ava::provider::ProviderCatalog::build_builtins_only();
+  }
 
   // Bind a lifetime-safe history snapshot route to this session's exact lease
   // (or to its shared in-memory state in sessionless mode).

@@ -1,16 +1,16 @@
 #include "sys.h"
-#include "ava/core/thread.h"
 #include "output.h"
 #include "prompt_worker.h"
 #include "resolvers.h"
 #include "run_state.h"
 #include "serialization.h"
 #include "session_operators.h"
-#include "ava/app/runtime.h"
 #include "ava/event/events.h"
+#include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/provider/catalog.h"
+#include "ava/core/thread.h"
 
-#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -80,9 +80,12 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       static_cast<void>(deactivate_and_clear_queued_messages(options.run_state));
     };
 
-    auto const prompt_provider_id = runtime::session_ts::rat(unlocked_session)->model().provider_id;
-    auto prompt_options =
-        ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt");
+    CRITICAL_AREA_BEGIN_R(session);
+    auto const prompt_provider_id = session_r->model().provider_id;
+    auto prompt_catalog = session_r->provider_catalog();
+    CRITICAL_AREA_END_R(session);
+    auto prompt_options = ensure_prompt_runtime_options(options.paths, prompt_provider_id, std::move(options.runtime_options), options.auth_transport, "prompt",
+                                                        std::move(prompt_catalog));
     if (!prompt_options)
     {
       auto published = publish_terminal(options.request_id, std::unexpected(std::move(prompt_options.error())), false, "prompt_start_failed");

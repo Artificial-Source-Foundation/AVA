@@ -968,7 +968,7 @@ ava::core::Result<CommandResult> run_command(runtime::session_ts& unlocked_sessi
     return handled_text(entry->command + " is disabled: " + entry->disabled_reason);
   }
 
-  auto plugin_observer_options = plugin_event_observer_options(unlocked_session, request.permission_resolver, nullptr);
+  auto plugin_observer_options = plugin_event_observer_options(unlocked_session, request.permission_resolver);
   plugin_observer_options.cancel_requested = request.cancel_requested;
   request.event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), std::move(request.event_sink));
 

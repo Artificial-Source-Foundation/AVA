@@ -216,7 +216,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::event::RuntimeEventSink event_sink = options.event_sink;
   if (!options.isolate_ambient_extensions)
   {
-    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver, options.ro_session_mutex);
+    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver);
     plugin_observer_options.permission_audit_sink = [&append_route](ava::tools::PermissionAuditEvent const& event) {
       return ava::agent::append_permission_decision(append_route, event);
     };

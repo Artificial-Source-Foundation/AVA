@@ -100,7 +100,6 @@ ava::core::JoinThread make_rpc_prompt_worker(RpcPromptWorkerOptions options)
       prompt_options->request_id = request_id;
       prompt_options->image_attachments = std::move(image_attachments);
       prompt_options->cancel_requested = [&run_state = options.run_state, stop_token] { return stop_token.stop_requested() || cancel_requested(run_state); };
-      prompt_options->ro_session_mutex = nullptr;
 
       // These callbacks run synchronously inside run_prompt's write critical area and retain the Session reference only until run_prompt returns.
       prompt_options->permission_resolver = make_rpc_permission_resolver(options.pending_state, options.output, options.run_state, unlocked_session, adapter_mutex,

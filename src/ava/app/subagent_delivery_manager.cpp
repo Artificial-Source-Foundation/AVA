@@ -722,7 +722,6 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
   run_options.event_sink = nullptr;
   run_options.question_resolver = nullptr;
   run_options.take_steering_messages = nullptr;
-  run_options.ro_session_mutex = nullptr;
   run_options.image_attachments.clear();
   run_options.synthetic_subagent_delivery = true;
   run_options.synthetic_user_message_provenance =

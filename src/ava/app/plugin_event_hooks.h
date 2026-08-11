@@ -42,8 +42,7 @@ struct PluginEventObserverOptions
 };
 
 [[nodiscard]] PluginEventObserverOptions plugin_event_observer_options(runtime::session_ts& unlocked_session,
-                                                                       ava::permissions::PermissionResolver permission_resolver = nullptr,
-                                                                       std::mutex* session_mutex = nullptr);
+                                                                       ava::permissions::PermissionResolver permission_resolver = nullptr);
 
 // Event hooks are observational and best-effort: hook launch, protocol, timeout,
 // and shutdown failures are intentionally not surfaced to the originating event.

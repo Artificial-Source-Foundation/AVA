@@ -197,17 +197,16 @@ class Session : protected Session_aggregate_base
   using Session_aggregate_base::created;
   using Session_aggregate_base::store;
 
-  // Move constructors.
-  Session(Session&& session) = default;
-
  private:
   template <typename, typename>
   friend class threadsafe::Unlocked;
 
+  // Move constructors.
+  Session(Session&& session) = default; // `Session&& session` is allowed here (private move-constructor).
   Session(Session_aggregate_base&& base) : Session_aggregate_base(std::move(base)) { }
 
   // Called from replace_with.
-  Session& operator=(Session&& session) = default;
+  Session& operator=(Session&& session) = default; // `Session&& session` is allowed here (private move-assignment operator).
 
   static ava::core::Result<session_ts> construct(OpenContext const& context, SessionLifecycleRequest const& request, ava::session::SessionStore& store,
                                                  ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool append_session_start,

@@ -681,7 +681,7 @@ std::string context_sources_json(runtime::session_ts const& unlocked_session)
 
 namespace detail {
 
-MessagesResultSerializer::MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session)
+MessagesResultSerializer::MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session) // `runtime::Session const&` is allowed here.
     : session_(session), prefix_("{" + string_field_json("session_id", session.store.session_id()) + ",\"messages\":[")
 {
 }
@@ -829,7 +829,8 @@ std::string MessagesResultSerializer::tail_json_for(bool truncated, std::size_t 
   return tail;
 }
 
-SessionResultSerializer::SessionResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session) : session_(session)
+SessionResultSerializer::SessionResultSerializer(utils::Badge<runtime::Session>,
+    runtime::Session const& session) : session_(session) // `runtime::Session const&` is allowed here.
 {
 }
 

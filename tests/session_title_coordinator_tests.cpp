@@ -119,9 +119,10 @@ std::shared_ptr<ava::app::SessionTitleCoordinator> make_coordinator(std::shared_
   return coordinator ? *coordinator : nullptr;
 }
 
-ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::Session& session, std::string text)
+ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::session_ts& unlocked_session, std::string text)
 {
-  auto authority = session.append_target()->read_authority();
+  auto const append_target = ava::app::runtime::session_ts::rat(unlocked_session)->append_target();
+  auto authority = append_target->read_authority();
   if (!authority)
     return std::unexpected(std::move(authority.error()));
   auto entries = authority->load();
@@ -132,7 +133,7 @@ ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::S
                                   .type = ava::session::EntryType::UserMessage,
                                   .timestamp = ava::session::now_timestamp(),
                                   .data_json = "{\"text\":\"" + ava::core::json::escape(text) + "\"}"};
-  if (auto appended = session.append_target()->append(user); !appended)
+  if (auto appended = append_target->append(user); !appended)
     return std::unexpected(std::move(appended.error()));
   auto const turn_id = ava::core::make_id("assistant_turn");
   auto output_data = ava::session::serialize_assistant_output_item_data_json(
@@ -159,7 +160,7 @@ ava::core::Result<std::string> seed_committed_ordinary_turn(ava::app::runtime::S
                                                  .type = ava::session::EntryType::AssistantTurnCommit,
                                                  .timestamp = ava::session::now_timestamp(),
                                                  .data_json = std::move(*commit_data)}};
-  if (auto appended = session.append_target()->append_batch(std::move(batch)); !appended)
+  if (auto appended = append_target->append_batch(std::move(batch)); !appended)
     return std::unexpected(std::move(appended.error()));
   return commit_entry_id;
 }
@@ -327,18 +328,16 @@ void test_direct_provider_generation_is_isolated()
   if (!unlocked_session_result)
     return;
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
-  CRITICAL_AREA_BEGIN_W(session);
 
-  auto seeded = seed_committed_ordinary_turn(*session_w, "Inspect isolated provider title generation");
+  auto seeded = seed_committed_ordinary_turn(unlocked_session, "Inspect isolated provider title generation");
   expect(seeded.has_value(), seeded ? "direct title provider committed turn is seeded" : seeded.error().format());
   if (!seeded)
     return;
   ava::app::runtime::RunOptions options;
   options.access_token = "fake-provider-token";
-  CRITICAL_AREA_END_W(session);
   coordinator.value()->schedule(unlocked_session, "Inspect isolated provider title generation", *seeded, options);
   expect(coordinator.value()->wait_until_idle(3s), "direct title provider generation becomes idle");
-  CRITICAL_AREA_CONTINUE_W(session);
+  CRITICAL_AREA_BEGIN_W(session);
   auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
   bool isolated_request = false;
   {
@@ -377,19 +376,17 @@ void test_coordinator_dedupes_and_preserves_manual_rename_races()
   if (!unlocked_session_result || !coordinator)
     return;
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
-  CRITICAL_AREA_BEGIN_W(session);
 
-  auto seeded = seed_committed_ordinary_turn(*session_w, "First ordinary prompt");
+  auto seeded = seed_committed_ordinary_turn(unlocked_session, "First ordinary prompt");
   expect(seeded.has_value(), seeded ? "title race committed turn is seeded" : seeded.error().format());
   if (!seeded)
     return;
   ava::app::runtime::RunOptions options;
   options.access_token = "not-used-by-fake";
-  CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "First ordinary prompt", *seeded, options);
   coordinator->schedule(unlocked_session, "Second prompt must not replace first", *seeded, options);
   expect(state->wait_started(), "title race fake generator starts");
-  CRITICAL_AREA_CONTINUE_W(session);
+  CRITICAL_AREA_BEGIN_W(session);
   auto renamed = session_w->append_metadata_1(ava::session::SessionMetadataUpdate{.name = "Manual Rename", .actor = "test", .generated_title = std::nullopt});
   expect(renamed.has_value(), renamed ? "manual rename wins title race" : renamed.error().format());
   state->allow_completion();
@@ -418,12 +415,12 @@ void test_coordinator_fallback_and_navigation_lifetime()
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
   CRITICAL_AREA_BEGIN_W(session);
   auto const source_id = session_w->store.session_id();
-  auto seeded = seed_committed_ordinary_turn(*session_w, "Design <skill>hidden scaffold</skill> durable navigation titles");
+  CRITICAL_AREA_END_W(session);
+  auto seeded = seed_committed_ordinary_turn(unlocked_session, "Design <skill>hidden scaffold</skill> durable navigation titles");
   expect(seeded.has_value(), seeded ? "title navigation committed turn is seeded" : seeded.error().format());
   if (!seeded)
     return;
   ava::app::runtime::RunOptions options;
-  CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "Design <skill>hidden scaffold</skill> durable navigation titles", *seeded, options);
   expect(state->wait_started(), "title navigation generator starts");
   auto unlocked_replacement_result = ava::app::runtime::Session::create_like(unlocked_session, ava::app::runtime::OpenContext{});
@@ -467,13 +464,11 @@ void test_session_specific_catalog_notifications_survive_navigation()
   ava::app::runtime::session_ts& unlocked_old_session = *unlocked_old_session_result;
   ava::app::runtime::session_ts& unlocked_new_session = *unlocked_new_session_result;
   ava::app::runtime::session_ts& unlocked_late_session = *unlocked_late_session_result;
-  CRITICAL_AREA_BEGIN_W(old_session);
-  CRITICAL_AREA_BEGIN_W(new_session);
-  CRITICAL_AREA_BEGIN_W(late_session);
 
+  CRITICAL_AREA_BEGIN_W(new_session);
   auto named = new_session_w->append_metadata_1({.name = "New Current Session", .actor = "test"});
-  auto committed = seed_committed_ordinary_turn(*old_session_w, "Fallback Old Session Catalog Title");
-  auto late_committed = seed_committed_ordinary_turn(*late_session_w, "Late Session Notification Title");
+  auto committed = seed_committed_ordinary_turn(unlocked_old_session, "Fallback Old Session Catalog Title");
+  auto late_committed = seed_committed_ordinary_turn(unlocked_late_session, "Late Session Notification Title");
   auto new_authority = new_session_w->append_target()->read_authority();
   auto new_entries = new_authority ? new_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(new_authority.error()));
   auto marked = new_entries ? new_session_w->append_target()->append(ava::session::SessionEntry{.id = ava::core::make_id("entry"),
@@ -486,12 +481,14 @@ void test_session_specific_catalog_notifications_survive_navigation()
          "session-specific title catalog fixture persists names, old and late committed turns, and deterministic new-current activity");
   if (!named || !committed || !late_committed || !marked)
     return;
+  CRITICAL_AREA_BEGIN_W(old_session);
+  CRITICAL_AREA_BEGIN_W(late_session);
   auto const old_session_id = old_session_w->store.session_id();
-  auto const new_session_id = new_session_w->store.session_id();
   auto const late_session_id = late_session_w->store.session_id();
+  auto const new_session_id = new_session_w->store.session_id();
   CRITICAL_AREA_END_W(late_session);
-  CRITICAL_AREA_END_W(new_session);
   CRITICAL_AREA_END_W(old_session);
+  CRITICAL_AREA_END_W(new_session);
 
   std::size_t workspace_walks = 0;
   std::size_t tree_builds = 0;
@@ -577,43 +574,35 @@ void test_queue_delay_allows_later_turns_after_captured_first_commit()
   ava::app::runtime::session_ts& unlocked_blocker = *unlocked_blocker_result;
   ava::app::runtime::session_ts& unlocked_delayed = *unlocked_delayed_result;
   ava::app::runtime::session_ts& unlocked_overflow = *unlocked_overflow_result;
-  CRITICAL_AREA_BEGIN_W(blocker);
-  CRITICAL_AREA_BEGIN_W(delayed);
-  CRITICAL_AREA_BEGIN_W(overflow);
 
-  auto blocker_commit = seed_committed_ordinary_turn(*blocker_w, "Block title worker until released");
+  auto blocker_commit = seed_committed_ordinary_turn(unlocked_blocker, "Block title worker until released");
   expect(blocker_commit.has_value(), "queue-delay blocker commits its first ordinary turn");
   if (!blocker_commit)
     return;
   ava::app::runtime::RunOptions options;
-  CRITICAL_AREA_END_W(blocker);
   coordinator->schedule(unlocked_blocker, "Block title worker until released", *blocker_commit, options);
   expect(state->wait_started(), "queue-delay blocker occupies the title worker");
 
-  auto first_commit = seed_committed_ordinary_turn(*delayed_w, "Capture this first ordinary title source");
+  auto first_commit = seed_committed_ordinary_turn(unlocked_delayed, "Capture this first ordinary title source");
   expect(first_commit.has_value(), "queue-delay target commits its first ordinary turn");
   if (!first_commit)
     return;
-  CRITICAL_AREA_END_W(delayed);
   coordinator->schedule(unlocked_delayed, "Capture this first ordinary title source", *first_commit, options);
-  CRITICAL_AREA_CONTINUE_W(delayed);
-  auto second_commit = seed_committed_ordinary_turn(*delayed_w, "A later turn arrives while title work is queued");
+  auto second_commit = seed_committed_ordinary_turn(unlocked_delayed, "A later turn arrives while title work is queued");
   expect(second_commit.has_value(), "queue-delay target appends a later ordinary turn");
-  CRITICAL_AREA_END_W(delayed);
-  auto overflow_commit = seed_committed_ordinary_turn(*overflow_w, "Queue pressure retains this fallback");
+  auto overflow_commit = seed_committed_ordinary_turn(unlocked_overflow, "Queue pressure retains this fallback");
   expect(overflow_commit.has_value(), "queue-pressure target commits its first ordinary turn");
   if (!overflow_commit)
     return;
-  CRITICAL_AREA_END_W(overflow);
   coordinator->schedule(unlocked_overflow, "Queue pressure retains this fallback", *overflow_commit, options);
-  CRITICAL_AREA_CONTINUE_W(overflow);
+  CRITICAL_AREA_BEGIN_W(overflow);
   auto overflow_metadata = ava::session::load_session_metadata(overflow_w->store, overflow_w->lease());
   expect(overflow_metadata && overflow_metadata->effective_title() == "Queue pressure retains this fallback",
          "a full provider-refinement queue still retains the synchronous fallback");
 
   state->allow_completion();
   expect(coordinator->wait_until_idle(3s), "queue-delay title coordinator becomes idle");
-  CRITICAL_AREA_CONTINUE_W(delayed);
+  CRITICAL_AREA_BEGIN_W(delayed);
   auto metadata = ava::session::load_session_metadata(delayed_w->store, delayed_w->lease());
   expect(metadata && metadata->effective_title() == "Five Word Delayed Queue Title" && state->calls == 2,
          "captured first-turn identity remains valid when later turns append during queue delay");
@@ -634,19 +623,17 @@ void test_first_admission_permanently_binds_commit_identity()
   if (!unlocked_session_result || !coordinator)
     return;
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
-  CRITICAL_AREA_BEGIN_W(session);
 
-  auto first_commit = seed_committed_ordinary_turn(*session_w, "The actual first ordinary title source");
-  auto second_commit = seed_committed_ordinary_turn(*session_w, "The second turn must not be rebound");
+  auto first_commit = seed_committed_ordinary_turn(unlocked_session, "The actual first ordinary title source");
+  auto second_commit = seed_committed_ordinary_turn(unlocked_session, "The second turn must not be rebound");
   expect(first_commit && second_commit, "commit-binding fixture appends two ordinary turns");
   if (!first_commit || !second_commit)
     return;
   ava::app::runtime::RunOptions options;
-  CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "The second turn must not be rebound", *second_commit, options);
   coordinator->schedule(unlocked_session, "The actual first ordinary title source", *first_commit, options);
   expect(coordinator->wait_until_idle(100ms), "invalid captured commit schedules no title work");
-  CRITICAL_AREA_CONTINUE_W(session);
+  CRITICAL_AREA_BEGIN_W(session);
   auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
   expect(metadata && metadata->effective_title().empty() && state->calls == 0,
          "the first admission is permanent and a commit outside the first ordinary turn cannot be replaced later");
@@ -666,13 +653,13 @@ void test_fallback_append_failure_latches_without_retry()
   if (!unlocked_session_result || !coordinator)
     return;
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
-  CRITICAL_AREA_BEGIN_W(session);
-  auto committed = seed_committed_ordinary_turn(*session_w, "Never retry a title metadata mutation");
+  auto committed = seed_committed_ordinary_turn(unlocked_session, "Never retry a title metadata mutation");
   expect(committed.has_value(), "append-latch fixture commits its first ordinary turn");
   if (!committed)
     return;
 
   auto write_calls = std::make_shared<std::atomic<std::size_t>>(0);
+  CRITICAL_AREA_BEGIN_W(session);
   session_w->store.set_append_write_for_test([write_calls](int fd, std::string_view bytes) -> ssize_t {
     if (write_calls->fetch_add(1) == 0)
     {
@@ -688,17 +675,19 @@ void test_fallback_append_failure_latches_without_retry()
   session_w->run_controller()->shutdown();
   session_w->resources().append_target = *replacement;
   session_w->resources().run_controller = std::make_shared<ava::app::SessionRunController>(*replacement);
+  CRITICAL_AREA_END_W(session);
 
   ava::app::runtime::RunOptions options;
-  CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "Never retry a title metadata mutation", *committed, options);
   expect(coordinator->wait_until_idle(1s), "failed fallback leaves no provider refinement work queued");
+
   CRITICAL_AREA_CONTINUE_W(session);
   auto later = session_w->append_metadata_1({.name = "must remain latched", .actor = "test"});
   auto metadata = ava::session::load_session_metadata(session_w->store, session_w->lease());
   expect(!later && metadata && metadata->effective_title().empty() && state->calls == 0 && write_calls->load() == 1,
          "title fallback uses the controller route, never retries a mutation error, and preserves its append-failure latch");
   CRITICAL_AREA_END_W(session);
+
   coordinator->shutdown();
 }
 
@@ -811,8 +800,8 @@ void test_existing_manual_child_generated_and_sessionless_exclusions()
   expect(unlocked_resumed_result.has_value(), "resumed-history exclusion session opens");
   if (unlocked_resumed_result)
   {
-    auto first = seed_committed_ordinary_turn(*ava::app::runtime::session_ts::wat(*unlocked_resumed_result), "Historical first prompt");
-    auto second = seed_committed_ordinary_turn(*ava::app::runtime::session_ts::wat(*unlocked_resumed_result), "Current resumed prompt");
+    auto first = seed_committed_ordinary_turn(*unlocked_resumed_result, "Historical first prompt");
+    auto second = seed_committed_ordinary_turn(*unlocked_resumed_result, "Current resumed prompt");
     expect(first && second, "resumed-history exclusion seeds prior committed turns");
     coordinator->schedule(*unlocked_resumed_result, "Current resumed prompt", second ? *second : "missing_commit", options);
     expect(coordinator->wait_until_idle(3s), "resumed-history exclusion check becomes idle");
@@ -853,16 +842,14 @@ void test_shutdown_cancels_owned_generation()
   if (!unlocked_session_result || !coordinator)
     return;
   ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
-  CRITICAL_AREA_BEGIN_W(session);
-  auto seeded = seed_committed_ordinary_turn(*session_w, "Cancel this title generation safely");
+  auto seeded = seed_committed_ordinary_turn(unlocked_session, "Cancel this title generation safely");
   expect(seeded.has_value(), seeded ? "shutdown committed turn is seeded" : seeded.error().format());
   if (!seeded)
     return;
   ava::app::runtime::RunOptions options;
-  CRITICAL_AREA_END_W(session);
   coordinator->schedule(unlocked_session, "Cancel this title generation safely", *seeded, options);
   expect(state->wait_started(), "shutdown title generation starts");
-  CRITICAL_AREA_CONTINUE_W(session);
+  CRITICAL_AREA_BEGIN_W(session);
   auto metadata_before_shutdown = ava::session::load_session_metadata(session_w->store, session_w->lease());
   CRITICAL_AREA_END_W(session);
   coordinator->shutdown();

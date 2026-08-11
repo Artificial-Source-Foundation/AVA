@@ -29,7 +29,7 @@ class MessagesResultSerializer
  public:
   // The session is retained by reference for the lifetime of the serializer.
   // Called from Session::messages_result_json that passes *this: session is already locked.
-  MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session);
+  MessagesResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session);    // `runtime::Session const&` is allowed here.
 
   MessagesResultSerializer(MessagesResultSerializer const&) = delete;
   MessagesResultSerializer& operator=(MessagesResultSerializer const&) = delete;
@@ -67,7 +67,7 @@ class MessagesResultSerializer
   [[nodiscard]] std::size_t rendered_size_for(bool truncated, std::size_t ordered_output_omitted_count) const;
   [[nodiscard]] std::string tail_json_for(bool truncated, std::size_t message_count, std::size_t ordered_output_omitted_count) const;
 
-  runtime::Session const& session_;
+  runtime::Session const& session_; // `runtime::Session const&` is allowed here.
   std::string prefix_;
   std::vector<ava::session::SessionEntry> projected_;
   std::vector<MessageCandidate> candidates_;
@@ -96,7 +96,7 @@ class SessionResultSerializer
  public:
   // The session is retained by reference for the lifetime of the serializer.
   // Called from Session::*_json[_1] member functions that pass *this: session is already locked.
-  SessionResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session);
+  SessionResultSerializer(utils::Badge<runtime::Session>, runtime::Session const& session); // `runtime::Session const&` is allowed here.
 
   SessionResultSerializer(SessionResultSerializer const&) = delete;
   SessionResultSerializer& operator=(SessionResultSerializer const&) = delete;
@@ -115,7 +115,7 @@ class SessionResultSerializer
   // Serialize `model` against this serializer's locked session, including whether it is configured and currently selected.
   [[nodiscard]] std::string model_info_json(ava::config::ModelInfo const& model, bool configured) const;
 
-  runtime::Session const& session_;
+  runtime::Session const& session_; // `runtime::Session const&` is allowed here.
 
   // References live session content that may carry provider credentials.
   AVA_DEBUG_PRINT_MEMBERS_ON

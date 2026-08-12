@@ -33,6 +33,9 @@ struct Margin
   uint8_t left = 0;
   uint8_t right = 0;
 
+  uint32_t height() const { return top + bottom; }
+  uint32_t width() const { return left + right; }
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

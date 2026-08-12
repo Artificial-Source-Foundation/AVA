@@ -43,7 +43,8 @@ class Dimension
   friend Dimension operator*(Dimension d, float n) { return d *= n; }
   friend Dimension operator/(Dimension d, float n) { return d /= n; }
 
-  friend Dimension operator-(Dimension d, Margin margin) { return {d.height_ - (margin.top + margin.bottom), d.width_ - (margin.left + margin.right)}; }
+  friend Dimension operator-(Dimension d, Margin margin) { return {d.height_ - margin.height(), d.width_ - margin.width()}; }
+  friend bool operator<(Margin margin, Dimension d) { return margin.height() < d.height_ && margin.width() < d.width_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

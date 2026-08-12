@@ -1089,6 +1089,8 @@ Window Window::subwin(Dimension size, Position pos)
 Window Window::subwin(Margin margin)
 {
   Dimension size = getmaxyx();
+  // The caller is responsible for making sure this is true.
+  ASSERT(margin < size);
   Position pos = getbegyx();
   return subwin(size - margin, pos + margin);
 }
@@ -1101,6 +1103,8 @@ Window Window::derwin(Dimension size, Position pos)
 Window Window::derwin(Margin margin)
 {
   Dimension size = getmaxyx();
+  // The caller is responsible for making sure this is true.
+  ASSERT(margin < size);
   Position pos{0, 0};
   return derwin(size - margin, pos + margin);
 }

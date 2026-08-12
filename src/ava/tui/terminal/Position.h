@@ -19,6 +19,9 @@ class Position
   uint32_t col_;        // The x-coordinate of the top-left cell.
 
  public:
+  // Construct an uninitialized Postion.
+  Position() = default;
+
   // Construct a Position from a row and col.
   // Note that rows always come before colums; this is also how ncurses treats
   // coordinates although in that case they use (y, x) instead of (row, col).

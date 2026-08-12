@@ -1135,6 +1135,7 @@ void test_active_run_checks_at_confirmation_and_preappend()
         auto const reserved = fixture->current_controller->snapshot().maintenance_reserved;
         state->allow();
         auto terminal = await_terminal(*coordinator, *generation);
+        (*coordinator)->shutdown();
         expect(!guard && reserved && terminal.phase == ava::app::BranchSummaryPhase::Succeeded && !fixture->current_controller->snapshot().maintenance_reserved,
                "exclusive maintenance rejects a normal run throughout provider generation and releases only after terminal publication");
       }

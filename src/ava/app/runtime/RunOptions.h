@@ -70,7 +70,7 @@ struct RunOptions
   bool synthetic_subagent_delivery = false;
   std::optional<ava::session::SyntheticDeliveryProvenance> synthetic_user_message_provenance = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 }  // namespace ava::app::runtime

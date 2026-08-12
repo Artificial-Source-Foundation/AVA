@@ -15,6 +15,9 @@ import time
 
 MARKER_PREFIX = "AVA libcwd routing marker: suite="
 APP_MARKER_PREFIX = "AVA libcwd routing marker: test="
+PROMPT_CANARY = "CARLO_SEC_001_PROMPT_CANARY_4f6c2a91"
+TOKEN_CANARY = "CARLO_SEC_001_TOKEN_CANARY_8d74e3b5"
+ACCOUNT_CANARY = "CARLO_SEC_001_ACCOUNT_CANARY_6a19fd20"
 PROCESS_TIMEOUT = 12.0
 TERM_GRACE = 0.5
 KILL_GRACE = 1.0
@@ -79,8 +82,14 @@ def finish(process: subprocess.Popen[str], timeout: float = PROCESS_TIMEOUT) -> 
     return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 
 
-def run(ava: Path, arguments: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    result = finish(start(ava, arguments, env, cwd))
+def run(
+    ava: Path,
+    arguments: list[str],
+    env: dict[str, str],
+    cwd: Path,
+    timeout: float = PROCESS_TIMEOUT,
+) -> subprocess.CompletedProcess[str]:
+    result = finish(start(ava, arguments, env, cwd), timeout=timeout)
     for prefix in (MARKER_PREFIX, APP_MARKER_PREFIX):
         require(prefix not in result.stdout, f"libcwd marker leaked to stdout: {result.stdout!r}")
         require(prefix not in result.stderr, f"libcwd marker leaked to stderr: {result.stderr!r}")
@@ -145,7 +154,7 @@ def main() -> int:
             private_file(base_rcfile, "silent = on\nchannels_default = off\n")
             # The base policy disables every channel. Seeing a NOTICE routing
             # marker therefore proves the caller's override rcfile survived.
-            private_file(override_rcfile, "channels_on = notice\n")
+            private_file(override_rcfile, "channels_on = notice runtime\n")
 
             base_env = os.environ.copy()
             base_env.update(
@@ -208,6 +217,23 @@ def main() -> int:
                 "real ava routing marker missing from its per-test log",
             )
 
+            prompt_test_name = "ava_debug.prompt_redaction"
+            prompt_env = opted_env.copy()
+            prompt_env["AVA_TEST_NAME"] = prompt_test_name
+            prompt_result = run(ava_exe, ["--offline", "--no-session", "--print", PROMPT_CANARY], prompt_env, root)
+            require(prompt_result.returncode == 1, "offline prompt redaction fixture unexpectedly succeeded")
+            prompt_log = named_log_text(output_directory, prompt_test_name)
+            prompt_bytes = len(PROMPT_CANARY.encode("utf-8"))
+            require(PROMPT_CANARY not in prompt_log, "raw print/runtime prompt escaped into libcwd output")
+            require(
+                f"run_print_prompt(prompt_bytes={prompt_bytes})" in prompt_log,
+                "print prompt log lost its safe byte-count metadata",
+            )
+            require(
+                f"run_prompt(prompt_bytes={prompt_bytes})" in prompt_log,
+                "runtime prompt log lost its safe byte-count metadata",
+            )
+
             unsafe_env = opted_env.copy()
             unsafe_env["AVA_TEST_NAME"] = "../escape"
             unsafe_result = run(ava_exe, ["--help"], unsafe_env, root)
@@ -232,6 +258,20 @@ def main() -> int:
             require("Result:" in debug_result.stdout, "debug suite lost its intentional normal stdout")
             require("debug tests passed" in debug_result.stdout, "debug suite completion output missing")
             require(marker("debug") in log_text(output_directory, "debug"), "debug suite marker was not routed to its suite log")
+
+            subagent_result = run(ava, ["subagent_delivery_manager"], opted_env, root, timeout=60.0)
+            require(subagent_result.returncode == 0, f"subagent delivery suite failed: {subagent_result.stderr}")
+            subagent_log = log_text(output_directory, "subagent_delivery_manager")
+            for canary in (PROMPT_CANARY, TOKEN_CANARY, ACCOUNT_CANARY):
+                require(canary not in subagent_log, f"private runtime canary escaped into libcwd output: {canary}")
+            require(
+                "SubagentDeliveryManager::refresh_parent()" in subagent_log,
+                "subagent parent refresh log lost its fixed safe metadata",
+            )
+            require(
+                "run_admitted_prompt(prompt_bytes=" in subagent_log,
+                "admitted prompt log lost its safe byte-count metadata",
+            )
 
             invalid_result = run(ava, ["not/a-suite"], opted_env, root)
             require(invalid_result.returncode == 2, "unknown suite did not fail with status 2")

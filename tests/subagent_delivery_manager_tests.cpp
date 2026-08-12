@@ -27,6 +27,11 @@
 
 namespace {
 
+// Mirrored by libcwd_debug_output_test.py, which asserts these values never reach captured debug output.
+constexpr char kDebugPromptCanary[] = "CARLO_SEC_001_PROMPT_CANARY_4f6c2a91";
+constexpr char kDebugTokenCanary[] = "CARLO_SEC_001_TOKEN_CANARY_8d74e3b5";
+constexpr char kDebugAccountCanary[] = "CARLO_SEC_001_ACCOUNT_CANARY_6a19fd20";
+
 struct DeliveryBlockingJob
 {
   std::mutex mutex;
@@ -314,7 +319,7 @@ ava::agent::SubagentCoordinatorJobSnapshot start_completed(DeliveryFixture& fixt
   auto started = fixture.coordinator->start_background(parent, {.title = "delivery", .description = "summarize", .child_session_id = std::move(child)},
                                                        [](ava::agent::BackgroundJobContext const&) {
                                                          return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed,
-                                                                                                    .final_text = "bounded child completion",
+                                                                                                    .final_text = kDebugPromptCanary,
                                                                                                     .stop_reason = "completed",
                                                                                                     .provider_iterations = 2,
                                                                                                     .tool_calls = 3,
@@ -335,7 +340,8 @@ void test_idle_delivery_and_terminal_before_registration()
   std::atomic_int permission_callbacks = 0;
   std::atomic_int question_callbacks = 0;
   ava::app::runtime::RunOptions options;
-  options.access_token = "memory-only-delivery-token";
+  options.access_token = kDebugTokenCanary;
+  options.openai_account_id = kDebugAccountCanary;
   auto exact_file_calls = std::make_shared<std::atomic_int>(0);
   auto command_executor_calls = std::make_shared<std::atomic_int>(0);
   options.exact_file_access = std::make_shared<DeliveryExactFileAccess>(exact_file_calls);

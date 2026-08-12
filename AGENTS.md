@@ -103,6 +103,7 @@ git --no-pager diff --check
 - Every `.cpp` beneath `src/ava/` must use `#include "sys.h"` as its first include.
 - Header-defined classes and structs beneath `src/ava/` must end their final public section with an accepted marker: `AVA_DEBUG_PRINT_MEMBERS_ON`, `AVA_DEBUG_PRINT_MEMBERS_ON_BASE(base)`, `AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS`, or deliberate `AVA_DEBUG_PRINT_MEMBERS_OPT_OUT` (none take a trailing semicolon).
 - Include `ava/debug/print_members_on.h` in headers that use those markers. Include `debug.h` only when cwds debug APIs such as `Dout`, `Debug`, `DoutEntering`, or `ASSERT` are required.
+- Debug output must never stream prompt/message bodies, credentials, or evolving authority aggregates; log only bounded non-content metadata and opt sensitive aggregates out of generated printing.
 - Types in anonymous namespaces must use `AVA_DEBUG_PRINT_MEMBERS_OPT_OUT`; generated print-member definitions cannot support their internal linkage.
 - If generated `print_members.cpp` compilation or `*::print_members` linking fails, first build the `generate-print-members` target.
 

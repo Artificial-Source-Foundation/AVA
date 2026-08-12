@@ -3,6 +3,7 @@
 #include "ava/debug/debug_ostream_operators.h"          // This header must be included before test_harness.h
 
 #include "tests/support/test_harness.h"
+#include "ava/app/runtime/RunOptions.h"
 // clang-format on
 
 #include <array>
@@ -25,6 +26,12 @@ struct Foo : boost::intrusive_ref_counter<Foo, boost::thread_unsafe_counter> {
 } // namespace ava::session
 
 namespace {
+
+template <typename T>
+concept DebugStreamInsertable = requires(std::ostream& output, T const& value) { output << value; };
+
+static_assert(!DebugStreamInsertable<ava::app::runtime::RunOptions>,
+              "RunOptions contains credentials and authority callbacks and must remain unavailable to debug streams");
 
 // An enum with an ADL-findable to_string; after LIBCWD_USING_OSTREAM_PRELUDE it
 // should render as that string.

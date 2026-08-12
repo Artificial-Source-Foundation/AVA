@@ -74,7 +74,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_prompt(runtime::session_ts& u
                                                           ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                           runtime::RunOptions const& options)
 {
-  DoutEntering(dc::runtime, "run_prompt(" << unlocked_session << ", \"" << user_message << "\", " << provider << ")");
+  DoutEntering(dc::runtime, "run_prompt(prompt_bytes=" << user_message.size() << ")");
 #ifdef CWDEBUG
   auto&& f = at_scope_end([] { Dout(dc::runtime, "Leaving run_prompt()"); });
 #endif
@@ -135,7 +135,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                                                                    ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                    runtime::RunOptions const& options, ActiveRunGuard guard)
 {
-  DoutEntering(dc::notice, "run_admitted_prompt(" << unlocked_session << ", \"" << user_message << "\", " << provider << ")");
+  DoutEntering(dc::notice, "run_admitted_prompt(prompt_bytes=" << user_message.size() << ")");
 #ifdef CWDEBUG
   auto&& f = at_scope_end([] { Dout(dc::notice, "Leaving run_admitted_prompt()"); });
 #endif

@@ -549,6 +549,8 @@ void test_agent_loop_background_task_publishes_inspection_source()
   if (jobs.empty())
     return;
 
+  expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "background child reaches provider");
+
   // While the child is running, the coordinated source must already expose the
   // committed user prompt prefix without leaking session paths through inspect.
   auto live = coordinator->inspect(store.session_id(), jobs.front().job.identity.job_id);
@@ -565,14 +567,12 @@ void test_agent_loop_background_task_publishes_inspection_source()
     expect(saw_prompt, "live inspect projects the committed child user prompt prefix");
   }
 
-  expect(background_state->wait_for_request(std::chrono::milliseconds(1000)), "background child reaches provider");
   background_state->release_success();
   auto terminal = coordinator->wait(store.session_id(), jobs.front().job.identity.job_id, std::chrono::seconds(2));
   expect(terminal && !terminal->timed_out && terminal->job.execution == ava::agent::SubagentExecutionState::Completed,
          "background inspect child reaches terminal completion");
   auto frozen = coordinator->inspect(store.session_id(), jobs.front().job.identity.job_id);
-  expect(frozen && (*frozen)->terminal && !(*frozen)->unavailable,
-         "terminal background child freezes a path-free inspection frame");
+  expect(frozen && (*frozen)->terminal && !(*frozen)->unavailable, "terminal background child freezes a path-free inspection frame");
   if (frozen)
   {
     bool saw_assistant = false;

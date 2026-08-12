@@ -39,9 +39,9 @@ add_subdirectory(session)
 add_subdirectory(tools)
 
 set(AVA_FRONTEND_LIBRARIES
-  ava_app
-  ava_terminal
-  ava_tui
+  AVA::app
+  AVA::tui
+  AVA::terminal
 
   CACHE INTERNAL "AVA frontend libraries"
 )

@@ -114,3 +114,6 @@ target_link_libraries(ava_app PUBLIC ava_event ava_http PRIVATE ava_context ava_
 ava_apply_debugging(ava_app)
 ava_apply_warnings(ava_app)
 ava_apply_sanitizers(ava_app)
+
+# Create an ALIAS target.
+add_library(AVA::app ALIAS ava_app)

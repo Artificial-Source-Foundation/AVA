@@ -68,3 +68,6 @@ ava_apply_warnings(ava_tui)
 ava_apply_sanitizers(ava_tui)
 
 add_subdirectory(terminal)
+
+# Create an ALIAS target.
+add_library(AVA::tui ALIAS ava_tui)

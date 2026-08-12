@@ -17,9 +17,9 @@ namespace ava::tui::terminal {
 class Context final
 {
  private:
-  Window stdscr_;
-  Rendition default_rendition_;
-  std::vector<ColorPair> color_pairs_;
+  Window stdscr_;                                                       // The entire surface of the terminal.
+  Rendition default_rendition_;                                         // The rendition to use for text that doesn't have any defined of its own.
+  std::vector<ColorPair> color_pairs_;                                  // All registered foreground/background color pairs so far.
 
  public:
   Context();

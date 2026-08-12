@@ -10,6 +10,7 @@ namespace ava::tui::terminal {
 // ComplexChar
 //
 // Combines a (potentially empty) (variable width) character with Attributes and a color pair (by index).
+//
 class ComplexChar
 {
  private:

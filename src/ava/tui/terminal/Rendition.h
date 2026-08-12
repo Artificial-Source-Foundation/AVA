@@ -10,7 +10,7 @@ namespace ava::tui::terminal {
 //
 // A ColorPair / Attributes pair.
 //
-// Can be used along side UTF8 text to full define how a string is displayed on the terminal.
+// Can be used along side UTF8 text to fully define how a string is displayed on the terminal.
 //
 class Rendition
 {

@@ -41,3 +41,6 @@ target_link_libraries(linux06 PRIVATE AVA::terminal)
 
 add_executable(linux07 linux07-full-grapheme-cluster.cpp)
 target_link_libraries(linux07 PRIVATE AVA::terminal)
+
+add_executable(linux08 linux08-pad.cpp)
+target_link_libraries(linux08 PRIVATE AVA::terminal AVA::tui)

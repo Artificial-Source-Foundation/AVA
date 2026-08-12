@@ -44,10 +44,12 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ## Local Workflow
 
-Use `BetaTest` for normal local development. It keeps Release-style optimization and assertions, so AVA and its tests stay fast while invariant failures remain visible. Keep project debug output off unless a diagnosis specifically needs it.
+Use `BetaTest` with `EnableDebug=ON` for normal local development. It keeps Release-style optimization and assertions while compiling AVA's `CWDEBUG`/libcwd instrumentation and debug-dependent tests. Keep runtime debug output off unless a diagnosis specifically needs it. Before configuring any non-Release tree, export a writable `GITACHE_ROOT`; agent-run builds use the AVA-specific `$HOME/.cache/ava/gitache` when it is otherwise unset.
 
 ```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=OFF
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
+cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
@@ -68,12 +70,12 @@ scripts/build.sh --build-dir build-debug
 scripts/run-tests.sh --build-dir build-debug
 ```
 
-Return to `build/` for ordinary work. `EnableDebug=ON` may also be combined with BetaTest when optimized debug logging is specifically needed, but it should not be the default.
+Return to `build/` for ordinary work. Use a Release build only as an additional pre-push compilation or packaging check; Release ignores `EnableDebug=ON` and therefore cannot replace the normal debug-enabled test build.
 
 Sanitizers:
 
 ```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=OFF
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```

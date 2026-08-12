@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/agent/subagent_inspector.h"
 #include "ava/agent/subagent_launch.h"
 #include "ava/tui/runtime_plugin_ui.h"
@@ -761,6 +762,8 @@ struct PluginUiSurfaceGeometry
 {
   std::size_t width = 0;
   std::size_t max_lines = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Exact dimensions passed to the plugin UI renderer for a candidate request.

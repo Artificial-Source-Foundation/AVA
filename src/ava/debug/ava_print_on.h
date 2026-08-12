@@ -98,6 +98,9 @@ using utils::has_print_on::operator<<;
 namespace detail {
 using utils::has_print_on::operator<<;
 } // namespace detail
+namespace runtime_views {
+using utils::has_print_on::operator<<;
+} // namespace runtime_views
 namespace terminal {
 using utils::has_print_on::operator<<;
 } // namespace terminal

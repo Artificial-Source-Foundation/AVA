@@ -51,7 +51,18 @@ def isolated_environment(root: pathlib.Path) -> dict[str, str]:
         directory.mkdir(parents=True, exist_ok=True)
         environment[name] = str(directory)
     directories["XDG_RUNTIME_DIR"].chmod(0o700)
-    environment.update({"TERM": "dumb", "NO_COLOR": "1"})
+    libcwd_rcfile = root / "libcwdrc"
+    libcwd_rcfile.write_text("silent = on\nchannels_default = off\n", encoding="utf-8")
+    libcwd_rcfile.chmod(0o600)
+    environment.update(
+        {
+            "TERM": "dumb",
+            "NO_COLOR": "1",
+            # Debug builds must remain CLI-quiet when the isolated HOME has no
+            # developer libcwd configuration.
+            "LIBCWD_RCFILE_NAME": str(libcwd_rcfile),
+        }
+    )
     return environment
 
 

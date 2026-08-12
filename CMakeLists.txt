@@ -178,6 +178,14 @@ endif()
 
 # Declare aicxx submodules.
 include(AICxxSubmodules)
+
+# libcwd publishes libdw/libelf as interface dependencies rather than recording
+# them as NEEDED entries. Linux toolchains that default to --as-needed can then
+# discard both libraries and leave debug executables with unresolved symbols.
+if(OptionEnableLibcwd AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(cwds_ObjLib INTERFACE "LINKER:--no-as-needed")
+endif()
+
 set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL "List of OBJECT libaries that this project uses.")
 
 add_subdirectory(src)

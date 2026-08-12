@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/tui/runtime_plugin_ui.h"
 #include "ava/tui/terminal.h"
 
@@ -18,6 +19,8 @@ struct TuiPluginUiPollResult
 {
   bool changed = false;
   bool deadline_expired = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class TuiPluginUiInputResult
@@ -61,6 +64,8 @@ class RuntimePluginUiCoordinator final
   // callers never set them; enqueue hooks run after releasing the state lock.
   void set_after_enqueue_for_test(std::function<void()> hook);
   void set_after_queue_swap_for_test(std::function<void(std::size_t)> hook);
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   std::shared_ptr<RuntimePluginUiCoordinatorState> state_;

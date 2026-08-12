@@ -464,6 +464,8 @@ class SessionAppendTarget
     ConditionalAppendCompletion completion = ConditionalAppendCompletion::RejectedBeforeAppend;
     std::optional<SessionConditionalAppendResult> result;
     std::optional<ava::core::Error> error;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
   // Controller queue policy needs this typed mutation-boundary outcome so only

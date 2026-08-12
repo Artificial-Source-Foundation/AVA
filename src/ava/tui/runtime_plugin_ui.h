@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
+
 #include <chrono>
 #include <cstddef>
 #include <functional>
@@ -23,6 +25,8 @@ struct TuiPluginUiBinding
   std::string invocation_id;
 
   friend bool operator==(TuiPluginUiBinding const&, TuiPluginUiBinding const&) = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 enum class TuiPluginUiKind
@@ -40,6 +44,8 @@ struct TuiPluginUiOption
   std::string id;
   std::string label;
   std::optional<std::string> description;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiPluginUiRequest
@@ -53,6 +59,8 @@ struct TuiPluginUiRequest
   std::string description;
   std::vector<std::string> lines;
   std::vector<TuiPluginUiOption> options;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 // Pure host-chrome fit policy shared by the coordinator and renderer. A
@@ -72,6 +80,8 @@ struct TuiPluginUiReply
 {
   TuiPluginUiReplyKind action = TuiPluginUiReplyKind::Cancel;
   std::string option_id;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using TuiPluginUiCancelCallback = std::function<bool()>;
@@ -89,12 +99,16 @@ struct TuiPluginUiEndpoint
   {
     return !runtime_token.expired() && deadline != std::chrono::steady_clock::time_point{} && present && close;
   }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiPluginUiWidgetView
 {
   std::string title;
   std::vector<std::string> lines;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiPluginUiDockView
@@ -102,6 +116,8 @@ struct TuiPluginUiDockView
   TuiPluginUiBinding binding;
   std::optional<std::string> status;
   std::vector<TuiPluginUiWidgetView> widgets;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 struct TuiPluginUiModalView
@@ -114,6 +130,8 @@ struct TuiPluginUiModalView
   std::string description;
   std::vector<TuiPluginUiOption> options;
   std::size_t selected_option = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 }  // namespace ava::tui

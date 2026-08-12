@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "Session.h"
+#include "Context.h"
 
 #include <clocale>
 #include <cstdlib>
@@ -9,7 +9,7 @@
 
 namespace ava::tui::terminal {
 
-Session::Session() : default_rendition_(ColorPair{0})
+Context::Context() : default_rendition_(ColorPair{0})
 {
   setlocale(LC_ALL, "");
 
@@ -44,29 +44,29 @@ Session::Session() : default_rendition_(ColorPair{0})
   meta(::stdscr, TRUE); // Always return 8-bit character codes.
 }
 
-Session::~Session()
+Context::~Context()
 {
   endwin();
 }
 
-uint32_t Session::rows() const
+uint32_t Context::rows() const
 {
   return LINES;
 }
 
-uint32_t Session::cols() const
+uint32_t Context::cols() const
 {
   return COLS;
 }
 
-int Session::get_wch()
+int Context::get_wch()
 {
   wint_t wch;
   ::get_wch(&wch);
   return wch;
 }
 
-ColorPair Session::create_color_pair(Color foreground, Color background)
+ColorPair Context::create_color_pair(Color foreground, Color background)
 {
   // Support for non-direct terminals has not be implemented yet.
   ASSERT(COLORS == 16777216);

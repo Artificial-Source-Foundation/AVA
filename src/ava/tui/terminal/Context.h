@@ -9,12 +9,12 @@
 
 namespace ava::tui::terminal {
 
-// Session
+// Context
 //
 // Represents the terminal. It's lifetime is equivalent with the
 // time that the terminal is under the control of this application.
 //
-class Session final
+class Context final
 {
  private:
   Window stdscr_;
@@ -22,8 +22,8 @@ class Session final
   std::vector<ColorPair> color_pairs_;
 
  public:
-  Session();
-  ~Session();
+  Context();
+  ~Context();
 
   Rendition const& default_rendition() const { return default_rendition_; }
 

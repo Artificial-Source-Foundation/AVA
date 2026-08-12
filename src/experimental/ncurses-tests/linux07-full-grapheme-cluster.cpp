@@ -1,7 +1,7 @@
 #include "terminal/Attributes.h"
 #include "terminal/ComplexChar.h"
 #include "terminal/GraphemeCluster.h"
-#include "terminal/Session.h"
+#include "terminal/Context.h"
 #include "terminal/Window.h"
 
 #include <array>
@@ -54,10 +54,10 @@ int main()
     // it back with getcchar.  This specifically guards the CCHARW_MAX edge case
     // where setcchar needs a temporary terminator and getcchar writes one extra
     // wchar_t beyond ncurses' fixed cchar_t payload.
-    terminal::Session terminal_session;
-    terminal::Rendition const green_rendition(terminal_session.create_color_pair({}, {0x008800}));
-    terminal_session.stdscr().set_background({green_rendition});
-    terminal::Dimension screen_size = terminal_session.size();
+    terminal::Context terminal_context;
+    terminal::Rendition const green_rendition(terminal_context.create_color_pair({}, {0x008800}));
+    terminal_context.stdscr().set_background({green_rendition});
+    terminal::Dimension screen_size = terminal_context.size();
     terminal::Position offset{screen_size.height() / 4, screen_size.width() / 4};
     terminal::Window window{screen_size / 2, offset};
     window.set_background(source);
@@ -72,9 +72,9 @@ int main()
                 "Window background round-trip should preserve bold attribute");
 
     window.move({1, 1});
-    terminal_session.stdscr().refresh();
+    terminal_context.stdscr().refresh();
     window.refresh();
-    terminal_session.get_wch();
+    terminal_context.get_wch();
   }
 
   if (!round_trip_ok)

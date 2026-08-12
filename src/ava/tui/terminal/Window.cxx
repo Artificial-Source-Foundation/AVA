@@ -1065,7 +1065,7 @@ Window::Window() = default;
 
 void Window::init_as_stdscr()
 {
-  // Only call this function once and only on a default constructed Window. This should only be called from Session().
+  // Only call this function once and only on a default constructed Window. This should only be called from Context().
   ASSERT(!impl_);
   impl_ = std::make_unique<Impl>();
 }

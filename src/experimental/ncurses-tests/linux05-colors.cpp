@@ -1,4 +1,4 @@
-#include "terminal/Session.h"
+#include "terminal/Context.h"
 
 #include <array>
 #include <iostream>
@@ -7,7 +7,7 @@
 
 int main()
 {
-  ava::tui::terminal::Session terminal_session;
+  ava::tui::terminal::Context terminal_context;
 
   move(10, 0);
 

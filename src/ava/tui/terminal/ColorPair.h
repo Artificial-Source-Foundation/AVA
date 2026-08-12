@@ -7,12 +7,12 @@
 namespace ava::tui::terminal {
 
 // Forward declaration.
-class Session;
+class Context;
 
 // class ColorPair
 //
 // Wrapper around an index to a foreground/background color pair.
-// A ColorPair must be created using Session::create_color_pair.
+// A ColorPair must be created using Context::create_color_pair.
 //
 class ColorPair
 {
@@ -20,7 +20,7 @@ class ColorPair
   uint32_t index_;
 
  private:
-  friend class Session;
+  friend class Context;
   ColorPair(uint32_t index) : index_(index) { }
 
  public:

@@ -4,7 +4,7 @@ add_library(ava_terminal)
 # Declare source files.
 target_sources(ava_terminal
   PRIVATE
-    "Session.cxx"
+    "Context.cxx"
     "ComplexChar.cxx"
     "Window.cxx"
     "private_convert.cxx"

@@ -23,7 +23,7 @@
 namespace ava::tui::terminal {
 
 // Forward declaration.
-class Session;
+class Context;
 
 // Inclusive top and bottom rows of a Window scrolling region.
 struct ScrollRegion
@@ -41,8 +41,8 @@ class Window
   std::unique_ptr<Impl> impl_;
 
  private:
-  // These are called before ncurses is initialized by the constructor of Session.
-  friend class Session;
+  // These are called before ncurses is initialized by the constructor of Context.
+  friend class Context;
   Window();                     // Construct an uninitialized Window.
   void init_as_stdscr();        // Initialize a default constructed window with stdscr.
 
@@ -181,7 +181,7 @@ class Window
 
   // Copy the Window to the physical screen.
   //
-  // This is done by first calling `wnoutrefresh`, followed by `Session::doupdate`.
+  // This is done by first calling `wnoutrefresh`, followed by `Context::doupdate`.
   //
   // Unless `leaveok` has been enabled, the physical cursor of the
   // terminal is left at the location of the cursor this Window.

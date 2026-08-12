@@ -1,5 +1,5 @@
 #include "terminal/Attributes.h"
-#include "terminal/Session.h"
+#include "terminal/Context.h"
 
 #include <iostream>
 #include <string>
@@ -16,7 +16,7 @@ int main()
 {
   wint_t wch;
   {
-    ava::tui::terminal::Session terminal_session;
+    ava::tui::terminal::Context terminal_context;
 
     move(10, 0);
 

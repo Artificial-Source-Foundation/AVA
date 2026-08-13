@@ -104,7 +104,8 @@ void write_colored_line(terminal::Window& pad, std::size_t row, std::string cons
     return;
 
   std::vector<std::size_t> word_starts{0};
-  for (std::size_t pos = line.find(' '); pos != std::string::npos; pos = line.find(' ', pos + 1)) word_starts.push_back(pos + 1);
+  for (std::size_t pos = line.find(' '); pos != std::string::npos; pos = line.find(' ', pos + 1))
+    word_starts.push_back(pos + 1);
 
   std::size_t const word_begin = word_starts[row % word_starts.size()];
   std::size_t const word_end = line.find(' ', word_begin);

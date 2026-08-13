@@ -18,6 +18,7 @@ BraceWrapping:
   AfterNamespace: false
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
 AlignTrailingComments:
   Kind: Leave
 SortIncludes: CaseSensitive

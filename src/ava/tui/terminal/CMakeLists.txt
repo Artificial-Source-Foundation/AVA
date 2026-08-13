@@ -6,6 +6,9 @@ target_sources(ava_terminal
   PRIVATE
     "Context.cxx"
     "ComplexChar.cxx"
+    "Paragraph.cxx"
+    "TextRow.cxx"
+    "TextSpan.cxx"
     "Window.cxx"
     "private_convert.cxx"
 )

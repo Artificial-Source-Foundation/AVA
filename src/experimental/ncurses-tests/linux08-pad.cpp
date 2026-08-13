@@ -134,15 +134,9 @@ int main()
   terminal::Context terminal_context;
   terminal::Window const& stdscr = terminal_context.stdscr();
 
-  Dout(dc::notice, "stdscr = " << stdscr.getmaxyx());
-
   // Create three pads of `pad_line_count` lines that are `pad_line_width` wide.
   terminal::Dimension const pad_dimension{pad_line_count, pad_line_width};
-  std::array<terminal::Window, 3> pads = {
-    stdscr.newpad(pad_dimension),
-    stdscr.newpad(pad_dimension),
-    stdscr.newpad(pad_dimension)
-  };
+  std::array<terminal::Window, 3> pads = {stdscr.newpad(pad_dimension), stdscr.newpad(pad_dimension), stdscr.newpad(pad_dimension)};
 
   std::array const line_colors = {
       terminal_context.create_color_pair({0xe8e8e8}, {0x182030}),
@@ -212,7 +206,7 @@ int main()
       {
         if ((++count % 5) == 0)
         {
-          first_row = std::clamp(first_row + (saw_scroll_up ? 1 : -1), 0, static_cast<int>(pad_line_count - pads.size() * view_size.height()));
+          first_row = std::clamp(first_row + (saw_scroll_down ? 1 : -1), 0, static_cast<int>(pad_line_count - pads.size() * view_size.height()));
           Dout(dc::notice, "first_row = " << first_row);
           break;
         }

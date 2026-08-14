@@ -45,6 +45,8 @@ class TextSpan
 
   // Only call this if is_hyperlink() returns true.
   virtual Hyperlink hyperlink() const;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 class StyledTextSpan : public TextSpan
@@ -57,6 +59,8 @@ class StyledTextSpan : public TextSpan
 
   bool use_default_rendition() const override { return false; }
   Rendition rendition() const override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON_BASE(TextSpan)
 };
 
 class HyperlinkedTextSpan : public StyledTextSpan
@@ -70,6 +74,8 @@ class HyperlinkedTextSpan : public StyledTextSpan
 
   bool is_hyperlink() const override { return true; }
   Hyperlink hyperlink() const override;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON_BASE(StyledTextSpan)
 };
 
 struct Character
@@ -79,6 +85,9 @@ struct Character
   wchar_t value;                                // The stretch of UTF8 chars converted to a wide character.
   int cell_width;                               // The number of terminal cells that this character will occupy (unfortunately, this is just an approximation).
   bool whitespace;                              // True if this character is white-space.
+
+  // It is current not possible to print a wchar_t. Printing this object is better done from the TextSpanView that contains it.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 class TextSpanView
@@ -99,6 +108,13 @@ class TextSpanView
   // Accessors.
   TextSpan const* parent() const { return parent_; }
   operator std::u8string_view() const;
+
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
+#endif
+
+  // We have a custom printer.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 } // namespace ava::tui::terminal

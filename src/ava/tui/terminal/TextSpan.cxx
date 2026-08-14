@@ -1,6 +1,9 @@
 #include "sys.h"
 #include "TextSpan.h"
 #include "debug.h"
+#ifdef CWDEBUG
+#include "utils/print_pointer.h"
+#endif
 
 namespace ava::tui::terminal {
 
@@ -94,5 +97,13 @@ TextSpanView::operator std::u8string_view() const
 
   return {&parent_->text()[0] + characters_.front().utf8_begin, size};
 }
+
+#ifdef CWDEBUG
+void TextSpanView::print_on(std::ostream& os) const
+{
+  LIBCWD_USING_OSTREAM_PRELUDE;
+  os << "{parent:" << print_pointer(parent_) << '}';
+}
+#endif
 
 } //namespace ava::tui::terminal

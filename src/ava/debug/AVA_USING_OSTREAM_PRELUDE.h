@@ -41,6 +41,7 @@ namespace debug { using namespace debug::hidden_dummies::debug; }
   using ::debug::__write__
 
 // This prelude is what is used inside print_members_on member functions.
+// Use LIBCWD_USING_OSTREAM_PRELUDE in custom print_on member functions.
 #define AVA_USING_OSTREAM_PRELUDE(os) \
   os << std::boolalpha; \
   LIBCWD_USING_OSTREAM_PRELUDE; \

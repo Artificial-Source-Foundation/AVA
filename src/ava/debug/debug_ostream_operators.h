@@ -164,6 +164,7 @@ std::ostream& operator<<(std::ostream& os, struct termios const& te);
 // depend on cwds symbols (type_name_of) and on AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 // becoming available only after the cwds debug ostream machinery is visible.
 #include <cwds/debug_ostream_operators.h>
+#include <utils/debug_ostream_operators.h>
 #include "print_reference.h"
 #include <threadsafe/threadsafe.h>
 #include "utils/print_pointer.h"

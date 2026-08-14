@@ -23,6 +23,8 @@ class Paragraph
 
   // Perform wrapping: return a list of TextRow's.
   std::vector<TextRow> wrap(uint32_t cell_width);
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace ava::tui::terminal

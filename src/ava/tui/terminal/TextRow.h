@@ -23,6 +23,8 @@ class TextRow
   size_t max_cell_width() const { return max_cell_width_; }
   size_t cell_width() const { return cell_width_; }
   std::vector<TextSpanView> const& text_span_views() const { return text_span_views_; }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 } // namespace ava::tui::terminal

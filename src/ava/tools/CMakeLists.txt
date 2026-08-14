@@ -14,8 +14,24 @@ add_library(ava_tools
   "websearch_tool.cpp"
 )
 
-target_include_directories(ava_tools PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_tools PUBLIC ava_command ava_containment ava_core ava_http ava_observability ava_permissions)
+target_include_directories(ava_tools
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+target_link_libraries(ava_tools
+  PUBLIC
+    AVA::command
+    AVA::containment
+    AVA::core
+    AVA::http
+    AVA::observability
+    AVA::permissions
+)
+
 ava_apply_debugging(ava_tools)
 ava_apply_warnings(ava_tools)
 ava_apply_sanitizers(ava_tools)
+
+# Create an ALIAS target.
+add_library(AVA::tools ALIAS ava_tools)

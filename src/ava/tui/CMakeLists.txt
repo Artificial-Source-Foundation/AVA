@@ -54,14 +54,20 @@ add_library(ava_tui
   "tool_cards.cpp"
 )
 
-target_link_libraries(ava_tui PUBLIC ava_core ava_event PRIVATE ${CURSES_LIBRARIES})
+target_link_libraries(ava_tui
+  PUBLIC
+    AVA::core
+    AVA::event
+  PRIVATE
+  ${CURSES_LIBRARIES}
+)
 message(STATUS "AVA_GENERATED_INCLUDE_DIR = ${AVA_GENERATED_INCLUDE_DIR}")
 target_include_directories(ava_tui
   PUBLIC
     "${CMAKE_SOURCE_DIR}/src"
     "${AVA_GENERATED_INCLUDE_DIR}"
   PRIVATE
-  ${CURSES_INCLUDE_DIRS}
+     ${CURSES_INCLUDE_DIRS}
 )
 ava_apply_debugging(ava_tui)
 ava_apply_warnings(ava_tui)

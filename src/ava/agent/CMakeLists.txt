@@ -44,8 +44,26 @@ add_library(ava_agent
   "usage_accounting.cpp"
 )
 
-target_include_directories(ava_agent PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_agent PUBLIC ava_core ava_http ava_observability PRIVATE ava_command ava_context ava_diagnostics ava_mcp ava_plugin nlohmann_json::nlohmann_json)
+target_include_directories(ava_agent
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+)
+target_link_libraries(ava_agent
+  PUBLIC
+    AVA::core
+    AVA::http
+    AVA::observability
+  PRIVATE
+    AVA::command
+    AVA::context
+    AVA::diagnostics
+    AVA::mcp
+    AVA::plugin
+    nlohmann_json::nlohmann_json
+)
 ava_apply_debugging(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_apply_sanitizers(ava_agent)
+
+# Create an ALIAS target.
+add_library(AVA::agent ALIAS ava_agent)

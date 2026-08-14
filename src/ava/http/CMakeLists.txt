@@ -3,8 +3,20 @@ add_library(ava_http
   "transport.cpp"
 )
 
-target_include_directories(ava_http PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_http PUBLIC ava_core ava_observability)
+target_include_directories(ava_http
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+target_link_libraries(ava_http
+  PUBLIC
+    AVA::core
+    AVA::observability
+)
+
 ava_apply_debugging(ava_http)
 ava_apply_warnings(ava_http)
 ava_apply_sanitizers(ava_http)
+
+# Create an ALIAS target.
+add_library(AVA::http ALIAS ava_http)

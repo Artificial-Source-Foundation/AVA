@@ -25,8 +25,19 @@ if (OptionEnableLibcwd)
   )
 endif ()
 
-target_include_directories(ava_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_core PRIVATE nlohmann_json::nlohmann_json)
+target_include_directories(ava_core
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+target_link_libraries(ava_core
+  PRIVATE
+    nlohmann_json::nlohmann_json
+)
+
 ava_apply_debugging(ava_core)
 ava_apply_warnings(ava_core)
 ava_apply_sanitizers(ava_core)
+
+# Create an ALIAS target.
+add_library(AVA::core ALIAS ava_core)

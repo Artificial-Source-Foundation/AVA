@@ -3,3 +3,6 @@ target_include_directories(ava_observability PUBLIC "${CMAKE_SOURCE_DIR}/src")
 ava_apply_debugging(ava_observability)
 ava_apply_warnings(ava_observability)
 ava_apply_sanitizers(ava_observability)
+
+# Create an ALIAS target.
+add_library(AVA::observability ALIAS ava_observability)

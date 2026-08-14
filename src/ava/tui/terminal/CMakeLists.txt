@@ -42,7 +42,7 @@ target_link_libraries(ava_terminal
 if (OptionEnableLibcwd)
   target_link_libraries(ava_terminal
     PUBLIC
-      ava_debug
+      AVA::debug
   )
 endif ()
 

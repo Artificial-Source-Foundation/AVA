@@ -281,7 +281,7 @@ add_library(ava_debug
 
 target_include_directories(ava_debug
   PUBLIC
-  "${CMAKE_BINARY_DIR}/src"   # Needed for ava/
+    "${CMAKE_BINARY_DIR}/src"   # Needed for ava/
     "${CMAKE_SOURCE_DIR}/src"
 )
 
@@ -294,10 +294,14 @@ target_include_directories(ava_debug
 target_link_libraries(ava_debug
   PUBLIC
     AVA::terminal       # ava::tui::terminal::GraphemeCluster::print_members
-    ava_agent           # ava::agent::to_string
-    ava_app             # ava::app::runtime::to_string
+    AVA::agent          # ava::agent::to_string
+    AVA::app            # ava::app::runtime::to_string
+    AVA::tui            # ava::tui::to_string
 )
 
 ava_apply_debugging(ava_debug)
 ava_apply_warnings(ava_debug)
 ava_apply_sanitizers(ava_debug)
+
+# Create an ALIAS target.
+add_library(AVA::debug ALIAS ava_debug)

@@ -21,8 +21,20 @@ add_library(ava_provider
   "registry.cpp"
 )
 
-target_include_directories(ava_provider PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(ava_provider PUBLIC ava_http ava_config)
+target_include_directories(ava_provider
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+target_link_libraries(ava_provider
+  PUBLIC
+    AVA::http
+    AVA::config
+)
+
 ava_apply_debugging(ava_provider)
 ava_apply_warnings(ava_provider)
 ava_apply_sanitizers(ava_provider)
+
+# Create an ALIAS target.
+add_library(AVA::provider ALIAS ava_provider)

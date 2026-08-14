@@ -15,7 +15,15 @@ target_include_directories(ava_command
     "${CMAKE_SOURCE_DIR}/src"
     "${CWDS_INTERFACE_INCLUDE_DIRECTORIES}"
 )
-target_link_libraries(ava_command PUBLIC ava_core)
+
+target_link_libraries(ava_command
+  PUBLIC
+    AVA::core
+)
+
 ava_apply_debugging(ava_command)
 ava_apply_warnings(ava_command)
 ava_apply_sanitizers(ava_command)
+
+# Create an ALIAS target.
+add_library(AVA::command ALIAS ava_command)

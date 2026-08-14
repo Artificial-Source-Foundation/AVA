@@ -12,7 +12,7 @@
 
 namespace terminal = ava::tui::terminal;
 
-std::array<char const*, 5> lorem_ipsum_paragraphs = {
+std::array<char const*, 10> lorem_ipsum_paragraphs = {
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam lacinia, augue quis iaculis hendrerit, risus dui pellentesque augue, nec sodales ipsum "
     "felis at massa. Cras at leo elementum, egestas odio non, mattis dolor. Pellentesque elementum vestibulum diam, nec scelerisque eros hendrerit sed. Morbi "
     "quis lorem neque. Aliquam sollicitudin ante ipsum, id tempor lectus eleifend vitae. Fusce vel pulvinar metus. Sed sed blandit tellus. Etiam et lacinia "
@@ -22,11 +22,13 @@ std::array<char const*, 5> lorem_ipsum_paragraphs = {
     "elementum mauris ut, aliquam urna. Aenean dapibus lobortis arcu ac hendrerit. Curabitur ac tellus nec ligula gravida gravida. In quis odio a erat cursus "
     "imperdiet. In rutrum lacinia nibh et bibendum. Vivamus eget lectus elementum, facilisis augue vel, luctus augue. Curabitur eget libero justo. Aliquam "
     "erat volutpat.",
+
     "Nullam rhoncus, sem nec congue vulputate, purus nulla tempus ipsum, at bibendum neque sapien cursus felis. Phasellus eu vulputate mi, congue pellentesque "
     "mi. In libero nunc, placerat quis maximus quis, volutpat ut magna. Nulla porttitor felis auctor mi posuere, sed congue sapien ultricies. In lobortis quam "
     "quis quam vestibulum, in egestas mi maximus. Mauris tristique felis lacinia risus tincidunt egestas. Ut nec erat lacinia, auctor leo mattis, malesuada "
     "nulla. Donec molestie id enim et facilisis. Sed tortor diam, ornare id egestas id, luctus in metus. Maecenas id tincidunt mi. Donec tempor viverra "
     "fringilla. Duis sollicitudin porta tellus vel cursus. Cras in imperdiet urna. Vestibulum interdum elementum hendrerit.",
+
     "Phasellus ac magna nec orci blandit tincidunt. Aenean finibus massa sed quam rutrum euismod. Morbi sollicitudin egestas malesuada. Vestibulum imperdiet, "
     "neque at iaculis congue, sem libero efficitur metus, in dapibus lectus ex consectetur nulla. Suspendisse volutpat, felis vel euismod rhoncus, ipsum massa "
     "sagittis quam, a efficitur mauris metus ut tellus. Donec lectus neque, commodo in elit et, consequat sodales sapien. Curabitur id odio ullamcorper, "
@@ -34,10 +36,44 @@ std::array<char const*, 5> lorem_ipsum_paragraphs = {
     "tellus, vitae vulputate ante scelerisque non. Aliquam erat volutpat. Nulla libero augue, ultrices sit amet justo volutpat, finibus maximus urna. Nam "
     "faucibus sed libero aliquam porta. Interdum et malesuada fames ac ante ipsum primis in faucibus. Cras pulvinar blandit urna, eget finibus lacus posuere "
     "non.",
+
     "Pellentesque fringilla velit vitae justo faucibus blandit. In pulvinar lectus ipsum, quis finibus odio convallis ut. Cras feugiat enim eget maximus "
     "auctor. Aliquam in tempus lectus, sed pharetra magna. Proin accumsan venenatis faucibus. Maecenas eget metus tempus, porta nulla at, rhoncus massa. Nam "
     "semper mollis mattis. Etiam lacinia odio odio, eu ullamcorper neque suscipit a. Donec vitae dui erat. Proin urna ligula, tincidunt nec orci eget, ornare "
-    "blandit nisl. In mi velit, mattis non sapien vel, porttitor mollis lorem."};
+    "blandit nisl. In mi velit, mattis non sapien vel, porttitor mollis lorem.",
+
+    "Sed sem tellus, consequat eget dui ut, finibus tempor diam. Cras id eros lorem. In tincidunt, orci id pulvinar lobortis, augue dolor volutpat sem, id "
+    "condimentum nisi risus sit amet dui. Pellentesque at fringilla nulla. Vivamus luctus consectetur commodo. Suspendisse potenti. Aliquam erat volutpat. "
+    "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Quisque gravida auctor eros, at vulputate elit pretium a. "
+    "Aenean tincidunt ex quis massa sodales, a commodo neque elementum. Aenean efficitur urna nibh, a egestas purus ullamcorper id. Suspendisse potenti. "
+    "Morbi sodales semper leo non suscipit.",
+
+    "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse sit amet lacus nec odio iaculis tincidunt "
+    "quis vel metus. Nullam sit amet diam imperdiet, egestas sapien eu, rutrum justo. In at orci tortor. Vestibulum vehicula vehicula est, et pharetra purus "
+    "commodo pulvinar. Suspendisse potenti. Suspendisse dignissim rutrum sapien ut finibus. Donec bibendum ultricies dui, quis dignissim lacus mattis sit amet. "
+    "Sed suscipit non neque vel auctor. Sed ac tellus quis eros imperdiet finibus ut ac nulla. Etiam ultrices, diam vel vehicula tincidunt, dolor metus "
+    "feugiat orci, et ullamcorper mauris ante vel tortor.",
+
+    "Mauris laoreet est arcu. Phasellus tortor nisi, commodo in faucibus ac, luctus cursus magna. Ut molestie leo vitae augue maximus, in interdum justo ornare. "
+    "In hac habitasse platea dictumst. Aenean scelerisque iaculis suscipit. Cras interdum velit et justo commodo, eu elementum enim pellentesque. Fusce luctus "
+    "egestas fermentum. Morbi consectetur justo id neque eleifend tristique id a lacus. Quisque sed sollicitudin odio, sed sollicitudin massa. Aliquam ac nulla "
+    "vel turpis ultricies bibendum at sagittis orci. In iaculis vel ante et porttitor. Etiam eu turpis nec est iaculis elementum quis volutpat neque. Nulla "
+    "volutpat, neque sit amet luctus faucibus, sapien nunc mollis neque, non eleifend neque libero sit amet dui. Donec a vehicula quam, mollis blandit turpis. "
+    "Donec sed accumsan massa.",
+
+    "Nulla rutrum vel nunc sit amet luctus. Nullam mattis ultrices diam vitae suscipit. Sed viverra pretium nibh, vel blandit lacus posuere nec. Orci varius "
+    "natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Nulla fringilla risus quis consectetur vehicula. Suspendisse eget nibh eu dolor "
+    "mollis viverra. Mauris commodo ut odio in egestas. Vestibulum commodo felis vel libero viverra, sit amet interdum risus lacinia. Suspendisse ultrices "
+    "ullamcorper metus, ullamcorper semper orci accumsan non. In ipsum velit, pharetra in odio vel, tristique vulputate dolor. Integer cursus gravida luctus. "
+    "Nullam sapien arcu, luctus eget interdum in, tempor sit amet nisl. Vivamus ultrices vel urna et egestas. Aliquam nisl tellus, sodales et ultricies in, "
+    "fringilla et mi.",
+
+    "Sed justo magna, volutpat efficitur fermentum id, iaculis in sem. Cras laoreet massa tortor, eget sollicitudin mi auctor quis. Suspendisse libero urna, "
+    "commodo vel molestie in, faucibus ullamcorper neque. Aenean dictum ultricies nulla convallis gravida. Praesent nec lorem ac nibh finibus dignissim at id dui. "
+    "Mauris quis sodales turpis. Sed tristique eros ut justo blandit lobortis. Nulla eget lorem sapien. Praesent eros nibh, ullamcorper nec purus in, sodales "
+    "finibus massa. Morbi elementum quis ligula sit amet dictum. Integer semper imperdiet sapien, non aliquet massa mattis sit amet. In aliquet, lacus vel aliquam "
+    "gravida, libero lectus volutpat libero, ut scelerisque est libero nec odio. Sed vitae mattis dolor, eget placerat lorem. Fusce sapien turpis, vestibulum ut "
+    "tortor vitae, euismod vestibulum metus. Donec non dignissim lectus."};
 
 namespace {
 

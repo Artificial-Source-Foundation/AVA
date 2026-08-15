@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "Paragraph.h"
+#include "debug.h"
 
 namespace ava::tui::terminal {
 
@@ -58,8 +59,31 @@ namespace ava::tui::terminal {
 //
 std::vector<TextRow> Paragraph::wrap(uint32_t cell_width)
 {
-  //FIXME: implement
-  return {};
+  ASSERT(cell_width > 0);
+
+  std::vector<TextRow> rows;
+  TextRow row{static_cast<size_t>(cell_width)};
+
+  for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
+  {
+    // Feed this whole TextSpan to TextRow::append, starting a new TextRow for
+    // whatever didn't fit anymore, until the TextSpan is fully consumed.
+    TextSpanView view{*text_span};
+    while (!view.empty())
+    {
+      TextSpanView remainder = row.append(std::move(view));
+      if (remainder.empty())
+        break;
+      rows.push_back(std::move(row));
+      row = TextRow{static_cast<size_t>(cell_width)};
+      view = std::move(remainder);
+    }
+  }
+
+  if (!row.text_span_views().empty())
+    rows.push_back(std::move(row));
+
+  return rows;
 }
 
 } // namespace ava::tui::terminal

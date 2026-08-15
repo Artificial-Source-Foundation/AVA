@@ -43,25 +43,21 @@ Hyperlink HyperlinkedTextSpan::hyperlink() const
   return hyperlink_;
 }
 
-TextSpanView::TextSpanView(TextSpan const& parent) : parent_(&parent)
+TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span)
 {
-  std::u8string const& parent_text = parent.text();
-  characters_.reserve(parent_text.size());
+  std::u8string const& text_span_text = text_span.text();
+  characters_meta_.reserve(text_span_text.size());
 
   std::mbstate_t state{};
   std::size_t offset = 0;
 
-  while (offset != parent_text.size())
+  while (offset != text_span_text.size())
   {
+    char const* first = reinterpret_cast<char const*>(text_span_text.data() + offset);
+    std::size_t const remaining = text_span_text.size() - offset;
+
     wchar_t value;
-
-    char const* first =
-        reinterpret_cast<char const*>(parent_text.data() + offset);
-    std::size_t const remaining = parent_text.size() - offset;
-
-    std::size_t const size = std::mbrtowc(
-        &value, first, remaining, &state);
-
+    std::size_t const size = std::mbrtowc(&value, first, remaining, &state);
     if (size == static_cast<std::size_t>(-1))
       throw std::runtime_error("Invalid UTF-8");
     if (size == static_cast<std::size_t>(-2))
@@ -70,17 +66,21 @@ TextSpanView::TextSpanView(TextSpan const& parent) : parent_(&parent)
       throw std::runtime_error("Embedded null character");
 
     int const width = ::wcwidth(value);
-
     if (width < 0)
       throw std::runtime_error("Non-printable Unicode character");
+    bool const whitespace = std::iswspace(value) != 0;
 
-    characters_.push_back({
+    // Not sure if the rest of the code really relies on this...
+    // If this fails then this character is probably one of '\t', '\f', '\n', '\r' or '\v', and those should be handled separately.
+    ASSERT(!whitespace || width == 1);
+
+    characters_meta_.push_back({
         .utf8_begin = offset,
         .utf8_size = size,
-        .value = value,
         .cell_width = width,
-        .whitespace = std::iswspace(value) != 0
+        .whitespace = whitespace
     });
+    wide_characters_ += value;
 
     offset += size;
   }
@@ -89,20 +89,20 @@ TextSpanView::TextSpanView(TextSpan const& parent) : parent_(&parent)
 TextSpanView::operator std::u8string_view() const
 {
   // Don't call this on an empty TextSpanView.
-  ASSERT(!characters_.empty());
+  ASSERT(!characters_meta_.empty());
 
   size_t size = 0;
-  for (Character const& character : characters_)
-    size += character.utf8_size;
+  for (CharacterMeta const& character_meta : characters_meta_)
+    size += character_meta.utf8_size;
 
-  return {&parent_->text()[0] + characters_.front().utf8_begin, size};
+  return {&text_span_->text()[0] + characters_meta_.front().utf8_begin, size};
 }
 
 #ifdef CWDEBUG
 void TextSpanView::print_on(std::ostream& os) const
 {
   LIBCWD_USING_OSTREAM_PRELUDE;
-  os << "{parent:" << print_pointer(parent_) << '}';
+  os << "{text_span:" << print_pointer(text_span_) << '}';
 }
 #endif
 

@@ -1,13 +1,12 @@
 #include "sys.h"
 #include "terminal/Context.h"
+#include "terminal/Pad.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <string_view>
-#include <vector>
 #include "debug.h"
 
 namespace terminal = ava::tui::terminal;
@@ -77,83 +76,55 @@ std::array<char const*, 10> lorem_ipsum_paragraphs = {
 
 namespace {
 
-constexpr uint32_t pad_line_count = 2000;
-constexpr uint32_t pad_line_width = 200;
+constexpr uint32_t pad_line_width = 120;
+constexpr int paragraph_repetitions = 20;
+constexpr std::size_t highlight_every_n_words = 7;
 
-// Wrap one space-delimited paragraph into lines no wider than max_width terminal cells.
-//
-// The test text is ASCII, so byte counts equal terminal-cell counts. Words longer than
-// max_width are kept intact because the supplied lorem ipsum contains no such words.
-std::vector<std::string> wrap_paragraph(std::string_view paragraph, std::size_t max_width)
+// Convert ASCII lorem ipsum text into the UTF-8 string type that TextSpan::create expects.
+std::u8string to_u8string(std::string_view text)
 {
-  std::vector<std::string> lines;
-  std::string line;
-
-  for (std::size_t begin = 0; begin < paragraph.size();)
-  {
-    std::size_t const end = paragraph.find(' ', begin);
-    std::string_view const word = paragraph.substr(begin, end == std::string_view::npos ? paragraph.size() - begin : end - begin);
-    if (!line.empty() && line.size() + 1 + word.size() > max_width)
-    {
-      lines.push_back(std::move(line));
-      line.clear();
-    }
-    if (!line.empty())
-      line += ' ';
-    line += word;
-    if (end == std::string_view::npos)
-      break;
-    begin = end + 1;
-  }
-
-  if (!line.empty())
-    lines.push_back(std::move(line));
-  return lines;
+  return std::u8string{reinterpret_cast<char8_t const*>(text.data()), text.size()};
 }
 
-// Build exactly pad_line_count lines by cycling through the source paragraphs.
-// An empty line follows every complete paragraph, including between repetitions.
-std::vector<std::string> make_pad_lines()
+// Build one Paragraph from a single lorem ipsum paragraph by chopping it into phrases of
+// alternating 51 and 19 characters long. Every third 19-character phrase gets its own colored
+// Rendition.
+terminal::Paragraph make_paragraph(std::string_view text, terminal::Rendition paragraph_rendition, std::array<terminal::ColorPair, 4> const& phrase_colors)
 {
-  std::vector<std::string> lines;
-  lines.reserve(pad_line_count);
+  terminal::Paragraph paragraph{paragraph_rendition};
 
-  for (int paragraph_index = 0; lines.size() < pad_line_count; ++paragraph_index)
+  int remaining = text.size();
+  std::array<int, 2> pla{51, 19};
+  bool need_color = false;
+  int begin = 0;
+  int phrase19_count = 0;
+  int phrase19_index = 0;
+
+  while (remaining > 0)
   {
-    for (std::string& line : wrap_paragraph(lorem_ipsum_paragraphs[paragraph_index % lorem_ipsum_paragraphs.size()], pad_line_width))
+    for (int pl = 0; pl < 2; ++pl)
     {
-      if (lines.size() == pad_line_count)
+      int phrase_len = pla[pl];
+      std::string_view phrase = text.substr(begin, phrase_len);
+      begin += phrase_len;
+
+      if (pl == 1 && need_color)
+      {
+        paragraph.append(terminal::TextSpan::create(to_u8string(phrase), terminal::Rendition{phrase_colors[phrase19_index % phrase_colors.size()]}));
+        ++phrase19_index;
+      }
+      else
+        paragraph.append(terminal::TextSpan::create(to_u8string(phrase)));
+
+      remaining -= phrase_len;
+      if (remaining <= 0)
         break;
-      lines.push_back(std::move(line));
     }
-    if (lines.size() < pad_line_count)
-      lines.emplace_back();
+    ++phrase19_count;
+    need_color = (phrase19_count + 1) % 3 == 0;
   }
-  return lines;
-}
 
-// Write one line using its base color and recolor one selected word with highlight_color.
-// Empty paragraph separators remain blank and therefore have no word to highlight.
-void write_colored_line(terminal::Window& pad, std::size_t row, std::string const& line, terminal::ColorPair base_color, terminal::ColorPair highlight_color)
-{
-  if (line.empty())
-    return;
-
-  std::vector<std::size_t> word_starts{0};
-  for (std::size_t pos = line.find(' '); pos != std::string::npos; pos = line.find(' ', pos + 1))
-    word_starts.push_back(pos + 1);
-
-  std::size_t const word_begin = word_starts[row % word_starts.size()];
-  std::size_t const word_end = line.find(' ', word_begin);
-  std::size_t const highlight_end = word_end == std::string::npos ? line.size() : word_end;
-
-  pad.move({static_cast<uint32_t>(row), 0});
-  pad.color_set(base_color);
-  pad.addstr(line.c_str(), static_cast<int>(word_begin));
-  pad.color_set(highlight_color);
-  pad.addstr(line.c_str() + word_begin, static_cast<int>(highlight_end - word_begin));
-  pad.color_set(base_color);
-  pad.addstr(line.c_str() + highlight_end);
+  return paragraph;
 }
 
 } // namespace
@@ -170,27 +141,35 @@ int main()
   terminal::Context terminal_context;
   terminal::Window const& stdscr = terminal_context.stdscr();
 
-  // Create three pads of `pad_line_count` lines that are `pad_line_width` wide.
-  terminal::Dimension const pad_dimension{pad_line_count, pad_line_width};
-  std::array<terminal::Window, 3> pads = {stdscr.newpad(pad_dimension), stdscr.newpad(pad_dimension), stdscr.newpad(pad_dimension)};
-
-  std::array const line_colors = {
-      terminal_context.create_color_pair({0xe8e8e8}, {0x182030}),
-      terminal_context.create_color_pair({0x201408}, {0xf0d8a8}),
-      terminal_context.create_color_pair({0xd8f0e0}, {0x183828}),
+  std::array const paragraph_colors = {
       terminal_context.create_color_pair({0x301838}, {0xe8c8f0}),
+      terminal_context.create_color_pair({0xe8e8e8}, {0x382030}),
+      terminal_context.create_color_pair({0xa01408}, {0x50d8a8}),
+      terminal_context.create_color_pair({0xd8f0e0}, {0x183828}),
   };
-  std::array const word_colors = {
+  std::array const phrase19_colors = {
       terminal_context.create_color_pair({0xfff060}, {0x804020}),
       terminal_context.create_color_pair({0x102850}, {0x70e0f0}),
       terminal_context.create_color_pair({0xffd8f0}, {0x903060}),
       terminal_context.create_color_pair({0x182008}, {0xa8e050}),
   };
 
-  std::vector<std::string> const lines = make_pad_lines();
-  for (std::size_t row = 0; row < lines.size(); ++row)
+  // Fill the Pad's with the lorem ipsum paragraphs, cycling through them (and through the
+  // paragraph default renditions) to get enough content to scroll through.
+  std::array<terminal::Pad, 3> pads;
+  int const total_paragraph_count = paragraph_repetitions * static_cast<int>(lorem_ipsum_paragraphs.size());
+  for (int paragraph_number = 0; paragraph_number < total_paragraph_count; ++paragraph_number)
+  {
+    int const source_index = paragraph_number % static_cast<int>(lorem_ipsum_paragraphs.size());
     for (int p = 0; p < pads.size(); ++p)
-      write_colored_line(pads[p], row, lines[row], line_colors[row % line_colors.size()], word_colors[(row * 3 + 1) % word_colors.size()]);
+      pads[p].append(make_paragraph(lorem_ipsum_paragraphs[source_index],
+                                    terminal::Rendition{paragraph_colors[paragraph_number % paragraph_colors.size()]},
+                                    phrase19_colors));
+  }
+
+  // Wrap the content at pad_line_width cells and create the ncurses pad from it.
+  for (int p = 0; p < pads.size(); ++p)
+    pads[p].generate(pad_line_width);
 
   uint32_t const pad_view_height = 17;
   terminal::Position const top_left_first_pad_view{1, 5};
@@ -202,6 +181,7 @@ int main()
   }
   terminal::Dimension const view_size{pad_view_height, std::min(pad_line_width, stdscr.getmaxyx().width() - top_left_first_pad_view.col())};
 
+  int const max_first_row = static_cast<int>(pads[0].dimension().height() - pads.size() * view_size.height());
   int first_row = 0;
   for (;;)
   {
@@ -217,7 +197,7 @@ int main()
       // Input is screen-global, but reading it through stdscr can implicitly refresh
       // stdscr over the pad. Reading through the pad retains ncurses key decoding;
       // pads are deliberately not refreshed as a side effect of input operations.
-      pads[0].get_wch(key);
+      pads[0].window().get_wch(key);
 
       Dout(dc::notice, "key = " << key);
       if (key == 'q')
@@ -242,7 +222,7 @@ int main()
       {
         if ((++count % 5) == 0)
         {
-          first_row = std::clamp(first_row + (saw_scroll_down ? 1 : -1), 0, static_cast<int>(pad_line_count - pads.size() * view_size.height()));
+          first_row = std::clamp(first_row + (saw_scroll_down ? 1 : -1), 0, max_first_row);
           Dout(dc::notice, "first_row = " << first_row);
           break;
         }

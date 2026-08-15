@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 #include "debug.h"
+#include "utils/macros.h"
+#include "utils/print_wstring.h"
 
 // This header must be included last.
 #include "private_convert.h"
@@ -467,7 +469,7 @@ struct Window::Impl
   int addstr(Position pos, wchar_t const* str) { return ::mvwaddwstr(handle_, pos.row(), pos.col(), str); }
   int addstr(Position pos, wchar_t const* str, int n) { return ::mvwaddnwstr(handle_, pos.row(), pos.col(), str, n); }
 
-#if 0 // FIXME: Lets not do this; instead pass a string + Rendition to build the cchar_t array.
+#if 0 // FIXME: Lets not do this; instead set a different rendition with Window::attr_set and then write a string using addstr to build the cchar_t array.
   // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
   //
   // The wadd_wchstr functions copy the array of complex characters into the window image structure at and after the cursor position.
@@ -1388,8 +1390,18 @@ void Window::addstr(wchar_t const* str)
 void Window::addstr(wchar_t const* str, int n)
 {
   int res = impl_->addstr(str, n);
-  ASSERT(res != ERR);
+#if CW_DEBUG
+  if (AI_UNLIKELY(res == ERR))
+  {
+    // The bottom-right corner character was stored, but the cursor could not advance
+    // past it (see the comment in Window.h). Verify that the cursor is indeed stuck
+    // at the bottom-right corner, so that any other kind of error still asserts.
+    Position const cursor = getyx();
+    Dimension const size = getmaxyx();
+    ASSERT(cursor.row() + 1 == size.height() && cursor.col() + 1 == size.width());
+  }
 }
+#endif
 
 void Window::addstr(Position pos, wchar_t const* str)
 {

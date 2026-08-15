@@ -6,6 +6,8 @@
 
 namespace ava::tui::terminal {
 
+class Window;
+
 // class Rendition
 //
 // A ColorPair / Attributes pair.
@@ -19,7 +21,8 @@ class Rendition
   Attributes attributes_;
 
  public:
-  Rendition(ColorPair color_pair, Attributes attributes = {}) : color_pair_(color_pair), attributes_(attributes) { }
+  // Construct a Rendition with `color_pair` and `attributes`.
+  Rendition(ColorPair color_pair = {}, Attributes attributes = {}) : color_pair_(color_pair), attributes_(attributes) { }
 
   // Accessors
 
@@ -28,6 +31,12 @@ class Rendition
 
   Attributes attributes() const { return attributes_; }
   Attributes& attributes() { return attributes_; }
+
+  // Equal when both use the same color pair and the same attributes.
+  friend bool operator==(Rendition const& lhs, Rendition const& rhs)
+  {
+    return lhs.color_pair_.index() == rhs.color_pair_.index() && lhs.attributes_.mask() == rhs.attributes_.mask();
+  }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

@@ -469,7 +469,10 @@ struct Window::Impl
   int addstr(Position pos, wchar_t const* str) { return ::mvwaddwstr(handle_, pos.row(), pos.col(), str); }
   int addstr(Position pos, wchar_t const* str, int n) { return ::mvwaddnwstr(handle_, pos.row(), pos.col(), str, n); }
 
-#if 0 // FIXME: Lets not do this; instead set a different rendition with Window::attr_set and then write a string using addstr to build the cchar_t array.
+#if 0
+  // This API is deliberately commented out.
+  // Instead, set a different rendition with Window::attr_set and then write a string using addstr to build the cchar_t array.
+
   // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
   //
   // The wadd_wchstr functions copy the array of complex characters into the window image structure at and after the cursor position.
@@ -1355,7 +1358,7 @@ void Window::addstr(Position pos, char8_t const* wstr, int n)
   impl_->addstr(pos, wstr, n);
 }
 
-#if 0
+#if 0 // This is deliberately commented out.
 void Window::addstr(ComplexChar const* str)
 {
   int res = impl_->addstr(str);

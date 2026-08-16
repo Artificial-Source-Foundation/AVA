@@ -2,7 +2,7 @@
 #include "terminal/ComplexChar.h"
 #include "terminal/GraphemeCluster.h"
 #include "terminal/Context.h"
-#include "terminal/Window.h"
+#include "terminal/BasicWindow.h"
 
 #include <array>
 #include <cstdlib>
@@ -49,7 +49,7 @@ int main()
 
   bool round_trip_ok = false;
   {
-    // Exercise the public conversion path: Window::set_background converts the
+    // Exercise the public conversion path: BasicWindow::set_background converts the
     // ComplexChar to ncurses cchar_t with setcchar, and get_background converts
     // it back with getcchar.  This specifically guards the CCHARW_MAX edge case
     // where setcchar needs a temporary terminator and getcchar writes one extra
@@ -59,17 +59,17 @@ int main()
     terminal_context.stdscr().set_background({green_rendition});
     terminal::Dimension screen_size = terminal_context.size();
     terminal::Position offset{screen_size.height() / 4, screen_size.width() / 4};
-    terminal::Window window{screen_size / 2, offset};
+    terminal::BasicWindow window{screen_size / 2, offset};
     window.set_background(source);
     window.set_border({});
     terminal::ComplexChar const round_trip = window.get_background();
     round_trip_ok =
-        require(same_storage(round_trip.cell_character(), expected_full_cluster), "Window background round-trip should preserve full cluster storage") &&
+        require(same_storage(round_trip.cell_character(), expected_full_cluster), "BasicWindow background round-trip should preserve full cluster storage") &&
         require(round_trip.cell_character().length() == terminal::GraphemeCluster::capacity,
                 "round-tripped full cluster should still use every storage slot") &&
         require(!round_trip.cell_character().is_zero_terminated(), "round-tripped full cluster should still be unterminated in-place") &&
         require((round_trip.rendition().attributes().mask() & static_cast<terminal::Attributes::attr_t>(terminal::Attribute::bold)) != 0,
-                "Window background round-trip should preserve bold attribute");
+                "BasicWindow background round-trip should preserve bold attribute");
 
     window.move({1, 1});
     terminal_context.stdscr().refresh();

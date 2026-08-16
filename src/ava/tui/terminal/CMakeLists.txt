@@ -4,13 +4,13 @@ add_library(ava_terminal)
 # Declare source files.
 target_sources(ava_terminal
   PRIVATE
+    "BasicWindow.cxx"
     "Context.cxx"
     "ComplexChar.cxx"
     "Pad.cxx"
     "Paragraph.cxx"
     "TextRow.cxx"
     "TextSpan.cxx"
-    "Window.cxx"
     "private_convert.cxx"
 )
 

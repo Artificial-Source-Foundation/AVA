@@ -1,5 +1,5 @@
 #include "sys.h"
-#include "Window.h"
+#include "BasicWindow.h"
 
 #include <array>
 #include <cstdarg>
@@ -15,7 +15,7 @@
 
 namespace ava::tui::terminal {
 
-struct Window::Impl
+struct BasicWindow::Handle
 {
  private:
   WINDOW* handle_;
@@ -67,12 +67,12 @@ struct Window::Impl
   }
 
  public:
-  // Construct an Impl representing stdscr.
-  Impl() : handle_(stdscr) { default_window_initialization(); }
+  // Construct an Handle representing stdscr.
+  Handle() : handle_(stdscr) { default_window_initialization(); }
 
   // Wrap an ncurses WINDOW handle returned by a window-creation function.
-  // The pointer must be non-null and is owned by this Impl, except for stdscr which is owned by ncurses itself.
-  explicit Impl(WINDOW* handle) : handle_(handle) { ASSERT(handle_); }
+  // The pointer must be non-null and is owned by this Handle, except for stdscr which is owned by ncurses itself.
+  explicit Handle(WINDOW* handle) : handle_(handle) { ASSERT(handle_); }
 
   static WINDOW* newpad(Dimension size)
   {
@@ -83,7 +83,7 @@ struct Window::Impl
     return ::newpad(size.height(), size.width());
   }
 
-  Impl(Dimension size, Position pos)
+  Handle(Dimension size, Position pos)
   {
     // https://invisible-island.net/ncurses/man/curs_window.3x.html
     //
@@ -95,7 +95,7 @@ struct Window::Impl
     default_window_initialization();
   }
 
-  ~Impl()
+  ~Handle()
   {
     if (handle_ == stdscr)
       return;
@@ -471,7 +471,7 @@ struct Window::Impl
 
 #if 0
   // This API is deliberately commented out.
-  // Instead, set a different rendition with Window::attr_set and then write a string using addstr to build the cchar_t array.
+  // Instead, set a different rendition with BasicWindow::attr_set and then write a string using addstr to build the cchar_t array.
 
   // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
   //
@@ -1058,40 +1058,40 @@ struct Window::Impl
   }
 };
 
-Window::Window(Dimension size, Position pos) : impl_(std::make_unique<Impl>(size, pos))
+BasicWindow::BasicWindow(Dimension size, Position pos) : impl_(std::make_unique<Handle>(size, pos))
 {
 }
 
-Window::Window(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+BasicWindow::BasicWindow(std::unique_ptr<Handle> impl) : impl_(std::move(impl))
 {
 }
 
-Window::Window() = default;
+BasicWindow::BasicWindow() = default;
 
-void Window::init_as_stdscr()
+void BasicWindow::init_as_stdscr()
 {
-  // Only call this function once and only on a default constructed Window. This should only be called from Context().
+  // Only call this function once and only on a default constructed BasicWindow. This should only be called from Context().
   ASSERT(!impl_);
-  impl_ = std::make_unique<Impl>();
+  impl_ = std::make_unique<Handle>();
 }
 
-Window::~Window() = default;
-Window::Window(Window&&) noexcept = default;
-Window& Window::operator=(Window&&) noexcept = default;
+BasicWindow::~BasicWindow() = default;
+BasicWindow::BasicWindow(BasicWindow&&) noexcept = default;
+BasicWindow& BasicWindow::operator=(BasicWindow&&) noexcept = default;
 
-Window Window::newpad(Dimension size)
+BasicWindow BasicWindow::newpad(Dimension size)
 {
-  WINDOW* res = Impl::newpad(size);
+  WINDOW* res = Handle::newpad(size);
   ASSERT(res);
-  return Window(std::make_unique<Impl>(res));
+  return BasicWindow(std::make_unique<Handle>(res));
 }
 
-Window Window::subwin(Dimension size, Position pos)
+BasicWindow BasicWindow::subwin(Dimension size, Position pos)
 {
-  return Window(std::make_unique<Impl>(impl_->subwin(size, pos)));
+  return BasicWindow(std::make_unique<Handle>(impl_->subwin(size, pos)));
 }
 
-Window Window::subwin(Margin margin)
+BasicWindow BasicWindow::subwin(Margin margin)
 {
   Dimension size = getmaxyx();
   // The caller is responsible for making sure this is true.
@@ -1100,12 +1100,12 @@ Window Window::subwin(Margin margin)
   return subwin(size - margin, pos + margin);
 }
 
-Window Window::derwin(Dimension size, Position pos)
+BasicWindow BasicWindow::derwin(Dimension size, Position pos)
 {
-  return Window(std::make_unique<Impl>(impl_->derwin(size, pos)));
+  return BasicWindow(std::make_unique<Handle>(impl_->derwin(size, pos)));
 }
 
-Window Window::derwin(Margin margin)
+BasicWindow BasicWindow::derwin(Margin margin)
 {
   Dimension size = getmaxyx();
   // The caller is responsible for making sure this is true.
@@ -1114,179 +1114,179 @@ Window Window::derwin(Margin margin)
   return derwin(size - margin, pos + margin);
 }
 
-void Window::derwin(Position pos)
+void BasicWindow::derwin(Position pos)
 {
   int res = impl_->derwin(pos);
   ASSERT(res != ERR);
 }
 
-void Window::syncup()
+void BasicWindow::syncup()
 {
   impl_->syncup();
 }
 
-void Window::cursyncup()
+void BasicWindow::cursyncup()
 {
   impl_->cursyncup();
 }
 
-void Window::syncok(bool enabled)
+void BasicWindow::syncok(bool enabled)
 {
   int res = impl_->syncok(enabled);
   ASSERT(res != ERR);
 }
 
-void Window::set_background(ComplexChar background, bool erase)
+void BasicWindow::set_background(ComplexChar background, bool erase)
 {
   impl_->set_background(background, erase);
 }
 
-ComplexChar Window::get_background() const
+ComplexChar BasicWindow::get_background() const
 {
   return impl_->get_background();
 }
 
-void Window::attr_set(Rendition rendition)
+void BasicWindow::attr_set(Rendition rendition)
 {
   int res = impl_->attr_set(rendition);
   ASSERT(res != ERR);
 }
 
-void Window::attr_get(Rendition& rendition) const
+void BasicWindow::attr_get(Rendition& rendition) const
 {
   int res = impl_->attr_get(rendition);
   ASSERT(res != ERR);
 }
 
-void Window::attr_on(Attributes attributes)
+void BasicWindow::attr_on(Attributes attributes)
 {
   int res = impl_->attr_on(attributes);
   ASSERT(res != ERR);
 }
 
-void Window::attr_off(Attributes attributes)
+void BasicWindow::attr_off(Attributes attributes)
 {
   int res = impl_->attr_off(attributes);
   ASSERT(res != ERR);
 }
 
-void Window::color_set(ColorPair color_pair)
+void BasicWindow::color_set(ColorPair color_pair)
 {
   int res = impl_->color_set(color_pair);
   ASSERT(res != ERR);
 }
 
-void Window::chgat(int n, Rendition rendition)
+void BasicWindow::chgat(int n, Rendition rendition)
 {
   int res = impl_->chgat(n, rendition);
   ASSERT(res != ERR);
 }
 
-void Window::chgat(Position pos, int n, Rendition rendition)
+void BasicWindow::chgat(Position pos, int n, Rendition rendition)
 {
   int res = impl_->chgat(pos, n, rendition);
   ASSERT(res != ERR);
 }
 
-void Window::standout()
+void BasicWindow::standout()
 {
   int res = impl_->standout();
   ASSERT(res != ERR);
 }
 
-void Window::standend()
+void BasicWindow::standend()
 {
   int res = impl_->standend();
   ASSERT(res != ERR);
 }
 
-void Window::erase()
+void BasicWindow::erase()
 {
   impl_->erase();
 }
 
-void Window::clear()
+void BasicWindow::clear()
 {
   int res = impl_->clear();
   ASSERT(res != ERR);
 }
 
-void Window::clrtobot()
+void BasicWindow::clrtobot()
 {
   int res = impl_->clrtobot();
   ASSERT(res != ERR);
 }
 
-void Window::clrtoeol()
+void BasicWindow::clrtoeol()
 {
   int res = impl_->clrtoeol();
   ASSERT(res != ERR);
 }
 
-void Window::refresh()
+void BasicWindow::refresh()
 {
   impl_->refresh();
 }
 
-void Window::wnoutrefresh()
+void BasicWindow::wnoutrefresh()
 {
   int res = impl_->wnoutrefresh();
   ASSERT(res != ERR);
 }
 
-void Window::redrawwin()
+void BasicWindow::redrawwin()
 {
   int res = impl_->redrawwin();
   ASSERT(res != ERR);
 }
 
-void Window::wredrawln(int beg_line, int num_lines)
+void BasicWindow::wredrawln(int beg_line, int num_lines)
 {
   int res = impl_->wredrawln(beg_line, num_lines);
   ASSERT(res != ERR);
 }
 
-void Window::clearok(bool bf)
+void BasicWindow::clearok(bool bf)
 {
   int res = impl_->clearok(bf);
   ASSERT(res != ERR);
 }
 
-void Window::idcok(bool bf)
+void BasicWindow::idcok(bool bf)
 {
   impl_->idcok(bf);
 }
 
-void Window::idlok(bool bf)
+void BasicWindow::idlok(bool bf)
 {
   int res = impl_->idlok(bf);
   ASSERT(res != ERR);
 }
 
-void Window::immedok(bool bf)
+void BasicWindow::immedok(bool bf)
 {
   impl_->immedok(bf);
 }
 
-void Window::leaveok(bool bf)
+void BasicWindow::leaveok(bool bf)
 {
   int res = impl_->leaveok(bf);
   ASSERT(res != ERR);
 }
 
-void Window::scrollok(bool bf)
+void BasicWindow::scrollok(bool bf)
 {
   int res = impl_->scrollok(bf);
   ASSERT(res != ERR);
 }
 
-void Window::setscrreg(int top, int bot)
+void BasicWindow::setscrreg(int top, int bot)
 {
   int res = impl_->setscrreg(top, bot);
   ASSERT(res != ERR);
 }
 
-void Window::set_border(Border const& border)
+void BasicWindow::set_border(Border const& border)
 {
   ComplexChar const background = get_background();
   std::array<cchar_t, 8> complex_characters;
@@ -1294,110 +1294,110 @@ void Window::set_border(Border const& border)
   impl_->border_set(complex_characters);
 }
 
-void Window::hline_set(ComplexChar const& complex_char, int n)
+void BasicWindow::hline_set(ComplexChar const& complex_char, int n)
 {
   int res = impl_->hline_set(complex_char, n);
   ASSERT(res != ERR);
 }
 
-void Window::hline_set(Position pos, ComplexChar const& complex_char, int n)
+void BasicWindow::hline_set(Position pos, ComplexChar const& complex_char, int n)
 {
   int res = impl_->hline_set(pos, complex_char, n);
   ASSERT(res != ERR);
 }
 
-void Window::vline_set(ComplexChar const& complex_char, int n)
+void BasicWindow::vline_set(ComplexChar const& complex_char, int n)
 {
   int res = impl_->vline_set(complex_char, n);
   ASSERT(res != ERR);
 }
 
-void Window::vline_set(Position pos, ComplexChar const& complex_char, int n)
+void BasicWindow::vline_set(Position pos, ComplexChar const& complex_char, int n)
 {
   int res = impl_->vline_set(pos, complex_char, n);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(char const* str)
+void BasicWindow::addstr(char const* str)
 {
   impl_->addstr(str);
 }
 
-void Window::addstr(char8_t const* wstr)
+void BasicWindow::addstr(char8_t const* wstr)
 {
   impl_->addstr(wstr);
 }
 
-void Window::addstr(Position pos, char const* str)
+void BasicWindow::addstr(Position pos, char const* str)
 {
   impl_->addstr(pos, str);
 }
 
-void Window::addstr(Position pos, char8_t const* wstr)
+void BasicWindow::addstr(Position pos, char8_t const* wstr)
 {
   impl_->addstr(pos, wstr);
 }
 
-void Window::addstr(char const* str, int n)
+void BasicWindow::addstr(char const* str, int n)
 {
   impl_->addstr(str, n);
 }
 
-void Window::addstr(char8_t const* wstr, int n)
+void BasicWindow::addstr(char8_t const* wstr, int n)
 {
   impl_->addstr(wstr, n);
 }
 
-void Window::addstr(Position pos, char const* str, int n)
+void BasicWindow::addstr(Position pos, char const* str, int n)
 {
   impl_->addstr(pos, str, n);
 }
 
-void Window::addstr(Position pos, char8_t const* wstr, int n)
+void BasicWindow::addstr(Position pos, char8_t const* wstr, int n)
 {
   impl_->addstr(pos, wstr, n);
 }
 
 #if 0 // This is deliberately commented out.
-void Window::addstr(ComplexChar const* str)
+void BasicWindow::addstr(ComplexChar const* str)
 {
   int res = impl_->addstr(str);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(ComplexChar const* str, int n)
+void BasicWindow::addstr(ComplexChar const* str, int n)
 {
   int res = impl_->addstr(str, n);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(Position pos, ComplexChar const* str)
+void BasicWindow::addstr(Position pos, ComplexChar const* str)
 {
   int res = impl_->addstr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(Position pos, ComplexChar const* str, int n)
+void BasicWindow::addstr(Position pos, ComplexChar const* str, int n)
 {
   int res = impl_->addstr(pos, str, n);
   ASSERT(res != ERR);
 }
 #endif
 
-void Window::addstr(wchar_t const* str)
+void BasicWindow::addstr(wchar_t const* str)
 {
   int res = impl_->addstr(str);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(wchar_t const* str, int n)
+void BasicWindow::addstr(wchar_t const* str, int n)
 {
   int res = impl_->addstr(str, n);
 #if CW_DEBUG
   if (AI_UNLIKELY(res == ERR))
   {
     // The bottom-right corner character was stored, but the cursor could not advance
-    // past it (see the comment in Window.h). Verify that the cursor is indeed stuck
+    // past it (see the comment in BasicWindow.h). Verify that the cursor is indeed stuck
     // at the bottom-right corner, so that any other kind of error still asserts.
     Position const cursor = getyx();
     Dimension const size = getmaxyx();
@@ -1406,190 +1406,190 @@ void Window::addstr(wchar_t const* str, int n)
 #endif
 }
 
-void Window::addstr(Position pos, wchar_t const* str)
+void BasicWindow::addstr(Position pos, wchar_t const* str)
 {
   int res = impl_->addstr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::addstr(Position pos, wchar_t const* str, int n)
+void BasicWindow::addstr(Position pos, wchar_t const* str, int n)
 {
   int res = impl_->addstr(pos, str, n);
   ASSERT(res != ERR);
 }
 
-void Window::addch(ComplexChar const& complex_char)
+void BasicWindow::addch(ComplexChar const& complex_char)
 {
   impl_->addch(complex_char);
 }
 
-void Window::addch(Position pos, ComplexChar const& complex_char)
+void BasicWindow::addch(Position pos, ComplexChar const& complex_char)
 {
   impl_->addch(pos, complex_char);
 }
 
-void Window::echochar(ComplexChar const& complex_char)
+void BasicWindow::echochar(ComplexChar const& complex_char)
 {
   impl_->echochar(complex_char);
 }
 
-void Window::delch()
+void BasicWindow::delch()
 {
   int res = impl_->delch();
   ASSERT(res != ERR);
 }
 
-void Window::delch(Position pos)
+void BasicWindow::delch(Position pos)
 {
   int res = impl_->delch(pos);
   ASSERT(res != ERR);
 }
 
-void Window::insdelln(int n)
+void BasicWindow::insdelln(int n)
 {
   int res = impl_->insdelln(n);
   ASSERT(res != ERR);
 }
 
-void Window::get_wch(wint_t& key)
+void BasicWindow::get_wch(wint_t& key)
 {
   int res = impl_->get_wch(key);
   ASSERT(res != ERR);
 }
 
-void Window::unget_wch(wchar_t key)
+void BasicWindow::unget_wch(wchar_t key)
 {
-  int res = Impl::unget_wch(key);
+  int res = Handle::unget_wch(key);
   ASSERT(res != ERR);
 }
 
-void Window::in_wch(ComplexChar& complex_char) const
+void BasicWindow::in_wch(ComplexChar& complex_char) const
 {
   int res = impl_->in_wch(complex_char);
   ASSERT(res != ERR);
 }
 
-void Window::in_wch(Position pos, ComplexChar& complex_char) const
+void BasicWindow::in_wch(Position pos, ComplexChar& complex_char) const
 {
   int res = impl_->in_wch(pos, complex_char);
   ASSERT(res != ERR);
 }
 
-void Window::instr(ComplexChar* str) const
+void BasicWindow::instr(ComplexChar* str) const
 {
   int res = impl_->instr(str);
   ASSERT(res != ERR);
 }
 
-void Window::instr(ComplexChar* str, int n) const
+void BasicWindow::instr(ComplexChar* str, int n) const
 {
   int res = impl_->instr(str, n);
   ASSERT(res != ERR);
 }
 
-void Window::instr(Position pos, ComplexChar* str) const
+void BasicWindow::instr(Position pos, ComplexChar* str) const
 {
   int res = impl_->instr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::instr(Position pos, ComplexChar* str, int n) const
+void BasicWindow::instr(Position pos, ComplexChar* str, int n) const
 {
   int res = impl_->instr(pos, str, n);
   ASSERT(res != ERR);
 }
 
-void Window::ins_wch(ComplexChar const& complex_char)
+void BasicWindow::ins_wch(ComplexChar const& complex_char)
 {
   int res = impl_->ins_wch(complex_char);
   ASSERT(res != ERR);
 }
 
-void Window::ins_wch(Position pos, ComplexChar const& complex_char)
+void BasicWindow::ins_wch(Position pos, ComplexChar const& complex_char)
 {
   int res = impl_->ins_wch(pos, complex_char);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(wchar_t const* str)
+void BasicWindow::insstr(wchar_t const* str)
 {
   int res = impl_->insstr(str);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(wchar_t const* str, int n)
+void BasicWindow::insstr(wchar_t const* str, int n)
 {
   int res = impl_->insstr(str, n);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(Position pos, wchar_t const* str)
+void BasicWindow::insstr(Position pos, wchar_t const* str)
 {
   int res = impl_->insstr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(Position pos, wchar_t const* str, int n)
+void BasicWindow::insstr(Position pos, wchar_t const* str, int n)
 {
   int res = impl_->insstr(pos, str, n);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(char const* str)
+void BasicWindow::insstr(char const* str)
 {
   int res = impl_->insstr(str);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(char const* str, int n)
+void BasicWindow::insstr(char const* str, int n)
 {
   int res = impl_->insstr(str, n);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(Position pos, char const* str)
+void BasicWindow::insstr(Position pos, char const* str)
 {
   int res = impl_->insstr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::insstr(Position pos, char const* str, int n)
+void BasicWindow::insstr(Position pos, char const* str, int n)
 {
   int res = impl_->insstr(pos, str, n);
   ASSERT(res != ERR);
 }
 
-void Window::inwstr(wchar_t* str) const
+void BasicWindow::inwstr(wchar_t* str) const
 {
   int res = impl_->inwstr(str);
   ASSERT(res != ERR);
 }
 
-void Window::inwstr(wchar_t* str, int n) const
+void BasicWindow::inwstr(wchar_t* str, int n) const
 {
   int res = impl_->inwstr(str, n);
   ASSERT(res != ERR);
 }
 
-void Window::inwstr(Position pos, wchar_t* str) const
+void BasicWindow::inwstr(Position pos, wchar_t* str) const
 {
   int res = impl_->inwstr(pos, str);
   ASSERT(res != ERR);
 }
 
-void Window::inwstr(Position pos, wchar_t* str, int n) const
+void BasicWindow::inwstr(Position pos, wchar_t* str, int n) const
 {
   int res = impl_->inwstr(pos, str, n);
   ASSERT(res != ERR);
 }
 
-void Window::curs_set(int visibility)
+void BasicWindow::curs_set(int visibility)
 {
-  int res = Impl::curs_set(visibility);
+  int res = Handle::curs_set(visibility);
   ASSERT(res != ERR);
 }
 
-void Window::printw(char const* fmt, ...)
+void BasicWindow::printw(char const* fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
@@ -1598,13 +1598,13 @@ void Window::printw(char const* fmt, ...)
   ASSERT(res != ERR);
 }
 
-void Window::vprintw(char const* fmt, va_list varglist)
+void BasicWindow::vprintw(char const* fmt, va_list varglist)
 {
   int res = impl_->printw(fmt, varglist);
   ASSERT(res != ERR);
 }
 
-void Window::printw(Position pos, char const* fmt, ...)
+void BasicWindow::printw(Position pos, char const* fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
@@ -1613,152 +1613,152 @@ void Window::printw(Position pos, char const* fmt, ...)
   ASSERT(res != ERR);
 }
 
-Window Window::subpad(Dimension size, Position pos)
+BasicWindow BasicWindow::subpad(Dimension size, Position pos)
 {
   WINDOW* res = impl_->subpad(size, pos);
   ASSERT(res);
-  return Window(std::make_unique<Impl>(res));
+  return BasicWindow(std::make_unique<Handle>(res));
 }
 
-void Window::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+void BasicWindow::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   int res = impl_->prefresh(pad_pos, screen_pos, screen_size);
   ASSERT(res != ERR);
 }
 
-void Window::pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+void BasicWindow::pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   int res = impl_->pnoutrefresh(pad_pos, screen_pos, screen_size);
   ASSERT(res != ERR);
 }
 
-void Window::pechochar(ComplexChar const& complex_char)
+void BasicWindow::pechochar(ComplexChar const& complex_char)
 {
   int res = impl_->pechochar(complex_char);
   ASSERT(res != ERR);
 }
 
-void Window::scrl(int n)
+void BasicWindow::scrl(int n)
 {
   int res = impl_->scrl(n);
   ASSERT(res != ERR);
 }
 
-void Window::key_name(wint_t key, std::string& name)
+void BasicWindow::key_name(wint_t key, std::string& name)
 {
-  char const* res = Impl::key_name(key);
+  char const* res = Handle::key_name(key);
   ASSERT(res);
   name = res;
 }
 
-void Window::move(Position pos)
+void BasicWindow::move(Position pos)
 {
   int res = impl_->move(pos);
   ASSERT(res != ERR);
 }
 
-void Window::resize(Dimension size)
+void BasicWindow::resize(Dimension size)
 {
   int res = impl_->resize(size);
   ASSERT(res != ERR);
 }
 
-Position Window::getyx() const
+Position BasicWindow::getyx() const
 {
   return impl_->getyx();
 }
 
-Position Window::getbegyx() const
+Position BasicWindow::getbegyx() const
 {
   return impl_->getbegyx();
 }
 
-Dimension Window::getmaxyx() const
+Dimension BasicWindow::getmaxyx() const
 {
   return impl_->getmaxyx();
 }
 
-std::optional<Position> Window::getparyx() const
+std::optional<Position> BasicWindow::getparyx() const
 {
   return impl_->getparyx();
 }
 
-bool Window::enclose(Position pos) const
+bool BasicWindow::enclose(Position pos) const
 {
   return impl_->enclose(pos);
 }
 
-bool Window::mouse_trafo(Position& pos, bool to_screen) const
+bool BasicWindow::mouse_trafo(Position& pos, bool to_screen) const
 {
   return impl_->mouse_trafo(pos, to_screen);
 }
 
-bool Window::is_cleared() const
+bool BasicWindow::is_cleared() const
 {
   return impl_->is_cleared();
 }
 
-bool Window::is_idcok() const
+bool BasicWindow::is_idcok() const
 {
   return impl_->is_idcok();
 }
 
-bool Window::is_idlok() const
+bool BasicWindow::is_idlok() const
 {
   return impl_->is_idlok();
 }
 
-bool Window::is_immedok() const
+bool BasicWindow::is_immedok() const
 {
   return impl_->is_immedok();
 }
 
-bool Window::is_keypad() const
+bool BasicWindow::is_keypad() const
 {
   return impl_->is_keypad();
 }
 
-bool Window::is_leaveok() const
+bool BasicWindow::is_leaveok() const
 {
   return impl_->is_leaveok();
 }
 
-bool Window::is_nodelay() const
+bool BasicWindow::is_nodelay() const
 {
   return impl_->is_nodelay();
 }
 
-bool Window::is_notimeout() const
+bool BasicWindow::is_notimeout() const
 {
   return impl_->is_notimeout();
 }
 
-bool Window::is_pad() const
+bool BasicWindow::is_pad() const
 {
   return impl_->is_pad();
 }
 
-bool Window::is_scrollok() const
+bool BasicWindow::is_scrollok() const
 {
   return impl_->is_scrollok();
 }
 
-bool Window::is_subwin() const
+bool BasicWindow::is_subwin() const
 {
   return impl_->is_subwin();
 }
 
-bool Window::is_syncok() const
+bool BasicWindow::is_syncok() const
 {
   return impl_->is_syncok();
 }
 
-int Window::getdelay() const
+int BasicWindow::getdelay() const
 {
   return impl_->getdelay();
 }
 
-ScrollRegion Window::getscrreg() const
+ScrollRegion BasicWindow::getscrreg() const
 {
   ScrollRegion region{};
   int res = impl_->getscrreg(region);

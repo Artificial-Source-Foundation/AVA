@@ -141,7 +141,7 @@ int main()
   Debug(libcw_do.set_ostream(&log, &log_mutex));
 
   terminal::Context terminal_context;
-  terminal::Window const& stdscr = terminal_context.stdscr();
+  terminal::BasicWindow const& stdscr = terminal_context.stdscr();
 
   std::array const paragraph_colors = {
       terminal_context.create_color_pair({0x301838}, {0xe8c8f0}),
@@ -199,7 +199,7 @@ int main()
       // Input is screen-global, but reading it through stdscr can implicitly refresh
       // stdscr over the pad. Reading through the pad retains ncurses key decoding;
       // pads are deliberately not refreshed as a side effect of input operations.
-      pads[0].window().get_wch(key);
+      pads[0].basic_window().get_wch(key);
 
       Dout(dc::notice, "key = " << key);
       if (key == 'q')

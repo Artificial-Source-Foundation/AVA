@@ -34,68 +34,72 @@ struct ScrollRegion
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-class Window
+// class BasicWindow
+//
+// Uses the PImpl idiom with `Handle`, a thin wrapper around an ncurses `WINDOW*` handle.
+//
+class BasicWindow
 {
  private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  struct Handle;
+  std::unique_ptr<Handle> impl_;
 
  private:
   // These are called before ncurses is initialized by the constructor of Context.
   friend class Context;
-  Window();                     // Construct an uninitialized Window.
+  BasicWindow();                // Construct an uninitialized BasicWindow.
   void init_as_stdscr();        // Initialize a default constructed window with stdscr.
 
-  // Wrap an already created subwindow Impl.
-  explicit Window(std::unique_ptr<Impl> impl);
+  // Wrap an already created subwindow Handle.
+  explicit BasicWindow(std::unique_ptr<Handle> impl);
 
  public:
-  // Construct a new Window with its top-left cell at `pos` with dimension `size`.
-  Window(Dimension size, Position pos); // newwin
+  // Construct a new BasicWindow with its top-left cell at `pos` with dimension `size`.
+  BasicWindow(Dimension size, Position pos); // newwin
 
   // Construct a new off-screen pad with dimension `size`; pads require explicit pad refresh rectangles.
-  static Window newpad(Dimension size); // newpad
+  static BasicWindow newpad(Dimension size); // newpad
 
-  // Disallow copying; allow moving a Window.
-  Window(Window const&) = delete;
-  Window& operator=(Window const&) = delete;
-  Window(Window&&) noexcept;
-  Window& operator=(Window&&) noexcept;
+  // Disallow copying; allow moving a BasicWindow.
+  BasicWindow(BasicWindow const&) = delete;
+  BasicWindow& operator=(BasicWindow const&) = delete;
+  BasicWindow(BasicWindow&&) noexcept;
+  BasicWindow& operator=(BasicWindow&&) noexcept;
 
-  // The destructor must be defined in the .cxx file because of the std::unique_ptr<Impl> with incomplete `Impl`.
-  ~Window();
+  // The destructor must be defined in the .cxx file because of the std::unique_ptr<Handle> with incomplete `Handle`.
+  ~BasicWindow();
 
   // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
-  // Create a Window that is a subwindow of the current Window.
+  // Create a BasicWindow that is a subwindow of the current BasicWindow.
   //
   // Either pass dimension `size` and top-left screen position `pos`,
-  // or pass a Margin that is relative to this Window.
+  // or pass a Margin that is relative to this BasicWindow.
   //
-  // The returned Window shares storage with this Window. The caller must keep parent
+  // The returned BasicWindow shares storage with this BasicWindow. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
-  Window subwin(Dimension size, Position pos);                          // subwin
-  Window subwin(Margin margin);                                         //
+  BasicWindow subwin(Dimension size, Position pos);                          // subwin
+  BasicWindow subwin(Margin margin);                                         //
 
-  // Create a Window that is a derived subwindow of the current Window.
+  // Create a BasicWindow that is a derived subwindow of the current BasicWindow.
   //
-  // Either pass dimension `size` and top-left position `pos` relative to this Window,
-  // or pass a Margin that is relative to this Window.
+  // Either pass dimension `size` and top-left position `pos` relative to this BasicWindow,
+  // or pass a Margin that is relative to this BasicWindow.
   //
-  // The returned Window shares storage with this Window. The caller must keep parent
+  // The returned BasicWindow shares storage with this BasicWindow. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
-  Window derwin(Dimension size, Position pos);                          // derwin
-  Window derwin(Margin margin);                                         //
+  BasicWindow derwin(Dimension size, Position pos);                          // derwin
+  BasicWindow derwin(Margin margin);                                         //
 
   // Move this derived subwindow to `pos` (relative to its parent).
   //
-  // The current Window must have been created with `derwin` and stay completely inside its parent window.
+  // The current BasicWindow must have been created with `derwin` and stay completely inside its parent window.
   void derwin(Position pos);                                            // mvderwin
 
-  // Flatten the changed-cell bookkeeping, propagating all subwindow touches to the root Window.
+  // Flatten the changed-cell bookkeeping, propagating all subwindow touches to the root BasicWindow.
   void syncup();                                                        // wsyncup
 
-  // Propagate this Window cursor position to all ancestor windows.
+  // Propagate this BasicWindow cursor position to all ancestor windows.
   void cursyncup();                                                     // wcursyncup
 
   // Enable or disable automatic syncup upon mutations.
@@ -137,20 +141,20 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_getyx.3x.html
 
-  // Return the cursor position relative to this Window's top-left corner.
+  // Return the cursor position relative to this BasicWindow's top-left corner.
   Position getyx() const;                                               // getyx
-  // Return this Window's top-left position in screen coordinates.
+  // Return this BasicWindow's top-left position in screen coordinates.
   Position getbegyx() const;                                            // getbegyx
-  // Return this Window's current dimensions in rows and columns.
+  // Return this BasicWindow's current dimensions in rows and columns.
   Dimension getmaxyx() const;                                           // getmaxyx
   // Return this subwindow's parent-relative origin, or no value when it has no parent.
   std::optional<Position> getparyx() const;                             // getparyx
 
   // https://invisible-island.net/ncurses/man/curs_mouse.3x.html
 
-  // Return whether screen-relative `pos` lies within this Window.
+  // Return whether screen-relative `pos` lies within this BasicWindow.
   bool enclose(Position pos) const;                                     // wenclose
-  // Convert `pos` between Window-local and screen coordinates; false means no valid conversion exists.
+  // Convert `pos` between BasicWindow-local and screen coordinates; false means no valid conversion exists.
   bool mouse_trafo(Position& pos, bool to_screen) const;                // wmouse_trafo
 
   // https://invisible-island.net/ncurses/man/curs_outopts.3x.html
@@ -179,15 +183,15 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_refresh.3x.html
 
-  // Copy the Window to the physical screen.
+  // Copy the BasicWindow to the physical screen.
   //
   // This is done by first calling `wnoutrefresh`, followed by `Context::doupdate`.
   //
   // Unless `leaveok` has been enabled, the physical cursor of the
-  // terminal is left at the location of the cursor this Window.
+  // terminal is left at the location of the cursor this BasicWindow.
   void refresh();                                                       // wrefresh
 
-  // Copy all touched lines from the Window to the virtual screen.
+  // Copy all touched lines from the BasicWindow to the virtual screen.
   void wnoutrefresh();                                                  // wnoutrefresh
 
   // Force a refresh of the entire window (in case of corruption of the screen).
@@ -197,7 +201,7 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_border_set.3x.html
 
-  // Draw a border around the Window (does not affect the cursor).
+  // Draw a border around the BasicWindow (does not affect the cursor).
   void set_border(Border const& border);                                // wborder_set
 
   // Add horizontal line after cursor.
@@ -263,14 +267,14 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_get_wch.3x.html
 
-  // Read one wide character or function-key code from this Window into `key`.
+  // Read one wide character or function-key code from this BasicWindow into `key`.
   void get_wch(wint_t& key);                                            // wget_wch
   // Push `key` back onto the ncurses input queue for the next read.
   static void unget_wch(wchar_t key);                                   // unget_wch
 
   // https://invisible-island.net/ncurses/man/curs_in_wch.3x.html
 
-  // Read the complex character under the cursor into `complex_char` without changing the Window.
+  // Read the complex character under the cursor into `complex_char` without changing the BasicWindow.
   void in_wch(ComplexChar& complex_char) const;                         // win_wch
   // Move to `pos` and read that complex character into `complex_char`.
   void in_wch(Position pos, ComplexChar& complex_char) const;           // mvwin_wch
@@ -340,7 +344,7 @@ class Window
   // https://invisible-island.net/ncurses/man/curs_pad.3x.html
 
   // Create a pad subwindow of `size` with top-left position `pos` relative to this pad.
-  Window subpad(Dimension size, Position pos);                          // subpad
+  BasicWindow subpad(Dimension size, Position pos);                          // subpad
   // Refresh a pad rectangle starting at `pad_pos` into a screen rectangle.
   void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size); // prefresh
   // Stage a pad rectangle starting at `pad_pos` into a screen rectangle without updating the terminal.
@@ -350,7 +354,7 @@ class Window
 
   // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
 
-  // Scroll the Window up for positive `n` or down for negative `n` lines.
+  // Scroll the BasicWindow up for positive `n` or down for negative `n` lines.
   void scrl(int n);                                                     // wscrl
 
   // https://invisible-island.net/ncurses/man/curs_util.3x.html
@@ -372,12 +376,12 @@ class Window
   bool is_scrollok() const;                                             // is_scrollok
   bool is_subwin() const;                                               // is_subwin
   bool is_syncok() const;                                               // is_syncok
-  // Return this Window's input delay in milliseconds, or ncurses sentinel values for blocking/nonblocking modes.
+  // Return this BasicWindow's input delay in milliseconds, or ncurses sentinel values for blocking/nonblocking modes.
   int getdelay() const;                                                 // wgetdelay
-  // Return a non-owning wrapper for this Window's parent, or null when it has no parent.
-  // Commented out because this requires a central registry of Window objects that we don't have (yet).
-// std::optional<Window> getparent() const;                              // wgetparent
-  //  Return this Window's inclusive scrolling-region row bounds.
+  // Return a non-owning wrapper for this BasicWindow's parent, or null when it has no parent.
+  // Commented out because this requires a central registry of BasicWindow objects that we don't have (yet).
+// std::optional<BasicWindow> getparent() const;                              // wgetparent
+  //  Return this BasicWindow's inclusive scrolling-region row bounds.
   ScrollRegion getscrreg() const;                                      // wgetscrreg
 
   AVA_DEBUG_PRINT_MEMBERS_ON

@@ -3,7 +3,7 @@
 #include "Color.h"
 #include "ColorPair.h"
 #include "ComplexChar.h"
-#include "Window.h"
+#include "BasicWindow.h"
 
 #include <vector>
 
@@ -17,7 +17,7 @@ namespace ava::tui::terminal {
 class Context final
 {
  private:
-  Window stdscr_;                                                       // The entire surface of the terminal.
+  BasicWindow stdscr_;                                                  // The entire surface of the terminal.
   Rendition default_rendition_;                                         // The rendition to use for text that doesn't have any defined of its own.
   std::vector<ColorPair> color_pairs_;                                  // All registered foreground/background color pairs so far.
 
@@ -30,8 +30,8 @@ class Context final
   // Return a suitable ColorPair for the given colors.
   ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair
 
-  Window const& stdscr() const { return stdscr_; }                      // stdscr
-  Window& stdscr() { return stdscr_; }                                  //
+  BasicWindow const& stdscr() const { return stdscr_; }                 // stdscr
+  BasicWindow& stdscr() { return stdscr_; }                             //
 
   uint32_t rows() const;                                                // LINES
   uint32_t cols() const;                                                // COLS

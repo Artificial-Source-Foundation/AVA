@@ -6,8 +6,6 @@
 
 namespace ava::tui::terminal {
 
-class Window;
-
 // class Rendition
 //
 // A ColorPair / Attributes pair.

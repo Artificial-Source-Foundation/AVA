@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Paragraph.h"
-#include "Window.h"
+#include "BasicWindow.h"
 #include <list>
 #include <optional>
 
@@ -21,7 +21,7 @@ class Pad
 {
  private:
   std::list<Paragraph> paragraphs_;     // The Paragraph's that make up the content of this pad, in order.
-  std::optional<Window> pad_;           // The ncurses pad created by the last generate() call, if any.
+  std::optional<BasicWindow> pad_;      // The ncurses pad created by the last generate() call, if any.
 
  public:
   Pad() = default;
@@ -50,9 +50,9 @@ class Pad
   // Return the dimensions of the generated ncurses pad.
   Dimension dimension() const;
 
-  // Access the ncurses pad Window underlying this pad; for example for input functions that
-  // must not implicitly refresh stdscr over the pad (see Window::get_wch).
-  Window& window();
+  // Access the ncurses pad BasicWindow underlying this pad; for example for input functions that
+  // must not implicitly refresh stdscr over the pad (see BasicWindow::get_wch).
+  BasicWindow& basic_window();
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

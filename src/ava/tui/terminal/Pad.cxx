@@ -28,9 +28,9 @@ namespace {
 // Rows are filled up to `pad_width` cells with spaces using `default_rendition`, so that
 // the background of the whole row equals the paragraph background. A row that is written
 // to the very last row of the pad can end exactly at the bottom-right corner of the pad;
-// that is the benign ncurses corner case tolerated by Window::addstr (even though
+// that is the benign ncurses corner case tolerated by BasicWindow::addstr (even though
 // ncurses `addstr` returns ERR because it can't advance the cursor).
-void write_row(Window& pad, TextRow const& text_row, uint32_t row, uint32_t pad_width, Rendition const& default_rendition)
+void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t pad_width, Rendition const& default_rendition)
 {
   pad.move(Position{row, 0});
 
@@ -142,7 +142,7 @@ void Pad::generate(uint32_t cell_width)
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.size() - 1);
 
   // (Re)create the ncurses pad; the assignment destroys the previously generated pad, if any.
-  pad_ = Window::newpad(Dimension{pad_height, cell_width});
+  pad_ = BasicWindow::newpad(Dimension{pad_height, cell_width});
 
   // Write all wrapped rows into the new pad.
   auto paragraph_iter = paragraphs_.begin();
@@ -173,7 +173,7 @@ Dimension Pad::dimension() const
   return pad_->getmaxyx();
 }
 
-Window& Pad::window()
+BasicWindow& Pad::basic_window()
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());

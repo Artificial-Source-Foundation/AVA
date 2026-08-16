@@ -8,7 +8,7 @@
 #include "terminal/Rendition.h"
 #include "terminal/TextRow.h"
 #include "terminal/TextSpan.h"
-#include "terminal/Window.h"
+#include "terminal/BasicWindow.h"
 
 #include <array>
 #include <cstddef>
@@ -224,7 +224,7 @@ void test_pad_generate_comment_example()
     std::array<terminal::ComplexChar, 9> cells;
     for (std::size_t row = 0; row < expected.size(); ++row)
     {
-      pad.window().instr(terminal::Position{static_cast<uint32_t>(row), 0}, cells.data(), static_cast<int>(cells.size()));
+      pad.basic_window().instr(terminal::Position{static_cast<uint32_t>(row), 0}, cells.data(), static_cast<int>(cells.size()));
 
       for (std::size_t col = 0; col < cells.size(); ++col)
       {

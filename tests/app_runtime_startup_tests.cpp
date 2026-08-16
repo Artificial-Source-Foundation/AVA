@@ -343,7 +343,7 @@ void test_app_active_context_status_tracks_compaction_projection()
   auto const grown_tokens =
       grown_entries ? ava::session::estimate_active_context_tokens(*grown_entries) : ava::core::Result<std::size_t>(std::unexpected(grown_entries.error()));
 
-  auto compaction_request = ava::session::ManualCompactionRequest{};
+  ava::session::ManualCompactionRequest compaction_request;
   compaction_request.summary = "condensed history";
   compaction_request.config = ava::session::default_compaction_config();
   compaction_request.estimated_tokens = 12'500;

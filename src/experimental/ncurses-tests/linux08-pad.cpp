@@ -6,7 +6,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <string_view>
+#include <mutex>
 #include "debug.h"
 
 namespace terminal = ava::tui::terminal;

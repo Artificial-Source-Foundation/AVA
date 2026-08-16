@@ -1400,8 +1400,8 @@ void Window::addstr(wchar_t const* str, int n)
     Dimension const size = getmaxyx();
     ASSERT(cursor.row() + 1 == size.height() && cursor.col() + 1 == size.width());
   }
-}
 #endif
+}
 
 void Window::addstr(Position pos, wchar_t const* str)
 {

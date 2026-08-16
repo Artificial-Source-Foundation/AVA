@@ -337,9 +337,9 @@ def main():
 
     workflow = (source / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     for sha in (
-        "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
-        "caa296126883cff596d87d8935842f9db880ef25",
-        "a0853c24544627f65ddf259abe73b1d18a591444",
+        "3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        "820762786026740c76f36085b0efc47a31fe5020",
     ):
         assert sha in workflow
     assert "permissions:\n  contents: read" in workflow

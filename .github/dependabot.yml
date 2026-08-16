@@ -2,12 +2,11 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    target-branch: master
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: github-actions
-    directory: /
     target-branch: develop
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+      - github_actions
+    commit-message:
+      prefix: "build(deps)"

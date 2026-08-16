@@ -37,7 +37,8 @@ class Color
     if (rgb_ < 8)
       rgb_ = 0;
 
-    // Invalid color.
+    // The caller passed an RGB value with bits set above bit 23; construct Color only from a 24-bit RGB value
+    // (0x000000 black through 0xffffff white).
     ASSERT(rgb_ < 0x1000000);
   }
 

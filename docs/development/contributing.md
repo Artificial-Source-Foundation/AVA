@@ -135,6 +135,16 @@ Run clang-tidy against files you changed after configuring the build:
 clang-tidy <changed-cpp-files> -p build
 ```
 
+Verify that every `ASSERT` under `src/ava/` keeps its required immediately
+preceding comment, both directly and through its two focused CTests:
+
+```sh
+python3 scripts/verify-assert-comments.py .
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.assert_comments_(checker|source)$' \
+  --output-on-failure
+```
+
 For Markdown changes, run both direct repository gates and their four focused
 CTest cases:
 

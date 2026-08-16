@@ -164,7 +164,8 @@ ava::core::Result<AnchorSet::AnchorRef> AnchorSet::find_anchor(std::filesystem::
   // behavior where relative paths are resolved against the workspace root.
   if (!candidate.is_absolute())
     try {
-      // The first entry is always the launch workspace.
+      // anchors_ is empty while a relative candidate needs the launch workspace; construct AnchorSet with the launch
+      // workspace as its first entry before resolving paths.
       ASSERT(!anchors_.empty());
       return AnchorRef{anchors_.front(), candidate};
     } catch (std::runtime_error const& error) {
@@ -203,7 +204,8 @@ bool AnchorSet::contains_lexical(std::filesystem::path const& candidate) const
 
 std::filesystem::path const& AnchorSet::launch_workspace_root() const
 {
-  // The first entry is always the launch workspace.
+  // The caller asked for the launch workspace of an AnchorSet that has none; construct the AnchorSet with a launch
+  // workspace entry before calling launch_workspace_root.
   ASSERT(!anchors_.empty());
   return anchors_.front().root;
 }

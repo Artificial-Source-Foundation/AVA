@@ -91,7 +91,9 @@ Result<TrustedAccount> resolve_trusted_account()
 
   // The environment variable HOME should *only* be read by `read_trusted_account_from_env`
   // and that function may only be called *once*. Therefore `read_trusted_account_from_env`
-  // may only be called while g_account_frozen was still false.
+  // may only be called while g_account_frozen was still false. If this fires, the account was
+  // read after being frozen; call load_account_once_and_freeze() once during startup and do not call
+  // resolve_trusted_account() directly or repeatedly.
   ASSERT(g_account_frozen.is_momentary_false(std::memory_order::relaxed));
 
   Dout(dc::finish, *account);
@@ -104,10 +106,11 @@ Result<TrustedAccount> resolve_trusted_account()
 
 TrustedAccount const& cached_trusted_account()
 {
-  // This function should only be called after `resolve_trusted_account` and, subsequently,
-  // `freeze_trusted_account` were already called.
+  // The caller used the cached account before initialization completed; call load_account_once_and_freeze()
+  // during startup and only call cached_trusted_account after that succeeds.
   ASSERT(g_account_frozen.is_true(std::memory_order::acquire));
-  // If g_account_frozen is true with memory order acquire then this must be true as well.
+  // The cache is empty even though the account is frozen; resolve_trusted_account must store into g_cache before
+  // freezing, so check that initialization path.
   ASSERT(g_cache.has_value());
 
   return g_cache.value();

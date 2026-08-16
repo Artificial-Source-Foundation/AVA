@@ -32,6 +32,8 @@ Context::Context() : default_rendition_(ColorPair{0})
     // number -1 in init_pair/init_extended_pair means the terminal's default
     // foreground or background color instead of an RGB/direct-color index.
     int const status = ::use_default_colors();
+    // use_default_colors returns ERR when the terminal does not support default colors; only initialize a Context on
+    // a terminal with the default-color capability.
     ASSERT(status == OK);
     Color foreground_color{0xffffff};
     Color background_color{};
@@ -69,6 +71,8 @@ int Context::get_wch()
 ColorPair Context::create_color_pair(Color foreground, Color background)
 {
   // Support for non-direct terminals has not be implemented yet.
+  // If this fires, the TUI was started on a terminal without direct color; run it only on a terminal reporting
+  // COLORS == 16777216, or implement the non-direct-color path first.
   ASSERT(COLORS == 16777216);
 
   if (COLORS == 16777216)
@@ -80,6 +84,8 @@ ColorPair Context::create_color_pair(Color foreground, Color background)
     int color_pair_index = color_pairs_.size() + 1;
     // Initialize the new color pair.
     int const status = ::init_extended_pair(color_pair_index, foreground.as_int(), background.as_int());
+    // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep
+    // the number of created pairs within the terminal limit and pass valid Color values.
     ASSERT(status == OK);
     // Create the new ColorPair from the new color pair index.
     color_pairs_.push_back(color_pair_index);

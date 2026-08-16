@@ -272,7 +272,11 @@ SecureWorkspace::StagedWrite::StagedWrite(int parent_fd, std::filesystem::path w
   // this assertion guards against future regressions in that chain. Using
   // std::filesystem::path::filename() avoids raw byte searches that would be
   // fragile under multi-byte encodings.
+  // If this fires, an empty target name reached StagedWrite; make the caller or lexical_workspace_path reject an
+  // empty final component before constructing StagedWrite.
   ASSERT(!target_name_.empty());
+  // If this fires, target_name_ contains a path separator and renameat/unlinkat could escape the anchor; reject
+  // multi-component names in lexical_workspace_path before constructing StagedWrite.
   ASSERT(target_name_.filename() == target_name_);
 }
 

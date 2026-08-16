@@ -35,6 +35,7 @@ REQUIRED_INDEXES = (
     "schema/README.md",
     "goals/README.md",
     "versions/README.md",
+    "interop/README.md",
     "interop/evidence/README.md",
 )
 REQUIRED_LLMS = (
@@ -51,6 +52,7 @@ REQUIRED_LLMS = (
     "docs/goals/README.md",
     "docs/history/README.md",
     "docs/versions/README.md",
+    "docs/interop/README.md",
     "docs/interop/evidence/README.md",
     "docs/acp.md",
     "docs/rpc-protocol.md",
@@ -88,6 +90,10 @@ class DocumentationStructureTests(unittest.TestCase):
             "docs/development/README.md",
             "# Development\n\n[internals](internals/README.md)\n",
         )
+        self.write(
+            "docs/interop/README.md",
+            "# Interop\n\n[evidence](evidence/README.md)\n",
+        )
 
         spine_targets = [*FIXED_ROOT_DOCS, *REQUIRED_INDEXES]
         self.write(
@@ -114,7 +120,7 @@ class DocumentationStructureTests(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("documentation structure: verified (", result.stdout)
-        self.assertIn("15 required indexes, 19 llms links", result.stdout)
+        self.assertIn("16 required indexes, 20 llms links", result.stdout)
 
     def test_missing_required_index(self) -> None:
         (self.root / "docs/core/README.md").unlink()

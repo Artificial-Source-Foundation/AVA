@@ -12,7 +12,7 @@ These instructions apply to first-party documentation under `docs/` and suppleme
 - `security/`: practical security guidance plus the fixed containment contract.
 - `product/`: current feature and capability baselines.
 - `plans/`, `roadmap/`, and `goals/`: future work, sequencing, approvals, and acceptance packages.
-- `history/`, `versions/`, and `interop/evidence/`: dated ledgers, release-position journals, and bounded evidence.
+- `history/`, `versions/`, and `interop/evidence/`: dated ledgers, release-position journals, and bounded evidence. The `interop/` category index links only its evidence subcategory.
 - `schema/`: machine-readable documentation contracts.
 
 Every category owns a concise `README.md` that links each document directly in that directory. [`README.md`](README.md) is the single human spine; root [`llms.txt`](../llms.txt) is the concise robot entry point.

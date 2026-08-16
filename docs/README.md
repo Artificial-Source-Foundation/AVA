@@ -64,6 +64,6 @@ Roadmaps and goals are planning surfaces even when they record completed slices;
 
 - [History index](history/README.md): historical implementation ledgers.
 - [Version index](versions/README.md): release-position journals and historical capability claims.
-- [ACP evidence policy and reports](interop/evidence/README.md): dated, scoped interoperability observations.
+- [Interoperability index](interop/README.md): the ACP evidence category, linking the [evidence policy and reports](interop/evidence/README.md) with dated, scoped interoperability observations.
 
 Local `reference-code/pi/`, `reference-code/opencode/`, and `reference-code/grok-build/` trees are comparative behavior references only. They are not AVA architecture, implementation, documentation authority, build input, or part of documentation verification.

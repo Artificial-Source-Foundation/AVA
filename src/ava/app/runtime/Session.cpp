@@ -715,9 +715,13 @@ ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, sessio
   //      otherwise use replacement.coordinator.
   //
   // Note that it is impossible for a `manager->coordinator()` to be null, if the `manager` exists.
+  // If this fires, old_resources paired a delivery manager with a coordinator not taken from that manager; keep the
+  // manager/coordinator pair consistent by taking the coordinator from the manager when the resources are built.
   ASSERT(!old_resources.subagent_delivery_manager ||
          (old_resources.subagent_delivery_manager->coordinator() &&
           old_resources.subagent_delivery_manager->coordinator() == old_resources.subagent_coordinator));
+  // If this fires, current_w paired a delivery manager with a coordinator not taken from that manager; keep the
+  // manager/coordinator pair consistent by taking the coordinator from the manager when the resources are built.
   ASSERT(!current_w->resources().subagent_delivery_manager ||
          (current_w->resources().subagent_delivery_manager->coordinator() &&
           current_w->resources().subagent_delivery_manager->coordinator() == current_w->resources().subagent_coordinator));
@@ -747,7 +751,11 @@ ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, sessio
   //   .subagent_delivery_manager = std::move(delivery_manager),
   // after making sure `delivery_manager` is non-null; replace_with is never called
   // on a manager-less Session. And thus
+  // if this fires, the replacement Session has no subagent delivery manager; never call replace_with on a manager-less
+  // Session — construct replacements with Session::construct, which requires a non-null delivery_manager.
   ASSERT(current_w->resources().subagent_delivery_manager);
+  // If this fires, current_w's coordinator was not taken from its delivery manager; keep the manager/coordinator pair
+  // consistent by taking the coordinator from the manager.
   ASSERT(current_w->resources().subagent_coordinator == current_w->resources().subagent_delivery_manager->coordinator());
 
   CRITICAL_AREA_END_W(replacement);

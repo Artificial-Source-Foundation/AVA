@@ -1342,7 +1342,8 @@ std::vector<tui::FileReferenceItem> file_reference_items(runtime::session_ts con
 tui::SelectListView model_selector_view(ava::config::ModelRegistry const& registry, ava::config::ModelInfo const& current_model,
                                         std::shared_ptr<ava::provider::ProviderCatalog const> ensured_provider_catalog, std::string footer_hint)
 {
-  // Only pass Session::ensure_provider_catalog() or ava::provider::ProviderCatalog::build_builtins_only().
+  // The caller passed a null provider catalog; pass Session::ensure_provider_catalog() or
+  // ava::provider::ProviderCatalog::build_builtins_only() so the palette always has a catalog.
   ASSERT(ensured_provider_catalog);
 
   auto models = ava::config::effective_models(registry);
@@ -1411,7 +1412,8 @@ tui::SelectListView scoped_model_selector_view(ava::config::ModelRegistry const&
                                                std::optional<std::vector<std::string>> const& scoped_model_cycle,
                                                std::shared_ptr<ava::provider::ProviderCatalog const> ensured_provider_catalog, std::string footer_hint)
 {
-  // Only pass Session::ensure_provider_catalog() or ava::provider::ProviderCatalog::build_builtins_only().
+  // The caller passed a null provider catalog; pass Session::ensure_provider_catalog() or
+  // ava::provider::ProviderCatalog::build_builtins_only() so the palette always has a catalog.
   ASSERT(ensured_provider_catalog);
 
   auto models = scoped_model_selector_models(ava::config::effective_models(registry), scoped_model_cycle);

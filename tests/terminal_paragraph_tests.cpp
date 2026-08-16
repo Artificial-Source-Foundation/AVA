@@ -1,0 +1,257 @@
+#include "sys.h"
+#include "tests/support/test_harness.h"
+#include "terminal/Attributes.h"
+#include "terminal/ColorPair.h"
+#include "terminal/ComplexChar.h"
+#include "terminal/Pad.h"
+#include "terminal/Paragraph.h"
+#include "terminal/Rendition.h"
+#include "terminal/TextRow.h"
+#include "terminal/TextSpan.h"
+#include "terminal/Window.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdio>
+#include <string>
+#include <vector>
+
+// Disable the ncurses convenience macros (e.g. instr(str)): they collide with
+// calls to the like-named terminal::Window member functions below.
+#define NCURSES_NOMACROS
+#include <curses.h>
+
+namespace terminal = ava::tui::terminal;
+
+namespace {
+
+// Build the Paragraph of the worked example in the comment at the top of src/ava/tui/terminal/Paragraph.cxx.
+//
+// The TextSpan's whose text contains uppercase (including their spaces) are StyledTextSpan's with `styled_rendition`;
+// the other TextSpan's were created without a rendition and must be rendered with the default rendition using
+// terminals default fore- and background.
+terminal::Paragraph make_comment_paragraph(terminal::Rendition const& styled_rendition)
+{
+  terminal::Paragraph paragraph;
+  paragraph.append(terminal::TextSpan::create(u8"AAAAAAAAAAA ", styled_rendition));
+  paragraph.append(terminal::TextSpan::create(u8" bbb ccc ddd "));
+  paragraph.append(terminal::TextSpan::create(u8"EEEEEEEE FFFFF  GGGGG", styled_rendition));
+  paragraph.append(terminal::TextSpan::create(u8" hhhhh iii j kkkk lll  "));
+  paragraph.append(terminal::TextSpan::create(u8"MMMMM N OOO", styled_rendition));
+  paragraph.append(terminal::TextSpan::create(u8" ppp "));
+  paragraph.append(terminal::TextSpan::create(u8"Q ", styled_rendition));
+  paragraph.append(terminal::TextSpan::create(u8" rrr  sss ttt uuuu vvvv wwww xxx yyy "));
+  paragraph.append(terminal::TextSpan::create(u8" ZZZ", styled_rendition));
+  return paragraph;
+}
+
+// One expected TextSpanView of a wrapped TextRow: its wide characters, and whether it must be a view into a
+// StyledTextSpan (`styled`) rather than into a TextSpan using the Paragraph default rendition.
+struct ExpectedView
+{
+  wchar_t const* text;
+  bool styled;
+};
+
+// One expected TextRow of the comment example after wrapping at 9 cells: its cell width (including trailing
+// white-space) and its list of TextSpanView's, exactly as listed in the comment.
+struct ExpectedRow
+{
+  std::size_t cell_width;
+  std::vector<ExpectedView> views;
+};
+
+// The expected result of Paragraph::wrap(9) for the comment example, row by row.
+//
+// Note which span the white-space-only views belong to: the " " of row 6 and of row 11 are leading white-space of
+// the following plain TextSpan, while the " " of row 15 is leading white-space of the styled TextSpan " ZZZ".
+std::vector<ExpectedRow> const& expected_wrapped_rows()
+{
+  static std::vector<ExpectedRow> const rows{
+      ExpectedRow{9, {{L"AAAAAAAAA", true}}},
+      ExpectedRow{8, {{L"AA ", true}, {L" bbb ", false}}},
+      ExpectedRow{8, {{L"ccc ddd ", false}}},
+      ExpectedRow{9, {{L"EEEEEEEE ", true}}},
+      ExpectedRow{7, {{L"FFFFF  ", true}}},
+      ExpectedRow{6, {{L"GGGGG", true}, {L" ", false}}},
+      ExpectedRow{10, {{L"hhhhh iii ", false}}},
+      ExpectedRow{7, {{L"j kkkk ", false}}},
+      ExpectedRow{5, {{L"lll  ", false}}},
+      ExpectedRow{8, {{L"MMMMM N ", true}}},
+      ExpectedRow{11, {{L"OOO", true}, {L" ppp ", false}, {L"Q ", true}, {L" ", false}}},
+      ExpectedRow{9, {{L"rrr  sss ", false}}},
+      ExpectedRow{9, {{L"ttt uuuu ", false}}},
+      ExpectedRow{10, {{L"vvvv wwww ", false}}},
+      ExpectedRow{9, {{L"xxx yyy ", false}, {L" ", true}}},
+      ExpectedRow{3, {{L"ZZZ", true}}},
+  };
+  return rows;
+}
+
+// Check Paragraph::wrap(9) against the worked example in the comment at the top of Paragraph.cxx.
+void test_paragraph_wrap_comment_example()
+{
+  terminal::Paragraph paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
+
+  std::vector<terminal::TextRow> rows = paragraph.wrap(9);
+
+  std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
+  expect(rows.size() == expected.size(), "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " +
+                                             std::to_string(rows.size()));
+
+  std::wstring concatenated;
+  for (std::size_t row = 0; row < rows.size() && row < expected.size(); ++row)
+  {
+    std::vector<terminal::TextSpanView> const& views = rows[row].text_span_views();
+
+    expect(rows[row].cell_width() == expected[row].cell_width,
+           "row " + std::to_string(row) + " must have cell width " + std::to_string(expected[row].cell_width) + ", got " +
+               std::to_string(rows[row].cell_width()));
+    expect(views.size() == expected[row].views.size(),
+           "row " + std::to_string(row) + " must contain " + std::to_string(expected[row].views.size()) + " TextSpanView's, got " +
+               std::to_string(views.size()));
+
+    for (std::size_t view = 0; view < views.size() && view < expected[row].views.size(); ++view)
+    {
+      expect(views[view].characters() == expected[row].views[view].text,
+             "row " + std::to_string(row) + " view " + std::to_string(view) + " must cover the expected text");
+      expect(views[view].text_span()->use_default_rendition() != expected[row].views[view].styled,
+             "row " + std::to_string(row) + " view " + std::to_string(view) + " must be a view into " +
+                 (expected[row].views[view].styled ? "a StyledTextSpan" : "a TextSpan using the Paragraph default rendition"));
+      concatenated += views[view].characters();
+    }
+  }
+
+  // The catenation of all TextSpanView's of all rows must give again the original string.
+  expect(concatenated == L"AAAAAAAAAAA  bbb ccc ddd EEEEEEEE FFFFF  GGGGG hhhhh iii j kkkk lll  MMMMM N OOO ppp Q  rrr  sss ttt uuuu vvvv wwww xxx yyy  ZZZ",
+         "the catenation of all TextSpanView's of all rows must reproduce the original text");
+}
+
+// One expected row of the ncurses pad generated by Pad::generate(9) from the comment example: the full 9 cells
+// of the row (content plus the spaces that Pad appends to fill the row, which carry the Paragraph default
+// rendition) and, for every cell, whether it must have the styled rendition or the Paragraph default rendition.
+struct ExpectedPadRow
+{
+  wchar_t const* cells;
+  unsigned styled_mask;      // Bit N is set when cell N must have the styled rendition instead of the default rendition.
+};
+
+// The expected pad content, row by row.
+//
+// Rows whose wrapped width exceeded 9 cells (rows 6, 10, 13 and 11 with widths 10, 9 + clipped white-space, etc.)
+// are clipped at 9 cells: only trailing white-space may be dropped. The last row exercises writing up till the
+// bottom-right corner of the pad.
+std::array<ExpectedPadRow, 16> const& expected_pad_rows()
+{
+  static std::array<ExpectedPadRow, 16> const rows{{
+      {L"AAAAAAAAA", 0x1ff},
+      {L"AA  bbb  ", 0x007},
+      {L"ccc ddd  ", 0x000},
+      {L"EEEEEEEE ", 0x1ff},
+      {L"FFFFF    ", 0x07f},
+      {L"GGGGG    ", 0x01f},
+      {L"hhhhh iii", 0x000},
+      {L"j kkkk   ", 0x000},
+      {L"lll      ", 0x000},
+      {L"MMMMM N  ", 0x0ff},
+      {L"OOO ppp Q", 0x107},
+      {L"rrr  sss ", 0x000},
+      {L"ttt uuuu ", 0x000},
+      {L"vvvv wwww", 0x000},
+      {L"xxx yyy  ", 0x100},
+      {L"ZZZ      ", 0x007},
+  }};
+  return rows;
+}
+
+// Check Pad::generate(9) for the comment example: the ncurses pad must contain, for every cell, the expected
+// character and the expected rendition (styled, or Paragraph default).
+//
+// Runs ncurses against temporary files (never a real terminal) with TERM=xterm-256color; no refresh is performed,
+// the pad is inspected through Window::instr.
+void test_pad_generate_comment_example()
+{
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    expect(false, "tmpfile must be available for the terminal::Pad test");
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    expect(false, "newterm must initialize ncurses for the terminal::Pad test");
+    return;
+  }
+  static_cast<void>(set_term(screen));
+
+  bool const color_support = has_colors();
+  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
+  if (color_support)
+  {
+    static_cast<void>(start_color());
+    // Register two color pairs; only their (distinct) indices matter, the actual colors are never inspected.
+    static_cast<void>(::init_extended_pair(1, 2, 0));
+    static_cast<void>(::init_extended_pair(2, 4, 0));
+  }
+
+  if (color_support)
+  {
+    terminal::ColorPair styled_pair;
+    styled_pair.index() = 1;
+
+    terminal::Rendition const styled_rendition{styled_pair, terminal::Attribute::bold};
+
+    terminal::Pad pad;
+    pad.append(make_comment_paragraph(styled_rendition));
+    pad.generate(9);
+
+    std::array<ExpectedPadRow, 16> const& expected = expected_pad_rows();
+
+    expect(pad.dimension().width() == 9 && pad.dimension().height() == expected.size(),
+           "Pad::generate(9) must create a 9 x 16 pad, got " + std::to_string(pad.dimension().width()) + " x " +
+               std::to_string(pad.dimension().height()));
+
+    std::array<terminal::ComplexChar, 9> cells;
+    for (std::size_t row = 0; row < expected.size(); ++row)
+    {
+      pad.window().instr(terminal::Position{static_cast<uint32_t>(row), 0}, cells.data(), static_cast<int>(cells.size()));
+
+      for (std::size_t col = 0; col < cells.size(); ++col)
+      {
+        bool const styled = (expected[row].styled_mask >> col) & 1U;
+        std::string const where = "pad cell (row " + std::to_string(row) + ", col " + std::to_string(col) + ")";
+
+        expect(cells[col].cell_character().data()[0] == expected[row].cells[col], where + " must contain the expected character");
+        expect(cells[col].rendition().color_pair().index() == (styled ? styled_pair.index() : 0),
+               where + " must use the " + (styled ? "styled" : "paragraph default") + " color pair, got color pair " +
+                   std::to_string(cells[col].rendition().color_pair().index()));
+        expect(cells[col].rendition().attributes().mask() ==
+                   (styled ? static_cast<terminal::Attributes::attr_t>(terminal::Attribute::bold) : static_cast<terminal::Attributes::attr_t>(0)),
+               where + " must use the " + (styled ? "bold" : "normal") + " attributes");
+      }
+    }
+  }
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+}
+
+} // namespace
+
+void run_terminal_paragraph_tests()
+{
+  test_paragraph_wrap_comment_example();
+  test_pad_generate_comment_example();
+}

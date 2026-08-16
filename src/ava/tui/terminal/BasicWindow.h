@@ -22,8 +22,9 @@
 //
 namespace ava::tui::terminal {
 
-// Forward declaration.
+// Forward declarations.
 class Context;
+class Window;
 
 // Inclusive top and bottom rows of a Window scrolling region.
 struct ScrollRegion
@@ -47,7 +48,8 @@ class BasicWindow
  private:
   // These are called before ncurses is initialized by the constructor of Context.
   friend class Context;
-  BasicWindow();                // Construct an uninitialized BasicWindow.
+  friend class Window;
+  BasicWindow();                // Construct a BasicWindow that has impl_ == nullptr.
   void init_as_stdscr();        // Initialize a default constructed window with stdscr.
 
   // Wrap an already created subwindow Handle.
@@ -71,16 +73,6 @@ class BasicWindow
 
   // https://invisible-island.net/ncurses/man/curs_window.3x.html
 
-  // Create a BasicWindow that is a subwindow of the current BasicWindow.
-  //
-  // Either pass dimension `size` and top-left screen position `pos`,
-  // or pass a Margin that is relative to this BasicWindow.
-  //
-  // The returned BasicWindow shares storage with this BasicWindow. The caller must keep parent
-  // and child lifetimes ordered so the subwindow is destroyed before its parent.
-  BasicWindow subwin(Dimension size, Position pos);                          // subwin
-  BasicWindow subwin(Margin margin);                                         //
-
   // Create a BasicWindow that is a derived subwindow of the current BasicWindow.
   //
   // Either pass dimension `size` and top-left position `pos` relative to this BasicWindow,
@@ -88,8 +80,12 @@ class BasicWindow
   //
   // The returned BasicWindow shares storage with this BasicWindow. The caller must keep parent
   // and child lifetimes ordered so the subwindow is destroyed before its parent.
+
   BasicWindow derwin(Dimension size, Position pos);                          // derwin
   BasicWindow derwin(Margin margin);                                         //
+
+  BasicWindow subwin(Dimension size, Position pos_relative_to_screen);       // subwin
+  BasicWindow subwin(Margin margin);                                         //
 
   // Move this derived subwindow to `pos` (relative to its parent).
   //
@@ -166,6 +162,16 @@ class BasicWindow
   void leaveok(bool bf);                                                // leaveok
   void scrollok(bool bf);                                               // scrollok
   void setscrreg(int top, int bot);                                     // wsetscrreg
+
+  // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
+
+  //  Return this BasicWindow's inclusive scrolling-region row bounds.
+  ScrollRegion getscrreg() const;                                       // wgetscrreg
+
+  // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
+
+  // Scroll this BasicWindow up for positive `n` or down for negative `n` lines.
+  void scrl(int n);                                                     // wscrl
 
   // https://invisible-island.net/ncurses/man/curs_clear.3x.html
 
@@ -352,11 +358,6 @@ class BasicWindow
   // Add `complex_char` to a pad and refresh the pad using ncurses' remembered pad viewport.
   void pechochar(ComplexChar const& complex_char);                      // pecho_wchar
 
-  // https://invisible-island.net/ncurses/man/curs_scroll.3x.html
-
-  // Scroll the BasicWindow up for positive `n` or down for negative `n` lines.
-  void scrl(int n);                                                     // wscrl
-
   // https://invisible-island.net/ncurses/man/curs_util.3x.html
 
   // Store the printable name for `key` in `name`; function-key codes are supported.
@@ -381,8 +382,6 @@ class BasicWindow
   // Return a non-owning wrapper for this BasicWindow's parent, or null when it has no parent.
   // Commented out because this requires a central registry of BasicWindow objects that we don't have (yet).
 // std::optional<BasicWindow> getparent() const;                              // wgetparent
-  //  Return this BasicWindow's inclusive scrolling-region row bounds.
-  ScrollRegion getscrreg() const;                                      // wgetscrreg
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

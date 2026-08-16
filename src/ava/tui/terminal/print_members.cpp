@@ -1,14 +1,14 @@
 #include "sys.h"
 // clang-format off
 #include "ava/debug/debug_ostream_operators.h"  // Must be included immediately after "sys.h".
-#include "ava/tui/terminal/Border.h"
+#include "ava/tui/terminal/Box.h"
 #include "ava/tui/terminal/GraphemeCluster.h"
 // clang-format on
 #include "utils/wstring_to_utf8.h"
 
 namespace ava::tui::terminal {
 
-void Border::print_members(std::ostream& os, char const* prefix) const
+void Box::print_members(std::ostream& os, char const* prefix) const
 {
   os << prefix;
   AVA_USING_OSTREAM_PRELUDE(os)

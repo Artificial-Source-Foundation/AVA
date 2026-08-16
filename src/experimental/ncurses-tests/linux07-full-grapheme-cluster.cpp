@@ -61,7 +61,8 @@ int main()
     terminal::Position offset{screen_size.height() / 4, screen_size.width() / 4};
     terminal::BasicWindow window{screen_size / 2, offset};
     window.set_background(source);
-    window.set_border({});
+    terminal::Margin margin{.top = 1, .bottom = 1, .left = 1, .right = 1};
+    window.set_border({margin, green_rendition});
     terminal::ComplexChar const round_trip = window.get_background();
     round_trip_ok =
         require(same_storage(round_trip.cell_character(), expected_full_cluster), "BasicWindow background round-trip should preserve full cluster storage") &&

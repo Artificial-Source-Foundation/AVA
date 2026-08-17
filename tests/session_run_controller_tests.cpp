@@ -5,6 +5,7 @@
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/session_run_controller.h"
+#include "ava/session/compaction.h"
 #include "ava/session/session_store.h"
 #include "ava/core/thread.h"
 
@@ -143,6 +144,23 @@ ava::session::SessionEntry append_entry(std::string id)
 {
   return ava::session::SessionEntry{
       .id = std::move(id), .parent_id = "", .type = ava::session::EntryType::Error, .timestamp = ava::session::now_timestamp(), .data_json = "{\"test\":true}"};
+}
+
+ava::session::SessionEntry compaction_entry(std::string id)
+{
+  auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = "summary",
+                                                                                                .instructions = "",
+                                                                                                .config = ava::session::default_compaction_config(),
+                                                                                                .estimated_tokens = 0,
+                                                                                                .threshold_tokens = 0,
+                                                                                                .retained_tokens = 0,
+                                                                                                .trigger = "manual",
+                                                                                                .recent_context = "",
+                                                                                                .recent_context_omitted = false});
+  if (!entry)
+    return {};
+  entry->id = std::move(id);
+  return std::move(*entry);
 }
 
 ava::session::SessionEntry branch_summary_entry(ava::session::SessionStore const& store, std::string id, std::string parent_id, std::string root_id,
@@ -1825,6 +1843,162 @@ void test_session_run_controller_exclusive_maintenance_reservation()
   }
 }
 
+void test_session_run_controller_compaction_compare_and_append()
+{
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-persistent");
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease)
+      return;
+    expect(store->append(*lease, append_entry("persistent-prefix")).has_value(), "persistent compaction CAS fixture seeds history");
+    auto expected = store->load(*lease);
+    auto target = persistent_controller_target(*store, *lease);
+    if (!expected || !target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto exact = controller.append_compaction_if_snapshot_matches(compaction_entry("persistent-compaction"), *expected);
+    auto after_exact = store->load(*lease);
+    expect(exact && *exact == ava::session::SessionCompactionAppendResult::Appended && after_exact && after_exact->size() == 2,
+           "persistent compaction CAS appends on an exact authoritative snapshot");
+
+    if (!after_exact)
+      return;
+    auto stale = *after_exact;
+    expect(controller.append(append_entry("persistent-growth")).has_value(), "persistent compaction CAS fixture advances history ordinarily");
+    auto mismatch = controller.append_compaction_if_snapshot_matches(compaction_entry("must-not-append"), std::move(stale));
+    auto after_mismatch = store->load(*lease);
+    auto const compactions =
+        after_mismatch ? std::ranges::count_if(*after_mismatch, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }) : 0;
+    expect(mismatch && *mismatch == ava::session::SessionCompactionAppendResult::SnapshotMismatch && after_mismatch && compactions == 1 &&
+               controller.append(append_entry("persistent-after-mismatch")),
+           "persistent snapshot mismatch is successful, nonmutating, and non-latching");
+
+    auto title_snapshot = store->load(*lease);
+    if (!title_snapshot)
+      return;
+    auto automatic_title = ava::session::SessionEntry{.id = "automatic-title",
+                                                      .parent_id = title_snapshot->back().id,
+                                                      .type = ava::session::EntryType::SessionMetadata,
+                                                      .timestamp = ava::session::now_timestamp(),
+                                                      .data_json = "{\"actor\":\"auto-title\",\"generated_title\":\"Generated\"}"};
+    expect(controller.append(std::move(automatic_title)).has_value(), "compaction CAS fixture appends context-neutral automatic title metadata");
+    auto after_title = controller.append_compaction_if_snapshot_matches(compaction_entry("after-automatic-title"), std::move(*title_snapshot));
+    expect(after_title && *after_title == ava::session::SessionCompactionAppendResult::Appended,
+           "persistent compaction CAS accepts the validated trailing automatic-title suffix");
+
+    auto manual_snapshot = store->load(*lease);
+    if (!manual_snapshot)
+      return;
+    auto manual_title = ava::session::SessionEntry{.id = "manual-title",
+                                                   .parent_id = manual_snapshot->back().id,
+                                                   .type = ava::session::EntryType::SessionMetadata,
+                                                   .timestamp = ava::session::now_timestamp(),
+                                                   .data_json = "{\"actor\":\"manual\",\"name\":\"Manual\"}"};
+    expect(controller.append(std::move(manual_title)).has_value(), "compaction CAS fixture appends context-affecting manual metadata");
+    auto after_manual = controller.append_compaction_if_snapshot_matches(compaction_entry("after-manual-title"), std::move(*manual_snapshot));
+    expect(after_manual && *after_manual == ava::session::SessionCompactionAppendResult::SnapshotMismatch,
+           "persistent compaction CAS rejects a trailing manual metadata mismatch");
+
+    auto cancel_snapshot = store->load(*lease);
+    if (!cancel_snapshot)
+      return;
+    auto canceled = controller.append_compaction_if_snapshot_matches(compaction_entry("canceled-compaction"), *cancel_snapshot, [] { return true; });
+    expect(!canceled && !append_error_context(canceled.error(), "append_commit_state") && controller.append(append_entry("persistent-after-cancel")),
+           "conditional compaction cancellation before append does not latch persistence");
+
+    auto admitted = controller.admit({.request_id = "compaction-generation"});
+    if (admitted)
+    {
+      auto guard = std::move(*admitted);
+      auto stale_route = guard.compaction_append_route();
+      auto stale_snapshot = store->load(*lease);
+      guard = ava::app::ActiveRunGuard{};
+      auto stale_result = stale_snapshot ? stale_route(compaction_entry("stale-route-compaction"), std::move(*stale_snapshot), nullptr)
+                                         : ava::core::Result<ava::session::SessionCompactionAppendResult>(std::unexpected(stale_snapshot.error()));
+      expect(!stale_result && stale_result.error().message() == "stale run route",
+             "conditional compaction active route rejects its stale immutable generation");
+    }
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-ephemeral");
+    auto store = ava::session::SessionStore::create_ephemeral(root / "workspace");
+    if (!store)
+      return;
+    expect(store->append_ephemeral(append_entry("ephemeral-prefix")).has_value(), "ephemeral compaction CAS fixture seeds history");
+    auto expected = store->load();
+    auto target = ava::session::SessionAppendTarget::create_ephemeral(*store);
+    if (!expected || !target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto exact = controller.append_compaction_if_snapshot_matches(compaction_entry("ephemeral-compaction"), *expected);
+    auto stale = store->load();
+    if (!stale)
+      return;
+    expect(controller.append(append_entry("ephemeral-growth")).has_value(), "ephemeral compaction CAS fixture advances history ordinarily");
+    auto mismatch = controller.append_compaction_if_snapshot_matches(compaction_entry("ephemeral-must-not-append"), std::move(*stale));
+    auto final_entries = store->load();
+    auto const compactions =
+        final_entries ? std::ranges::count_if(*final_entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }) : 0;
+    expect(exact && *exact == ava::session::SessionCompactionAppendResult::Appended && mismatch &&
+               *mismatch == ava::session::SessionCompactionAppendResult::SnapshotMismatch && final_entries && compactions == 1,
+           "ephemeral compaction CAS has exact-match and mismatch parity with persistent sessions");
+  }
+
+  auto run_failure = [](std::string const& name, std::string_view expected_state) {
+    auto const root = create_empty_root("session-run-controller-compaction-failure-" + name);
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    if (!store || !lease || !store->append(*lease, append_entry(name + "-prefix")))
+      return false;
+    auto expected = store->load(*lease);
+    if (!expected)
+      return false;
+    int calls = 0;
+    if (expected_state == "not_started")
+    {
+      store->set_append_write_for_test([&](int, std::string_view) -> ssize_t {
+        ++calls;
+        errno = EIO;
+        return -1;
+      });
+    }
+    else if (expected_state == "partial_or_unknown")
+    {
+      store->set_append_write_for_test([&](int fd, std::string_view bytes) -> ssize_t {
+        ++calls;
+        if (calls == 1)
+          return ::write(fd, bytes.data(), std::max<std::size_t>(1, bytes.size() / 2));
+        errno = EIO;
+        return -1;
+      });
+    }
+    else
+    {
+      store->set_append_write_for_test([&](int fd, std::string_view bytes) -> ssize_t {
+        ++calls;
+        return ::write(fd, bytes.data(), bytes.size());
+      });
+      store->set_after_append_write_for_test([] { throw 1; });
+    }
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return false;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto failed = controller.append_compaction_if_snapshot_matches(compaction_entry(name + "-compaction"), std::move(*expected));
+    auto blocked = controller.append(append_entry(name + "-blocked"));
+    return !failed && append_error_context(failed.error(), "append_commit_state") == std::optional<std::string>(expected_state) && !blocked &&
+           append_error_context(blocked.error(), "append_commit_state") == std::optional<std::string>(expected_state) &&
+           controller.inspect_admission({.request_id = "blocked"}) == ava::app::AdmissionDisposition::RejectPersistenceFailure;
+  };
+  expect(run_failure("not-started", "not_started"), "compaction CAS not-started append failures latch with stable classification");
+  expect(run_failure("partial", "partial_or_unknown"), "compaction CAS partial append failures latch and cannot be bypassed");
+  expect(run_failure("committed", "committed_to_leased_inode"), "compaction CAS committed append failures latch with stable classification");
+}
+
 void test_session_run_controller_bounds_and_reentrant_snapshot()
 {
   ava::app::SessionRunController controller(ephemeral_controller_target());
@@ -1869,5 +2043,6 @@ void run_session_run_controller_tests()
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_exclusive_maintenance_reservation();
+  test_session_run_controller_compaction_compare_and_append();
   test_session_run_controller_bounds_and_reentrant_snapshot();
 }

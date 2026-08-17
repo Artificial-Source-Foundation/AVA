@@ -8,6 +8,7 @@
 #include "ava/session/export.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/record.h"
+#include "ava/session/session_metadata.h"
 #include "ava/session/validation.h"
 #include "ava/provider/anthropic_provider.h"
 #include "ava/provider/provider.h"
@@ -27,6 +28,47 @@
 #include <vector>
 
 namespace session_tests {
+void test_compaction_snapshot_matcher_is_exact()
+{
+  std::vector<ava::session::SessionEntry> const snapshot = {{.id = "snapshot-entry",
+                                                             .parent_id = "snapshot-parent",
+                                                             .type = ava::session::EntryType::UserMessage,
+                                                             .timestamp = "2026-08-17T00:00:00Z",
+                                                             .data_json = "{\"text\":\"snapshot\"}",
+                                                             .version = 3}};
+  expect(ava::session::compaction_snapshot_matches(snapshot, snapshot), "compaction snapshot matcher accepts an exact ordered history");
+
+  auto expect_field_mismatch = [&](auto mutate, std::string_view field) {
+    auto changed = snapshot;
+    mutate(changed.front());
+    expect(!ava::session::compaction_snapshot_matches(snapshot, changed), "compaction snapshot matcher compares " + std::string(field));
+  };
+  expect_field_mismatch([](auto& entry) { entry.id += "-changed"; }, "id");
+  expect_field_mismatch([](auto& entry) { entry.parent_id += "-changed"; }, "parent_id");
+  expect_field_mismatch([](auto& entry) { entry.type = ava::session::EntryType::AssistantMessage; }, "type");
+  expect_field_mismatch([](auto& entry) { entry.timestamp = "2026-08-17T00:00:01Z"; }, "timestamp");
+  expect_field_mismatch([](auto& entry) { entry.data_json = "{\"text\":\"changed\"}"; }, "data_json");
+  expect_field_mismatch([](auto& entry) { entry.version = 4; }, "version");
+
+  auto generated = ava::session::make_session_metadata_entry(ava::session::SessionMetadataUpdate{.actor = "auto-title", .generated_title = "Generated title"},
+                                                             snapshot.back().id);
+  auto manual = ava::session::make_session_metadata_entry(ava::session::SessionMetadataUpdate{.name = "Manual title", .actor = "manual"}, snapshot.back().id);
+  expect(generated && manual, "compaction snapshot matcher metadata fixtures serialize");
+  if (generated && manual)
+  {
+    auto auto_title_suffix = snapshot;
+    auto_title_suffix.push_back(*generated);
+    auto manual_suffix = snapshot;
+    manual_suffix.push_back(*manual);
+    auto context_metadata_suffix = auto_title_suffix;
+    context_metadata_suffix.back().data_json = "{\"actor\":\"auto-title\",\"generated_title\":\"Generated title\",\"source_session_id\":\"other\"}";
+    expect(ava::session::compaction_snapshot_matches(snapshot, auto_title_suffix),
+           "compaction snapshot matcher accepts only the validated trailing auto-title exception");
+    expect(!ava::session::compaction_snapshot_matches(snapshot, manual_suffix) && !ava::session::compaction_snapshot_matches(snapshot, context_metadata_suffix),
+           "compaction snapshot matcher rejects manual and context-affecting metadata suffixes");
+  }
+}
+
 void test_session_compaction_entry_round_trip()
 {
   auto const root = create_empty_root("compaction-round-trip");

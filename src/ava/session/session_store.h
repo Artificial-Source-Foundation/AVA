@@ -414,6 +414,15 @@ struct SessionConditionalAppendResult
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+enum class SessionCompactionAppendResult
+{
+  Appended,
+  SnapshotMismatch,
+};
+
+using SessionCompactionAppendSink =
+    std::function<ava::core::Result<SessionCompactionAppendResult>(SessionEntry, std::vector<SessionEntry>, SessionCancelCallback)>;
+
 // The sole copyable append authority for runtime routes. Persistent targets
 // duplicate the caller's locked open-file description and revalidate the exact
 // published inode before accepting it. Ephemeral targets retain only the
@@ -436,6 +445,12 @@ class SessionAppendTarget
   // may race with a committed append and is reported by the append result.
   [[nodiscard]] ava::core::Result<SessionConditionalAppendResult> append_branch_summary_if_absent(SessionEntry const& entry,
                                                                                                   SessionCancelCallback cancel_requested = nullptr);
+  // Atomically reloads this target's authoritative bounded history, compares
+  // the exact compaction snapshot, and appends only on a match. A mismatch is a
+  // successful, nonmutating result and never requires recovery.
+  [[nodiscard]] ava::core::Result<SessionCompactionAppendResult> append_compaction_if_snapshot_matches(SessionEntry const& entry,
+                                                                                                       std::vector<SessionEntry> const& expected,
+                                                                                                       SessionCancelCallback cancel_requested = nullptr);
   // One all-or-nothing preflight reservation for exactly one complete bounded
   // v4 assistant transaction: zero or more ordered output items followed by
   // its one matching commit. Durable writes remain append-only. Once any
@@ -468,10 +483,21 @@ class SessionAppendTarget
     AVA_DEBUG_PRINT_MEMBERS_ON
   };
 
+  struct CompactionAppendOutcome
+  {
+    ConditionalAppendCompletion completion = ConditionalAppendCompletion::RejectedBeforeAppend;
+    std::optional<SessionCompactionAppendResult> result;
+    std::optional<ava::core::Error> error;
+
+    AVA_DEBUG_PRINT_MEMBERS_ON
+  };
+
   // Controller queue policy needs this typed mutation-boundary outcome so only
   // errors from append_impl latch persistence. The public wrapper preserves the
   // ordinary Result API for direct append-target callers.
   [[nodiscard]] ConditionalAppendOutcome append_branch_summary_if_absent_classified(SessionEntry const& entry, SessionCancelCallback const& cancel_requested);
+  [[nodiscard]] CompactionAppendOutcome append_compaction_if_snapshot_matches_classified(SessionEntry const& entry, std::vector<SessionEntry> const& expected,
+                                                                                         SessionCancelCallback const& cancel_requested);
 
   SessionAppendTarget(SessionStore store, std::optional<SessionLease> lease, AssistantOutputAppendState assistant_output_state, SessionReadLimits read_limits);
 

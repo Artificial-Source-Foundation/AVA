@@ -70,6 +70,10 @@ struct ManualCompactionRequest
 // the complete ordered public history when no checkpoint exists.
 [[nodiscard]] ava::core::Result<std::vector<SessionEntry>> project_active_compaction_context(std::vector<SessionEntry> const& entries);
 [[nodiscard]] ava::core::Result<std::size_t> estimate_active_context_tokens(std::vector<SessionEntry> const& entries);
+// Exact ordered compaction compare-and-swap matcher. Every persisted entry
+// field participates, including the record version. The only accepted suffix
+// is strictly validated, context-neutral automatic-title metadata.
+[[nodiscard]] bool compaction_snapshot_matches(std::vector<SessionEntry> const& expected, std::vector<SessionEntry> const& actual);
 [[nodiscard]] std::size_t effective_auto_threshold_tokens(CompactionConfig const& config, std::optional<long long> context_window_tokens) noexcept;
 [[nodiscard]] ava::core::Result<CompactionDecision> should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config);
 [[nodiscard]] ava::core::Result<CompactionDecision> should_auto_compact(std::vector<SessionEntry> const& entries, CompactionConfig const& config,

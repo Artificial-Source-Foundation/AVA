@@ -301,6 +301,40 @@ ava::core::Result<std::size_t> estimate_active_context_tokens(std::vector<Sessio
   return tokens;
 }
 
+bool compaction_snapshot_matches(std::vector<SessionEntry> const& expected, std::vector<SessionEntry> const& actual)
+{
+  if (actual.size() < expected.size())
+    return false;
+  for (std::size_t index = 0; index < expected.size(); ++index)
+  {
+    auto const& expected_entry = expected[index];
+    auto const& actual_entry = actual[index];
+    if (expected_entry.id != actual_entry.id || expected_entry.parent_id != actual_entry.parent_id || expected_entry.type != actual_entry.type ||
+        expected_entry.timestamp != actual_entry.timestamp || expected_entry.data_json != actual_entry.data_json ||
+        expected_entry.version != actual_entry.version)
+    {
+      return false;
+    }
+  }
+
+  // Automatic title metadata is context-neutral. Allow only the currently
+  // validated trailing form to finish while provider generation is in flight.
+  for (std::size_t index = expected.size(); index < actual.size(); ++index)
+  {
+    auto const& entry = actual[index];
+    if (entry.type != EntryType::SessionMetadata || ava::core::json::string_field(entry.data_json, "actor").value_or("") != "auto-title" ||
+        !ava::core::json::string_field(entry.data_json, "generated_title") || ava::core::json::field_value_start(entry.data_json, "name") ||
+        ava::core::json::field_value_start(entry.data_json, "labels") || ava::core::json::field_value_start(entry.data_json, "archived") ||
+        ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
+        ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || ava::core::json::field_value_start(entry.data_json, "branch_origin") ||
+        ava::core::json::field_value_start(entry.data_json, "original_cwd"))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::size_t effective_auto_threshold_tokens(CompactionConfig const& config, std::optional<long long> context_window_tokens) noexcept
 {
   if (config.auto_threshold_tokens > 0)

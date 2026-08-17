@@ -186,10 +186,12 @@ struct ActiveRunGuard::State
     };
 
     std::vector<ava::session::SessionEntry> entries;
+    std::vector<ava::session::SessionEntry> expected;
     std::size_t bytes = 0;
-    bool conditional_branch_summary = false;
+    SessionAppendRequestKind kind = SessionAppendRequestKind::Ordinary;
     ava::session::SessionCancelCallback cancel_requested = nullptr;
-    std::optional<ava::session::SessionConditionalAppendResult> conditional_result = std::nullopt;
+    std::optional<ava::session::SessionConditionalAppendResult> branch_summary_result = std::nullopt;
+    std::optional<ava::session::SessionCompactionAppendResult> compaction_result = std::nullopt;
     Completion completion = Completion::Pending;
     std::shared_ptr<ava::core::Error const> failure;
   };
@@ -463,7 +465,9 @@ RunSnapshot SessionRunController::snapshot() const
 
 ava::core::VoidResult SessionRunController::append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
                                                                   std::vector<ava::session::SessionEntry> entries, bool owner_route,
-                                                                  ava::session::SessionConditionalAppendResult* conditional_result,
+                                                                  SessionAppendRequestKind kind, std::vector<ava::session::SessionEntry> expected,
+                                                                  ava::session::SessionConditionalAppendResult* branch_summary_result,
+                                                                  ava::session::SessionCompactionAppendResult* compaction_result,
                                                                   ava::session::SessionCancelCallback cancel_requested)
 {
   if (!state)
@@ -480,11 +484,28 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   auto bytes = batch_entry_byte_count(entries);
   if (!bytes)
     return std::unexpected(std::move(bytes.error()));
+  std::size_t expected_bytes = 0;
+  if (kind == SessionAppendRequestKind::Compaction)
+  {
+    for (auto const& expected_entry : expected)
+    {
+      auto entry_bytes = entry_byte_count(expected_entry);
+      if (!entry_bytes)
+        return std::unexpected(std::move(entry_bytes.error()));
+      if (*entry_bytes > std::numeric_limits<std::size_t>::max() - expected_bytes)
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append byte accounting overflow"));
+      expected_bytes += *entry_bytes;
+    }
+    if (expected_bytes > std::numeric_limits<std::size_t>::max() - *bytes)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append byte accounting overflow"));
+    *bytes += expected_bytes;
+  }
 
   auto item = std::make_shared<ActiveRunGuard::State::AppendItem>();
   item->bytes = *bytes;
   item->entries = std::move(entries);
-  item->conditional_branch_summary = conditional_result != nullptr;
+  item->expected = std::move(expected);
+  item->kind = kind;
   item->cancel_requested = std::move(cancel_requested);
   {
     std::lock_guard lock(state->mutex);
@@ -562,14 +583,14 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     try
     {
       ava::core::VoidResult persisted;
-      if (head->conditional_branch_summary)
+      if (head->kind == SessionAppendRequestKind::BranchSummary)
       {
         auto conditional = target->append_branch_summary_if_absent_classified(head->entries.front(), head->cancel_requested);
         if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::Succeeded)
         {
           if (!conditional.result)
             throw std::logic_error("successful conditional append has no result");
-          head->conditional_result = std::move(*conditional.result);
+          head->branch_summary_result = std::move(*conditional.result);
         }
         else if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::RejectedBeforeAppend)
         {
@@ -587,6 +608,33 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
           persisted = conditional.error ? ava::core::VoidResult(std::unexpected(std::move(*conditional.error)))
                                         : ava::core::VoidResult(std::unexpected(ava::core::Error(
                                               ava::core::ErrorCategory::Unknown, "conditional branch summary append failed without a stable error")));
+        }
+      }
+      else if (head->kind == SessionAppendRequestKind::Compaction)
+      {
+        auto conditional = target->append_compaction_if_snapshot_matches_classified(head->entries.front(), head->expected, head->cancel_requested);
+        if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::Succeeded)
+        {
+          if (!conditional.result)
+            throw std::logic_error("successful conditional compaction append has no result");
+          head->compaction_result = *conditional.result;
+        }
+        else if (conditional.completion == ava::session::SessionAppendTarget::ConditionalAppendCompletion::RejectedBeforeAppend)
+        {
+          try
+          {
+            rejection = conditional.error ? std::make_shared<ava::core::Error>(std::move(*conditional.error)) : rejection_fallback;
+          }
+          catch (...)
+          {
+            rejection = rejection_fallback;
+          }
+        }
+        else
+        {
+          persisted = conditional.error ? ava::core::VoidResult(std::unexpected(std::move(*conditional.error)))
+                                        : ava::core::VoidResult(std::unexpected(ava::core::Error(
+                                              ava::core::ErrorCategory::Unknown, "conditional compaction append failed without a stable error")));
         }
       }
       else
@@ -742,44 +790,71 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
     return std::unexpected(inactive_error());
   if (completion != ActiveRunGuard::State::AppendItem::Completion::Succeeded)
     return std::unexpected(*state->append_exception_fallback);
-  if (conditional_result != nullptr)
+  if (branch_summary_result != nullptr)
   {
-    if (!item->conditional_result)
+    if (!item->branch_summary_result)
       return std::unexpected(*state->append_exception_fallback);
-    *conditional_result = std::move(*item->conditional_result);
+    *branch_summary_result = std::move(*item->branch_summary_result);
+  }
+  if (compaction_result != nullptr)
+  {
+    if (!item->compaction_result)
+      return std::unexpected(*state->append_exception_fallback);
+    *compaction_result = *item->compaction_result;
   }
   return {};
 }
 
 ava::core::VoidResult SessionRunController::append(ava::session::SessionEntry entry)
 {
-  return append_for_generation(state_, 0, {std::move(entry)}, true);
+  return append_for_generation(state_, 0, {std::move(entry)}, true, SessionAppendRequestKind::Ordinary);
 }
 
 ava::core::Result<ava::session::SessionConditionalAppendResult> SessionRunController::append_branch_summary_if_absent(
     ava::session::SessionEntry entry, ava::session::SessionCancelCallback cancel_requested)
 {
   ava::session::SessionConditionalAppendResult result;
-  if (auto appended = append_for_generation(state_, 0, {std::move(entry)}, true, &result, std::move(cancel_requested)); !appended)
+  if (auto appended = append_for_generation(state_, 0, {std::move(entry)}, true, SessionAppendRequestKind::BranchSummary, {}, &result, nullptr,
+                                            std::move(cancel_requested));
+      !appended)
+  {
     return std::unexpected(std::move(appended.error()));
+  }
+  return result;
+}
+
+ava::core::Result<ava::session::SessionCompactionAppendResult> SessionRunController::append_compaction_if_snapshot_matches(
+    ava::session::SessionEntry entry, std::vector<ava::session::SessionEntry> expected, ava::session::SessionCancelCallback cancel_requested)
+{
+  ava::session::SessionCompactionAppendResult result = ava::session::SessionCompactionAppendResult::SnapshotMismatch;
+  if (auto appended = append_for_generation(state_, 0, {std::move(entry)}, true, SessionAppendRequestKind::Compaction, std::move(expected), nullptr, &result,
+                                            std::move(cancel_requested));
+      !appended)
+  {
+    return std::unexpected(std::move(appended.error()));
+  }
   return result;
 }
 
 ava::core::VoidResult SessionRunController::append_batch(std::vector<ava::session::SessionEntry> entries)
 {
-  return append_for_generation(state_, 0, std::move(entries), true);
+  return append_for_generation(state_, 0, std::move(entries), true, SessionAppendRequestKind::Ordinary);
 }
 
 ava::agent::SessionAppendSink SessionRunController::owner_append_route() const
 {
   auto state = state_;
-  return [state = std::move(state)](ava::session::SessionEntry entry) { return append_for_generation(state, 0, {std::move(entry)}, true); };
+  return [state = std::move(state)](ava::session::SessionEntry entry) {
+    return append_for_generation(state, 0, {std::move(entry)}, true, SessionAppendRequestKind::Ordinary);
+  };
 }
 
 ava::agent::SessionAppendBatchSink SessionRunController::owner_append_batch_route() const
 {
   auto state = state_;
-  return [state = std::move(state)](std::vector<ava::session::SessionEntry> entries) { return append_for_generation(state, 0, std::move(entries), true); };
+  return [state = std::move(state)](std::vector<ava::session::SessionEntry> entries) {
+    return append_for_generation(state, 0, std::move(entries), true, SessionAppendRequestKind::Ordinary);
+  };
 }
 
 ava::core::VoidResult SessionRunController::reset_persistence_failure()
@@ -1013,7 +1088,7 @@ ava::agent::SessionAppendSink ActiveRunGuard::append_route() const
   auto state = state_;
   auto generation = generation_;
   return [state = std::move(state), generation](ava::session::SessionEntry entry) {
-    return SessionRunController::append_for_generation(state, generation, {std::move(entry)}, false);
+    return SessionRunController::append_for_generation(state, generation, {std::move(entry)}, false, SessionAppendRequestKind::Ordinary);
   };
 }
 
@@ -1022,7 +1097,24 @@ ava::agent::SessionAppendBatchSink ActiveRunGuard::append_batch_route() const
   auto state = state_;
   auto generation = generation_;
   return [state = std::move(state), generation](std::vector<ava::session::SessionEntry> entries) {
-    return SessionRunController::append_for_generation(state, generation, std::move(entries), false);
+    return SessionRunController::append_for_generation(state, generation, std::move(entries), false, SessionAppendRequestKind::Ordinary);
+  };
+}
+
+ava::session::SessionCompactionAppendSink ActiveRunGuard::compaction_append_route() const
+{
+  auto state = state_;
+  auto generation = generation_;
+  return [state = std::move(state), generation](ava::session::SessionEntry entry, std::vector<ava::session::SessionEntry> expected,
+                                                ava::session::SessionCancelCallback cancel_requested) {
+    ava::session::SessionCompactionAppendResult result = ava::session::SessionCompactionAppendResult::SnapshotMismatch;
+    if (auto appended = SessionRunController::append_for_generation(state, generation, {std::move(entry)}, false, SessionAppendRequestKind::Compaction,
+                                                                    std::move(expected), nullptr, &result, std::move(cancel_requested));
+        !appended)
+    {
+      return ava::core::Result<ava::session::SessionCompactionAppendResult>(std::unexpected(std::move(appended.error())));
+    }
+    return ava::core::Result<ava::session::SessionCompactionAppendResult>(result);
   };
 }
 

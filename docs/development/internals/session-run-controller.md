@@ -23,11 +23,32 @@ During an active `run_prompt`, AgentLoop user/replay-user, assistant, reasoning,
 | Append class | M2 route |
 | --- | --- |
 | Parent user/assistant/reasoning/tool/permission/error/cancel | Generation-bound active route |
-| Runtime compaction (auto/overflow) and plugin/file-reference audits | Generation-bound active route |
+| Runtime compaction (auto/overflow) | Generation-bound conditional compaction route carrying the immutable expected snapshot |
+| Plugin/file-reference audits | Generation-bound ordinary active route |
 | Metadata/model/reasoning/mode commands | Stable RuntimeSession owner route |
 | Background child failure notification to parent | Stable owner route, valid across A→B and while inactive; no `RuntimeSession&` capture |
-| Child history | Independent child append target and `SessionReadAuthority`; child options clear both parent routes and never inherit parent read authority |
+| Child history | Independent child append target and `SessionReadAuthority`; child options clear all parent routes and never inherit parent read authority |
 | Import/export/open/session creation and branch copy | Direct `SessionStore` only while inactive; M5 replaces this with the locked writer |
+
+The controller owns compaction CAS admission as well as ordinary and branch-summary
+append admission. Queue tickets carry an explicit ordinary, branch-summary, or
+compaction kind; compaction tickets synchronously own and byte-account the
+bounded expected vector. Automatic/overflow work uses the guard's immutable
+run-generation route. Manual `/compact` snapshots the read authority and shared
+controller together, performs provider work without a Session lock, then uses
+the stable owner CAS route. Neither route exposes `SessionAppendTarget` through
+`runtime::Session`.
+
+At the target boundary, the target mutex is acquired before the shared
+persistent-path or ephemeral mutation mutex and remains held across recovery
+state inspection, authoritative reload, exact comparison, cancellation,
+assistant-output rebuild/preflight, append, and cache/epoch publication. A
+`SnapshotMismatch` completes only that ticket successfully without mutation or
+persistence latch. Cancellation, validation, and other pre-attempt rejections
+also do not latch. Errors after `append_impl` is attempted preserve its stable
+`append_commit_state`; the controller shares and latches that exact error for
+all affected tickets, while partial/unknown target state requires explicit
+recovery.
 
 This is an additive M2 boundary: it does not rewrite JSONL history, change session/RPC/TUI/print bytes, add a second agent runtime, or claim M5 durable-writer semantics.
 

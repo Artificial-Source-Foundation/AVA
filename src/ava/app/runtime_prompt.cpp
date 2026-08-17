@@ -221,6 +221,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   // runs bypass ambient plugin event hooks entirely.
   ava::agent::SessionAppendSink const append_route = guard.append_route();
   ava::agent::SessionAppendBatchSink const append_batch_route = guard.append_batch_route();
+  ava::session::SessionCompactionAppendSink const compaction_append_route = guard.compaction_append_route();
   ava::event::RuntimeEventSink event_sink = options.event_sink;
   if (!options.isolate_ambient_extensions)
   {
@@ -240,6 +241,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   }
   runtime_options.active_append_route = append_route;
   runtime_options.active_append_batch_route = append_batch_route;
+  runtime_options.active_compaction_append_route = compaction_append_route;
   std::function<bool()> const caller_cancel_requested_copy = runtime_options.cancel_requested;
   runtime_options.cancel_requested = [guard_token = guard.stop_token(), &caller_cancel_requested = caller_cancel_requested_copy] {
     return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());

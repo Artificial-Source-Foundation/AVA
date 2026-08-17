@@ -56,6 +56,7 @@ struct RunOptions
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages = nullptr;
   ava::agent::SessionAppendSink active_append_route = nullptr;
   ava::agent::SessionAppendBatchSink active_append_batch_route = nullptr;
+  ava::session::SessionCompactionAppendSink active_compaction_append_route = nullptr;
   std::vector<ava::session::ImageAttachmentRef> image_attachments;
   // Disabled by default; observation data never enters events, sessions, or RPC output.
   std::shared_ptr<ava::observability::RunObservation> observation = nullptr;

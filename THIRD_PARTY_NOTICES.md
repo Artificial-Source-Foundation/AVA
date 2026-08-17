@@ -28,9 +28,6 @@ not describe the whole `utils` repository as exclusively MIT. In particular,
 `utils/FunctionView.h` is BSD-3-Clause and `utils/threading/MpscQueue.h` is
 BSD-2-Clause-Views; both are excluded from AVA production sources and AVA builds
 define `MIT_LICENSE_ONLY` so accidental future inclusion fails compilation.
-The AArch64 `yield` branch in `utils/cpu_relax.h` has unresolved third-party
-provenance; non-x86 architectures are not release-qualified pending provenance
-or replacement.
 
 Copyright (c) 2004-2026 Carlo Wood
 

@@ -79,6 +79,8 @@ inline thread_local LongWaitIncompatibleLockRegistry long_wait_incompatible_lock
 inline void register_long_wait_incompatible_lock(void const* lock)
 {
   auto& registry = detail::long_wait_incompatible_locks;
+  // More locks were registered than the fixed registry holds; register fewer simultaneous locks on this thread or enlarge
+  // LongWaitIncompatibleLockRegistry::locks.
   ASSERT(registry.count < registry.locks.size());
   registry.locks[registry.count++] = lock;
 }
@@ -91,6 +93,8 @@ inline void unregister_long_wait_incompatible_lock(void const* lock)
   auto& registry = detail::long_wait_incompatible_locks;
   std::size_t index = 0;
   while (index < registry.count && registry.locks[index] != lock) ++index;
+  // The caller tried to unregister a lock that this thread never registered; only unregister locks after a successful register_long_wait_incompatible_lock on
+  // the same thread.
   ASSERT(index < registry.count);
   registry.locks[index] = registry.locks[--registry.count];
   registry.locks[registry.count] = nullptr;
@@ -139,6 +143,7 @@ class SessionDebugMutex final : public AIMutex
   {
     DoutEntering(dc::session, "SessionDebugMutex::unlock() [" << this << "]");
 
+    // unlock was called without the current thread holding this mutex; pair every unlock with a successful lock or try_lock on the same thread.
     ASSERT(is_self_locked());
     unregister_long_wait_incompatible_lock(this);
     AIMutex::unlock();

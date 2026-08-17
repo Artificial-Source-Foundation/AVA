@@ -192,7 +192,22 @@ def isolated_environment(root: pathlib.Path) -> dict[str, str]:
         directory.mkdir(parents=True, exist_ok=True)
         environment[name] = str(directory)
     directories["XDG_RUNTIME_DIR"].chmod(0o700)
-    environment.update({"TERM": "xterm-256color", "NO_COLOR": "1"})
+    # Debug builds must not write libcwd NOTICE/startup output into the PTY
+    # protocol this harness parses; keep the child quiet like other real-process
+    # tests, while still allowing explicit per-test debug routing overrides.
+    environment.update(
+        {
+            "TERM": "xterm-256color",
+            "NO_COLOR": "1",
+            "AVA_SESSION_TITLES": "off",
+            "LIBCWD_NO_STARTUP_MSGS": "1",
+            "AVA_NO_DEBUG_OUTPUT": "1",
+        }
+    )
+    for name in ("AVA_TEST_NAME", "AVA_DEBUG_OUTPUT_DIR"):
+        value = os.environ.get(name)
+        if value is not None:
+            environment[name] = value
     return environment
 
 

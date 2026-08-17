@@ -19,7 +19,7 @@ Use one primary home for each kind of information:
 | Testing/release | `docs/operations/testing.md`, `docs/operations/release-checklist.md` | reproducible validation and release gates |
 | Product state | `docs/product/` | current capability baselines and evidence mappings |
 | Future work | `docs/plans/`, `docs/roadmap/`, `docs/goals/` | proposals, sequencing, acceptance criteria, unresolved work |
-| History/evidence | `docs/history/`, `docs/versions/`, `docs/interop/evidence/` | what was claimed or observed at a particular point in time |
+| History/evidence | `docs/history/`, `docs/versions/`, `docs/interop/` | what was claimed or observed at a particular point in time; `docs/interop/evidence/` holds the dated reports |
 | Schemas/machine status | `docs/schema/`, JSON manifests | machine-readable contracts or status checked by tests |
 
 The mechanically allowed top-level taxonomy is `core`, `interfaces`, `extensions`, `operations`, `development`, `security`, `product`, `plans`, `roadmap`, `goals`, `history`, `versions`, `interop`, and `schema`, plus optional excluded `reference-code`. Only `README.md`, `AGENTS.md`, `acp.md`, `acp-support.json`, `rpc-protocol.md`, `headless-protocol.md`, `session-format.md`, and `plugin-compatibility-policy.md` remain as fixed `docs/`-root files. Every owned category has its required `README.md`; nested implementation inputs such as `operations/docker/Dockerfile` are not document graph nodes.

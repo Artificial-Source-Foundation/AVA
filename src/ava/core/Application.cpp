@@ -12,14 +12,15 @@ namespace {
 // after app::run returns with all app::run-owned workers joined.
 Application const* registered_application = nullptr;
 
-#define AVA_REQUIRE_APPLICATION_LIFECYCLE(condition) \
-  do                                                 \
-  {                                                  \
-    if (!(condition))                                \
-    {                                                \
-      ASSERT(condition);                             \
-      std::abort();                                  \
-    }                                                \
+#define AVA_REQUIRE_APPLICATION_LIFECYCLE(condition)                                                                                  \
+  do                                                                                                                                  \
+  {                                                                                                                                   \
+    if (!(condition))                                                                                                                 \
+    {                                                                                                                                 \
+      /* Invalid Application lifecycle or argv: use one instance, initialize once with valid main arguments, then destroy it last. */ \
+      ASSERT(condition);                                                                                                              \
+      std::abort();                                                                                                                   \
+    }                                                                                                                                 \
   } while (false)
 
 }  // namespace

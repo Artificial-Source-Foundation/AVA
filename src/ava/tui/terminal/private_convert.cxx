@@ -70,6 +70,9 @@ ComplexChar convert_to_ComplexChar(cchar_t const& cchar)
   // returned by getcchar is null-terminated, even if it contains CCHARW_MAX non-zero characters!
   std::array<wchar_t, CCHARW_MAX + 1> grapheme_cluster;
   int const status = ::getcchar(&cchar, grapheme_cluster.data(), &attributes, &color_pair, &extended_color_pair);
+  // getcchar returns ERR when cchar is not a wide complex character; call convert_to_ComplexChar only with a valid
+  // cchar_t initialized by ncurses (for example via setcchar, convert_to_cchar, win_wch, or win_wchstr), using the
+  // CCHARW_MAX + 1 buffer above.
   ASSERT(status == OK);
   // Copy at most CCHARW_MAX wide characters into the ComplexChar.
   std::wcsncpy(result.cell_character().data(), grapheme_cluster.data(), CCHARW_MAX);

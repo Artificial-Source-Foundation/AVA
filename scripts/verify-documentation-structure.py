@@ -64,6 +64,7 @@ REQUIRED_INDEXES = (
     "docs/schema/README.md",
     "docs/goals/README.md",
     "docs/versions/README.md",
+    "docs/interop/README.md",
     "docs/interop/evidence/README.md",
 )
 REQUIRED_LLMS_TARGETS = frozenset(
@@ -81,6 +82,7 @@ REQUIRED_LLMS_TARGETS = frozenset(
         "docs/goals/README.md",
         "docs/history/README.md",
         "docs/versions/README.md",
+        "docs/interop/README.md",
         "docs/interop/evidence/README.md",
         "docs/acp.md",
         "docs/rpc-protocol.md",

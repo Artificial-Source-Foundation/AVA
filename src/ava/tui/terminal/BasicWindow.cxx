@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "BasicWindow.h"
+#include "utils/macros.h"
 
 #include <array>
 #include <cstdarg>
@@ -7,8 +8,6 @@
 #include <utility>
 #include <vector>
 #include "debug.h"
-#include "utils/macros.h"
-#include "utils/print_wstring.h"
 
 // This header must be included last.
 #include "private_convert.h"
@@ -23,33 +22,42 @@ struct BasicWindow::Handle
  private:
   static int screen_max_row(Position screen_pos, Dimension screen_size)
   {
+    // The caller must pass a positive screen height; a zero height would compute an inclusive maximum row above the window.
     ASSERT(screen_size.height() > 0);
     return static_cast<int>(screen_pos.row() + screen_size.height() - 1);
   }
 
   static int screen_max_col(Position screen_pos, Dimension screen_size)
   {
+    // The caller must pass a positive screen width; a zero width would compute an inclusive maximum column left of the window.
     ASSERT(screen_size.width() > 0);
     return static_cast<int>(screen_pos.col() + screen_size.width() - 1);
   }
 
   static std::vector<cchar_t> convert_to_cchar_vector(ComplexChar const* str, int n)
   {
+    // The caller must pass a non-null ComplexChar array; do not forward a nullable pointer.
     ASSERT(str);
+    // The caller must pass a non-negative element count; validate the length at the call site.
     ASSERT(n >= 0);
     std::vector<cchar_t> result;
     result.reserve(static_cast<size_t>(n) + 1);
-    for (int i = 0; i < n; ++i) result.push_back(convert_to_cchar(str[i]));
+    for (int i = 0; i < n; ++i)
+      result.push_back(convert_to_cchar(str[i]));
     result.push_back({});
     return result;
   }
 
   static void convert_from_cchar_array(cchar_t const* src, ComplexChar* dest, int n)
   {
+    // The caller must pass a non-null source cchar_t array; do not forward a nullable buffer.
     ASSERT(src);
+    // The caller must pass a non-null destination buffer with room for n ComplexChar elements; allocate it before calling.
     ASSERT(dest);
+    // The caller must pass a non-negative element count; validate the length at the call site.
     ASSERT(n >= 0);
-    for (int i = 0; i < n; ++i) dest[i] = convert_to_ComplexChar(src[i]);
+    for (int i = 0; i < n; ++i)
+      dest[i] = convert_to_ComplexChar(src[i]);
   }
 
  private:
@@ -57,12 +65,15 @@ struct BasicWindow::Handle
   {
     int res;
     res = ::keypad(handle_, TRUE);
+    // keypad returns ERR when the WINDOW handle is invalid; call default_window_initialization only from an Impl constructor holding a live ncurses window.
     ASSERT(res == OK);
     // Block on calls to get_wch: use a dedicated thread to get input.
     res = ::nodelay(handle_, FALSE);
+    // nodelay returns ERR when the WINDOW handle is invalid; this initializer requires a live ncurses window.
     ASSERT(res == OK);
     // Wait after seeing an ESC for more characters to allow a keyboard to send a full escape sequence.
     res = ::notimeout(handle_, FALSE);
+    // notimeout returns ERR when the WINDOW handle is invalid; this initializer requires a live ncurses window.
     ASSERT(res == OK);
   }
 
@@ -72,7 +83,11 @@ struct BasicWindow::Handle
 
   // Wrap an ncurses WINDOW handle returned by a window-creation function.
   // The pointer must be non-null and is owned by this Handle, except for stdscr which is owned by ncurses itself.
-  explicit Handle(WINDOW* handle) : handle_(handle) { ASSERT(handle_); }
+  explicit Handle(WINDOW* handle) : handle_(handle)
+  {
+    // The caller passed a null WINDOW handle; construct Impl only from a successful ncurses window-creation call (or stdscr).
+    ASSERT(handle_);
+  }
 
   static WINDOW* newpad(Dimension size)
   {
@@ -91,6 +106,8 @@ struct BasicWindow::Handle
     // upper left-hand corner of the window is at line begin_y, column begin_x. If either nlines or ncols is zero,
     // they default to LINES - begin_y and COLS - begin_x.
     handle_ = ::newwin(size.height(), size.width(), pos.row(), pos.col());
+    // newwin returns null when the requested window does not fit on the screen; clamp the requested size and position to the screen before constructing a
+    // Window.
     ASSERT(handle_);
     default_window_initialization();
   }
@@ -482,6 +499,7 @@ struct BasicWindow::Handle
   {
     // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
     //
+    // The caller must pass a non-null, null-terminated ComplexChar array; do not forward a nullable pointer.
     ASSERT(str);
     int n = 0;
     while (str[n].cell_character().length() != 0) ++n;
@@ -503,6 +521,7 @@ struct BasicWindow::Handle
     // https://invisible-island.net/ncurses/man/curs_add_wchstr.3x.html
     //
     // mvwadd_wchstr moves the cursor, then copies complex characters into the window without advancing it.
+    // The caller must pass a non-null, null-terminated ComplexChar array; do not forward a nullable pointer.
     ASSERT(str);
     int n = 0;
     while (str[n].cell_character().length() != 0) ++n;
@@ -611,6 +630,7 @@ struct BasicWindow::Handle
     // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
     //
     // win_wchstr reads complex characters from the cursor through the end of the line into the caller's buffer.
+    // The caller must provide a non-null output buffer sized for a full window line plus terminator; size it from getmaxyx() before calling.
     ASSERT(str);
     int cols = getmaxx(handle_);
     std::vector<cchar_t> tmp(static_cast<size_t>(cols) + 1);
@@ -635,6 +655,7 @@ struct BasicWindow::Handle
     // https://invisible-island.net/ncurses/man/curs_in_wchstr.3x.html
     //
     // mvwin_wchstr moves to the requested position and reads complex characters through the end of the line.
+    // The caller must provide a non-null output buffer sized for a full window line plus terminator; size it from getmaxyx() before calling.
     ASSERT(str);
     int cols = getmaxx(handle_);
     std::vector<cchar_t> tmp(static_cast<size_t>(cols) + 1);
@@ -874,6 +895,7 @@ struct BasicWindow::Handle
     // getyx stores the current cursor row and column of the specified window in caller-provided variables.
     int y = ::getcury(handle_);
     int x = ::getcurx(handle_);
+    // getcury/getcurx only return negative values for an invalid window; call getyx on a live Window.
     ASSERT(y >= 0 && x >= 0);
     return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
   }
@@ -885,6 +907,7 @@ struct BasicWindow::Handle
     // getbegyx stores the beginning row and column of the specified window in screen coordinates.
     int y = ::getbegy(handle_);
     int x = ::getbegx(handle_);
+    // getbegy/getbegx only return negative values for an invalid window; call getbegyx on a live Window.
     ASSERT(y >= 0 && x >= 0);
     return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
   }
@@ -896,6 +919,7 @@ struct BasicWindow::Handle
     // getmaxyx stores the size of the specified window as row and column counts.
     int y = ::getmaxy(handle_);
     int x = ::getmaxx(handle_);
+    // getmaxy/getmaxx only return negative values for an invalid window; call getmaxyx on a live Window.
     ASSERT(y >= 0 && x >= 0);
     return Dimension(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
   }
@@ -909,6 +933,7 @@ struct BasicWindow::Handle
     int x = ::getparx(handle_);
     if (y == -1 && x == -1)
       return std::nullopt;
+    // The (-1, -1) no-parent case is handled above; any other negative coordinate means the window handle is invalid, so call getparyx on a live subwindow.
     ASSERT(y >= 0 && x >= 0);
     return Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
   }
@@ -931,6 +956,7 @@ struct BasicWindow::Handle
     bool const res = ::wmouse_trafo(handle_, &y, &x, to_screen);
     if (res)
     {
+      // wmouse_trafo reported success, so the converted coordinates must be non-negative; pass a Position that maps inside the target coordinate system.
       ASSERT(y >= 0 && x >= 0);
       pos = Position(static_cast<uint32_t>(y), static_cast<uint32_t>(x));
     }
@@ -1082,6 +1108,7 @@ BasicWindow& BasicWindow::operator=(BasicWindow&&) noexcept = default;
 BasicWindow BasicWindow::newpad(Dimension size)
 {
   WINDOW* res = Handle::newpad(size);
+  // newpad returns null when the requested pad dimensions are not positive; construct the pad with a positive Dimension.
   ASSERT(res);
   return BasicWindow(std::make_unique<Handle>(res));
 }
@@ -1117,6 +1144,7 @@ BasicWindow BasicWindow::derwin(Margin margin)
 void BasicWindow::derwin(Position pos)
 {
   int res = impl_->derwin(pos);
+  // mvderwin returns ERR when the derived window would move outside its parent; keep pos within the parent's interior.
   ASSERT(res != ERR);
 }
 
@@ -1133,6 +1161,7 @@ void BasicWindow::cursyncup()
 void BasicWindow::syncok(bool enabled)
 {
   int res = impl_->syncok(enabled);
+  // syncok returns ERR only when the window handle is invalid; call syncok on a live Window.
   ASSERT(res != ERR);
 }
 
@@ -1149,54 +1178,65 @@ ComplexChar BasicWindow::get_background() const
 void BasicWindow::attr_set(Rendition rendition)
 {
   int res = impl_->attr_set(rendition);
+  // wattr_set returns ERR when the window handle is invalid; call attr_set on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::attr_get(Rendition& rendition) const
 {
   int res = impl_->attr_get(rendition);
+  // wattr_get returns ERR when the window handle is invalid; call attr_get on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::attr_on(Attributes attributes)
 {
   int res = impl_->attr_on(attributes);
+  // wattr_on returns ERR when the window handle is invalid or the attributes are unsupported; call attr_on on a live Window with valid Attributes.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::attr_off(Attributes attributes)
 {
   int res = impl_->attr_off(attributes);
+  // wattr_off returns ERR when the window handle is invalid or the attributes are unsupported; call attr_off on a live Window with valid Attributes.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::color_set(ColorPair color_pair)
 {
   int res = impl_->color_set(color_pair);
+  // wcolor_set returns ERR when the color pair is not initialized or the window handle is invalid; create the pair with Context::create_color_pair and call
+  // color_set on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::chgat(int n, Rendition rendition)
 {
   int res = impl_->chgat(n, rendition);
+  // wchgat returns ERR when the rendition cannot be applied from the cursor or the window handle is invalid; call chgat on a live Window with an initialized
+  // ColorPair and keep n within the remaining line.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::chgat(Position pos, int n, Rendition rendition)
 {
   int res = impl_->chgat(pos, n, rendition);
+  // mvwchgat returns ERR when pos is outside the window or the rendition cannot be applied; pass a Position inside the window and an initialized ColorPair.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::standout()
 {
   int res = impl_->standout();
+  // wstandout returns ERR only when the window handle is invalid; call standout on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::standend()
 {
   int res = impl_->standend();
+  // wstandend returns ERR only when the window handle is invalid; call standend on a live Window.
   ASSERT(res != ERR);
 }
 
@@ -1208,18 +1248,21 @@ void BasicWindow::erase()
 void BasicWindow::clear()
 {
   int res = impl_->clear();
+  // wclear returns ERR only when the window handle is invalid; call clear on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::clrtobot()
 {
   int res = impl_->clrtobot();
+  // wclrtobot returns ERR only when the window handle is invalid; call clrtobot on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::clrtoeol()
 {
   int res = impl_->clrtoeol();
+  // wclrtoeol returns ERR only when the window handle is invalid; call clrtoeol on a live Window.
   ASSERT(res != ERR);
 }
 
@@ -1231,24 +1274,29 @@ void BasicWindow::refresh()
 void BasicWindow::wnoutrefresh()
 {
   int res = impl_->wnoutrefresh();
+  // wnoutrefresh returns ERR when the window is a pad or the handle is invalid; call wnoutrefresh on a live non-pad Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::redrawwin()
 {
   int res = impl_->redrawwin();
+  // redrawwin returns ERR only when the window handle is invalid; call redrawwin on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::wredrawln(int beg_line, int num_lines)
 {
   int res = impl_->wredrawln(beg_line, num_lines);
+  // wredrawln returns ERR when the line range falls outside the window or the handle is invalid; pass a beg_line/num_lines range within the window height on a
+  // live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::clearok(bool bf)
 {
   int res = impl_->clearok(bf);
+  // clearok returns ERR only when the window handle is invalid; call clearok on a live Window.
   ASSERT(res != ERR);
 }
 
@@ -1260,6 +1308,8 @@ void BasicWindow::idcok(bool bf)
 void BasicWindow::idlok(bool bf)
 {
   int res = impl_->idlok(bf);
+  // idlok returns ERR when the window handle is invalid or the terminal lacks insert/delete-line capability; check the terminal capability before enabling
+  // idlok.
   ASSERT(res != ERR);
 }
 
@@ -1271,18 +1321,21 @@ void BasicWindow::immedok(bool bf)
 void BasicWindow::leaveok(bool bf)
 {
   int res = impl_->leaveok(bf);
+  // leaveok returns ERR only when the window handle is invalid; call leaveok on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::scrollok(bool bf)
 {
   int res = impl_->scrollok(bf);
+  // scrollok returns ERR only when the window handle is invalid; call scrollok on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::setscrreg(int top, int bot)
 {
   int res = impl_->setscrreg(top, bot);
+  // wsetscrreg returns ERR when top/bot fall outside the window or top exceeds bot; pass a valid row range within the window height.
   ASSERT(res != ERR);
 }
 
@@ -1307,24 +1360,28 @@ void BasicWindow::set_border(Border const& border)
 void BasicWindow::hline_set(ComplexChar const& complex_char, int n)
 {
   int res = impl_->hline_set(complex_char, n);
+  // whline_set returns ERR when n extends past the window edge or the rendition is unusable; keep n within the remaining line width.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::hline_set(Position pos, ComplexChar const& complex_char, int n)
 {
   int res = impl_->hline_set(pos, complex_char, n);
+  // mvwhline_set returns ERR when pos is outside the window or n extends past the edge; pass a Position inside the window and a fitting count.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::vline_set(ComplexChar const& complex_char, int n)
 {
   int res = impl_->vline_set(complex_char, n);
+  // wvline_set returns ERR when n extends past the window bottom or the rendition is unusable; keep n within the remaining column height.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::vline_set(Position pos, ComplexChar const& complex_char, int n)
 {
   int res = impl_->vline_set(pos, complex_char, n);
+  // mvwvline_set returns ERR when pos is outside the window or n extends past the bottom; pass a Position inside the window and a fitting count.
   ASSERT(res != ERR);
 }
 
@@ -1372,24 +1429,28 @@ void BasicWindow::addstr(Position pos, char8_t const* wstr, int n)
 void BasicWindow::addstr(ComplexChar const* str)
 {
   int res = impl_->addstr(str);
+  // wadd_wchstr returns ERR when the string does not fit at the cursor; if this disabled overload is re-enabled, ensure the text fits the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::addstr(ComplexChar const* str, int n)
 {
   int res = impl_->addstr(str, n);
+  // wadd_wchnstr returns ERR when n characters do not fit at the cursor; if this disabled overload is re-enabled, clamp n to the remaining line.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::addstr(Position pos, ComplexChar const* str)
 {
   int res = impl_->addstr(pos, str);
+  // mvwadd_wchstr returns ERR when pos is outside the window or the string does not fit; if this disabled overload is re-enabled, pass a Position inside the window and fitting text.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::addstr(Position pos, ComplexChar const* str, int n)
 {
   int res = impl_->addstr(pos, str, n);
+  // mvwadd_wchnstr returns ERR when pos is outside the window or n characters do not fit; if this disabled overload is re-enabled, pass a Position inside the window and clamp n.
   ASSERT(res != ERR);
 }
 #endif
@@ -1397,6 +1458,7 @@ void BasicWindow::addstr(Position pos, ComplexChar const* str, int n)
 void BasicWindow::addstr(wchar_t const* str)
 {
   int res = impl_->addstr(str);
+  // waddwstr returns ERR when the string does not fit in the window; keep the text within the window bounds or scroll first.
   ASSERT(res != ERR);
 }
 
@@ -1411,6 +1473,7 @@ void BasicWindow::addstr(wchar_t const* str, int n)
     // at the bottom-right corner, so that any other kind of error still asserts.
     Position const cursor = getyx();
     Dimension const size = getmaxyx();
+    // Treat ERR as valid only at the bottom-right cell; investigate any other waddnwstr failure.
     ASSERT(cursor.row() + 1 == size.height() && cursor.col() + 1 == size.width());
   }
 #endif
@@ -1419,12 +1482,14 @@ void BasicWindow::addstr(wchar_t const* str, int n)
 void BasicWindow::addstr(Position pos, wchar_t const* str)
 {
   int res = impl_->addstr(pos, str);
+  // mvwaddwstr returns ERR when pos is outside the window or the string does not fit; pass a Position inside the window and fitting text.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::addstr(Position pos, wchar_t const* str, int n)
 {
   int res = impl_->addstr(pos, str, n);
+  // mvwaddnwstr returns ERR when pos is outside the window or n characters do not fit; pass a Position inside the window and clamp n.
   ASSERT(res != ERR);
 }
 
@@ -1446,156 +1511,182 @@ void BasicWindow::echochar(ComplexChar const& complex_char)
 void BasicWindow::delch()
 {
   int res = impl_->delch();
+  // wdelch returns ERR when the cursor is at the lower-right corner of the window; avoid deleting at the last cell.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::delch(Position pos)
 {
   int res = impl_->delch(pos);
+  // mvwdelch returns ERR when pos is outside the window or at its lower-right corner; pass a deletable Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insdelln(int n)
 {
   int res = impl_->insdelln(n);
+  // winsdelln returns ERR only when the window handle is invalid; call insdelln on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::get_wch(wint_t& key)
 {
   int res = impl_->get_wch(key);
+  // wget_wch returns ERR for an invalid window or signal interruption; keep the Window alive and handle input-thread signals before calling get_wch.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::unget_wch(wchar_t key)
 {
   int res = Handle::unget_wch(key);
+  // unget_wch returns ERR when the input pushback buffer is full; read pushed-back input before pushing another character.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::in_wch(ComplexChar& complex_char) const
 {
   int res = impl_->in_wch(complex_char);
+  // win_wch returns ERR only when the window handle is invalid; call in_wch on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::in_wch(Position pos, ComplexChar& complex_char) const
 {
   int res = impl_->in_wch(pos, complex_char);
+  // mvwin_wch returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::instr(ComplexChar* str) const
 {
   int res = impl_->instr(str);
+  // win_wchstr returns ERR only when the window handle is invalid; call instr on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::instr(ComplexChar* str, int n) const
 {
   int res = impl_->instr(str, n);
+  // win_wchnstr returns ERR only when the window handle is invalid; call instr on a live Window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::instr(Position pos, ComplexChar* str) const
 {
   int res = impl_->instr(pos, str);
+  // mvwin_wchstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::instr(Position pos, ComplexChar* str, int n) const
 {
   int res = impl_->instr(pos, str, n);
+  // mvwin_wchnstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::ins_wch(ComplexChar const& complex_char)
 {
   int res = impl_->ins_wch(complex_char);
+  // wins_wch returns ERR when a character cannot be inserted at the cursor; position the cursor where an insert is possible before calling.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::ins_wch(Position pos, ComplexChar const& complex_char)
 {
   int res = impl_->ins_wch(pos, complex_char);
+  // mvwins_wch returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(wchar_t const* str)
 {
   int res = impl_->insstr(str);
+  // wins_wstr returns ERR when the string cannot be inserted before the cursor; keep the inserted text within the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(wchar_t const* str, int n)
 {
   int res = impl_->insstr(str, n);
+  // wins_nwstr returns ERR when n characters cannot be inserted; clamp n to what fits in the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(Position pos, wchar_t const* str)
 {
   int res = impl_->insstr(pos, str);
+  // mvwins_wstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(Position pos, wchar_t const* str, int n)
 {
   int res = impl_->insstr(pos, str, n);
+  // mvwins_nwstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(char const* str)
 {
   int res = impl_->insstr(str);
+  // winsstr returns ERR when the string cannot be inserted before the cursor; keep the inserted text within the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(char const* str, int n)
 {
   int res = impl_->insstr(str, n);
+  // winsnstr returns ERR when n bytes cannot be inserted; clamp n to what fits in the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(Position pos, char const* str)
 {
   int res = impl_->insstr(pos, str);
+  // mvwinsstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::insstr(Position pos, char const* str, int n)
 {
   int res = impl_->insstr(pos, str, n);
+  // mvwinsnstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::inwstr(wchar_t* str) const
 {
   int res = impl_->inwstr(str);
+  // winwstr returns ERR only when the window handle is invalid; call inwstr on a live Window with a buffer sized for a full line.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::inwstr(wchar_t* str, int n) const
 {
   int res = impl_->inwstr(str, n);
+  // winnwstr returns ERR only when the window handle is invalid; call inwstr on a live Window with a buffer of at least n + 1 wide characters.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::inwstr(Position pos, wchar_t* str) const
 {
   int res = impl_->inwstr(pos, str);
+  // mvwinwstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::inwstr(Position pos, wchar_t* str, int n) const
 {
   int res = impl_->inwstr(pos, str, n);
+  // mvwinnwstr returns ERR when pos is outside the window; pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::curs_set(int visibility)
 {
   int res = Handle::curs_set(visibility);
+  // curs_set returns ERR when the terminal does not support the requested cursor visibility; check the cursor-visibility capability before requesting a change.
   ASSERT(res != ERR);
 }
 
@@ -1605,12 +1696,14 @@ void BasicWindow::printw(char const* fmt, ...)
   va_start(args, fmt);
   int res = impl_->printw(fmt, args);
   va_end(args);
+  // vw_printw returns ERR when the formatted output does not fit in the window; keep printed text within the window bounds.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::vprintw(char const* fmt, va_list varglist)
 {
   int res = impl_->printw(fmt, varglist);
+  // vw_printw returns ERR when the formatted output does not fit in the window; keep printed text within the window bounds.
   ASSERT(res != ERR);
 }
 
@@ -1620,12 +1713,14 @@ void BasicWindow::printw(Position pos, char const* fmt, ...)
   va_start(args, fmt);
   int res = impl_->printw(pos, fmt, args);
   va_end(args);
+  // printw first moves the cursor; the wmove inside it returns ERR when pos is outside the window, so pass a Position inside the window.
   ASSERT(res != ERR);
 }
 
 BasicWindow BasicWindow::subpad(Dimension size, Position pos)
 {
   WINDOW* res = impl_->subpad(size, pos);
+  // subpad returns null when the requested sub-rectangle does not fit inside the pad; pass a size and position contained in the pad.
   ASSERT(res);
   return BasicWindow(std::make_unique<Handle>(res));
 }
@@ -1633,30 +1728,35 @@ BasicWindow BasicWindow::subpad(Dimension size, Position pos)
 void BasicWindow::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   int res = impl_->prefresh(pad_pos, screen_pos, screen_size);
+  // prefresh returns ERR when the requested rectangles fall outside the pad or the screen; clamp pad_pos, screen_pos, and screen_size to valid ranges.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::pnoutrefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   int res = impl_->pnoutrefresh(pad_pos, screen_pos, screen_size);
+  // pnoutrefresh returns ERR when the requested rectangles fall outside the pad or the screen; clamp pad_pos, screen_pos, and screen_size to valid ranges.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::pechochar(ComplexChar const& complex_char)
 {
   int res = impl_->pechochar(complex_char);
+  // pecho_wchar returns ERR when the character cannot be added at the pad cursor; position the cursor inside the pad before echoing.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::scrl(int n)
 {
   int res = impl_->scrl(n);
+  // wscrl returns ERR when scrolling is disabled or the window handle is invalid; enable scrolling with scrollok on a live Window before calling scrl.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::key_name(wint_t key, std::string& name)
 {
   char const* res = Handle::key_name(key);
+  // key_name returns null for an unrecognized key code; pass a key value previously returned by get_wch.
   ASSERT(res);
   name = res;
 }
@@ -1664,12 +1764,14 @@ void BasicWindow::key_name(wint_t key, std::string& name)
 void BasicWindow::move(Position pos)
 {
   int res = impl_->move(pos);
+  // wmove returns ERR when pos is outside the window; pass a Position inside the window bounds.
   ASSERT(res != ERR);
 }
 
 void BasicWindow::resize(Dimension size)
 {
   int res = impl_->resize(size);
+  // wresize returns ERR when the new dimensions are not positive or exceed screen or memory limits; resize to a positive Dimension that fits the screen.
   ASSERT(res != ERR);
 }
 
@@ -1772,6 +1874,7 @@ ScrollRegion BasicWindow::getscrreg() const
 {
   ScrollRegion region{};
   int res = impl_->getscrreg(region);
+  // wgetscrreg returns ERR only when the window handle is invalid; call getscrreg on a live Window.
   ASSERT(res != ERR);
   return region;
 }

@@ -34,6 +34,14 @@ These rules define the C++ subset we will use.
 - Preserve actionable error context: operation, path/provider/tool name, and underlying cause.
 - Do not collapse distinct failures into generic `false`, `nullptr`, or empty string returns.
 
+## Assertions
+
+- Use `ASSERT` (cwds, via `debug.h`) only for programmer errors and internal invariants.
+- Never assert on recoverable conditions, untrusted input, or runtime failures; those belong on explicit `Result<T>`/`VoidResult` error paths.
+- Keep `ASSERT` predicates side-effect-free: release builds may omit assertions, and correctness must never depend on their evaluation.
+- Every `ASSERT` gets its own immediately preceding, actionable comment explaining what the developer did wrong and how to correct it. The comment is normally a `//` line; a one-line `/* ... */` comment is also accepted so an assertion inside a continued macro definition can carry the required comment. Write one `ASSERT` per line, repeat the comment for adjacent assertions, and keep assertion-specific recovery guidance next to the assertion rather than in public headers.
+- Verify the placement rule with `python3 scripts/verify-assert-comments.py .`; the focused CTests are `ava_tests.assert_comments_checker` and `ava_tests.assert_comments_source`. Reviewers still judge whether each comment is actionable.
+
 ## State
 
 - Avoid global mutable state.
@@ -78,10 +86,11 @@ These rules define the C++ subset we will use.
 
 ## Dependencies
 
-- Add dependencies slowly and deliberately.
+- Add dependencies slowly and deliberately, and ask before introducing a new production dependency.
 - Prefer mature, small, well-maintained libraries.
 - Do not add framework-scale dependencies for isolated convenience.
 - Dependencies must be usable from CMake without custom fragile setup.
+- Pin every dependency exactly and review its license and provenance; shipped dependencies must be covered by `THIRD_PARTY_NOTICES.md`.
 - Every dependency should have a clear owner and purpose.
 
 ## Testing
@@ -90,20 +99,27 @@ These rules define the C++ subset we will use.
 - Prioritize tests for file edits, process execution, JSON parsing, config loading, session persistence, and permission decisions.
 - Add regression tests for every safety bug.
 - Keep fast unit tests separate from integration tests that spawn subprocesses or hit networks.
-- Networked provider tests must be opt-in.
+- Keep default tests credential-free and offline. Networked provider tests must be opt-in, and validation for normal development must never require paid live-provider calls.
+- Match completion checks to the change's scope: focused CTest filters for the touched subsystem, clang-format on changed C/C++ files, and only the repository gates the change can affect.
 
 ### Running Tests
 
+Normal development uses a `BetaTest` build with `EnableDebug=ON`, keeping Release-style optimization and assertions together with AVA's libcwd instrumentation:
+
 ```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
+cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
 ### Sanitizer Builds
 
+ASan/UBSan are test diagnostics, not a production security boundary:
+
 ```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
@@ -116,10 +132,20 @@ Before merging C++ code, check:
 - No hidden global mutable state.
 - No long-lived dangling-prone views/references.
 - Fallible operations return explicit errors.
+- Assertions are side-effect-free internal invariants with actionable preceding comments.
 - File writes and process execution use the approved layers.
 - Background work has cancellation and shutdown.
 - Tests cover the risky behavior introduced.
 - The change keeps AVA smaller and more understandable than the code it replaces.
+
+## Authoritative References
+
+These external documents motivate the assertion and sanitizer rules above; they are rationale, not a wholesale import of external rule sets:
+
+- [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) (assertions express programmer-error expectations, not runtime error handling).
+- [CERT MSC11-C](https://wiki.sei.cmu.edu/confluence/display/c/MSC11-C.+Incorporate+diagnostic+tests+using+assertions) (assertions are diagnostic and must be side-effect-free).
+- [cppreference `assert`](https://en.cppreference.com/w/cpp/error/assert.html) (standard assertion semantics; disabled in `NDEBUG` builds).
+- [Clang AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html) and [Clang UndefinedBehaviorSanitizer](https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html) (test-time diagnostics).
 
 ## Principle
 

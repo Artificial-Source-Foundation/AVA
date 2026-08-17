@@ -34,4 +34,5 @@
 - [Goal packages](docs/goals/README.md)
 - [History](docs/history/README.md)
 - [Version journals](docs/versions/README.md)
+- [Interoperability index](docs/interop/README.md)
 - [Interoperability evidence policy](docs/interop/evidence/README.md)

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "Paragraph.h"
+
 #include "debug.h"
 
 namespace ava::tui::terminal {
@@ -59,6 +60,7 @@ namespace ava::tui::terminal {
 //
 std::vector<TextRow> Paragraph::wrap(uint32_t cell_width)
 {
+  // Don't pass a cell_width of zero.
   ASSERT(cell_width > 0);
 
   std::vector<TextRow> rows;

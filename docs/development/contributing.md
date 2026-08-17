@@ -135,6 +135,16 @@ Run clang-tidy against files you changed after configuring the build:
 clang-tidy <changed-cpp-files> -p build
 ```
 
+Verify that every `ASSERT` under `src/ava/` keeps its required immediately
+preceding comment, both directly and through its two focused CTests:
+
+```sh
+python3 scripts/verify-assert-comments.py .
+scripts/run-tests.sh --build-dir build \
+  -R '^ava_tests\.assert_comments_(checker|source)$' \
+  --output-on-failure
+```
+
 For Markdown changes, run both direct repository gates and their four focused
 CTest cases:
 
@@ -168,3 +178,7 @@ git --no-pager diff --check
 - Add focused regression tests for safety-sensitive changes.
 - For plugin or MCP contract changes, follow [`docs/plugin-compatibility-policy.md`](../plugin-compatibility-policy.md) and update deterministic golden fixtures when stable serialized shapes intentionally change.
 - Do not include `build*/` trees or `docs/reference-code/` repositories in reviews.
+
+## GitHub Actions dependencies
+
+Third-party GitHub Actions must be pinned to a full 40-character commit SHA with an exact release-tag comment (for example `# v7.0.1`). Before bumping an action, verify the official tag-to-SHA mapping and the action's release/runner requirements, then update every `uses:` occurrence in the workflow. GitHub-hosted runners are the current CI baseline; Node 24-based action majors require Actions Runner `>= 2.327.1`. Never replace a pinned SHA with a mutable tag such as `@v7`. Dependabot opens weekly GitHub Actions update PRs against `develop`, but human review of the pin, comment, and runner fit remains required.

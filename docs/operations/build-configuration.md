@@ -14,7 +14,7 @@ scripts/run-tests.sh --build-dir build
 
 | Preset | Binary directory | Key cache settings |
 | --- | --- | --- |
-| `dev` | `build` | `EnableAvaBuildTests=ON`, `CMAKE_BUILD_TYPE=BetaTest`, `EnableDebug=OFF`, `CMAKE_EXPORT_COMPILE_COMMANDS=ON` |
+| `dev` | `build` | `EnableAvaBuildTests=ON`, `CMAKE_BUILD_TYPE=BetaTest`, `EnableDebug=ON`, `CMAKE_EXPORT_COMPILE_COMMANDS=ON` |
 | `sanitize` | `build-sanitize` | Inherits `dev`; `EnableAvaSanitizers=ON` |
 | `tsan` | `build-tsan` | Inherits `dev`; `AVA_ENABLE_TSAN=ON` |
 | `release` | `build-release` | Tests on; `CMAKE_BUILD_TYPE=Release` |
@@ -43,7 +43,7 @@ Pass cache values at configure time, for example `cmake --preset dev -DAVA_ENABL
 
 ## Relevant AICxx/cwds options and build types
 
-AVA imports AICxx through `cmake/aicxx/Project` and uses its `cw_option` mechanism for `EnableAvaBuildTests` and `EnableAvaSanitizers`. The preset also sets `EnableDebug=OFF`; that is an AICxx debugging option, not an AVA alias. Do not replace canonical `EnableAva*` names in new automation with the compatibility names.
+AVA imports AICxx through `cmake/aicxx/Project` and uses its `cw_option` mechanism for `EnableAvaBuildTests` and `EnableAvaSanitizers`. The preset also sets `EnableDebug=ON`; that is an AICxx debugging option, not an AVA alias. Do not replace canonical `EnableAva*` names in new automation with the compatibility names.
 
 The configured AICxx build-type validation accepts:
 

@@ -586,6 +586,20 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.documentation_structure_source PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.assert_comments_checker
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/verify_assert_comments_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/verify-assert-comments.py)
+  set_tests_properties(ava_tests.assert_comments_checker PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.assert_comments_source
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/verify-assert-comments.py
+            ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ava_tests.assert_comments_source PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.module_dependency_rules
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/module_dependency_rules_test.py

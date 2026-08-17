@@ -332,7 +332,8 @@ std::filesystem::path logical_cwd()
 
   std::filesystem::path const logical(pwd_environment);
 
-  // pwd_environment start with '/'.
+  // $PWD was validated above to start with '/'; if this fires, that validation was bypassed, so keep the check that
+  // rejects a non-absolute $PWD before constructing logical.
   ASSERT(logical.is_absolute());
 
   int const cwd_fd = ::open(".", O_PATH | O_DIRECTORY | O_CLOEXEC);
@@ -446,6 +447,8 @@ Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path
 
   // Relative candidates resolve against the first anchor inside find_anchor and
   // therefore never reach this branch; only absolute candidates can be external.
+  // If this fires, a relative candidate slipped past find_anchor; fix find_anchor to resolve relative candidates
+  // against the first anchor before returning.
   ASSERT(candidate.is_absolute());
   std::filesystem::path const absolute = candidate.lexically_normal();
 

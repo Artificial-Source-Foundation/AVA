@@ -231,10 +231,10 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertEqual(
             PROVENANCE.EXPECTED_GITLINK_REVISIONS,
             {
-                "cwds": "3bef487a734de41fe4af52003f9186a485f8d287",
+                "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
                 "aicxx": "411eae316e75f798611afc5223d861b213e9d503",
-                "utils": "ce73eaf3292dce5b149d9459f5733a31688ce864",
-                "threadsafe": "7e749d1735f817952239c2351b24aaf78514e5a0",
+                "utils": "5ed11a1763eb982efcbc4d8407433010a8a317be",
+                "threadsafe": "76c3ccab0ef913f6c472175eb3994b20b5b40a0e",
                 "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
                 "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",
             },
@@ -245,6 +245,38 @@ class ReleaseProvenanceTests(unittest.TestCase):
         )
         records = clean_dependencies()
         self.assertEqual(next(record for record in records if record["name"] == "aicxx")["usage"], "build-tool")
+
+    def test_expected_gitlink_policy_matches_source_checkout(self) -> None:
+        probe = subprocess.run(
+            ["git", "-C", str(SOURCE), "rev-parse", "--is-inside-work-tree"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if probe.returncode != 0 or probe.stdout.strip() != "true":
+            self.skipTest("Git metadata is unavailable for the source checkout")
+
+        paths = [path for _name, path, _license_file, _license_id in PROVENANCE.DIRECT_DEPENDENCIES]
+        result = subprocess.run(
+            ["git", "-C", str(SOURCE), "ls-tree", "HEAD", "--", *paths],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        revisions_by_path: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            metadata, separator, path = line.partition("\t")
+            fields = metadata.split()
+            self.assertEqual(separator, "\t")
+            self.assertEqual(fields[:2], ["160000", "commit"])
+            self.assertEqual(len(fields), 3)
+            revisions_by_path[path] = fields[2]
+        actual = {
+            name: revisions_by_path[path]
+            for name, path, _license_file, _license_id in PROVENANCE.DIRECT_DEPENDENCIES
+        }
+        self.assertEqual(actual, PROVENANCE.EXPECTED_GITLINK_REVISIONS)
 
     def test_elf_metadata_reads_loader_visible_needed_names_without_sections(self) -> None:
         # There are intentionally no section headers: the loader uses program
@@ -339,11 +371,16 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertIn("unexpected-dynamic-dependency", provenance["qualification_reasons"])
 
     def test_architecture_and_dynamic_dependencies_are_qualification_gates(self) -> None:
-        arm = self.collect(architecture="aarch64")
+        self.assertEqual(PROVENANCE.QUALIFIED_ARCHITECTURES, frozenset({"x86_64", "aarch64"}))
+        x86_64 = self.collect(architecture="x86_64")
+        aarch64 = self.collect(architecture="aarch64")
+        riscv64 = self.collect(architecture="riscv64")
         allowed_subset = self.collect(needed=["libc.so.6"])
         unexpected = self.collect(needed=["libc.so.6", "libsurprise.so.1"])
-        self.assertFalse(arm["release_qualified"])
-        self.assertIn("architecture-not-x86_64", arm["qualification_reasons"])
+        self.assertTrue(x86_64["release_qualified"])
+        self.assertTrue(aarch64["release_qualified"])
+        self.assertFalse(riscv64["release_qualified"])
+        self.assertIn("architecture-not-qualified", riscv64["qualification_reasons"])
         self.assertTrue(allowed_subset["release_qualified"])
         self.assertFalse(unexpected["release_qualified"])
         self.assertIn("unexpected-dynamic-dependency", unexpected["qualification_reasons"])

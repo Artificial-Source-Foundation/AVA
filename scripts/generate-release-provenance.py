@@ -32,10 +32,10 @@ DEPENDENCY_USAGE = {
 # This committed policy makes the direct-license evidence independently
 # auditable. A license identifier alone cannot establish what file was used.
 EXPECTED_GITLINK_REVISIONS = {
-    "cwds": "3bef487a734de41fe4af52003f9186a485f8d287",
+    "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
     "aicxx": "411eae316e75f798611afc5223d861b213e9d503",
-    "utils": "ce73eaf3292dce5b149d9459f5733a31688ce864",
-    "threadsafe": "7e749d1735f817952239c2351b24aaf78514e5a0",
+    "utils": "5ed11a1763eb982efcbc4d8407433010a8a317be",
+    "threadsafe": "76c3ccab0ef913f6c472175eb3994b20b5b40a0e",
     "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
     "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",
 }
@@ -48,6 +48,7 @@ EXPECTED_LICENSE_SHA256 = {
     "nlohmann_json": "d64d1b4d948aa7751cfb613c02dc246aab7b358d760053e6580f01affe946906",
 }
 HOST_DYNAMIC_ALLOWLIST = frozenset({"libncursesw.so.6", "libtinfo.so.6", "libstdc++.so.6", "libm.so.6", "libgcc_s.so.1", "libc.so.6"})
+QUALIFIED_ARCHITECTURES = frozenset({"x86_64", "aarch64"})
 MACHINE_ARCHITECTURES = {3: "x86", 62: "x86_64", 183: "aarch64"}
 
 
@@ -283,8 +284,8 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         reasons.append("qualification-mode-not-requested")
     if build_mode != "source-build":
         reasons.append("build-mode-not-source-build")
-    if architecture != "x86_64":
-        reasons.append("architecture-not-x86_64")
+    if architecture not in QUALIFIED_ARCHITECTURES:
+        reasons.append("architecture-not-qualified")
     if needed is None:
         reasons.append("binary-not-elf")
     elif set(needed) - HOST_DYNAMIC_ALLOWLIST:

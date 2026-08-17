@@ -26,6 +26,7 @@ share/doc/ava/PROVENANCE.json
 share/doc/ava/docs/core/usage.md
 share/doc/ava/docs/core/configuration.md
 share/doc/ava/docs/core/context-resources.md
+share/doc/ava/docs/core/custom-providers.md
 share/doc/ava/docs/core/environment-variables.md
 share/doc/ava/docs/core/providers.md
 share/doc/ava/docs/core/subagents.md
@@ -53,10 +54,11 @@ share/doc/ava/docs/plugin-compatibility-policy.md
 share/doc/ava/docs/interop/evidence/README.md
 share/doc/ava/docs/interop/evidence/zed-1.9.0-2026-07-14.md
 share/doc/ava/docs/product/mvp-coverage-ledger.md
+share/doc/ava/docs/plans/tui-pi-feature-expansion-plan.md
 share/doc/ava/docs/schema/theme.schema.json
 ```
 
-The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. The curated documentation payload is exactly 31 source files (29 Markdown and 2 JSON) mirrored under their source categories; category indexes remain source-only. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
+The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. The curated documentation payload is exactly 33 source files (31 Markdown and 2 JSON) mirrored under their source categories; category indexes remain source-only. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
 
 The allowlist excludes reference repositories, source and test trees, build trees, examples, credentials, auth/config/session state, provider output, raw interoperability evidence, and the optional desktop prototype. CMake component `ava` must remain exact; always pass `--component ava` for a manual stage:
 
@@ -68,7 +70,7 @@ cmake --install build-release \
 
 ## Portability boundary
 
-This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport.
+This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport. Release qualification is limited to native x86_64 and AArch64 builds; each qualified architecture requires its own native CI Release build, full CTest run, clean-checkout assertion, and successful strict source-package run. Cross-compilation is not qualification evidence.
 
 Build-only dependencies are not packaged. Building from this checkout needs CMake 3.25+, a C++23 compiler, Boost and ncurses development files, Git, and configured source dependencies. Packaging additionally needs Bash, Python 3, `tar`, `sha256sum`, and Linux `renameat2`. Python is used only for staged-link verification, negative tests, and descriptor-anchored no-replace publication; it is not a runtime dependency.
 
@@ -132,7 +134,7 @@ Ordinary build mode configures a fresh private Release build tree, builds the cu
 scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
 ```
 
-The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, non-x86_64 builds, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
+The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, architectures other than x86_64 or AArch64, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
 
 ```sh
 scripts/package-linux.sh --require-release-qualified \

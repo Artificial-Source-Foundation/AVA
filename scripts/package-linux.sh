@@ -21,7 +21,7 @@ Usage: scripts/package-linux.sh [--binary ABS] [--fake-provider ABS] [--output-d
 Without --binary, configure a fresh private Release build tree and build ava plus the fake-provider helper.
 With --binary, snapshot that executable once and stage it only when its exact version matches this checkout.
 A supplied --fake-provider is likewise snapshotted once before model smoke.
---require-release-qualified accepts only a clean source-built x86_64 artifact with approved provenance.
+--require-release-qualified accepts only a clean source-built x86_64/AArch64 artifact with approved provenance.
 If --output-dir is omitted, a new private unpredictable directory is created.
 Python 3 is required for provenance, packaging-time link verification, and secure publication.
 EOF

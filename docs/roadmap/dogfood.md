@@ -62,3 +62,13 @@ Current workflow controls:
 The pinned `utils` revision is `ce73eaf`; Carlo's MIT relicensing commit is `adee705`. AVA's qualified x86_64/x64 release uses the MIT-licensed Carlo-owned `utils` paths and defines `MIT_LICENSE_ONLY`, which makes accidental inclusion of the guarded BSD `FunctionView.h` and `threading/MpscQueue.h` fail compilation. This is not a claim that every `utils` path has one license: the AArch64 `yield` branch in `cpu_relax.h` remains attributed to Long Wong and is not qualified pending provenance or replacement.
 
 `scripts/package-linux.sh --require-release-qualified` requires a clean source-built x86_64 artifact, matching initialized gitlinks, expected license evidence, and allowlisted host ELF dependencies. The packaged `THIRD_PARTY_NOTICES.md` and `PROVENANCE.json` state the boundary. Supplied-binary packaging remains available but is explicitly unqualified.
+
+### 2026-08-17 replacement and qualification state
+
+The 2026-07-23 evidence above remains the dated record for the prior pin. The
+current `utils` pin is `5ed11a1763eb982efcbc4d8407433010a8a317be` and contains
+Carlo's MIT-licensed AArch64 CPU-relaxation implementation. Strict source-built
+native x86_64/x64 and AArch64/arm64 artifacts are now release-qualified when all
+clean gitlink, worktree, license, binary-version, ELF dependency, full CTest,
+and native CI evidence gates pass. Other architectures and all supplied
+binaries remain unqualified.

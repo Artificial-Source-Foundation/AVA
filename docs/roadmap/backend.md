@@ -45,7 +45,7 @@ The current backend-only 1.1 candidate product list lives in `docs/plans/capabil
 
 Reference-code rule: material under `docs/reference-code/` is for behavior comparison only. Its source code and architecture must not be copied into AVA.
 
-Terminology note: this roadmap uses "1.0" and "backend MVP" for the same release cut. "Post-MVP" means 1.1 and later. Historical 1.0 evidence below is not an artifact-qualification claim: current Linux packaging qualifies only strict source-built x86_64/x64 artifacts with the provenance contract in [`../release-checklist.md`](../operations/release-checklist.md); ARM/non-x86 remains unqualified.
+Terminology note: this roadmap uses "1.0" and "backend MVP" for the same release cut. "Post-MVP" means 1.1 and later. Historical 1.0 evidence below is not an artifact-qualification claim: current Linux packaging qualifies only strict source-built native x86_64/x64 and AArch64/arm64 artifacts with the provenance contract in [`../release-checklist.md`](../operations/release-checklist.md); other architectures remain unqualified.
 
 ## Reference: Backend Maturity Capabilities
 

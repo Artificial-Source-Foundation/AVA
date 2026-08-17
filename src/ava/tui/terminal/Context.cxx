@@ -42,6 +42,14 @@ Context::Context() : default_rendition_(ColorPair{0})
   noecho();
   nl();                 // Always translate the Enter key to a linefeed.
   meta(::stdscr, TRUE); // Always return 8-bit character codes.
+
+  // Refresh stdscr once to consume its initial all-touched state, and to clear
+  // whatever the previous program left on the physical terminal.
+  // A still-touched stdscr would stage blanks over cells that other windows
+  // already published to the virtual screen — explicitly, or implicitly from
+  // the wrefresh(stdscr) that get_wch performs before blocking for input.
+  // After this, application windows own all staging; never write through stdscr.
+  stdscr_.refresh();
 }
 
 Context::~Context()

@@ -22,6 +22,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -56,6 +57,7 @@ void test_usage_accounting_saturates_without_signed_overflow()
 
 void test_agent_loop_text_only_turn()
 {
+  constexpr std::string_view system_prompt_marker = "AVA-ISSUE-54-AGENT-LOOP-SYSTEM-PROMPT";
   auto const root = create_empty_root("agent-text");
 
   auto const workspace = root / "workspace";
@@ -70,7 +72,7 @@ void test_agent_loop_text_only_turn()
       .mode = ava::agent::Mode::Build,
       .model = ava::agent::ModelInvocationOptions{.provider_id = "openai",
                                                   .model_id = "gpt-5.5",
-                                                  .system_prompt = "system prompt",
+                                                  .system_prompt = std::string(system_prompt_marker),
                                                   .api_family = "openai_responses",
                                                   .reasoning_format = "openai_responses"},
       .access_token = "token",
@@ -86,6 +88,8 @@ void test_agent_loop_text_only_turn()
          "agent loop returns text-only provider response with status metadata");
   expect(transport.requests().size() == 1 && transport.requests()[0].body.find("read_file") != std::string::npos,
          "agent loop includes tool schemas in provider request");
+  expect(transport.requests().size() == 1 && ava::tests::count_occurrences(transport.requests()[0].body, system_prompt_marker) == 1,
+         "agent loop sends the effective system prompt to the provider exactly once");
   expect(transport.requests().size() == 1 && transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].headers.at("ChatGPT-Account-Id") == "acct_123",
          "agent loop routes OpenAI OAuth turns through delegated endpoint");

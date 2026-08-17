@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -43,12 +44,13 @@ void test_json_object_validator()
 
 void test_anthropic_provider_contract()
 {
+  constexpr std::string_view system_prompt_marker = "AVA-ISSUE-54-ANTHROPIC-SYSTEM-PROMPT";
   ava::provider::AnthropicProvider const provider("https://anthropic.example.test/");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "anthropic",
           .model_id = "claude-sonnet-4-5",
-          .system_prompt = "system",
+          .system_prompt = std::string(system_prompt_marker),
           .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"}, ava::provider::ChatMessage{.role = "assistant", .content = "hi"}},
           .tools_json =
               {R"({"type":"function","name":"read_file","description":"Read","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}})"},
@@ -66,7 +68,7 @@ void test_anthropic_provider_contract()
            "Anthropic streaming request asks for SSE and does not follow authenticated redirects");
     expect(request->body.find("\"model\":\"claude-sonnet-4-5\"") != std::string::npos, "Anthropic request includes model id");
     expect(request->body.find("\"max_tokens\":64000") != std::string::npos, "Anthropic request uses model max output token metadata when supplied");
-    expect(request->body.find("\"system\":\"system\"") != std::string::npos, "Anthropic request includes top-level system prompt");
+    expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1, "Anthropic request serializes the effective system prompt exactly once");
     expect(request->body.find("\"stream\":true") != std::string::npos, "Anthropic request preserves stream flag");
     expect(request->body.find("\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}") != std::string::npos, "Anthropic request includes messages");
     expect(request->body.find("\"input_schema\":{\"type\":\"object\"") != std::string::npos, "Anthropic request maps OpenAI-style parameters to input_schema");

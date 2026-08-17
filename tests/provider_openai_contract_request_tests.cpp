@@ -15,10 +15,11 @@ namespace ava::tests::provider_openai_suite {
 
 std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(ava::provider::OpenAIProvider const& provider)
 {
+  constexpr std::string_view system_prompt_marker = "AVA-ISSUE-54-OPENAI-SYSTEM-PROMPT";
   auto const request =
       provider.build_request(ava::provider::ProviderRequest{.provider_id = "openai",
                                                             .model_id = "gpt-5.5",
-                                                            .system_prompt = "system",
+                                                            .system_prompt = std::string(system_prompt_marker),
                                                             .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello \"ava\""}},
                                                             .tools_json = {"{\"type\":\"function\",\"name\":\"read_file\"}"},
                                                             .max_output_tokens = 1234},
@@ -32,6 +33,8 @@ std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(av
     expect(request->body.find("\"stream\":true") != std::string::npos, "OpenAI request defaults to streaming");
     expect(request->body.find("\"max_output_tokens\":1234") != std::string::npos, "OpenAI request includes configured max output tokens");
     expect(request->body.find("\"store\":false") == std::string::npos, "OpenAI API-key request does not force storage flag");
+    expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1,
+           "OpenAI Responses request serializes the effective system prompt exactly once");
     expect(request->body.find("hello \\\"ava\\\"") != std::string::npos, "OpenAI request JSON escapes message content");
     expect(request->body.find("\"tools\":[{\"type\":\"function\",\"name\":\"read_file\"}]") != std::string::npos, "OpenAI request includes tools array");
     expect(request->timeout_ms == 60000, "OpenAI request carries default HTTP timeout");

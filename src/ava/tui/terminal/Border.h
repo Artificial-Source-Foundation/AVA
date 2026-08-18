@@ -19,7 +19,7 @@ class Border
 
  public:
   // Construct a non-existent Border.
-  Border() = default;
+  Border() : margin_{}, rendition_{ColorPair{}}, box_characters_{} { }
 
   // Construct a Border using `margin`, `rendition` and `box_characters`.
   Border(Margin margin,  Rendition rendition, Box const& box_characters = {Box::default_box}) : margin_(margin), rendition_(rendition), box_characters_(box_characters) { }

@@ -30,18 +30,18 @@ namespace {
 // The TextSpan's whose text contains uppercase (including their spaces) are StyledTextSpan's with `styled_rendition`;
 // the other TextSpan's were created without a rendition and must be rendered with the default rendition using
 // terminals default fore- and background.
-terminal::Paragraph make_comment_paragraph(terminal::Rendition const& styled_rendition)
+std::unique_ptr<terminal::Paragraph> make_comment_paragraph(terminal::Rendition const& styled_rendition)
 {
-  terminal::Paragraph paragraph;
-  paragraph.append(terminal::TextSpan::create(u8"AAAAAAAAAAA ", styled_rendition));
-  paragraph.append(terminal::TextSpan::create(u8" bbb ccc ddd "));
-  paragraph.append(terminal::TextSpan::create(u8"EEEEEEEE FFFFF  GGGGG", styled_rendition));
-  paragraph.append(terminal::TextSpan::create(u8" hhhhh iii j kkkk lll  "));
-  paragraph.append(terminal::TextSpan::create(u8"MMMMM N OOO", styled_rendition));
-  paragraph.append(terminal::TextSpan::create(u8" ppp "));
-  paragraph.append(terminal::TextSpan::create(u8"Q ", styled_rendition));
-  paragraph.append(terminal::TextSpan::create(u8" rrr  sss ttt uuuu vvvv wwww xxx yyy "));
-  paragraph.append(terminal::TextSpan::create(u8" ZZZ", styled_rendition));
+  auto paragraph = terminal::Paragraph::create({.minimum_width = 16});
+  paragraph->append(terminal::TextSpan::create(u8"AAAAAAAAAAA ", styled_rendition));
+  paragraph->append(terminal::TextSpan::create(u8" bbb ccc ddd "));
+  paragraph->append(terminal::TextSpan::create(u8"EEEEEEEE FFFFF  GGGGG", styled_rendition));
+  paragraph->append(terminal::TextSpan::create(u8" hhhhh iii j kkkk lll  "));
+  paragraph->append(terminal::TextSpan::create(u8"MMMMM N OOO", styled_rendition));
+  paragraph->append(terminal::TextSpan::create(u8" ppp "));
+  paragraph->append(terminal::TextSpan::create(u8"Q ", styled_rendition));
+  paragraph->append(terminal::TextSpan::create(u8" rrr  sss ttt uuuu vvvv wwww xxx yyy "));
+  paragraph->append(terminal::TextSpan::create(u8" ZZZ", styled_rendition));
   return paragraph;
 }
 
@@ -91,9 +91,9 @@ std::vector<ExpectedRow> const& expected_wrapped_rows()
 // Check Paragraph::wrap(9) against the worked example in the comment at the top of Paragraph.cxx.
 void test_paragraph_wrap_comment_example()
 {
-  terminal::Paragraph paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
+  auto paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
 
-  std::vector<terminal::TextRow> rows = paragraph.wrap(9);
+  std::vector<terminal::TextRow> rows = paragraph->wrap(9);
 
   std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
   expect(rows.size() == expected.size(), "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " +

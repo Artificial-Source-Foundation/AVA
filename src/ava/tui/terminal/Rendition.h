@@ -20,7 +20,7 @@ class Rendition
 
  public:
   // Construct a Rendition with `color_pair` and `attributes`.
-  Rendition(ColorPair color_pair = {}, Attributes attributes = {}) : color_pair_(color_pair), attributes_(attributes) { }
+  explicit Rendition(ColorPair color_pair, Attributes attributes = {}) : color_pair_(color_pair), attributes_(attributes) { }
 
   // Accessors
 

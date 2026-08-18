@@ -1,35 +1,38 @@
 #pragma once
 
 #include "Hyperlink.h"
+#include "LayoutItem.h"
 #include "Rendition.h"
-#include <string>
+
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace ava::tui::terminal {
 
-class TextSpan
+class TextSpan : public LayoutItem
 {
  private:
   std::u8string text_;          // Pure UTF8 encoded text for display with the same rendition (no markdown).
 
  protected:
   // Constructor; used by create and the constructor of StyledTextSpan.
-  TextSpan(std::u8string const& text) : text_(text) { }
-
- public:
-  virtual ~TextSpan() = default;
+  TextSpan(LayoutItem&& layout_item, std::u8string const& text) : LayoutItem(std::move(layout_item)), text_(text) { }
 
  public:
   // Create a TextSpan without rendition info. Use this for example when the rendition will be determined by the window (which must be enforced elsewhere).
-  static std::unique_ptr<TextSpan> create(std::u8string const& text) { return std::unique_ptr<TextSpan>{new TextSpan{text}}; }
+  static std::unique_ptr<TextSpan> create(std::u8string const& text, LayoutItem::Properties layout_properties = {.minimum_width = greedy})
+  {
+    return std::unique_ptr<TextSpan>{new TextSpan{LayoutItem{layout_properties}, text}};
+  }
 
   // Create a TextSpan with its own rendition info.
-  static std::unique_ptr<TextSpan> create(std::u8string const& text, Rendition rendition);
+  static std::unique_ptr<TextSpan> create(std::u8string const& text, Rendition rendition, LayoutItem::Properties layout_properties = {.minimum_width = greedy});
 
   // Create a TextSpan with rendition info and hyperlink.
-  static std::unique_ptr<TextSpan> create(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink);
+  static std::unique_ptr<TextSpan> create(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink,
+                                          LayoutItem::Properties layout_properties = {.minimum_width = greedy});
 
   // Accessor.
   std::u8string const& text() const { return text_; }
@@ -47,6 +50,9 @@ class TextSpan
   virtual Hyperlink hyperlink() const;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  int do_natural_width() const override;
 };
 
 class StyledTextSpan : public TextSpan
@@ -55,7 +61,7 @@ class StyledTextSpan : public TextSpan
   Rendition rendition_;
 
  public:
-  StyledTextSpan(std::u8string const& text, Rendition rendition) : TextSpan(text), rendition_(rendition) { }
+  StyledTextSpan(LayoutItem&& layout_item, std::u8string const& text, Rendition rendition) : TextSpan(std::move(layout_item), text), rendition_(rendition) { }
 
   bool use_default_rendition() const override { return false; }
   Rendition rendition() const override;
@@ -69,8 +75,10 @@ class HyperlinkedTextSpan : public StyledTextSpan
   Hyperlink hyperlink_;
 
  public:
-  HyperlinkedTextSpan(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink) :
-    StyledTextSpan(text, rendition), hyperlink_(hyperlink) { }
+  HyperlinkedTextSpan(LayoutItem&& layout_item, std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink)
+      : StyledTextSpan(std::move(layout_item), text, rendition), hyperlink_(hyperlink)
+  {
+  }
 
   bool is_hyperlink() const override { return true; }
   Hyperlink hyperlink() const override;
@@ -84,10 +92,10 @@ class TextSpanView
   // that corresponds to the `wchar_t` stored in wide_characters_ at index N.
   struct CharacterMeta
   {
-    std::size_t utf8_begin;                       // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
-    std::size_t utf8_size;                        // The total number of UTF8 bytes that are consumed by this Character.
-    int cell_width;                               // The number of terminal cells that this Character will occupy (unfortunately, this is just an approximation).
-    bool whitespace;                              // True if this Character is white-space.
+    std::size_t utf8_begin;     // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
+    std::size_t utf8_size;      // The total number of UTF8 bytes that are consumed by this Character.
+    int cell_width;             // The number of terminal cells that this Character will occupy (unfortunately, this is just an approximation).
+    bool whitespace;            // True if this Character is white-space.
 
     // Printing this object is better done from the TextSpanView that contains it.
     AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

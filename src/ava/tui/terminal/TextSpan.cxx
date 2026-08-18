@@ -21,16 +21,38 @@ Hyperlink TextSpan::hyperlink() const
   AI_NEVER_REACHED;
 }
 
-//static
-std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition)
+// Returns the width in terminal columns of the trimmed text_ string.
+int TextSpan::do_natural_width() const
 {
-  return std::unique_ptr<TextSpan>{new StyledTextSpan{text, rendition}};
+  //FIXME: this seems inefficient; can't this be delayed until the TextSpanView is required anyway?
+  TextSpanView view(*this);     // Use TextSpanView to get the cell width of each character.
+
+  int natural_width = 0;
+  auto const& characters_meta = view.characters_meta();
+  auto first_non_whitespace_character = characters_meta.begin();
+  while (first_non_whitespace_character != characters_meta.end() && first_non_whitespace_character->whitespace)
+    ++first_non_whitespace_character;
+  if (first_non_whitespace_character != characters_meta.end())
+  {
+    auto first_trailing_whitespace_character = characters_meta.end();
+    while (std::prev(first_trailing_whitespace_character)->whitespace)
+      --first_trailing_whitespace_character;
+    for (auto iter = first_non_whitespace_character; iter != first_trailing_whitespace_character; ++iter)
+      natural_width += iter->cell_width;
+  }
+  return natural_width;
 }
 
 //static
-std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink)
+std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition, LayoutItem::Properties layout_properties)
 {
-  return std::unique_ptr<TextSpan>{new HyperlinkedTextSpan{text, rendition, hyperlink}};
+  return std::unique_ptr<TextSpan>{new StyledTextSpan{layout_properties, text, rendition}};
+}
+
+//static
+std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink, LayoutItem::Properties layout_properties)
+{
+  return std::unique_ptr<TextSpan>{new HyperlinkedTextSpan{layout_properties, text, rendition, hyperlink}};
 }
 
 Rendition StyledTextSpan::rendition() const

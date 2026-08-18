@@ -127,6 +127,13 @@ class BasicWindow
   // Turn off standout and return subsequent output to normal rendition.
   void standend();                                                      // wstandend
 
+  Rendition get_rendition() const
+  {
+    Rendition current_rendition{ColorPair{}};
+    attr_get(current_rendition);
+    return current_rendition;
+  }
+
   // https://invisible-island.net/ncurses/man/curs_move.3x.html
 
   void move(Position pos);                                              // wmove

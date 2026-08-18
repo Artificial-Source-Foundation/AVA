@@ -36,8 +36,7 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
 
   // Track the rendition that ncurses would still use, starting from the current one,
   // so that an unchanged rendition never needs an attr_set call.
-  Rendition original_rendition;
-  pad.attr_get(original_rendition);
+  Rendition original_rendition = pad.get_rendition();
   Rendition current_rendition{original_rendition};
 
   // Append `n` characters of the wide character string `str` to `pad` using `rendition`.
@@ -133,9 +132,9 @@ void Pad::generate(uint32_t cell_width)
   std::vector<std::vector<TextRow>> wrapped_paragraphs;
   wrapped_paragraphs.reserve(paragraphs_.size());
   uint32_t pad_height = 0;
-  for (Paragraph& paragraph : paragraphs_)
+  for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
   {
-    wrapped_paragraphs.push_back(paragraph.wrap(cell_width));
+    wrapped_paragraphs.push_back(paragraph->wrap(cell_width));
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.back().size());
   }
   if (wrapped_paragraphs.size() > 1)
@@ -151,7 +150,7 @@ void Pad::generate(uint32_t cell_width)
   {
     for (TextRow const& text_row : rows)
     {
-      write_row(*pad_, text_row, row, cell_width, paragraph_iter->default_rendition());
+      write_row(*pad_, text_row, row, cell_width, (*paragraph_iter)->default_rendition());
       ++row;
     }
     ++row;               // Leave one blank row between consecutive Paragraph's.

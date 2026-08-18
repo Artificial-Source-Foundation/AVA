@@ -20,14 +20,14 @@ namespace ava::tui::terminal {
 class Pad
 {
  private:
-  std::list<Paragraph> paragraphs_;     // The Paragraph's that make up the content of this pad, in order.
-  std::optional<BasicWindow> pad_;      // The ncurses pad created by the last generate() call, if any.
+  std::vector<std::unique_ptr<Paragraph>> paragraphs_;  // The Paragraph's that make up the content of this pad, in order.
+  std::optional<BasicWindow> pad_;                      // The ncurses pad created by the last generate() call, if any.
 
  public:
   Pad() = default;
 
   // Append `paragraph` to the end of the content of this pad.
-  void append(Paragraph&& paragraph)
+  void append(std::unique_ptr<Paragraph>&& paragraph)
   {
     paragraphs_.push_back(std::move(paragraph));
   }
@@ -45,7 +45,7 @@ class Pad
   void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size);
 
   // Accessor.
-  std::list<Paragraph> const& paragraphs() const { return paragraphs_; }
+  std::vector<std::unique_ptr<Paragraph>> const& paragraphs() const { return paragraphs_; }
 
   // Return the dimensions of the generated ncurses pad.
   Dimension dimension() const;

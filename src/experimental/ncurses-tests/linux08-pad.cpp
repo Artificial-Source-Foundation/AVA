@@ -91,9 +91,9 @@ std::u8string to_u8string(std::string_view text)
 // Build one Paragraph from a single lorem ipsum paragraph by chopping it into phrases of
 // alternating 51 and 19 characters long. Every third 19-character phrase gets its own colored
 // Rendition.
-terminal::Paragraph make_paragraph(std::string_view text, terminal::Rendition paragraph_rendition, std::array<terminal::ColorPair, 4> const& phrase_colors)
+std::unique_ptr<terminal::Paragraph> make_paragraph(std::string_view text, terminal::Rendition paragraph_rendition, std::array<terminal::ColorPair, 4> const& phrase_colors)
 {
-  terminal::Paragraph paragraph{paragraph_rendition};
+  auto paragraph = terminal::Paragraph::create(paragraph_rendition, {.minimum_width = 16});
 
   int remaining = text.size();
   std::array<int, 2> pla{51, 19};
@@ -112,11 +112,11 @@ terminal::Paragraph make_paragraph(std::string_view text, terminal::Rendition pa
 
       if (pl == 1 && need_color)
       {
-        paragraph.append(terminal::TextSpan::create(to_u8string(phrase), terminal::Rendition{phrase_colors[phrase19_index % phrase_colors.size()]}));
+        paragraph->append(terminal::TextSpan::create(to_u8string(phrase), terminal::Rendition{phrase_colors[phrase19_index % phrase_colors.size()]}));
         ++phrase19_index;
       }
       else
-        paragraph.append(terminal::TextSpan::create(to_u8string(phrase)));
+        paragraph->append(terminal::TextSpan::create(to_u8string(phrase)));
 
       remaining -= phrase_len;
       if (remaining <= 0)

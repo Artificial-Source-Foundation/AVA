@@ -44,3 +44,6 @@ target_link_libraries(linux07 PRIVATE AVA::terminal)
 
 add_executable(linux08 linux08-pad.cpp)
 target_link_libraries(linux08 PRIVATE AVA::terminal)
+
+add_executable(linux09 linux09-layout.cpp)
+target_link_libraries(linux09 PRIVATE AVA::terminal)

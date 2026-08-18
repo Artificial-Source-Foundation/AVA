@@ -3,6 +3,7 @@
 #include "HorizontalAlignment.h"
 
 #include <limits>
+#include <memory>
 #include "debug.h"                      // ASSERT
 
 namespace ava::tui::terminal {
@@ -78,6 +79,9 @@ class LayoutItem
   int minimum_width() const { return properties_.minimum_width; }
   int natural_width() const { return do_natural_width(); }
   HorizontalAlignment horizontal_alignment() const { return properties_.alignment; }
+
+  // Rendering.
+  //...
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

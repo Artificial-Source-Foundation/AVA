@@ -66,25 +66,26 @@ TextSpanView TextRow::append(TextSpanView&& source)
     // Pretend we succesfully appended source.
     return {};
 
-  auto const source_begin = source.characters_meta_.begin();
+  auto const source_begin = source.characters().meta().begin();
+  auto const source_end = source.characters().meta().end();
   auto prefix_end = source_begin;
   auto cursor = source_begin;
   size_t appended_width = 0;
 
   // Leading whitespace remains trailing whitespace on this row until another
   // word is accepted, so preserve all of it even when it crosses the limit.
-  while (cursor != source.characters_meta_.end() && cursor->whitespace)
+  while (cursor != source_end && cursor->whitespace)
   {
     appended_width += static_cast<size_t>(cursor->cell_width);
     prefix_end = ++cursor;
   }
 
   bool first_word = true;
-  while (cursor != source.characters_meta_.end())
+  while (cursor != source_end)
   {
     auto const word_begin = cursor;
     size_t word_width = 0;
-    while (cursor != source.characters_meta_.end() && !cursor->whitespace)
+    while (cursor != source_end && !cursor->whitespace)
     {
       word_width += static_cast<size_t>(cursor->cell_width);
       ++cursor;
@@ -97,7 +98,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
       if (first_word && word_width > max_cell_width_)
       {
         cursor = word_begin;
-        while (cursor != source.characters_meta_.end() && !cursor->whitespace &&
+        while (cursor != source_end && !cursor->whitespace &&
                cell_width_ + appended_width + static_cast<size_t>(cursor->cell_width) <= max_cell_width_)
         {
           appended_width += static_cast<size_t>(cursor->cell_width);
@@ -113,7 +114,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
 
     // Whitespace following an accepted word stays on this row, including the
     // portion beyond max_cell_width_, because it is ignored for wrapping.
-    while (cursor != source.characters_meta_.end() && cursor->whitespace)
+    while (cursor != source_end && cursor->whitespace)
     {
       appended_width += static_cast<size_t>(cursor->cell_width);
       prefix_end = ++cursor;
@@ -123,7 +124,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
   if (prefix_end == source_begin)
     return std::move(source);
 
-  if (prefix_end == source.characters_meta_.end())
+  if (prefix_end == source_end)
   {
     cell_width_ += appended_width;
     text_span_views_.push_back(std::move(source));
@@ -136,10 +137,8 @@ TextSpanView TextRow::append(TextSpanView&& source)
 
   TextSpanView prefix;
   prefix.text_span_ = source.text_span_;
-  prefix.characters_meta_.assign(source_begin, prefix_end);
-  prefix.wide_characters_.assign(source.wide_characters_.begin(), source.wide_characters_.begin() + static_cast<std::ptrdiff_t>(prefix_size));
-  source.characters_meta_.erase(source_begin, prefix_end);
-  source.wide_characters_.erase(source.wide_characters_.begin(), source.wide_characters_.begin() + static_cast<std::ptrdiff_t>(prefix_size));
+  prefix.characters().copy_prefix(source.characters(), prefix_size);
+  source.characters().remove_prefix(prefix_size);
 
   cell_width_ += appended_width;
   text_span_views_.push_back(std::move(prefix));

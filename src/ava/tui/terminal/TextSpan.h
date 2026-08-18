@@ -3,11 +3,10 @@
 #include "Hyperlink.h"
 #include "LayoutItem.h"
 #include "Rendition.h"
+#include "Characters.h"
 
 #include <memory>
-#include <string>
 #include <string_view>
-#include <vector>
 
 namespace ava::tui::terminal {
 
@@ -49,7 +48,7 @@ class TextSpan : public LayoutItem
   // Only call this if is_hyperlink() returns true.
   virtual Hyperlink hyperlink() const;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_ON_BASE(LayoutItem)
 
  private:
   int do_natural_width() const override;
@@ -88,29 +87,15 @@ class HyperlinkedTextSpan : public StyledTextSpan
 
 class TextSpanView
 {
-  // Meta data of the Character, stored in `characters_meta_` at -say- index N
-  // that corresponds to the `wchar_t` stored in wide_characters_ at index N.
-  struct CharacterMeta
-  {
-    std::size_t utf8_begin;     // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
-    std::size_t utf8_size;      // The total number of UTF8 bytes that are consumed by this Character.
-    int cell_width;             // The number of terminal cells that this Character will occupy (unfortunately, this is just an approximation).
-    bool whitespace;            // True if this Character is white-space.
-
-    // Printing this object is better done from the TextSpanView that contains it.
-    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-  };
-
  private:
   friend class TextRow;
 
   TextSpan const* text_span_;                   // The TextSpan (base) class that this is a view into.
-  std::wstring wide_characters_;                // The wide characters that make up this view.
-  std::vector<CharacterMeta> characters_meta_;  // The meta data of the characters in wide_characters_.
+  Characters characters_;                       // The wide characters and meta data of those characters that make up this view.
 
  public:
   // Construct an empty TextSpanView.
-  TextSpanView() : text_span_(nullptr) { }
+  TextSpanView() : text_span_(nullptr), characters_(0) { }
 
   // Construct a TextSpanView that covers the whole parent.
   TextSpanView(TextSpan const& parent);
@@ -118,18 +103,16 @@ class TextSpanView
   // Accessors.
   TextSpan const* text_span() const { return text_span_; }
 
-  // The wide characters that make up this view.
-  std::wstring const& characters() const { return wide_characters_; }
-
-  // The meta data of the characters.
-  std::vector<CharacterMeta> const& characters_meta() const { return characters_meta_; }
+  Characters& characters() { return characters_; }
+  Characters const& characters() const { return characters_; }
 
   // Convenience accessor; returns true if this view contains no Characters.
-  bool empty() const { return wide_characters_.empty(); }
-
-  operator std::u8string_view() const;
+  bool empty() const { return characters_.empty(); }
 
 #ifdef CWDEBUG
+  // Get a view into the TextSpan parent of just the utf8 characters.
+  std::u8string_view get_u8string_view() const;
+
   void print_on(std::ostream& os) const;
 #endif
 

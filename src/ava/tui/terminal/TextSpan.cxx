@@ -2,6 +2,7 @@
 #include "TextSpan.h"
 #include "debug.h"
 #ifdef CWDEBUG
+#include "utils/debug_ostream_operators.h"
 #include "utils/print_pointer.h"
 #endif
 
@@ -28,7 +29,7 @@ int TextSpan::do_natural_width() const
   TextSpanView view(*this);     // Use TextSpanView to get the cell width of each character.
 
   int natural_width = 0;
-  auto const& characters_meta = view.characters_meta();
+  auto const& characters_meta = view.characters().meta();
   auto first_non_whitespace_character = characters_meta.begin();
   while (first_non_whitespace_character != characters_meta.end() && first_non_whitespace_character->whitespace)
     ++first_non_whitespace_character;
@@ -65,10 +66,9 @@ Hyperlink HyperlinkedTextSpan::hyperlink() const
   return hyperlink_;
 }
 
-TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span)
+TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span), characters_(text_span.text().size())
 {
   std::u8string const& text_span_text = text_span.text();
-  characters_meta_.reserve(text_span_text.size());
 
   std::mbstate_t state{};
   std::size_t offset = 0;
@@ -96,36 +96,31 @@ TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span)
     // If this fails then this character is probably one of '\t', '\f', '\n', '\r' or '\v', and those should be handled separately.
     ASSERT(!whitespace || width == 1);
 
-    characters_meta_.push_back({
+    characters_.push_back({
         .utf8_begin = offset,
         .utf8_size = size,
         .cell_width = width,
         .whitespace = whitespace
-    });
-    wide_characters_ += value;
+      }, value);
 
     offset += size;
   }
 }
 
-TextSpanView::operator std::u8string_view() const
+#ifdef CWDEBUG
+std::u8string_view TextSpanView::get_u8string_view() const
 {
   // Don't call this on an empty TextSpanView.
-  ASSERT(!characters_meta_.empty());
-
-  size_t size = 0;
-  for (CharacterMeta const& character_meta : characters_meta_)
-    size += character_meta.utf8_size;
-
-  return {&text_span_->text()[0] + characters_meta_.front().utf8_begin, size};
+  ASSERT(!characters_.empty());
+  return {&text_span_->text()[0] + characters_.meta().front().utf8_begin, characters_.utf8_size()};
 }
 
-#ifdef CWDEBUG
 void TextSpanView::print_on(std::ostream& os) const
 {
   LIBCWD_USING_OSTREAM_PRELUDE;
-  os << "{text_span:" << print_pointer(text_span_) << '}';
+  os << "{text_span:" << print_pointer(text_span_) << ", characters_:" << get_u8string_view() << '}';
 }
+
 #endif
 
 } //namespace ava::tui::terminal

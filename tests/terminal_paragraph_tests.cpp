@@ -113,12 +113,12 @@ void test_paragraph_wrap_comment_example()
 
     for (std::size_t view = 0; view < views.size() && view < expected[row].views.size(); ++view)
     {
-      expect(views[view].characters() == expected[row].views[view].text,
+      expect(views[view].characters().wide() == expected[row].views[view].text,
              "row " + std::to_string(row) + " view " + std::to_string(view) + " must cover the expected text");
       expect(views[view].text_span()->use_default_rendition() != expected[row].views[view].styled,
              "row " + std::to_string(row) + " view " + std::to_string(view) + " must be a view into " +
                  (expected[row].views[view].styled ? "a StyledTextSpan" : "a TextSpan using the Paragraph default rendition"));
-      concatenated += views[view].characters();
+      concatenated += views[view].characters().wide();
     }
   }
 

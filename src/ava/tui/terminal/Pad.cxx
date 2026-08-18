@@ -60,7 +60,7 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
 
     // Determine how many wide characters of this text_span_view.wide_characters_ fit (also) on the pad row.
     std::size_t count = 0;
-    for (auto const& character_meta : text_span_view.characters_meta())
+    for (auto const& character_meta : text_span_view.characters().meta())
     {
       if (!row_full && static_cast<uint32_t>(character_meta.cell_width) <= remaining_width)
       {
@@ -88,7 +88,7 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
     {
       TextSpan const* text_span = text_span_view.text_span();
       Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
-      addstr(text_span_view.characters().data(), static_cast<int>(count), required_rendition);
+      addstr(text_span_view.characters().wide().data(), static_cast<int>(count), required_rendition);
     }
 
     // If the row is full then we expect any additional characters, of subsequent TextSpanView's if any, to be whitespace.

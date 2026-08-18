@@ -389,6 +389,31 @@ void test_shared_ptr_uses_print_pointer()
   expect(ss_empty.str() == "nullptr", "Empty shared_ptr<Foo> renders as nullptr");
 }
 
+void test_unique_ptr_uses_print_pointer()
+{
+  std::stringstream ss;
+  std::unique_ptr<ava::session::Foo> const unique_foo_ptr(new ava::session::Foo);
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss) << unique_foo_ptr;
+  }
+  expect(ss.str().find("&{Foo}@0x") != std::string::npos, "unique_ptr<Foo> dereferences Foo and shows ptr value");
+
+  std::stringstream ss_empty;
+  std::unique_ptr<ava::session::Foo> const unique_foo_ptr_empty;
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss_empty) << unique_foo_ptr_empty;
+  }
+  expect(ss_empty.str() == "nullptr", "Empty unique_ptr<Foo> renders as nullptr");
+
+  std::stringstream ss_vector;
+  std::vector<std::unique_ptr<ava::session::Foo>> unique_foo_ptrs;
+  unique_foo_ptrs.push_back(std::make_unique<ava::session::Foo>());
+  {
+    AVA_USING_OSTREAM_PRELUDE(ss_vector) << unique_foo_ptrs;
+  }
+  expect(ss_vector.str().find("{&{Foo}@0x") == 0, "vector<unique_ptr<Foo>> uses the debug pointer inserter for its elements");
+}
+
 void test_full_render_smoke()
 {
   // Exercises every requested type in one stream; mainly a compile-and-run smoke.
@@ -421,5 +446,6 @@ void run_debug_tests()
   test_span_const_char_pointer_renders_quoted_list();
   test_optional_bool_renders_with_boolalpha();
   test_shared_ptr_uses_print_pointer();
+  test_unique_ptr_uses_print_pointer();
   test_full_render_smoke();
 }

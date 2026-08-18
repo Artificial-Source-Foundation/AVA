@@ -90,10 +90,8 @@ template<typename T>
 concept ConceptIsEnum = std::is_enum_v<T>;
 
 template<typename T>
-concept ConceptIsNonIntrusiveNonArrayNonCharPointer =
-  (std::same_as<detail::pointee_t<T>, std::unique_ptr<T>> ||
-   std::same_as<detail::pointee_t<T>, std::shared_ptr<T>> ||
-   std::is_pointer_v<T>) && !ConceptCharacterPointer<T>;
+concept ConceptNonArrayNonCharRawPointer =
+  std::is_pointer_v<T> && !std::is_array_v<detail::pointee_t<T>> && !ConceptCharacterPointer<T>;
 
 //=============================================================================
 // Forward declarations
@@ -112,8 +110,14 @@ inline std::ostream& operator<<(std::ostream& os, std::variant<Args...> const& v
 
 //-----------------
 // Pointer types
-template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
+template<ConceptNonArrayNonCharRawPointer T>
 inline std::ostream& operator<<(std::ostream& os, T const& ptr);
+
+// Print unique pointer `ptr` to `os` using the debug pointer representation.
+//
+// Null pointers render as "nullptr". Custom deleters are supported.
+template<typename T, typename Deleter>
+inline std::ostream& operator<<(std::ostream& os, std::unique_ptr<T, Deleter> const& ptr);
 
 // boost::intrusive_ptr defines its own operator<< as
 // template<class E, class T, class Y> std::basic_ostream<E, T> & operator<< (std::basic_ostream<E, T> & os, intrusive_ptr<Y> const & p)
@@ -218,10 +222,17 @@ std::ostream& operator<<(std::ostream& os, std::variant<Args...> const& UNUSED_A
   return os;
 }
 
-template<ConceptIsNonIntrusiveNonArrayNonCharPointer T>
+template<ConceptNonArrayNonCharRawPointer T>
 std::ostream& operator<<(std::ostream& os, T const& ptr)
 {
   ::utils::operator<<(os, ::utils::print_pointer(ptr));
+  return os;
+}
+
+template<typename T, typename Deleter>
+std::ostream& operator<<(std::ostream& os, std::unique_ptr<T, Deleter> const& ptr)
+{
+  ::utils::operator<<(os, ::utils::print_pointer(ptr.get()));
   return os;
 }
 

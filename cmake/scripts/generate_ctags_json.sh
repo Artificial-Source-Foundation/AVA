@@ -47,6 +47,7 @@ cd "$repo_root"
   --output-format=json \
   --language-force=C++ \
   --fields=+KinSz \
+  --fields-C++=+'{properties}' \
   --kinds-C++=+p \
   -D 'AVA_DEBUG_PRINT_MEMBERS_ON=void print_members_opt_in() { }' \
   -D 'AVA_DEBUG_PRINT_MEMBERS_ON_BASE(base_class)=void print_members_opt_in() { }' \

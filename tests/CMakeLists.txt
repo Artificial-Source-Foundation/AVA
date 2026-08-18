@@ -557,6 +557,13 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
 endif()
 if(Python3_Interpreter_FOUND)
   add_test(
+    NAME ava_debug.generate_print_members
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/generate_print_members_test.py
+            --generator ${CMAKE_SOURCE_DIR}/cmake/scripts/generate_print_members.py)
+  set_tests_properties(ava_debug.generate_print_members PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_tests.markdown_link_verifier
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/verify_markdown_links_test.py

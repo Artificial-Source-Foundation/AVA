@@ -48,6 +48,14 @@ def rel_qname(fqname, bucket_ns):
     return fqname[len(prefix):] if fqname.startswith(prefix) else fqname
 
 
+def is_static_member(tag):
+    # Return whether a ctags member tag describes class-wide storage rather
+    # than per-object state. Universal Ctags emits C++ properties as a
+    # comma-separated string when generate_ctags_json.sh enables that field.
+    properties = tag.get("properties") or ""
+    return "static" in properties.split(",")
+
+
 def load_tags(tags_path):
     classes = {}                       # fqname -> class/struct tag (name, scope, path)
     members_by_scope = defaultdict(list)  # fqname -> [(line, member_name)]
@@ -64,9 +72,11 @@ def load_tags(tags_path):
             fqname = (scope + "::" + name) if (scope and name) else None
             if kind in ("class", "struct") and name and tag.get("path") and fqname:
                 classes[fqname] = tag
-            elif kind == "member" and scope and name:
+            elif kind == "member" and scope and name and not is_static_member(tag):
                 # Keep the line so members can be emitted in declaration order
-                # rather than tags.json's alphabetical order.
+                # rather than tags.json's alphabetical order. Static members
+                # describe the type rather than an individual object's state
+                # and therefore do not belong in print_members output.
                 members_by_scope[scope].append((tag.get("line", 0), name))
             if name == "print_members_opt_in" and scope:
                 # Opt-in marker: the enclosing type declares print_members_opt_in.

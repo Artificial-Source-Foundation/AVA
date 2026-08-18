@@ -53,11 +53,11 @@ struct ExpectedView
   bool styled;
 };
 
-// One expected TextRow of the comment example after wrapping at 9 cells: its cell width (including trailing
-// white-space) and its list of TextSpanView's, exactly as listed in the comment.
+// One expected TextRow of the comment example after wrapping at 9 cells: its occupied columns
+// (including trailing white-space) and its list of TextSpanView's, exactly as listed in the comment.
 struct ExpectedRow
 {
-  std::size_t cell_width;
+  std::size_t columns;
   std::vector<ExpectedView> views;
 };
 
@@ -93,7 +93,7 @@ void test_paragraph_wrap_comment_example()
 {
   auto paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
 
-  std::vector<terminal::TextRow> rows = paragraph->wrap(9);
+  std::vector<terminal::TextRow> rows = paragraph->wrap_to(9);
 
   std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
   expect(rows.size() == expected.size(), "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " +
@@ -104,9 +104,9 @@ void test_paragraph_wrap_comment_example()
   {
     std::vector<terminal::TextSpanView> const& views = rows[row].text_span_views();
 
-    expect(rows[row].cell_width() == expected[row].cell_width,
-           "row " + std::to_string(row) + " must have cell width " + std::to_string(expected[row].cell_width) + ", got " +
-               std::to_string(rows[row].cell_width()));
+    expect(rows[row].columns() == expected[row].columns,
+           "row " + std::to_string(row) + " must occupy " + std::to_string(expected[row].columns) + " terminal columns, got " +
+               std::to_string(rows[row].columns()));
     expect(views.size() == expected[row].views.size(),
            "row " + std::to_string(row) + " must contain " + std::to_string(expected[row].views.size()) + " TextSpanView's, got " +
                std::to_string(views.size()));

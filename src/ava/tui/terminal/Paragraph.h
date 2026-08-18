@@ -52,8 +52,8 @@ class Paragraph : public LayoutItem
   // Accessor; the rendition used for TextSpan's without a rendition of their own.
   Rendition const& default_rendition() const { return default_rendition_; }
 
-  // Perform wrapping: return a list of TextRow's.
-  std::vector<TextRow> wrap(uint32_t cell_width);
+  // Wrap this Paragraph to `columns` terminal columns, returning TextRows for that width.
+  std::vector<TextRow> wrap_to(uint32_t columns);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 

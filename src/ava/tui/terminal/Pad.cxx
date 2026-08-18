@@ -62,9 +62,9 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
     std::size_t count = 0;
     for (auto const& character_meta : text_span_view.characters().meta())
     {
-      if (!row_full && static_cast<uint32_t>(character_meta.cell_width) <= remaining_width)
+      if (!row_full && static_cast<uint32_t>(character_meta.columns) <= remaining_width)
       {
-        remaining_width -= static_cast<uint32_t>(character_meta.cell_width);
+        remaining_width -= static_cast<uint32_t>(character_meta.columns);
         ++count;
       }
       else
@@ -72,8 +72,8 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
         // Only white-space may exceed the pad_width. This should have been enforced by Paragraph::wrap.
         ASSERT(character_meta.whitespace);
         // This should be just a space.
-        ASSERT(character_meta.cell_width == 1);
-        // This implied from the fact that the first time we get here, with character_meta.cell_width == 1, !(1 <= remaining_width).
+        ASSERT(character_meta.columns == 1);
+        // This follows because the first time we get here, a one-column character does not fit in remaining_width.
         ASSERT(remaining_width == 0);
         row_full = true;
       }
@@ -120,10 +120,10 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
 
 } // namespace
 
-void Pad::generate(uint32_t cell_width)
+void Pad::generate(uint32_t columns)
 {
-  // Don't pass a cell_width of zero.
-  ASSERT(cell_width > 0);
+  // Pass at least one terminal column so wrapping can always make progress.
+  ASSERT(columns > 0);
 
   // Wrap every Paragraph first: the total number of wrapped rows (plus one blank row between
   // consecutive Paragraph's) determines the height of the ncurses pad, which must be known when
@@ -134,14 +134,14 @@ void Pad::generate(uint32_t cell_width)
   uint32_t pad_height = 0;
   for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
   {
-    wrapped_paragraphs.push_back(paragraph->wrap(cell_width));
+    wrapped_paragraphs.push_back(paragraph->wrap_to(columns));
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.back().size());
   }
   if (wrapped_paragraphs.size() > 1)
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.size() - 1);
 
   // (Re)create the ncurses pad; the assignment destroys the previously generated pad, if any.
-  pad_ = BasicWindow::newpad(Dimension{pad_height, cell_width});
+  pad_ = BasicWindow::newpad(Dimension{pad_height, columns});
 
   // Write all wrapped rows into the new pad.
   auto paragraph_iter = paragraphs_.begin();
@@ -150,7 +150,7 @@ void Pad::generate(uint32_t cell_width)
   {
     for (TextRow const& text_row : rows)
     {
-      write_row(*pad_, text_row, row, cell_width, (*paragraph_iter)->default_rendition());
+      write_row(*pad_, text_row, row, columns, (*paragraph_iter)->default_rendition());
       ++row;
     }
     ++row;               // Leave one blank row between consecutive Paragraph's.

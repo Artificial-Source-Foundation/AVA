@@ -26,7 +26,7 @@ Hyperlink TextSpan::hyperlink() const
 int TextSpan::do_natural_width() const
 {
   //FIXME: this seems inefficient; can't this be delayed until the TextSpanView is required anyway?
-  TextSpanView view(*this);     // Use TextSpanView to get the cell width of each character.
+  TextSpanView view(*this);     // Use TextSpanView to get the number of terminal columns occupied by each character.
 
   int natural_width = 0;
   auto const& characters_meta = view.characters().meta();
@@ -39,7 +39,7 @@ int TextSpan::do_natural_width() const
     while (std::prev(first_trailing_whitespace_character)->whitespace)
       --first_trailing_whitespace_character;
     for (auto iter = first_non_whitespace_character; iter != first_trailing_whitespace_character; ++iter)
-      natural_width += iter->cell_width;
+      natural_width += iter->columns;
   }
   return natural_width;
 }
@@ -99,7 +99,7 @@ TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span), 
     characters_.push_back({
         .utf8_begin = offset,
         .utf8_size = size,
-        .cell_width = width,
+        .columns = width,
         .whitespace = whitespace
       }, value);
 

@@ -11,7 +11,7 @@ namespace ava::tui::terminal {
 // the same rendition as if all TextSpan's of the Paragraph were catenated.
 // However, a single TextSpan of this Paragraph might have been split up into
 // two (or more) TextSpan. The catenation of each TextSpan in any given TextRow
-// has a cell width that is less than or equal `cell_width` *after* stripping
+// occupies no more than `columns` terminal columns *after* stripping
 // all white-space characters at the end.
 //
 // For example, if the Paragraph contains:
@@ -34,7 +34,7 @@ namespace ava::tui::terminal {
 //
 // which, after catenating gives the above string.
 //
-// Wrapping using a cell_width of 9 then should give:
+// Wrapping to 9 terminal columns should then give:
 //
 // row    width       TextSpanView list
 //      <---9--->
@@ -58,13 +58,13 @@ namespace ava::tui::terminal {
 // Note how all TextSpanView's in this list are views into the existing TextSpan's of the Paragraph.
 // The catenation of all TextSpanView's gives again the original string.
 //
-std::vector<TextRow> Paragraph::wrap(uint32_t cell_width)
+std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
 {
-  // Don't pass a cell_width of zero.
-  ASSERT(cell_width > 0);
+  // Pass at least one terminal column so wrapping can always make progress.
+  ASSERT(columns > 0);
 
   std::vector<TextRow> rows;
-  TextRow row{static_cast<size_t>(cell_width)};
+  TextRow row{static_cast<size_t>(columns)};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
   {
@@ -77,7 +77,7 @@ std::vector<TextRow> Paragraph::wrap(uint32_t cell_width)
       if (remainder.empty())
         break;
       rows.push_back(std::move(row));
-      row = TextRow{static_cast<size_t>(cell_width)};
+      row = TextRow{static_cast<size_t>(columns)};
       view = std::move(remainder);
     }
   }

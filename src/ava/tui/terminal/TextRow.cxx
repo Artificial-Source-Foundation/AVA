@@ -9,7 +9,7 @@ namespace ava::tui::terminal {
 //
 // For example if TextRow currently contains the TextSpanView's "current ", "CONTENT" and " ":
 //
-//           <-------max_cell_width_----->
+//           <--------max_columns_------->
 //  this:   |current CONTENT #            |
 //           ''''''''^^^^^^^'                 <--
 //  source: |hello world|
@@ -17,11 +17,11 @@ namespace ava::tui::terminal {
 //  result: |current CONTENT hello world# |
 //           ''''''''^^^^^^^'^^^^^^^^^^^      <-- this line shows which characters below to which TextSpanView element (alternating ' and ~ characters).
 //
-// If the first word of `source` is longer than max_cell_width_, then
-// use it to fill the current TextRow up till max_cell_width_ cells by truncating that word and return the remainder.
+// If the first word of `source` is longer than max_columns_, then
+// use it to fill the current TextRow up to max_columns_ by truncating that word and return the remainder.
 //
 // For example,
-//             <-------max_cell_width_----->
+//             <--------max_columns_------->
 //  this:     |foo#                         |
 //  source:   |AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
@@ -31,7 +31,7 @@ namespace ava::tui::terminal {
 // otherwise if nothing fits, return source itself.
 //
 // For example,
-//             <-------max_cell_width_----->
+//             <--------max_columns_------->
 //  this:     |foo#                         |
 //  source:   |AAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
@@ -43,7 +43,7 @@ namespace ava::tui::terminal {
 // to this TextRow and return the remaining Characters as a TextSpanView.
 //
 // For example,
-//             <-------max_cell_width_----->
+//             <--------max_columns_------->
 //  this:     |aaaaaaa bbbbbbb #            |
 //  source:   |ccccc ddddd eeeeeee fffff ggggg hhhhh|
 //
@@ -52,7 +52,7 @@ namespace ava::tui::terminal {
 //  returned: |eeeeeee fffff ggggg hhhhh|
 //
 //  or
-//             <-------max_cell_width_----->
+//             <--------max_columns_------->
 //  this:     |aaaaaaa bbbbbbb #            |
 //  source:   |ccccc ddddddd    eeeeeee fffff ggggg hhhhh|
 //
@@ -76,7 +76,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
   // word is accepted, so preserve all of it even when it crosses the limit.
   while (cursor != source_end && cursor->whitespace)
   {
-    appended_width += static_cast<size_t>(cursor->cell_width);
+    appended_width += static_cast<size_t>(cursor->columns);
     prefix_end = ++cursor;
   }
 
@@ -87,21 +87,21 @@ TextSpanView TextRow::append(TextSpanView&& source)
     size_t word_width = 0;
     while (cursor != source_end && !cursor->whitespace)
     {
-      word_width += static_cast<size_t>(cursor->cell_width);
+      word_width += static_cast<size_t>(cursor->columns);
       ++cursor;
     }
 
-    if (cell_width_ + appended_width + word_width > max_cell_width_)
+    if (columns_ + appended_width + word_width > max_columns_)
     {
       // Only an overlong first word may be split. A normally sized word that
       // does not fit in the remaining cells must start on the next row.
-      if (first_word && word_width > max_cell_width_)
+      if (first_word && word_width > max_columns_)
       {
         cursor = word_begin;
         while (cursor != source_end && !cursor->whitespace &&
-               cell_width_ + appended_width + static_cast<size_t>(cursor->cell_width) <= max_cell_width_)
+               columns_ + appended_width + static_cast<size_t>(cursor->columns) <= max_columns_)
         {
-          appended_width += static_cast<size_t>(cursor->cell_width);
+          appended_width += static_cast<size_t>(cursor->columns);
           prefix_end = ++cursor;
         }
       }
@@ -113,10 +113,10 @@ TextSpanView TextRow::append(TextSpanView&& source)
     first_word = false;
 
     // Whitespace following an accepted word stays on this row, including the
-    // portion beyond max_cell_width_, because it is ignored for wrapping.
+    // portion beyond max_columns_, because it is ignored for wrapping.
     while (cursor != source_end && cursor->whitespace)
     {
-      appended_width += static_cast<size_t>(cursor->cell_width);
+      appended_width += static_cast<size_t>(cursor->columns);
       prefix_end = ++cursor;
     }
   }
@@ -126,7 +126,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
 
   if (prefix_end == source_end)
   {
-    cell_width_ += appended_width;
+    columns_ += appended_width;
     text_span_views_.push_back(std::move(source));
     return {};
   }
@@ -140,7 +140,7 @@ TextSpanView TextRow::append(TextSpanView&& source)
   prefix.characters().copy_prefix(source.characters(), prefix_size);
   source.characters().remove_prefix(prefix_size);
 
-  cell_width_ += appended_width;
+  columns_ += appended_width;
   text_span_views_.push_back(std::move(prefix));
   return std::move(source);
 }

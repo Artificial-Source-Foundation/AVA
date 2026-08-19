@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ava/debug/print_members_on.h"
 #include <string>
 #include <vector>
+#include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
 
@@ -15,7 +15,7 @@ class Characters
   {
     std::size_t utf8_begin;     // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
     std::size_t utf8_size;      // The total number of UTF8 bytes that are consumed by this Character.
-    int columns;                // The number of terminal columns that this Character will occupy (unfortunately, this is just an approximation).
+    uint32_t columns;           // The number of terminal columns that this Character will occupy (unfortunately, this is just an approximation).
     bool whitespace;            // True if this Character is white-space.
 
     // Printing this object is better done from the TextSpanView that contains it.

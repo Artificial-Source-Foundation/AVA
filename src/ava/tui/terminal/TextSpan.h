@@ -4,6 +4,7 @@
 #include "LayoutItem.h"
 #include "Rendition.h"
 #include "Characters.h"
+#include "utils/Badge.h"
 
 #include <memory>
 #include <string_view>
@@ -17,13 +18,16 @@ class TextSpan : public LayoutItem
 
  protected:
   // Constructor; used by create and the constructor of StyledTextSpan.
-  TextSpan(LayoutItem&& layout_item, std::u8string const& text) : LayoutItem(std::move(layout_item)), text_(text) { }
+  TextSpan(LayoutItem::Properties const& layout_properties, std::u8string const& text) : LayoutItem(layout_properties), text_(text)
+  {
+    initialize_cached_natural_width(obtain_natural_width());
+  }
 
  public:
   // Create a TextSpan without rendition info. Use this for example when the rendition will be determined by the window (which must be enforced elsewhere).
   static std::unique_ptr<TextSpan> create(std::u8string const& text, LayoutItem::Properties layout_properties = {.minimum_width = greedy})
   {
-    return std::unique_ptr<TextSpan>{new TextSpan{LayoutItem{layout_properties}, text}};
+    return std::unique_ptr<TextSpan>{new TextSpan{layout_properties, text}};
   }
 
   // Create a TextSpan with its own rendition info.
@@ -51,7 +55,7 @@ class TextSpan : public LayoutItem
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(LayoutItem)
 
  private:
-  int do_natural_width() const override;
+  Width obtain_natural_width() const;
 };
 
 class StyledTextSpan : public TextSpan
@@ -60,7 +64,8 @@ class StyledTextSpan : public TextSpan
   Rendition rendition_;
 
  public:
-  StyledTextSpan(LayoutItem&& layout_item, std::u8string const& text, Rendition rendition) : TextSpan(std::move(layout_item), text), rendition_(rendition) { }
+  StyledTextSpan(utils::Badge<TextSpan>, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition) :
+    TextSpan(layout_properties, text), rendition_(rendition) { }
 
   bool use_default_rendition() const override { return false; }
   Rendition rendition() const override;
@@ -74,8 +79,8 @@ class HyperlinkedTextSpan : public StyledTextSpan
   Hyperlink hyperlink_;
 
  public:
-  HyperlinkedTextSpan(LayoutItem&& layout_item, std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink)
-      : StyledTextSpan(std::move(layout_item), text, rendition), hyperlink_(hyperlink)
+  HyperlinkedTextSpan(utils::Badge<TextSpan> badge, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink)
+      : StyledTextSpan(badge, layout_properties, text, rendition), hyperlink_(hyperlink)
   {
   }
 

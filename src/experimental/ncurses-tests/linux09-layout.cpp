@@ -24,12 +24,14 @@ int main()
   auto shortcuts = terminal::Paragraph::create({.priority = 2, .alignment = terminal::HorizontalAlignment::right});
   auto shortcuts_text = terminal::TextSpan::create(u8"ctrl+c, ctrl+d, ctrl+x q");
   shortcuts->append(std::move(shortcuts_text));
+  shortcuts->initialize_cached_natural_width();
 
   terminal::HorizontalLayout horizontal_layout;
   horizontal_layout.append(std::move(exit_text));
   horizontal_layout.append(std::move(spacer));
   horizontal_layout.append(std::move(shortcuts));
 
+  horizontal_layout.set_width(17);
   Dout(dc::notice, "horizontal_layout = " << horizontal_layout);
 
   //... display it

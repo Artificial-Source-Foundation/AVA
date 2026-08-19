@@ -23,12 +23,12 @@ Hyperlink TextSpan::hyperlink() const
 }
 
 // Returns the width in terminal columns of the trimmed text_ string.
-int TextSpan::do_natural_width() const
+Width TextSpan::obtain_natural_width() const
 {
   //FIXME: this seems inefficient; can't this be delayed until the TextSpanView is required anyway?
   TextSpanView view(*this);     // Use TextSpanView to get the number of terminal columns occupied by each character.
 
-  int natural_width = 0;
+  uint32_t natural_width = 0;
   auto const& characters_meta = view.characters().meta();
   auto first_non_whitespace_character = characters_meta.begin();
   while (first_non_whitespace_character != characters_meta.end() && first_non_whitespace_character->whitespace)
@@ -47,13 +47,13 @@ int TextSpan::do_natural_width() const
 //static
 std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition, LayoutItem::Properties layout_properties)
 {
-  return std::unique_ptr<TextSpan>{new StyledTextSpan{layout_properties, text, rendition}};
+  return std::unique_ptr<TextSpan>{new StyledTextSpan{{}, layout_properties, text, rendition}};
 }
 
 //static
 std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink, LayoutItem::Properties layout_properties)
 {
-  return std::unique_ptr<TextSpan>{new HyperlinkedTextSpan{layout_properties, text, rendition, hyperlink}};
+  return std::unique_ptr<TextSpan>{new HyperlinkedTextSpan{{}, layout_properties, text, rendition, hyperlink}};
 }
 
 Rendition StyledTextSpan::rendition() const
@@ -99,7 +99,7 @@ TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span), 
     characters_.push_back({
         .utf8_begin = offset,
         .utf8_size = size,
-        .columns = width,
+        .columns = static_cast<uint32_t>(width),
         .whitespace = whitespace
       }, value);
 

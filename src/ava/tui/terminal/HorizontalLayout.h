@@ -21,6 +21,8 @@ class HorizontalLayout
     layout_items_.push_back(std::move(layout_item));
   }
 
+  void set_width(uint32_t columns);
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

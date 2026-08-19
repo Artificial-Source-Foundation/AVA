@@ -9,6 +9,56 @@
 
 namespace ava::tui::terminal {
 
+// Forward declarations.
+class Width;
+Width operator-(Width w1, Width w2);
+
+class Width
+{
+  static constexpr uint32_t unknown = std::numeric_limits<uint32_t>::max();
+
+ public:
+  static constexpr uint32_t unlimited = std::numeric_limits<int>::max();
+
+ private:
+  uint32_t columns_;
+
+ public:
+  // Construct an unknown Width.
+  constexpr Width() : columns_(unknown) { }
+
+  // Construct a Width from an integer value.
+  constexpr Width(uint32_t columns) : columns_(columns)
+  {
+    // Do not construct a Width with an unknown value using this constructor.
+    ASSERT(columns_ != unknown);
+  }
+
+  Width& operator+=(Width w);
+
+  uint32_t value() const
+  {
+    // Should only use `value` for known, finite values.
+    ASSERT(!is_unknown() && !is_unlimited());
+    return columns_;
+  }
+
+  friend Width operator+(Width w1, Width w2);
+  friend Width operator-(Width w1, Width w2);
+  friend bool operator!=(Width w1, Width w2) { return w1.columns_ != w2.columns_; }
+  friend bool operator<(Width w1, Width w2);
+  bool is_greedy() const { return columns_ == unlimited; }
+  bool is_unlimited() const { return columns_ == unlimited; }
+  bool is_unknown() const { return columns_ == unknown; }
+
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
+#endif
+
+  // We have a custom print_on.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 // class LayoutItem
 //
 // The base class for items arranged side by side in a HorizontalLayout.
@@ -24,8 +74,10 @@ class LayoutItem
 {
  public:
   static constexpr float default_shrink_weight = 1.0f;
-  static constexpr int default_minimum_width = 3;
-  static constexpr int greedy = std::numeric_limits<int>::max();
+  static constexpr Width default_minimum_width = 3;
+  static constexpr Width greedy{Width::unlimited};
+  static constexpr Width unknown{};
+  static constexpr uint32_t max_priority = 8;
 
   struct Properties
   {
@@ -39,7 +91,7 @@ class LayoutItem
     float weight = default_shrink_weight;
 
     // The smallest width that may be allocated to this item, measured in terminal columns.
-    int minimum_width = default_minimum_width;
+    Width minimum_width = default_minimum_width;
 
     // Used for alignment.
 
@@ -51,35 +103,58 @@ class LayoutItem
 
  private:
   Properties properties_;
+  Width cached_natural_width_;          // Cached value of a call to `obtain_natural_width` by the most-derived class.
 
-  // Returns the natural width of this item, measured in terminal columns.
-  // Allocating more width will result in white space and require horizontal alignment.
-  //
-  // The default implementation gives the item an unbounded natural width, making it greedy. Such an item must have shrink priority zero.
-  // Derived classes with a finite natural width must override this function.
-  virtual int do_natural_width() const
-  {
-    // Either implement `do_natural_width` in the derived class, returning a finite value, or use a priority of 0.
-    ASSERT(properties_.priority == 0);
-    return greedy;
-  }
+  friend class HorizontalLayout;
+  Width assigned_width_{unknown};       // The assigned width in terminal columns.
 
  public:
   // Construct a LayoutItem from a Properties aggregate with defaults.
-  LayoutItem(Properties properties) : properties_(properties) { }
+  LayoutItem(Properties properties) : properties_(properties)
+  {
+    // A priority should be some small integral value. If really necessary, increase max_priority
+    // but keep in mind that we need to create a std::array on the stack on that size.
+    ASSERT(properties_.priority < max_priority);
+    // A weight is not allowed to be less or equal zero; you must be able to divide by it.
+    ASSERT(properties_.weight > 0.0f);
+  }
 
   // Move constructor.
   LayoutItem(LayoutItem&& layout_item) : properties_(std::move(layout_item.properties_)) { }
+
+  // Finalize initialization. This must be called from the most-derived class.
+  void initialize_cached_natural_width(Width natural_width)
+  {
+    // Don't initialize with an unknown width.
+    ASSERT(!natural_width.is_unknown());
+    cached_natural_width_ = natural_width;
+  }
 
   // Destructor.
   virtual ~LayoutItem() = default;
 
   // Accessors.
-  int shrink_priority() const { return properties_.priority; }
+  uint32_t shrink_priority() const { return properties_.priority; }
   float shrink_weight() const { return properties_.weight; }
-  int minimum_width() const { return properties_.minimum_width; }
-  int natural_width() const { return do_natural_width(); }
+  Width minimum_width() const
+  {
+    // Clamp minimum_width to the natural width. This is used for example to set a fixed width by passing a Properties::minimum_width of `Width::greedy`.
+    return cached_natural_width_ < properties_.minimum_width ? cached_natural_width_ : properties_.minimum_width;
+  }
+  Width natural_width() const
+  {
+    // Call initialize_cached_natural_width() after the most-derived class is fully initialized.
+    ASSERT(!cached_natural_width_.is_unknown());
+    return cached_natural_width_;
+  }
   HorizontalAlignment horizontal_alignment() const { return properties_.alignment; }
+
+  Width assigned_width() const
+  {
+    // Call `HorizontalLayout::set_width` to calculate and assign the width of its children.
+    ASSERT(assigned_width_ != unknown);
+    return assigned_width_;
+  }
 
   // Rendering.
 

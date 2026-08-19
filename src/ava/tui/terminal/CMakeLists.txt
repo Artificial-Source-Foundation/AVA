@@ -5,8 +5,10 @@ add_library(ava_terminal)
 target_sources(ava_terminal
   PRIVATE
     "BasicWindow.cxx"
-    "Context.cxx"
     "ComplexChar.cxx"
+    "Context.cxx"
+    "HorizontalLayout.cxx"
+    "LayoutItem.cxx"
     "Pad.cxx"
     "Paragraph.cxx"
     "TextRow.cxx"

@@ -1,27 +1,28 @@
 #include "sys.h"
 #include "HorizontalLayout.h"
+#include <algorithm>
 
 namespace ava::tui::terminal {
 namespace {
 
-std::vector<uint32_t> distribute(uint32_t columns, std::vector<LayoutItem*> const& items)
-{
-  std::vector<uint32_t> distribution;
+struct Item {
+  LayoutItem* ptr;
+  uint32_t assigned_width;
+};
 
+void distribute(uint32_t columns, Item* items, int number_of_items)
+{
   // Fast path: if there is only 1 item - then that gets it all.
-  if (items.size() == 1)
-    distribution.push_back(columns);
-  else
+  if (number_of_items == 1)
   {
-    // Distribute columns over N items, where N == items.size(),
-    // such that the sum of all N elements of distribution equals columns.
-    // For every element holds distribution[i] <= items[i]->natural_width() and
-    // for all elements j such that distribution[j] < items[j]->natural_width()
-    // the expression distribution[j] / items[j]->shrink_weight() is more or less
-    // the same accross all j.
+    items->assigned_width = items->ptr->minimum_width().value() + columns;
+    return;
   }
 
-  return distribution;
+  // Distribute `columns` over `number_of_items` items, such that the sum of all the `assigned_width` equals the sum of their minimum widths plus columns,
+  // for every Item holds that items[i].assigned_width <= items[i].ptr->natural_width(), and for all items j such that
+  // items[j].assigned_width < items[j].ptr->natural_width() the expression
+  // (items[j].assigned_width - items[i].ptr->minimum_width()) / items[j].ptr->shrink_weight() is more or less the same accross all j.
 }
 
 } // namespace
@@ -32,71 +33,125 @@ std::vector<uint32_t> distribute(uint32_t columns, std::vector<LayoutItem*> cons
 // The maximum-width at priority p is the sum of the natural width's of all items of
 // priority p or higher, plus the minimum width of all items with a priority less than p.
 //
-// The minimum-width at priority p is equal to the maximum-width at priority p+1.
+// The minimum-width at priority p is equal to the maximum-width at the next higher priority.
 //
-// For example, if we have three items with the following values:
+// For example, if we have four items with the following values, here shown
+// in the order that they'd appear in `ordered_items` (where the order of items
+// with the equal priority is arbitrary):
 //
-//   priority   minimum width   natural width   delta
-//   0          3               11              11-3 = 8
-//   1          5               12              12-5 = 7
-//   2          8               14              14-8 = 6        <-- highest_priority is 2 in this example.
+// ordered_items:
+//   index i    priority   minimum width   natural width
+//   0          5          4               13
+//   1          2          8               14
+//   2          2          5               12
+//   3          0          3               11/unlimited                        <-- `number_of_items` is 4 in this example.
 //
 // Then we have:
 //
-//   priority   minimum-width   maximum-width
-//   0          14+12+ 3 = 29   14+12+11 = 37
-//   1          14+ 5+ 3 = 22   14+12+ 3 = 29   <-- columns_priority will be 1 if 22 <= columns < 29
-//   2           8+ 5+ 3 = 16   14+ 5+ 3 = 22
-//   3                           8+ 5+ 3 = 16   <-- pseudo priority with as maximum-width the sum of all minimum width's.
+// boundary:
+//   index j    priority   minimum-width              maximum-width
+//                                                    20                       <-- sum of minimum widths; note 20 <= columns (we force it that way).
+//   0          5          20 =  3 +  5 +  8 +  4     29                       <-- corresponds with 20 <= columns < 29
+//   1          2          29 =  3 +  5 +  8 + 13     42                       <-- corresponds with 29 <= columns < 42
+//   2          0          42 =  3 + 12 + 14 + 13     50                       <-- corresponds with 42 <= columns, regardless of maximum-width.
+//                         50/unlimited = 11/unlimited + 12 + 14 + 13
+//
+// The function calculates `boundary[j]` with values {20, 29, 42}, which are
+// to be interpreted as the minimum-width lower bound values at which we need
+// to switch to a lower priority.
 //
 void HorizontalLayout::set_width(uint32_t columns)
 {
-  // Run over all items, calculate the delta's and determine the highest shrink_priority used.
-  std::array<Width, LayoutItem::max_priority + 1> delta;
-  uint32_t highest_priority = 0;
-  Width sum_of_minimum_widths{0U};
+  static constexpr std::size_t max_items = 16;
+  int const number_of_items = layout_items_.size();
+  // Increase max_items if required.
+  ASSERT(number_of_items <= max_items);
+  if (number_of_items == 0)
+    return;
+  // Sort the items on the stack by priority from high to low.
+  std::array<Item, max_items> ordered_items;
+  std::size_t item_count = 0;
+  uint32_t sum_of_widths = 0;
   for (std::unique_ptr<LayoutItem> const& layout_item : layout_items_)
   {
-    uint32_t const priority = layout_item->shrink_priority();
-    highest_priority = std::max(highest_priority, priority);
-    Width item_delta = layout_item->natural_width() - layout_item->minimum_width();
-    if (delta[priority].is_unknown())
-      delta[priority] = item_delta;
-    else
-      delta[priority] += item_delta;
-    sum_of_minimum_widths += layout_item->minimum_width();
+    sum_of_widths += layout_item->minimum_width().value();
+    ordered_items[item_count++].ptr = layout_item.get();
   }
+  std::sort(
+    ordered_items.begin(),
+    ordered_items.begin() + item_count,
+    [](Item const& lhs, Item const& rhs){
+      return lhs.ptr->shrink_priority() > rhs.ptr->shrink_priority();
+    });
+  // `ordered_items` now contains the first table with index i.
+  // `sum_of_widths` is now 20.
 
   // If columns is less than the absolute minimum then we just can't do that; render the absolute minimum and hope for the best.
-  columns = std::max(columns, sum_of_minimum_widths.value());
-  int columns_priority = highest_priority;                              // The priority that `columns` falls into.
+  columns = std::max(columns, sum_of_widths);
+  int columns_j = 0;                                                    // The range that `columns` falls into.
+  uint32_t columns_priority;                                            // The priority corresponding with that range.
 
-  // Run over all used priorities and fill the `maximum-width` table.
-  std::array<Width, LayoutItem::max_priority + 2> maximum_width;
-  maximum_width[highest_priority + 1] = sum_of_minimum_widths;          // 8+ 5+ 3 = 16
-  for (uint32_t p = highest_priority + 1; p > 0; --p)                   // p runs from 3 to 1.
+  // Run over all ordered items and fill the `boundary` table.
+  std::array<uint32_t, LayoutItem::max_priority + 1> boundary;
+  int j = 0;
+  uint32_t prev_priority = LayoutItem::max_priority + 1;             // Something larger than any priority.
+  for (int i = 0; i < number_of_items; ++i)
   {
-    maximum_width[p - 1] = maximum_width[p] + delta[p - 1];             // 16 + 6 = 22 (first time)
-    // Only maximum_width[0] may become `unlimited`, the rest is expected to represent actual terminal columns.
-    ASSERT((p == 1 && maximum_width[0].is_unlimited()) || maximum_width[p - 1].value() < 1000000U);
-    if (columns >= maximum_width[p].value())
-      columns_priority = p - 1;
+    if (ordered_items[i].ptr->shrink_priority() < prev_priority)
+    {
+      prev_priority = ordered_items[i].ptr->shrink_priority();
+
+      // All boundaries are expected to represent actual terminal columns.
+      ASSERT(sum_of_widths < 1000000U);
+
+      if (columns >= sum_of_widths)
+      {
+        columns_j = j;
+        columns_priority = prev_priority;
+      }
+
+      boundary[j++] = sum_of_widths;                                    // Assign 20 the first time, then 29 while prev_priority == 5, 42 while prev_priority == 2.
+
+      // Once we find an item with priority 0 we can exit this loop, because we'll never find a lower
+      // priority and thus will never get here again (to assign a new value to `boundary`.
+      // Moreover, we can't calculate the difference between natural_width() and minimum_width() anymore because the natural width might be unlimited.
+      if (prev_priority == 0)
+        break;
+    }
+    sum_of_widths += (ordered_items[i].ptr->natural_width() - ordered_items[i].ptr->minimum_width()).value();
+    // That runs `sum_of_widths` over the values:
+    //   i      sum_of_widths
+    //   0      20 + (13 - 4) = 29
+    //   1      29 + (14 - 8) = 35
+    //   2      35 + (12 - 5) = 42
+    //   The loop did break before we get here:
+    //   3      42 + (11/unlimited - 3) = 50/unlimited
   }
 
-  // The number of columns that `columns` is larger than the minimum-width of the columns_priority range.
-  uint32_t const columns_delta = (columns - maximum_width[columns_priority + 1]).value();
+  // The number of columns that `columns` is larger than the minimum-width of the columns_j range.
+  uint32_t const columns_delta = columns - boundary[columns_j];
 
-  std::vector<LayoutItem*> flex_items;
-  for (std::unique_ptr<LayoutItem> const& layout_item : layout_items_)
+  // Set assigned_width_ on all items that have minimum or maximum width,
+  // and store the items that have a width somewhere in between those values.
+  int first_flex_item = -1;
+  int last_flex_item = -1;
+  for (int i = 0; i < number_of_items; ++i)
   {
-    uint32_t const priority = layout_item->shrink_priority();
+    Item& item = ordered_items[i];
+    uint32_t const priority = item.ptr->shrink_priority();
     if (priority < columns_priority)
-      layout_item->assigned_width_ = layout_item->minimum_width();
+      item.assigned_width = item.ptr->minimum_width().value();
     else if (priority > columns_priority)
-      layout_item->assigned_width_ = layout_item->natural_width();
+      item.assigned_width = item.ptr->natural_width().value();
     else
-      flex_items.push_back(layout_item.get());
+    {
+      if (first_flex_item == -1)
+        first_flex_item = i;
+      last_flex_item = i;
+    }
   }
+  // There is always an item with a priority equal to columns_priority.
+  ASSERT(last_flex_item != -1);
 
   // Distribute the surplus columns `columns_delta` over the items with priority `columns_priority`, giving
   // the item with a larger weight proportionally more.
@@ -117,9 +172,9 @@ void HorizontalLayout::set_width(uint32_t columns)
   // (note that 2.6 * 1.5 = 3.9 and 2.6 + 3.9 = 6.5). In the end we gave A 3+2.6 = 5.6, B 4.5+3.9=8.4 and C 6.
   // We can't give fractions of columns, so after rounding off we give A 6 and B 8. Note that 6+8+6=20.
 
-  auto assigned_columns = distribute(columns_delta, flex_items);
-  for (int i = 0; i != flex_items.size(); ++i)
-    flex_items[i]->assigned_width_ = flex_items[i]->minimum_width().value() + assigned_columns[i];
+  distribute(columns_delta, &ordered_items[first_flex_item], last_flex_item - first_flex_item + 1);
+  for (int i = 0; i < number_of_items; ++i)
+    ordered_items[i].ptr->assigned_width_ = ordered_items[i].assigned_width;
 }
 
 } // namespace ava::tui::terminal

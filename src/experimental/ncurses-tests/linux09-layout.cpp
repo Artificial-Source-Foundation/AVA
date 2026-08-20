@@ -34,6 +34,25 @@ int main()
   horizontal_layout.set_width(17);
   Dout(dc::notice, "horizontal_layout = " << horizontal_layout);
 
+  //   index i    priority   minimum width   natural width
+  //   0          5          4               13
+  //   1          2          8               14
+  //   2          2          5               12
+  //   3          0          3               unlimited
+
+  auto item0 = terminal::TextSpan::create(u8"1234567890123", {.priority = 5, .minimum_width = 4});
+  auto item1 = terminal::TextSpan::create(u8"12345678901234", {.priority = 2, .minimum_width = 8});
+  auto item2 = terminal::TextSpan::create(u8"123456789012", {.priority = 2, .minimum_width = 5});
+  auto item3 = terminal::Spacer::create({.minimum_width = 3});
+  terminal::HorizontalLayout horizontal_layout2;
+  horizontal_layout2.append(std::move(item3));
+  horizontal_layout2.append(std::move(item0));
+  horizontal_layout2.append(std::move(item2));
+  horizontal_layout2.append(std::move(item1));
+
+  horizontal_layout2.set_width(32);
+  Dout(dc::notice, "horizontal_layout2 = " << horizontal_layout2);
+
   //... display it
   //... allow resizing with keyboard
 }

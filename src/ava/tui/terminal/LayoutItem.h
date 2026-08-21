@@ -116,7 +116,8 @@ class LayoutItem
     // but keep in mind that we need to create a std::array on the stack on that size.
     ASSERT(properties_.priority < max_priority);
     // A weight is not allowed to be less or equal zero; you must be able to divide by it.
-    ASSERT(properties_.weight > 0.0f);
+    // In fact it is stronly encouraged to only use weights greater than or equal 1.
+    ASSERT(properties_.weight > 0.1f);
   }
 
   // Move constructor.

@@ -1,28 +1,217 @@
 #include "sys.h"
 #include "HorizontalLayout.h"
+#include "utils/macros.h"
 #include <algorithm>
+#include <span>
+#include <numeric>
+#include <cmath>
 
 namespace ava::tui::terminal {
 namespace {
+
+static constexpr std::size_t max_items = 16;
 
 struct Item {
   LayoutItem* ptr;
   uint32_t assigned_width;
 };
 
-void distribute(uint32_t columns, Item* items, int number_of_items)
+void distribute(uint32_t columns, std::span<Item> items)
 {
   // Fast path: if there is only 1 item - then that gets it all.
-  if (number_of_items == 1)
+  if (items.size() == 1)
   {
-    items->assigned_width = items->ptr->minimum_width().value() + columns;
+    // Assign all columns to the first (and only) item.
+    items.front().assigned_width = items.front().ptr->minimum_width().value() + columns;
     return;
   }
 
-  // Distribute `columns` over `number_of_items` items, such that the sum of all the `assigned_width` equals the sum of their minimum widths plus columns,
-  // for every Item holds that items[i].assigned_width <= items[i].ptr->natural_width(), and for all items j such that
-  // items[j].assigned_width < items[j].ptr->natural_width() the expression
-  // (items[j].assigned_width - items[i].ptr->minimum_width()) / items[j].ptr->shrink_weight() is more or less the same accross all j.
+  // Distribute `columns` over `number_of_items` items, such that afterwards the sum of all the
+  // `assigned_width` members equals the sum of their minimum widths plus `columns`;
+  //
+  // that is: each of the first `number_of_items` `Item`s is assigned:
+  //
+  //   items[k].assigned_width = items[k].ptr->minimum_width().value() + columns_part(k)
+  //
+  // where the sum of columns_part(k) over all k equals `columns`.
+  //
+  // Also, for each of the first `number_of_items` `Item`s it holds afterwards, that:
+  //
+  //   items[k].assigned_width <= items[k].ptr->natural_width(),
+  //
+  // and for all items l such that items[l].assigned_width < items[l].ptr->natural_width(),
+  // the expression `columns_part(l) / items[j].ptr->shrink_weight()` is more or less the same
+  // accross all l.
+
+  // We can convert this problem to the following:
+  //
+  // Consider `N = items.size()` tubes with a depth of 1 and a width of w(k), where 0 <= k < N.
+  // That is, if tube `k` is filled with oil such that its level rises with `Δh` then `Δh·w(k)` of oil was added.
+  //
+  // Assume the tubes are connected at the bottom, the connections already full of oil.
+  // Initially the level in all tubes is the same, the height of which we call 0.
+  // Each tube has `h(k)` more room above this level. The top of each cylinder is closed.
+  // The empty space above the initial level, with volume `h(k)·w(k)` is vacuum.
+  // The tallest tube is assumed to be arbitrary long.
+  //
+  // We fill the tubes with a `column` amount of extra oil. The level in all tubes stays
+  // the same although any given tube can not be filled any higher than `h(k)`.
+
+  // There is always at least one item, and we already handled the case where there is only one.
+  ASSERT(items.size() > 1);
+
+  struct Tube           // Tube k
+  {
+    uint32_t delta;     // natural_width - minimum_width : the maximum number of columns on top of minimum_width.
+    float weight;       // w(k), or zero when the Tube is full.
+
+    // Return the height of the tube.
+    float height() const { return delta / weight; }
+    bool is_full() const { return weight == 0.f; }
+
+    void set_full() { weight = 0.f; }
+  };
+
+  std::array<Tube, max_items> tubes;
+  float active_weight = 0.f;
+
+  // Initialize each tube with the correct delta and weight.
+  for (int k = 0; k < items.size(); ++k)
+  {
+    LayoutItem const* layout_item = items[k].ptr;
+    tubes[k] = Tube{
+      .delta = layout_item->natural_width().is_unlimited() ? Width::unlimited
+                                                           : (layout_item->natural_width() - layout_item->minimum_width()).value(),
+      .weight = layout_item->shrink_weight()
+    };
+
+    active_weight += layout_item->shrink_weight();
+  }
+
+  // Sort the k values for increasing height.
+  std::array<int, max_items> ok;        // Ordered k values.
+  std::iota(ok.begin(), ok.begin() + items.size(), 0);
+
+  std::sort(
+    ok.begin(),
+    ok.begin() + items.size(),
+    [&tubes](int lhs, int rhs)
+    {
+      return tubes[lhs].height() < tubes[rhs].height();
+    });
+  // Now tubes[ok[i]] is ordered by height for increasing 0 <= i < items.size().
+
+  float current_level = 0.f;            // The largest height that was handed out so far (also: the current oil level).
+  float final_level;                    // The final largest height added to any tube.
+  int first = 0;                        // The first of the tubes that is still going to be filled (any tube below `first` is already full).
+  float remaining_volume = columns;     // The remaining number of columns that we still need to distribute (also: the remaining volume of
+                                        // oil that needs to be transfered into the tubes).
+  for (;;)
+  {
+    // The level at which the next tube will run full.
+    float const next_level = tubes[ok[first]].height();
+    // The additional amount of oil required to reach that level.
+    // Note that `active_weight` corresponds to the cross-section of the tubes that are not yet full.
+    float const required_volume = (next_level - current_level) * active_weight;
+
+    if (remaining_volume <= required_volume)
+    {
+      // We don't reach `next_level`; calculate the final level and continue.
+      final_level = current_level + remaining_volume / active_weight;
+      break;
+    }
+
+    remaining_volume -= required_volume;
+    current_level = next_level;
+
+    // Remove all tubes that become full at this level.
+    do
+    {
+      // Adjust the cross-section of the not-full tubes.
+      active_weight -= tubes[ok[first]].weight;
+      tubes[ok[first]].set_full();
+      ++first;
+
+      // At least one sufficiently large tube must remain, otherwise there is no way to know how/where to distribute the excess columns.
+      // If this asserts then the Properties of one or more LayoutItem's needs to be changed so the algorithm can know how to distribute
+      // the required columns.
+      ASSERT(first != items.size());
+    }
+    while (tubes[ok[first]].height() <= current_level * 1.0001f);
+  }
+
+  // Run over all items again and assign the natural width to all items that were stretched to their maximum width (the 'tube' was completely filled).
+  uint32_t remaining_columns = columns;
+  for (int k = 0; k < items.size(); ++k)
+  {
+    LayoutItem const* layout_item = items[k].ptr;
+    if (tubes[k].is_full())
+    {
+      items[k].assigned_width = layout_item->natural_width().value();
+      remaining_columns -= tubes[k].delta;
+    }
+    else
+    {
+      // For now, assign the minimum width (level 0) to non-full tubes.
+      items[k].assigned_width = layout_item->minimum_width().value();
+    }
+  }
+
+  // Distribute the remaining_columns over the remaining items.
+  // The situation is now as follows:
+
+  //                                            |    |
+  //                                   |     |  |    |
+  //                       full  full  |-----| ·|----|· · <-- final_level
+  //                        v     v    |xxxx |  |xxxx|
+  //                                   |xxxxx|  |xxxx|    x = remaining_columns (62)
+  //    current_level -->· · · · |--|· |xxxxx| ·|xxxx|·
+  //                    ˰ |---|  |  |  |xxxxx|  |xxxx|
+  //                    | |   |  |  |  |xxxxx|  |xxxx|
+  // tubes[k].height()__| |   |  |  |  |xxxxx|  |xxxx|
+  //                    | |   |  |  |  |xxxxx|  |xxxx|
+  //                    ˅ `---'  `--'  `-----'  `----'   <-- level of minimum_width of each item (level 0).
+  //                weight: 3      2      5        4
+  //                        ^      ^   ╰-------------╯
+  //                      set to zero  remaining items
+
+  // Reorder the items by the fractional part of the extra columns each should get, from large to small.
+  std::iota(ok.begin(), ok.begin() + items.size(), 0);
+  std::sort(
+    ok.begin(),
+    ok.begin() + items.size(),
+    [&tubes, final_level](int lhs, int rhs)
+    {
+      float lhs_desired_extra_columns = final_level * tubes[lhs].weight;
+      float rhs_desired_extra_columns = final_level * tubes[rhs].weight;
+      float lhs_fractional_part = lhs_desired_extra_columns - std::floor(lhs_desired_extra_columns);
+      float rhs_fractional_part = rhs_desired_extra_columns - std::floor(rhs_desired_extra_columns);
+      return lhs_fractional_part > rhs_fractional_part;
+    });
+
+  for (int i = 0; remaining_columns > 0 && i < items.size(); ++i)
+  {
+    int k = ok[i];
+    if (tubes[k].is_full())
+      continue;
+    float desired_extra_columns = final_level * tubes[k].weight;
+    uint32_t extra_columns = std::floor(desired_extra_columns);
+    items[k].assigned_width += extra_columns;
+    remaining_columns -= extra_columns;
+  }
+
+  // Assign the last remaining columns, one per item, starting with the ones that have the largest fractional part.
+  for (int i = 0; remaining_columns > 0 && AI_LIKELY(i < items.size()); ++i)
+  {
+    int k = ok[i];
+    if (AI_UNLIKELY(tubes[k].is_full()))        // This should never happen because full tubes have their weight set to 0
+      continue;                                 // and are therefore sorted last: all remaining columns should already have been distributed.
+    items[k].assigned_width += 1;
+    --remaining_columns;
+  }
+
+  // Paranoia check: every requested column must have been distributed by this point.
+  ASSERT(remaining_columns == 0);
 }
 
 } // namespace
@@ -62,7 +251,6 @@ void distribute(uint32_t columns, Item* items, int number_of_items)
 //
 void HorizontalLayout::set_width(uint32_t columns)
 {
-  static constexpr std::size_t max_items = 16;
   int const number_of_items = layout_items_.size();
   // Increase max_items if required.
   ASSERT(number_of_items <= max_items);
@@ -134,7 +322,7 @@ void HorizontalLayout::set_width(uint32_t columns)
   // Set assigned_width_ on all items that have minimum or maximum width,
   // and store the items that have a width somewhere in between those values.
   int first_flex_item = -1;
-  int last_flex_item = -1;
+  size_t number_of_flex_items = 0;
   for (int i = 0; i < number_of_items; ++i)
   {
     Item& item = ordered_items[i];
@@ -147,11 +335,11 @@ void HorizontalLayout::set_width(uint32_t columns)
     {
       if (first_flex_item == -1)
         first_flex_item = i;
-      last_flex_item = i;
+      ++number_of_flex_items;
     }
   }
   // There is always an item with a priority equal to columns_priority.
-  ASSERT(last_flex_item != -1);
+  ASSERT(number_of_flex_items > 0);
 
   // Distribute the surplus columns `columns_delta` over the items with priority `columns_priority`, giving
   // the item with a larger weight proportionally more.
@@ -172,7 +360,9 @@ void HorizontalLayout::set_width(uint32_t columns)
   // (note that 2.6 * 1.5 = 3.9 and 2.6 + 3.9 = 6.5). In the end we gave A 3+2.6 = 5.6, B 4.5+3.9=8.4 and C 6.
   // We can't give fractions of columns, so after rounding off we give A 6 and B 8. Note that 6+8+6=20.
 
-  distribute(columns_delta, &ordered_items[first_flex_item], last_flex_item - first_flex_item + 1);
+  distribute(columns_delta, {ordered_items.begin() + first_flex_item, number_of_flex_items});
+
+  // Assign `assigned_width_` of each item.
   for (int i = 0; i < number_of_items; ++i)
     ordered_items[i].ptr->assigned_width_ = ordered_items[i].assigned_width;
 }

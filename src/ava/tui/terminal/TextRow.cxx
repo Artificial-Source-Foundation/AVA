@@ -1,6 +1,8 @@
 #include "sys.h"
 #include "TextRow.h"
 
+#include <iterator>
+
 namespace ava::tui::terminal {
 
 // Determine how much of `source` still fits on this TextRow.
@@ -17,8 +19,9 @@ namespace ava::tui::terminal {
 //  result: |current CONTENT hello world# |
 //           ''''''''^^^^^^^'^^^^^^^^^^^      <-- this line shows which characters below to which TextSpanView element (alternating ' and ~ characters).
 //
-// If the first word of `source` is longer than max_columns_, then
-// use it to fill the current TextRow up to max_columns_ by truncating that word and return the remainder.
+// If the first word of `source` is longer than max_columns_, use it to fill the current TextRow by splitting
+// that word only between compact grapheme clusters and return the remainder. A cluster wider than an otherwise
+// empty row is appended whole, exceeding max_columns_, so wrapping can make progress without splitting it.
 //
 // For example,
 //             <--------max_columns_------->
@@ -98,11 +101,31 @@ TextSpanView TextRow::append(TextSpanView&& source)
       if (first_word && word_width > max_columns_)
       {
         cursor = word_begin;
-        while (cursor != source_end && !cursor->whitespace &&
-               columns_ + appended_width + static_cast<size_t>(cursor->columns) <= max_columns_)
+        while (cursor != source_end && !cursor->whitespace && columns_ + appended_width <= max_columns_)
         {
-          appended_width += static_cast<size_t>(cursor->columns);
-          prefix_end = ++cursor;
+          auto cluster_end = std::next(cursor);
+          size_t cluster_width = static_cast<size_t>(cursor->columns);
+          while (cluster_end != source_end && cluster_end->combining)
+          {
+            cluster_width += static_cast<size_t>(cluster_end->columns);
+            ++cluster_end;
+          }
+
+          if (columns_ + appended_width + cluster_width > max_columns_)
+          {
+            // An indivisible cluster wider than an empty row must be kept whole so wrapping makes progress.
+            if (columns_ == 0 && appended_width == 0)
+            {
+              appended_width = cluster_width;
+              prefix_end = cluster_end;
+              cursor = cluster_end;
+            }
+            break;
+          }
+
+          appended_width += cluster_width;
+          prefix_end = cluster_end;
+          cursor = cluster_end;
         }
       }
       break;

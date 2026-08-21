@@ -283,6 +283,53 @@ void test_text_span_compact_cluster_metadata()
     static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
 }
 
+// Verify that wrapping `text` to `columns` never starts a TextSpanView with a continuation of the preceding compact cluster.
+//
+// Also checks the first row width against `expected_first_row_columns` so a cluster that straddles the boundary cannot merely
+// be split into two fragments that happen to remain on the same logical row.
+void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t columns, std::size_t expected_first_row_columns, std::string_view name)
+{
+  auto paragraph = terminal::Paragraph::create({.minimum_width = 1});
+  paragraph->append(terminal::TextSpan::create(text));
+  paragraph->initialize_cached_natural_width();
+
+  std::vector<terminal::TextRow> const rows = paragraph->wrap_to(columns);
+  expect(!rows.empty(), std::string{name} + " must produce at least one wrapped row");
+  if (!rows.empty())
+    expect(rows.front().columns() == expected_first_row_columns, std::string{name} + " first row must occupy " + std::to_string(expected_first_row_columns) +
+                                                                     " columns, got " + std::to_string(rows.front().columns()));
+
+  for (std::size_t row = 0; row < rows.size(); ++row)
+  {
+    for (terminal::TextSpanView const& view : rows[row].text_span_views())
+    {
+      auto const& meta = view.characters().meta();
+      expect(meta.empty() || !meta.front().combining,
+             std::string{name} + " row " + std::to_string(row) + " must not begin a TextSpanView inside a compact grapheme cluster");
+    }
+  }
+}
+
+// Check that Paragraph wrapping treats every Character marked as combining as part of its preceding compact cluster.
+void test_paragraph_wrap_compact_clusters()
+{
+  char const* previous_locale_value = std::setlocale(LC_CTYPE, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? std::string{} : std::string{previous_locale_value};
+  if (std::setlocale(LC_CTYPE, "") == nullptr)
+  {
+    expect(false, "the environment locale must support UTF-8 for Paragraph compact-cluster wrapping coverage");
+    return;
+  }
+
+  expect_compact_clusters_stay_whole(u8"aaaa\U0001F469\u200D\U0001F4BBbbbb", 6, 4, "ZWJ emoji wrapping");
+  expect_compact_clusters_stay_whole(u8"aaaa\U0001F44D\U0001F3FDbbbb", 6, 4, "emoji-modifier wrapping");
+  expect_compact_clusters_stay_whole(u8"aaaa\U0001F1E8\U0001F1F3bbbb", 5, 4, "regional-indicator wrapping");
+  expect_compact_clusters_stay_whole(u8"\U0001F469\u200D\U0001F4BB", 1, 4, "oversized compact-cluster wrapping");
+
+  if (!previous_locale.empty())
+    static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
+}
+
 } // namespace
 
 void run_terminal_paragraph_tests()
@@ -290,4 +337,5 @@ void run_terminal_paragraph_tests()
   test_paragraph_wrap_comment_example();
   test_pad_generate_comment_example();
   test_text_span_compact_cluster_metadata();
+  test_paragraph_wrap_compact_clusters();
 }

@@ -14,9 +14,10 @@ class Characters
   struct CharacterMeta
   {
     std::size_t utf8_begin;     // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
-    std::size_t utf8_size;      // The total number of UTF8 bytes that are consumed by this Character.
     uint32_t columns;           // The number of terminal columns that this Character will occupy (unfortunately, this is just an approximation).
-    bool whitespace;            // True if this Character is white-space.
+    uint8_t utf8_size;          // The total number of UTF8 bytes that are consumed by this Character.
+    uint8_t whitespace : 1;       // True if this Character is white-space.
+    uint8_t combining : 1;        // True if this Character continues the preceding compact grapheme cluster.
 
     // Printing this object is better done from the TextSpanView that contains it.
     AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -28,10 +29,7 @@ class Characters
 
  public:
   // Construct Characters reserving `size_hint` wide characters for wide_.
-  Characters(std::size_t size_hint)
-  {
-    wide_.reserve(size_hint);
-  }
+  Characters(std::size_t size_hint) { wide_.reserve(size_hint); }
 
   void copy_prefix(Characters const& source, std::size_t size)
   {

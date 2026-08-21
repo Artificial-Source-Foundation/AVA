@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "tests/support/test_harness.h"
 #include "terminal/Attributes.h"
+#include "terminal/BasicWindow.h"
 #include "terminal/ColorPair.h"
 #include "terminal/ComplexChar.h"
 #include "terminal/Pad.h"
@@ -8,9 +8,10 @@
 #include "terminal/Rendition.h"
 #include "terminal/TextRow.h"
 #include "terminal/TextSpan.h"
-#include "terminal/BasicWindow.h"
+#include "tests/support/test_harness.h"
 
 #include <array>
+#include <clocale>
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -96,20 +97,18 @@ void test_paragraph_wrap_comment_example()
   std::vector<terminal::TextRow> rows = paragraph->wrap_to(9);
 
   std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
-  expect(rows.size() == expected.size(), "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " +
-                                             std::to_string(rows.size()));
+  expect(rows.size() == expected.size(),
+         "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " + std::to_string(rows.size()));
 
   std::wstring concatenated;
   for (std::size_t row = 0; row < rows.size() && row < expected.size(); ++row)
   {
     std::vector<terminal::TextSpanView> const& views = rows[row].text_span_views();
 
-    expect(rows[row].columns() == expected[row].columns,
-           "row " + std::to_string(row) + " must occupy " + std::to_string(expected[row].columns) + " terminal columns, got " +
-               std::to_string(rows[row].columns()));
-    expect(views.size() == expected[row].views.size(),
-           "row " + std::to_string(row) + " must contain " + std::to_string(expected[row].views.size()) + " TextSpanView's, got " +
-               std::to_string(views.size()));
+    expect(rows[row].columns() == expected[row].columns, "row " + std::to_string(row) + " must occupy " + std::to_string(expected[row].columns) +
+                                                             " terminal columns, got " + std::to_string(rows[row].columns()));
+    expect(views.size() == expected[row].views.size(), "row " + std::to_string(row) + " must contain " + std::to_string(expected[row].views.size()) +
+                                                           " TextSpanView's, got " + std::to_string(views.size()));
 
     for (std::size_t view = 0; view < views.size() && view < expected[row].views.size(); ++view)
     {
@@ -218,8 +217,7 @@ void test_pad_generate_comment_example()
     std::array<ExpectedPadRow, 16> const& expected = expected_pad_rows();
 
     expect(pad.dimension().width() == 9 && pad.dimension().height() == expected.size(),
-           "Pad::generate(9) must create a 9 x 16 pad, got " + std::to_string(pad.dimension().width()) + " x " +
-               std::to_string(pad.dimension().height()));
+           "Pad::generate(9) must create a 9 x 16 pad, got " + std::to_string(pad.dimension().width()) + " x " + std::to_string(pad.dimension().height()));
 
     std::array<terminal::ComplexChar, 9> cells;
     for (std::size_t row = 0; row < expected.size(); ++row)
@@ -248,10 +246,48 @@ void test_pad_generate_comment_example()
   static_cast<void>(std::fclose(output));
 }
 
+// Check compact grapheme metadata for combining marks, flags, emoji modifiers, variation selectors, and ZWJ sequences.
+//
+// The first wide character of each compact cluster must remain unmarked. Every subsequent wide character that must stay
+// attached to that first character is marked combining, including positive-width emoji joined by a zero-width joiner.
+void test_text_span_compact_cluster_metadata()
+{
+  char const* previous_locale_value = std::setlocale(LC_CTYPE, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? std::string{} : std::string{previous_locale_value};
+  if (std::setlocale(LC_CTYPE, "") == nullptr)
+  {
+    expect(false, "the environment locale must support UTF-8 for TextSpan compact-cluster metadata coverage");
+    return;
+  }
+
+  auto text_span = terminal::TextSpan::create(u8"e\u0301\U0001F1E8\U0001F1F3\U0001F469\u200D\U0001F4BB\U0001F44D\U0001F3FD\u2764\uFE0F");
+  terminal::TextSpanView const view{*text_span};
+  auto const& meta = view.characters().meta();
+  std::array<bool, 11> const expected_combining{
+      false, true,       // e + COMBINING ACUTE ACCENT.
+      false, true,       // Regional indicators C + N.
+      false, true, true, // WOMAN + ZWJ + LAPTOP.
+      false, true,       // THUMBS UP + MEDIUM SKIN TONE.
+      false, true        // HEART + VARIATION SELECTOR-16.
+  };
+
+  expect(meta.size() == expected_combining.size(),
+         "compact-cluster TextSpan must decode to " + std::to_string(expected_combining.size()) + " wide characters, got " + std::to_string(meta.size()));
+  for (std::size_t index = 0; index < meta.size() && index < expected_combining.size(); ++index)
+  {
+    expect(meta[index].combining == expected_combining[index], "compact-cluster wide character " + std::to_string(index) + " must have combining=" +
+                                                                   (expected_combining[index] ? std::string{"true"} : std::string{"false"}));
+  }
+
+  if (!previous_locale.empty())
+    static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
+}
+
 } // namespace
 
 void run_terminal_paragraph_tests()
 {
   test_paragraph_wrap_comment_example();
   test_pad_generate_comment_example();
+  test_text_span_compact_cluster_metadata();
 }

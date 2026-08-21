@@ -11,6 +11,21 @@
 
 namespace ava::tui::terminal {
 
+// class TextSpan
+//
+// Represents the UTF8 characters that make up a span of characters to be displayed with the same rendition.
+//
+// For example:
+//
+//   u8"Exit the app"
+//
+// If `use_default_rendition` returns `true` (the TextSpan was created by a call to `TextSpan::create` without passing a `rendition`)
+// then the rendition of this text must come from elsewhere. Otherwise (if a `rendition` was passed to `TextSpan::create`), the rendition
+// to be used can be obtained by a call to `rendition`.
+//
+// Iff `is_hyperlink` returns `true` (the TextSpan was created by a call to `TextSpan::create` while passing a `Hyperlink`) then
+// this `TextSpan` is associated with the `Hyperlink` returned by the member function `hyperlink`.
+//
 class TextSpan : public LayoutItem
 {
  private:

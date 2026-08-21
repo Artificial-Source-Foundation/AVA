@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Verify that every literal ASSERT(...) under src/ava has an actionable comment.
+"""Verify that every literal ASSERT(...) under src/ava has a policy comment.
 
 AVA's assertion policy requires every individual ASSERT to be preceded, on the
-immediately preceding physical line, by its own actionable comment that
-explains what the developer did wrong and how to correct it. The comment is
-normally a `//` line; a one-line `/* ... */` comment is also accepted so that
-an ASSERT inside a continued macro definition can carry the required comment.
-Each ASSERT needs its own comment, so a physical line may contain at most one
-ASSERT use. This checker enforces the placement rule mechanically; reviewers
-still judge whether the comment is actionable.
+immediately preceding physical line, by its own comment. API-contract comments
+explain what the developer did wrong and how to fix it; internal-invariant
+comments describe the invariant and why it must hold. A `//` line or a one-line
+`/* ... */` comment is accepted so that an ASSERT inside a continued macro
+definition can carry the required comment. Each ASSERT needs its own comment,
+so a physical line may contain at most one ASSERT use. This checker enforces
+the placement rule mechanically; reviewers still judge whether the comment
+satisfies the applicable policy.
 """
 
 from __future__ import annotations
@@ -145,7 +146,7 @@ def verify(root: pathlib.Path) -> tuple[list[str], int, int]:
             if len(uses) > 1:
                 failures.append(
                     f"{relative}:{index + 1}: {len(uses)} ASSERT uses on one line; write one ASSERT per line so each "
-                    "assertion has its own immediately preceding actionable comment"
+                    "assertion has its own immediately preceding policy comment"
                 )
                 continue
             previous = lines[index - 1] if index > 0 else ""

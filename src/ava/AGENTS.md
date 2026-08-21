@@ -25,13 +25,16 @@ use `AVA_DEBUG_PRINT_MEMBERS_ON` in a struct/class that is in an anonymous names
   `Result<T>`/`VoidResult` error paths, never in an assertion.
 - Keep `ASSERT` predicates side-effect-free: release builds may omit them, and
   correctness must never depend on assertion evaluation.
-- Every individual `ASSERT` gets its own immediately preceding, actionable
-  comment that explains what the developer did wrong and how to correct it.
-  The comment is normally a `//` line; a one-line `/* ... */` comment is also
-  accepted so an assertion inside a continued macro definition can carry the
-  required comment. Write one `ASSERT` per line, repeat the comment for
-  adjacent assertions, and keep assertion-specific recovery guidance next to
+- Every `ASSERT` that checks for an API contract violation must have its own
+  immediately preceding, actionable comment explaining what the developer did
+  wrong and how to fix it. Keep assertion-specific recovery guidance next to
   the assertion rather than in public headers such as `Window.h`.
+- Use internal-invariant `ASSERT`s sparingly and never as a substitute for
+  reasoning about or testing the code. They may be useful in complex code when
+  an invariant violation would otherwise be difficult to detect. Precede each
+  such `ASSERT` with a comment describing the invariant and why it must hold.
+  The comment may begin with `// Paranoia check:` to emphasize that the
+  assertion is believed to be impossible to trigger in correct code.
 - Verify the placement rule with `python3 scripts/verify-assert-comments.py .`
   from the repository root; the focused CTests are
   `ava_tests.assert_comments_checker` and `ava_tests.assert_comments_source`.

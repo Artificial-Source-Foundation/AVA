@@ -1,6 +1,10 @@
 #include "sys.h"
 #include "GraphemeSpan.h"
 #include "GraphemeRun.h"
+#include "BasicWindow.h"
+#include "TextSpan.h"
+#include "Rendition.h"
+#include "utils/macros.h"
 
 #include <iterator>
 
@@ -167,6 +171,110 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
   columns_ += appended_width;
   grapheme_runs_.push_back(std::move(prefix));
   return std::move(source);
+}
+
+// Write one GraphemeSpan into the ncurses handle `basic_window` at the current cursor position.
+//
+// Every addstr call continues right after where the previous one ended; the GraphemeRun's are simply concatenated.
+// Each GraphemeRun is written with the rendition of its parent TextSpan, or with `default_rendition` when that
+// TextSpan was created without a rendition of its own. The rendition is only passed to ncurses when it changes,
+// and is restored at the end.
+//
+// Wrapping (for example of a Paragraph) may have kept trailing white-space past the end of the GraphemeSpan.
+// Trailing white-space is still written - it carries the background color of its rendition - but is clipped
+// at `max_columns_` terminal columns. A GraphemeSpan only contains spaces that go beyond its `max_columns_`,
+// therefore nothing else will be clipped.
+//
+// Rows are extended to `max_columns_` terminal columns using spaces with `default_rendition`, so that the
+// background of the whole row equals the paragraph background. A row that is written to the very last row
+// of the basic_window (i.e. an ncurses window, subwindow or pad) can end exactly at the bottom-right corner.
+// That is the benign ncurses corner case tolerated by BasicWindow::addstr (even though ncurses `addstr` returns
+// ERR because it can't advance the cursor).
+//
+void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
+{
+  // Track the rendition that ncurses would still use, starting from the current one,
+  // so that an unchanged rendition never needs an attr_set call.
+  Rendition original_rendition = basic_window.get_rendition();
+  Rendition current_rendition{original_rendition};
+
+  // Append `n` characters of the wide character string `str` to `basic_window` using `rendition`.
+  auto&& addstr = [&basic_window, &current_rendition](wchar_t const* str, int n, Rendition const& rendition) {
+    if (current_rendition != rendition)
+    {
+      basic_window.attr_set(rendition);
+      current_rendition = rendition;
+    }
+    basic_window.addstr(str, n);
+  };
+
+  uint32_t remaining_columns = max_columns_;
+  bool row_full = false;          // Set once a character was clipped; from then on only white-space may follow.
+
+  for (GraphemeRun const& grapheme_run : grapheme_runs_)
+  {
+    // An empty GraphemeRun has nothing to write; just go to the next one.
+    if (grapheme_run.empty())
+      continue;
+
+    // Determine how many wide characters of this grapheme_run fit (also) on the basic_window row.
+    std::size_t count = 0;
+    for (auto const& character_metadata : grapheme_run.metadata())
+    {
+      if (!row_full && static_cast<uint32_t>(character_metadata.columns) <= remaining_columns)
+      {
+        remaining_columns -= static_cast<uint32_t>(character_metadata.columns);
+        ++count;
+      }
+      else
+      {
+        // Only white-space may exceed max_columns_. This should have been enforced by Paragraph::wrap.
+        ASSERT(character_metadata.whitespace);
+        // This should be just a space.
+        ASSERT(character_metadata.columns == 1);
+        // This follows because the first time we get here, a one-column character does not fit in remaining_columns.
+        ASSERT(remaining_columns == 0);
+        row_full = true;
+      }
+    }
+
+    // Since grapheme_run is not empty there was at least one element in grapheme_run.characters_meta(),
+    // therefore now either count is larger than 0 or row_full is true, or both.
+    //
+    // If count is zero then no character in this grapheme_run did fit on this row and all characters
+    // truncated were whitespace (see the above ASSERT).
+    if (count > 0)
+    {
+      TextSpan const* text_span = grapheme_run.text_span();
+      Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
+      addstr(grapheme_run.str().data(), static_cast<int>(count), required_rendition);
+    }
+
+    // If the row is full then we expect any additional characters, of subsequent GraphemeRun's if any, to be whitespace.
+    if (row_full)
+      break;
+  }
+
+  while (remaining_columns > 0)
+  {
+    constexpr static uint32_t number_of_spaces = 32;
+    constexpr static auto spaces = [] {
+      std::array<wchar_t, number_of_spaces> result;
+      result.fill(L' ');
+      return result;
+    }();
+    addstr(spaces.data(), std::min(remaining_columns, number_of_spaces), default_rendition);
+    if (AI_UNLIKELY(remaining_columns > number_of_spaces))
+    {
+      remaining_columns -= number_of_spaces;
+      continue;
+    }
+    break;
+  }
+
+  // Restore the rendition that the basic_window had before writing this row.
+  if (!(current_rendition == original_rendition))
+    basic_window.attr_set(original_rendition);
 }
 
 } // namespace ava::tui::terminal

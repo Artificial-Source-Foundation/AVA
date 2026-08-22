@@ -64,29 +64,30 @@ std::vector<GraphemeSpan> Paragraph::wrap_to(uint32_t columns)
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
 
-  std::vector<GraphemeSpan> rows;
-  GraphemeSpan row{static_cast<size_t>(columns)};
+  std::vector<GraphemeSpan> grapheme_spans;
+  GraphemeSpan grapheme_span{static_cast<size_t>(columns)};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
   {
     // Feed this whole TextSpan to GraphemeSpan::append, starting a new GraphemeSpan for
     // whatever didn't fit anymore, until the TextSpan is fully consumed.
-    GraphemeRun view{*text_span};
-    while (!view.empty())
+    GraphemeRun grapheme_run{*text_span};
+    while (!grapheme_run.empty())
     {
-      GraphemeRun remainder = row.append(std::move(view));
+      GraphemeRun remainder = grapheme_span.append(std::move(grapheme_run));
       if (remainder.empty())
         break;
-      rows.push_back(std::move(row));
-      row = GraphemeSpan{static_cast<size_t>(columns)};
-      view = std::move(remainder);
+      grapheme_spans.emplace_back(std::move(grapheme_span));
+      // Note: the grapheme_span is now in the same state as it was immediately after the above construction.
+
+      grapheme_run = std::move(remainder);
     }
   }
 
-  if (!row.grapheme_runs().empty())
-    rows.push_back(std::move(row));
+  if (!grapheme_span.grapheme_runs().empty())
+    grapheme_spans.emplace_back(std::move(grapheme_span));
 
-  return rows;
+  return grapheme_spans;
 }
 
 } // namespace ava::tui::terminal

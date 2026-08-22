@@ -160,17 +160,17 @@ void distribute(uint32_t columns, std::span<Item> items)
   // Distribute the remaining_columns over the remaining items.
   // The situation is now as follows:
 
-  //                                            |    |
-  //                                   |     |  |    |
-  //                       full  full  |-----| ·|----|· · <-- final_level
-  //                        v     v    |xxxx |  |xxxx|
-  //                                   |xxxxx|  |xxxx|    x = remaining_columns (62)
-  //    current_level -->· · · · |--|· |xxxxx| ·|xxxx|·
-  //                    ˰ |---|  |  |  |xxxxx|  |xxxx|
-  //                    | |   |  |  |  |xxxxx|  |xxxx|
-  // tubes[k].height()__| |   |  |  |  |xxxxx|  |xxxx|
-  //                    | |   |  |  |  |xxxxx|  |xxxx|
-  //                    ˅ `---'  `--'  `-----'  `----'   <-- level of minimum_width of each item (level 0).
+  //                                            │    │
+  //                                   │     │  │    │
+  //                       full  full  │⎻⎻⎻⎻⎻│┄┄│⎻⎻⎻⎻│┄ ⟵ final_level
+  //                        ▼     ▼    │▒▒▒▒ │  │▒▒▒▒│
+  //                                   │▒▒▒▒▒│  │▒▒▒▒│
+  //   current_level ──➤ ┄┄┄┄┄┄┄┄│⎻⎻│┄┄│▒▒▒▒▒│┄┄│▒▒▒▒│┄
+  //                    ˰ │⎻⎻⎻│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│  ▓ = already filled
+  //                    │ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│
+  // tubes[k].height()──│ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│  ▒ = remaining_columns (62)
+  //                    │ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│
+  //                    ˅ └───┘  └──┘  └─────┘  └────┘┄ ⟵ level of minimum_width of each item (level 0).
   //                weight: 3      2      5        4
   //                        ^      ^   ╰-------------╯
   //                      set to zero  remaining items

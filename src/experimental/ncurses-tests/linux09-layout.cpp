@@ -13,9 +13,11 @@ int main()
   Debug(NAMESPACE_DEBUG::init());
   Debug(libcw_do.always_flush_on());
 
+#ifdef CWDEBUG
   std::mutex log_mutex;
   std::ofstream log("debug.out");
   Debug(libcw_do.set_ostream(&log, &log_mutex));
+#endif
 
   terminal::Context terminal_context;
   terminal::BasicWindow const& stdscr = terminal_context.stdscr();

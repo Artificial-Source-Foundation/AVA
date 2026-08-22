@@ -3,6 +3,7 @@
 #include "Box.h"
 #include "HorizontalAlignment.h"
 
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include "debug.h"                      // ASSERT

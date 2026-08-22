@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LayoutItem.h"
+#include <vector>
 
 namespace ava::tui::terminal {
 

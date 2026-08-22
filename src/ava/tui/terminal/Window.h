@@ -1,7 +1,7 @@
 #pragma once
 
 #include "BasicWindow.h"
-#include "debug.h"
+#include "debug.h"              // ASSERT
 
 namespace ava::tui::terminal {
 

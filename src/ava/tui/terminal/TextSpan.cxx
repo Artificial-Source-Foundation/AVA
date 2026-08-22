@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "TextSpan.h"
+#include "GraphemeRun.h"
 
 #include "debug.h"
 #ifdef CWDEBUG

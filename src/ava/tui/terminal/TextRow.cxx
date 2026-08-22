@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "TextRow.h"
+#include "GraphemeRun.h"
 
 #include <iterator>
 

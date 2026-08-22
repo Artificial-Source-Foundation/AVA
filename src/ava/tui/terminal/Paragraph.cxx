@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "Paragraph.h"
+#include "GraphemeRun.h"
 
 #include "debug.h"
 

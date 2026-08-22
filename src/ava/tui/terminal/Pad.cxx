@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "GraphemeRun.h"
 #include "Pad.h"
 #include "utils/macros.h"
 

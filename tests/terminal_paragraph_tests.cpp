@@ -3,6 +3,7 @@
 #include "terminal/BasicWindow.h"
 #include "terminal/ColorPair.h"
 #include "terminal/ComplexChar.h"
+#include "terminal/GraphemeRun.h"
 #include "terminal/Pad.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Rendition.h"

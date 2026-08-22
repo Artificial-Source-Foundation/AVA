@@ -159,8 +159,9 @@ class LayoutItem
 
   // Rendering.
 
-  // Convert this LayoutItem into one or more Characters objects using `columns` terminal columns, one object per output row.
-  Box generate_box(int columns);
+  // Convert this LayoutItem into one or more GraphemeRun objects using `columns` terminal columns, one object per output row.
+  // FIXME: Box is already used.
+//  Box generate_box(int columns);
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

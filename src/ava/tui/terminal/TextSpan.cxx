@@ -117,17 +117,17 @@ Hyperlink TextSpan::hyperlink() const
 // Returns the width in terminal columns of the trimmed text_ string.
 Width TextSpan::obtain_natural_width() const
 {
-  // FIXME: this seems inefficient; can't this be delayed until the TextSpanView is required anyway?
-  TextSpanView view(*this);     // Use TextSpanView to get the number of terminal columns occupied by each character.
+  // FIXME: this seems inefficient; can't this be delayed until the GraphemeRun is required anyway?
+  GraphemeRun grapheme_run(*this);      // Use GraphemeRun to get the number of terminal columns occupied by each character.
 
   uint32_t natural_width = 0;
-  auto const& characters_meta = view.characters().meta();
-  auto first_non_whitespace_character = characters_meta.begin();
-  while (first_non_whitespace_character != characters_meta.end() && first_non_whitespace_character->whitespace)
+  auto const& characters_metadata = grapheme_run.wide_characters().metadata();
+  auto first_non_whitespace_character = characters_metadata.begin();
+  while (first_non_whitespace_character != characters_metadata.end() && first_non_whitespace_character->whitespace)
     ++first_non_whitespace_character;
-  if (first_non_whitespace_character != characters_meta.end())
+  if (first_non_whitespace_character != characters_metadata.end())
   {
-    auto first_trailing_whitespace_character = characters_meta.end();
+    auto first_trailing_whitespace_character = characters_metadata.end();
     while (std::prev(first_trailing_whitespace_character)->whitespace)
       --first_trailing_whitespace_character;
     for (auto iter = first_non_whitespace_character; iter != first_trailing_whitespace_character; ++iter)
@@ -158,7 +158,7 @@ Hyperlink HyperlinkedTextSpan::hyperlink() const
   return hyperlink_;
 }
 
-TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span), characters_(text_span.text().size())
+GraphemeRun::GraphemeRun(TextSpan const& text_span) : text_span_(&text_span), wide_characters_(text_span.text().size())
 {
   std::u8string const& text_span_text = text_span.text();
 
@@ -190,26 +190,26 @@ TextSpanView::TextSpanView(TextSpan const& text_span) : text_span_(&text_span), 
     // If this fails then this character is probably one of '\t', '\f', '\n', '\r' or '\v', and those should be handled separately.
     ASSERT(!whitespace || width == 1);
 
-    characters_.push_back({.utf8_begin = offset,
-                           .columns = static_cast<uint32_t>(width),
-                           .utf8_size = static_cast<uint8_t>(size),        // The maximum value is MB_CUR_MAX = 6 with the used locale.
-                           .whitespace = whitespace,
-                           .combining = combining},
-                          value);
+    wide_characters_.push_back({.utf8_begin = offset,
+                                .columns = static_cast<uint32_t>(width),
+                                .utf8_size = static_cast<uint8_t>(size),        // The maximum value is MB_CUR_MAX = 6 with the used locale.
+                                .whitespace = whitespace,
+                                .combining = combining},
+                               value);
 
     offset += size;
   }
 }
 
 #ifdef CWDEBUG
-std::u8string_view TextSpanView::get_u8string_view() const
+std::u8string_view GraphemeRun::get_u8string_view() const
 {
-  // Don't call this on an empty TextSpanView.
-  ASSERT(!characters_.empty());
-  return {&text_span_->text()[0] + characters_.meta().front().utf8_begin, characters_.utf8_size()};
+  // Don't call this on an empty GraphemeRun.
+  ASSERT(!wide_characters_.empty());
+  return {&text_span_->text()[0] + wide_characters_.metadata().front().utf8_begin, wide_characters_.utf8_size()};
 }
 
-void TextSpanView::print_on(std::ostream& os) const
+void GraphemeRun::print_on(std::ostream& os) const
 {
   LIBCWD_USING_OSTREAM_PRELUDE;
   os << "{text_span:" << print_pointer(text_span_) << ", characters_:" << get_u8string_view() << '}';

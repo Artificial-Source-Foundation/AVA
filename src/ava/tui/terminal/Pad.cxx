@@ -12,8 +12,8 @@ namespace {
 // Write one wrapped TextRow of a Paragraph into the ncurses pad `pad`, at row `row`.
 //
 // The cursor is moved to the start of the row once; every addstr call then continues
-// right after where the previous one ended, so the TextSpanView's of the row simply
-// catenate. Each TextSpanView is written with the rendition of its parent TextSpan,
+// right after where the previous one ended, so the GraphemeRun's of the row simply
+// catenate. Each GraphemeRun is written with the rendition of its parent TextSpan,
 // or with `default_rendition` when that TextSpan was created without a rendition of
 // its own. The rendition is only passed to ncurses when it actually changes, and it
 // is restored to what it was before this row at the end.
@@ -40,7 +40,7 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
   Rendition current_rendition{original_rendition};
 
   // Append `n` characters of the wide character string `str` to `pad` using `rendition`.
-  auto&& addstr = [&pad, &current_rendition](wchar_t const* str, int n, Rendition const& rendition){
+  auto&& addstr = [&pad, &current_rendition](wchar_t const* str, int n, Rendition const& rendition) {
     if (current_rendition != rendition)
     {
       pad.attr_set(rendition);
@@ -52,46 +52,46 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
   uint32_t remaining_width = pad_width;
   bool row_full = false;          // Set once a character was clipped; from then on only white-space may follow.
 
-  for (TextSpanView const& text_span_view : text_row.text_span_views())
+  for (GraphemeRun const& grapheme_run : text_row.grapheme_runs())
   {
-    // An empty TextSpanView has nothing to write; just go to the next one.
-    if (text_span_view.empty())
+    // An empty GraphemeRun has nothing to write; just go to the next one.
+    if (grapheme_run.empty())
       continue;
 
-    // Determine how many wide characters of this text_span_view.wide_characters_ fit (also) on the pad row.
+    // Determine how many wide characters of this grapheme_run.wide_characters_ fit (also) on the pad row.
     std::size_t count = 0;
-    for (auto const& character_meta : text_span_view.characters().meta())
+    for (auto const& character_metadata : grapheme_run.wide_characters().metadata())
     {
-      if (!row_full && static_cast<uint32_t>(character_meta.columns) <= remaining_width)
+      if (!row_full && static_cast<uint32_t>(character_metadata.columns) <= remaining_width)
       {
-        remaining_width -= static_cast<uint32_t>(character_meta.columns);
+        remaining_width -= static_cast<uint32_t>(character_metadata.columns);
         ++count;
       }
       else
       {
         // Only white-space may exceed the pad_width. This should have been enforced by Paragraph::wrap.
-        ASSERT(character_meta.whitespace);
+        ASSERT(character_metadata.whitespace);
         // This should be just a space.
-        ASSERT(character_meta.columns == 1);
+        ASSERT(character_metadata.columns == 1);
         // This follows because the first time we get here, a one-column character does not fit in remaining_width.
         ASSERT(remaining_width == 0);
         row_full = true;
       }
     }
 
-    // Since text_span_view is not empty there was at least one element in text_span_view.characters_meta(),
+    // Since grapheme_run is not empty there was at least one element in grapheme_run.characters_meta(),
     // therefore now either count is larger than 0 or row_full is true, or both.
     //
-    // If count is zero then no character in this text_span_view did fit on this row and all characters
+    // If count is zero then no character in this grapheme_run did fit on this row and all characters
     // truncated were whitespace (see the above ASSERT).
     if (count > 0)
     {
-      TextSpan const* text_span = text_span_view.text_span();
+      TextSpan const* text_span = grapheme_run.text_span();
       Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
-      addstr(text_span_view.characters().wide().data(), static_cast<int>(count), required_rendition);
+      addstr(grapheme_run.wide_characters().str().data(), static_cast<int>(count), required_rendition);
     }
 
-    // If the row is full then we expect any additional characters, of subsequent TextSpanView's if any, to be whitespace.
+    // If the row is full then we expect any additional characters, of subsequent GraphemeRun's if any, to be whitespace.
     if (row_full)
       break;
   }

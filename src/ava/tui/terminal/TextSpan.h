@@ -3,7 +3,7 @@
 #include "Hyperlink.h"
 #include "LayoutItem.h"
 #include "Rendition.h"
-#include "Characters.h"
+#include "WideCharacters.h"
 #include "utils/Badge.h"
 
 #include <memory>
@@ -79,8 +79,10 @@ class StyledTextSpan : public TextSpan
   Rendition rendition_;
 
  public:
-  StyledTextSpan(utils::Badge<TextSpan>, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition) :
-    TextSpan(layout_properties, text), rendition_(rendition) { }
+  StyledTextSpan(utils::Badge<TextSpan>, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition)
+      : TextSpan(layout_properties, text), rendition_(rendition)
+  {
+  }
 
   bool use_default_rendition() const override { return false; }
   Rendition rendition() const override;
@@ -94,7 +96,8 @@ class HyperlinkedTextSpan : public StyledTextSpan
   Hyperlink hyperlink_;
 
  public:
-  HyperlinkedTextSpan(utils::Badge<TextSpan> badge, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition, Hyperlink const& hyperlink)
+  HyperlinkedTextSpan(utils::Badge<TextSpan> badge, LayoutItem::Properties const& layout_properties, std::u8string const& text, Rendition rendition,
+                      Hyperlink const& hyperlink)
       : StyledTextSpan(badge, layout_properties, text, rendition), hyperlink_(hyperlink)
   {
   }
@@ -105,29 +108,29 @@ class HyperlinkedTextSpan : public StyledTextSpan
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(StyledTextSpan)
 };
 
-class TextSpanView
+class GraphemeRun
 {
  private:
   friend class TextRow;
 
-  TextSpan const* text_span_;                   // The TextSpan (base) class that this is a view into.
-  Characters characters_;                       // The wide characters and meta data of those characters that make up this view.
+  TextSpan const* text_span_;                   // The source.
+  WideCharacters wide_characters_;              // The wide characters and meta data that make up this grapheme run.
 
  public:
-  // Construct an empty TextSpanView.
-  TextSpanView() : text_span_(nullptr), characters_(0) { }
+  // Construct an empty GraphemeRun.
+  GraphemeRun() : text_span_(nullptr), wide_characters_(0) { }
 
-  // Construct a TextSpanView that covers the whole parent.
-  TextSpanView(TextSpan const& parent);
+  // Construct a GraphemeRun that covers the whole parent.
+  GraphemeRun(TextSpan const& parent);
 
   // Accessors.
   TextSpan const* text_span() const { return text_span_; }
 
-  Characters& characters() { return characters_; }
-  Characters const& characters() const { return characters_; }
+  WideCharacters& wide_characters() { return wide_characters_; }
+  WideCharacters const& wide_characters() const { return wide_characters_; }
 
-  // Convenience accessor; returns true if this view contains no Characters.
-  bool empty() const { return characters_.empty(); }
+  // Convenience accessor; returns true if this view contains no wide characters.
+  bool empty() const { return wide_characters_.empty(); }
 
 #ifdef CWDEBUG
   // Get a view into the TextSpan parent of just the utf8 characters.

@@ -36,7 +36,7 @@ namespace ava::tui::terminal {
 //
 // Wrapping to 9 terminal columns should then give:
 //
-// row    width       TextSpanView list
+// row    width       GraphemeRun list
 //      <---9--->
 //  1  |AAAAAAAAA#    "AAAAAAAAA"
 //  2  |AA  bbb #     "AA ", " bbb "
@@ -55,8 +55,8 @@ namespace ava::tui::terminal {
 // 15  |xxx yyy  #    "xxx yyy ", " "
 // 16  |ZZZ#          "ZZZ"
 //
-// Note how all TextSpanView's in this list are views into the existing TextSpan's of the Paragraph.
-// The catenation of all TextSpanView's gives again the original string.
+// Note how all GraphemeRun's in this list are views into the existing TextSpan's of the Paragraph.
+// The catenation of all GraphemeRun's gives again the original string.
 //
 std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
 {
@@ -70,10 +70,10 @@ std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
   {
     // Feed this whole TextSpan to TextRow::append, starting a new TextRow for
     // whatever didn't fit anymore, until the TextSpan is fully consumed.
-    TextSpanView view{*text_span};
+    GraphemeRun view{*text_span};
     while (!view.empty())
     {
-      TextSpanView remainder = row.append(std::move(view));
+      GraphemeRun remainder = row.append(std::move(view));
       if (remainder.empty())
         break;
       rows.push_back(std::move(row));
@@ -82,7 +82,7 @@ std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
     }
   }
 
-  if (!row.text_span_views().empty())
+  if (!row.grapheme_runs().empty())
     rows.push_back(std::move(row));
 
   return rows;

@@ -6,12 +6,12 @@
 
 namespace ava::tui::terminal {
 
-// Perform wrapping: return a list of TextRow's.
+// Perform wrapping: return a list of GraphemeSpan's.
 //
-// A catenation of all TextSpan's of each TextRow results in the same text with
+// A catenation of all TextSpan's of each GraphemeSpan results in the same text with
 // the same rendition as if all TextSpan's of the Paragraph were catenated.
 // However, a single TextSpan of this Paragraph might have been split up into
-// two (or more) TextSpan. The catenation of each TextSpan in any given TextRow
+// two (or more) TextSpan. The catenation of each TextSpan in any given GraphemeSpan
 // occupies no more than `columns` terminal columns *after* stripping
 // all white-space characters at the end.
 //
@@ -59,17 +59,17 @@ namespace ava::tui::terminal {
 // Note how all GraphemeRun's in this list are views into the existing TextSpan's of the Paragraph.
 // The catenation of all GraphemeRun's gives again the original string.
 //
-std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
+std::vector<GraphemeSpan> Paragraph::wrap_to(uint32_t columns)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
 
-  std::vector<TextRow> rows;
-  TextRow row{static_cast<size_t>(columns)};
+  std::vector<GraphemeSpan> rows;
+  GraphemeSpan row{static_cast<size_t>(columns)};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
   {
-    // Feed this whole TextSpan to TextRow::append, starting a new TextRow for
+    // Feed this whole TextSpan to GraphemeSpan::append, starting a new GraphemeSpan for
     // whatever didn't fit anymore, until the TextSpan is fully consumed.
     GraphemeRun view{*text_span};
     while (!view.empty())
@@ -78,7 +78,7 @@ std::vector<TextRow> Paragraph::wrap_to(uint32_t columns)
       if (remainder.empty())
         break;
       rows.push_back(std::move(row));
-      row = TextRow{static_cast<size_t>(columns)};
+      row = GraphemeSpan{static_cast<size_t>(columns)};
       view = std::move(remainder);
     }
   }

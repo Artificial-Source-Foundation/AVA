@@ -5,7 +5,11 @@
 
 namespace ava::tui::terminal {
 
-class TextRow
+// class GraphemeSpan
+//
+// A series of a adjacent GraphemeRun's.
+//
+class GraphemeSpan
 {
  private:
   std::size_t max_columns_;                             // The maximum number of terminal columns in this row, ignoring trailing white-space.
@@ -13,8 +17,8 @@ class TextRow
   std::vector<GraphemeRun> grapheme_runs_;              // A list of GraphemeRun's that make up the row.
 
  public:
-  // Construct an empty TextRow.
-  TextRow(std::size_t max_columns) : max_columns_(max_columns) { }
+  // Construct an empty GraphemeSpan.
+  GraphemeSpan(std::size_t max_columns) : max_columns_(max_columns) { }
 
   // Append as much of a GraphemeRun to the end as possible, returns what didn't fit.
   GraphemeRun append(GraphemeRun&& source);

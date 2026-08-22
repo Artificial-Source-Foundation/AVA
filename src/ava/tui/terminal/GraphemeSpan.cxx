@@ -1,16 +1,16 @@
 #include "sys.h"
-#include "TextRow.h"
+#include "GraphemeSpan.h"
 #include "GraphemeRun.h"
 
 #include <iterator>
 
 namespace ava::tui::terminal {
 
-// Determine how much of `source` still fits on this TextRow.
+// Determine how much of `source` still fits on this GraphemeSpan.
 //
 // If everything fits, move-append source to grapheme_runs_ and return a default constructed GraphemeRun.
 //
-// For example if TextRow currently contains the GraphemeRun's "current ", "CONTENT" and " ":
+// For example if GraphemeSpan currently contains the GraphemeRun's "current ", "CONTENT" and " ":
 //
 //           <--------max_columns_------->
 //  this:   |current CONTENT #            |
@@ -20,7 +20,7 @@ namespace ava::tui::terminal {
 //  result: |current CONTENT hello world# |
 //           ''''''''^^^^^^^'^^^^^^^^^^^      <-- this line shows which characters belong to which GraphemeRun element (alternating ' and ~ characters).
 //
-// If the first word of `source` is longer than max_columns_, use it to fill the current TextRow by splitting
+// If the first word of `source` is longer than max_columns_, use it to fill the current GraphemeSpan by splitting
 // that word only between compact grapheme clusters and return the remainder. A cluster wider than an otherwise
 // empty row is appended whole, exceeding max_columns_, so wrapping can make progress without splitting it.
 //
@@ -43,7 +43,7 @@ namespace ava::tui::terminal {
 //  returned: |AAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
 // Otherwise, append all grapheme clusters up till the first white-space of `source` that still fit,
-// plus any subsequent white-space even if they don't fit, as a single GraphemeRun to to this TextRow
+// plus any subsequent white-space even if they don't fit, as a single GraphemeRun to to this GraphemeSpan
 // and return the remaining grapheme clusters as a GraphemeRun.
 //
 // For example,
@@ -64,14 +64,14 @@ namespace ava::tui::terminal {
 //             ''''''''''''''''^^^^^^^^^^^^^^^^^^
 //  returned: |eeeeeee fffff ggggg hhhhh|
 //
-GraphemeRun TextRow::append(GraphemeRun&& source)
+GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
 {
   if (source.empty())
     // Pretend we succesfully appended source.
     return {};
 
-  auto const source_begin = source.wide_characters().metadata().begin();
-  auto const source_end = source.wide_characters().metadata().end();
+  auto const source_begin = source.metadata().begin();
+  auto const source_end = source.metadata().end();
   auto prefix_end = source_begin;
   auto cursor = source_begin;
   size_t appended_width = 0;
@@ -161,8 +161,8 @@ GraphemeRun TextRow::append(GraphemeRun&& source)
 
   GraphemeRun prefix;
   prefix.text_span_ = source.text_span_;
-  prefix.wide_characters().copy_prefix(source.wide_characters(), prefix_size);
-  source.wide_characters().remove_prefix(prefix_size);
+  prefix.copy_prefix(source, prefix_size);
+  source.remove_prefix(prefix_size);
 
   columns_ += appended_width;
   grapheme_runs_.push_back(std::move(prefix));

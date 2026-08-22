@@ -7,11 +7,12 @@ target_sources(ava_terminal
     "BasicWindow.cxx"
     "ComplexChar.cxx"
     "Context.cxx"
+    "GraphemeRun.cxx"
+    "GraphemeSpan.cxx"
     "HorizontalLayout.cxx"
     "LayoutItem.cxx"
     "Pad.cxx"
     "Paragraph.cxx"
-    "TextRow.cxx"
     "TextSpan.cxx"
     "private_convert.cxx"
 )

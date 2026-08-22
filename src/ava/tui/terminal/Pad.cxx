@@ -10,7 +10,7 @@ namespace ava::tui::terminal {
 
 namespace {
 
-// Write one wrapped TextRow of a Paragraph into the ncurses pad `pad`, at row `row`.
+// Write one wrapped GraphemeSpan of a Paragraph into the ncurses pad `pad`, at row `row`.
 //
 // The cursor is moved to the start of the row once; every addstr call then continues
 // right after where the previous one ended, so the GraphemeRun's of the row simply
@@ -31,7 +31,7 @@ namespace {
 // to the very last row of the pad can end exactly at the bottom-right corner of the pad;
 // that is the benign ncurses corner case tolerated by BasicWindow::addstr (even though
 // ncurses `addstr` returns ERR because it can't advance the cursor).
-void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t pad_width, Rendition const& default_rendition)
+void write_row(BasicWindow& pad, GraphemeSpan const& text_row, uint32_t row, uint32_t pad_width, Rendition const& default_rendition)
 {
   pad.move(Position{row, 0});
 
@@ -59,9 +59,9 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
     if (grapheme_run.empty())
       continue;
 
-    // Determine how many wide characters of this grapheme_run.wide_characters_ fit (also) on the pad row.
+    // Determine how many wide characters of this grapheme_run fit (also) on the pad row.
     std::size_t count = 0;
-    for (auto const& character_metadata : grapheme_run.wide_characters().metadata())
+    for (auto const& character_metadata : grapheme_run.metadata())
     {
       if (!row_full && static_cast<uint32_t>(character_metadata.columns) <= remaining_width)
       {
@@ -89,7 +89,7 @@ void write_row(BasicWindow& pad, TextRow const& text_row, uint32_t row, uint32_t
     {
       TextSpan const* text_span = grapheme_run.text_span();
       Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
-      addstr(grapheme_run.wide_characters().str().data(), static_cast<int>(count), required_rendition);
+      addstr(grapheme_run.str().data(), static_cast<int>(count), required_rendition);
     }
 
     // If the row is full then we expect any additional characters, of subsequent GraphemeRun's if any, to be whitespace.
@@ -130,7 +130,7 @@ void Pad::generate(uint32_t columns)
   // consecutive Paragraph's) determines the height of the ncurses pad, which must be known when
   // the pad is created. The wrapped rows only contain views into the TextSpan's of the Paragraph's,
   // so keeping them around until the end is cheap apart from the wide characters and meta data.
-  std::vector<std::vector<TextRow>> wrapped_paragraphs;
+  std::vector<std::vector<GraphemeSpan>> wrapped_paragraphs;
   wrapped_paragraphs.reserve(paragraphs_.size());
   uint32_t pad_height = 0;
   for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
@@ -147,9 +147,9 @@ void Pad::generate(uint32_t columns)
   // Write all wrapped rows into the new pad.
   auto paragraph_iter = paragraphs_.begin();
   uint32_t row = 0;
-  for (std::vector<TextRow> const& rows : wrapped_paragraphs)
+  for (std::vector<GraphemeSpan> const& rows : wrapped_paragraphs)
   {
-    for (TextRow const& text_row : rows)
+    for (GraphemeSpan const& text_row : rows)
     {
       write_row(*pad_, text_row, row, columns, (*paragraph_iter)->default_rendition());
       ++row;

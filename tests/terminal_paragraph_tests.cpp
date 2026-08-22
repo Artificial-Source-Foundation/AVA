@@ -7,7 +7,7 @@
 #include "terminal/Pad.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Rendition.h"
-#include "terminal/TextRow.h"
+#include "terminal/GraphemeSpan.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
 
@@ -47,7 +47,7 @@ std::unique_ptr<terminal::Paragraph> make_comment_paragraph(terminal::Rendition 
   return paragraph;
 }
 
-// One expected GraphemeRun of a wrapped TextRow: its wide characters, and whether it must be a run into a
+// One expected GraphemeRun of a wrapped GraphemeSpan: its wide characters, and whether it must be a run into a
 // StyledTextSpan (`styled`) rather than into a TextSpan using the Paragraph default rendition.
 struct ExpectedRun
 {
@@ -55,7 +55,7 @@ struct ExpectedRun
   bool styled;
 };
 
-// One expected TextRow of the comment example after wrapping at 9 cells: its occupied columns
+// One expected GraphemeSpan of the comment example after wrapping at 9 cells: its occupied columns
 // (including trailing white-space) and its list of GraphemeRun's, exactly as listed in the comment.
 struct ExpectedRow
 {
@@ -95,7 +95,7 @@ void test_paragraph_wrap_comment_example()
 {
   auto paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
 
-  std::vector<terminal::TextRow> rows = paragraph->wrap_to(9);
+  std::vector<terminal::GraphemeSpan> rows = paragraph->wrap_to(9);
 
   std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
   expect(rows.size() == expected.size(),
@@ -114,12 +114,12 @@ void test_paragraph_wrap_comment_example()
 
     for (std::size_t run = 0; run < grapheme_runs.size() && run < expected[row].grapheme_runs.size(); ++run)
     {
-      expect(grapheme_runs[run].wide_characters().str() == expected[row].grapheme_runs[run].text,
+      expect(grapheme_runs[run].str() == expected[row].grapheme_runs[run].text,
              "row " + std::to_string(row) + " run " + std::to_string(run) + " must cover the expected text");
       expect(grapheme_runs[run].text_span()->use_default_rendition() != expected[row].grapheme_runs[run].styled,
              "row " + std::to_string(row) + " run " + std::to_string(run) + " must be a view into " +
                  (expected[row].grapheme_runs[run].styled ? "a StyledTextSpan" : "a TextSpan using the Paragraph default rendition"));
-      concatenated += grapheme_runs[run].wide_characters().str();
+      concatenated += grapheme_runs[run].str();
     }
   }
 
@@ -264,7 +264,7 @@ void test_text_span_compact_cluster_metadata()
 
   auto text_span = terminal::TextSpan::create(u8"e\u0301\U0001F1E8\U0001F1F3\U0001F469\u200D\U0001F4BB\U0001F44D\U0001F3FD\u2764\uFE0F");
   terminal::GraphemeRun const grapheme_run{*text_span};
-  auto const& metadata = grapheme_run.wide_characters().metadata();
+  auto const& metadata = grapheme_run.metadata();
   std::array<bool, 11> const expected_combining{
       false, true,       // e + COMBINING ACUTE ACCENT.
       false, true,       // Regional indicators C + N.
@@ -295,7 +295,7 @@ void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t colu
   paragraph->append(terminal::TextSpan::create(text));
   paragraph->initialize_cached_natural_width();
 
-  std::vector<terminal::TextRow> const rows = paragraph->wrap_to(columns);
+  std::vector<terminal::GraphemeSpan> const rows = paragraph->wrap_to(columns);
   expect(!rows.empty(), std::string{name} + " must produce at least one wrapped row");
   if (!rows.empty())
     expect(rows.front().columns() == expected_first_row_columns, std::string{name} + " first row must occupy " + std::to_string(expected_first_row_columns) +
@@ -305,7 +305,7 @@ void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t colu
   {
     for (terminal::GraphemeRun const& grapheme_run : rows[row].grapheme_runs())
     {
-      auto const& metadata = grapheme_run.wide_characters().metadata();
+      auto const& metadata = grapheme_run.metadata();
       expect(metadata.empty() || !metadata.front().combining,
              std::string{name} + " row " + std::to_string(row) + " must not begin a GraphemeRun inside a compact grapheme cluster");
     }

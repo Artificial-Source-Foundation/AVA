@@ -70,7 +70,7 @@ cmake --install build-release \
 
 ## Portability boundary
 
-This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport. Release qualification is limited to native x86_64 and AArch64 builds; each qualified architecture requires its own native CI Release build, full CTest run, clean-checkout assertion, and successful strict source-package run. Cross-compilation is not qualification evidence.
+This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport. Release qualification is limited to native x86_64 and AArch64 builds whose detected ELF architecture agrees with the recorded packaging-host architecture; each qualified architecture requires its own native CI Release build, full CTest run, clean-checkout assertion, and successful strict source-package run. Cross-compilation is not qualification evidence.
 
 Build-only dependencies are not packaged. Building from this checkout needs CMake 3.25+, a C++23 compiler, Boost and ncurses development files, Git, and configured source dependencies. Packaging additionally needs Bash, Python 3, `tar`, `sha256sum`, and Linux `renameat2`. Python is used only for staged-link verification, negative tests, and descriptor-anchored no-replace publication; it is not a runtime dependency.
 
@@ -134,7 +134,7 @@ Ordinary build mode configures a fresh private Release build tree, builds the cu
 scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
 ```
 
-The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, architectures other than x86_64 or AArch64, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
+The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, missing or unsupported host/binary architecture evidence, disagreement between the canonical packaging-host architecture and detected ELF architecture, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
 
 ```sh
 scripts/package-linux.sh --require-release-qualified \

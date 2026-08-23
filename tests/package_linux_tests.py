@@ -870,11 +870,51 @@ def run_signal_cleanup_regression_child(args: argparse.Namespace) -> int:
             cleanup_verified_owned_processes()
 
 
+def write_elf_shell_fixture(path: pathlib.Path, shell_script: str) -> None:
+    compiler = shutil.which("cc") or shutil.which("c++")
+    if compiler is None:
+        raise RuntimeError("a C or C++ compiler is required for ELF package fixtures")
+    source = f"""#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+static const char fixture_script[] = {json.dumps(shell_script)};
+
+int main(int argc, char **argv) {{
+    char **shell_argv = (char **)calloc((size_t)argc + 4, sizeof(*shell_argv));
+    if (shell_argv == NULL) return 127;
+    shell_argv[0] = (char *)"sh";
+    shell_argv[1] = (char *)"-c";
+    shell_argv[2] = (char *)fixture_script;
+    shell_argv[3] = (char *)"ava-fixture";
+    for (int index = 1; index < argc; ++index) shell_argv[index + 3] = argv[index];
+    shell_argv[argc + 3] = NULL;
+    execv("/bin/sh", shell_argv);
+    perror("execv /bin/sh");
+    return 127;
+}}
+"""
+    with tempfile.TemporaryDirectory(dir=path.parent) as directory:
+        root = pathlib.Path(directory)
+        source_path = root / "fixture.c"
+        executable_path = root / "fixture"
+        source_path.write_text(source, encoding="utf-8")
+        result = subprocess.run(
+            [compiler, "-O0", "-o", str(executable_path), str(source_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"unable to compile ELF package fixture:\n{result.stderr}")
+        shutil.copy2(executable_path, path)
+        path.chmod(0o700)
+
+
 def write_ava_fixture(path: pathlib.Path, version: str) -> None:
-    write_executable(
+    write_elf_shell_fixture(
         path,
-        f"""#!/bin/sh
-set -eu
+        f"""set -eu
 case "${{1-}}" in
   --version)
     if [ -n "${{AVA_PACKAGE_TEST_MARKER:-}}" ] && [ ! -e "$AVA_PACKAGE_TEST_MARKER" ]; then
@@ -900,10 +940,9 @@ esac
 
 
 def write_mutating_ava_fixture(path: pathlib.Path, version: str) -> None:
-    write_executable(
+    write_elf_shell_fixture(
         path,
-        f"""#!/bin/sh
-set -eu
+        f"""set -eu
 case "${{1-}}" in
   --version)
     if [ ! -e "$AVA_PACKAGE_TEST_BUILD_MUTATION_MARKER" ]; then
@@ -1933,6 +1972,13 @@ def run_package_tests(
         provenance_data = json.loads(provenance.read().decode("utf-8"))
         if provenance_data.get("schema_version") != 2 or provenance_data.get("build_mode") != "supplied-binary":
             raise RuntimeError("package provenance has unexpected accepted-binary content")
+        expected_architecture = {"x64": "x86_64", "arm64": "aarch64"}.get(package_architecture())
+        if expected_architecture is not None and (
+            provenance_data.get("architecture") != expected_architecture
+            or provenance_data.get("host_architecture") != expected_architecture
+            or provenance_data.get("host_architecture_matches_binary") is not True
+        ):
+            raise RuntimeError("package provenance does not record native host/ELF architecture agreement")
         if provenance_data.get("release_qualified") is not False:
             raise RuntimeError("accepted-binary package must remain unqualified")
         extract = root / "independent-extract"
@@ -2042,6 +2088,21 @@ def run_package_tests(
     mismatch_output.mkdir(mode=0o700)
     mismatch_result = run(package_command(script, mismatch, mismatch_output), env=env, check=False)
     require_failure(mismatch_result, "does not match current checkout", "mismatched accepted binary version was not rejected")
+
+    non_elf = root / "non-elf-ava"
+    write_executable(
+        non_elf,
+        f"#!/bin/sh\nprintf 'ava {version}\\n'\n",
+    )
+    non_elf_output = root / "non-elf-output"
+    non_elf_output.mkdir(mode=0o700)
+    non_elf_result = run(package_command(script, non_elf, non_elf_output), env=env, check=False)
+    require_failure(
+        non_elf_result,
+        "does not contain a detected ELF architecture",
+        "non-ELF accepted binary received a misleading architecture name",
+    )
+    assert_output_empty(non_elf_output, "non-ELF accepted binary published an artifact")
 
     binary_symlink = root / "binary-symlink"
     binary_symlink.symlink_to(fixture)

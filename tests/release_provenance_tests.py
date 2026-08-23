@@ -133,7 +133,7 @@ def with_fabricated_empty_dynamic_section(contents: bytes) -> bytes:
 
 
 class ReleaseProvenanceTests(unittest.TestCase):
-    def collect(self, *, build_mode: str = "source-build", qualification_mode: bool = True, binary_version: str | None = "1.0.0", architecture: str = "x86_64", needed: list[str] | None = None, dependency_reasons: list[str] | None = None) -> dict[str, object]:
+    def collect(self, *, build_mode: str = "source-build", qualification_mode: bool = True, binary_version: str | None = "1.0.0", host_architecture: str | None = "x86_64", architecture: str | None = "x86_64", needed: list[str] | None = None, dependency_reasons: list[str] | None = None) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as directory:
             binary = pathlib.Path(directory) / "ava"
             binary.write_bytes(b"deterministic provenance fixture\n")
@@ -143,7 +143,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 PROVENANCE, "dependency_records", return_value=(clean_dependencies(), dependency_reasons or [])
             ):
                 return PROVENANCE.collect_provenance(
-                    SOURCE, binary, build_mode, qualification_mode=qualification_mode,
+                    SOURCE, binary, build_mode, host_architecture=host_architecture,
+                    qualification_mode=qualification_mode,
                     binary_version=binary_version, architecture=architecture,
                     needed=needed if needed is not None else sorted(PROVENANCE.HOST_DYNAMIC_ALLOWLIST),
                 )
@@ -154,6 +155,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["schema_version"], 2)
         self.assertEqual(first["ava_version"], "1.0.0")
+        self.assertEqual(first["host_architecture"], "x86_64")
+        self.assertIs(first["host_architecture_matches_binary"], True)
         self.assertTrue(first["release_qualified"])
         self.assertNotIn(str(SOURCE), json.dumps(first))
 
@@ -166,8 +169,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 PROVENANCE, "worktree_dirty", return_value=True
             ), mock.patch.object(PROVENANCE, "dependency_records", return_value=(clean_dependencies(), [])):
                 source_dirty = PROVENANCE.collect_provenance(
-                    SOURCE, binary, "source-build", qualification_mode=True,
-                    binary_version="1.0.0", architecture="x86_64",
+                    SOURCE, binary, "source-build", host_architecture="x86_64",
+                    qualification_mode=True, binary_version="1.0.0", architecture="x86_64",
                     needed=sorted(PROVENANCE.HOST_DYNAMIC_ALLOWLIST),
                 )
         self.assertFalse(dirty["release_qualified"])
@@ -194,8 +197,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 PROVENANCE, "worktree_dirty", return_value=False
             ):
                 provenance = PROVENANCE.collect_provenance(
-                    repo, binary, "source-build", qualification_mode=True,
-                    binary_version="1.0.0", architecture="x86_64",
+                    repo, binary, "source-build", host_architecture="x86_64",
+                    qualification_mode=True, binary_version="1.0.0", architecture="x86_64",
                     needed=sorted(PROVENANCE.HOST_DYNAMIC_ALLOWLIST),
                 )
         record = provenance["direct_dependencies"][0]
@@ -364,23 +367,80 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 PROVENANCE, "dependency_records", return_value=(clean_dependencies(), [])
             ):
                 provenance = PROVENANCE.collect_provenance(
-                    SOURCE, binary, "source-build", qualification_mode=True, binary_version="1.0.0"
+                    SOURCE, binary, "source-build", host_architecture="x86_64",
+                    qualification_mode=True, binary_version="1.0.0"
                 )
         self.assertEqual(provenance["elf_dt_needed"], ["libc.so.6", "libsurprise.so.1"])
         self.assertFalse(provenance["release_qualified"])
         self.assertIn("unexpected-dynamic-dependency", provenance["qualification_reasons"])
 
-    def test_architecture_and_dynamic_dependencies_are_qualification_gates(self) -> None:
+    def test_matching_native_architectures_are_qualified(self) -> None:
         self.assertEqual(PROVENANCE.QUALIFIED_ARCHITECTURES, frozenset({"x86_64", "aarch64"}))
-        x86_64 = self.collect(architecture="x86_64")
-        aarch64 = self.collect(architecture="aarch64")
-        riscv64 = self.collect(architecture="riscv64")
+        for architecture in ("x86_64", "aarch64"):
+            with self.subTest(architecture=architecture):
+                provenance = self.collect(
+                    host_architecture=architecture,
+                    architecture=architecture,
+                )
+                self.assertEqual(provenance["host_architecture"], architecture)
+                self.assertEqual(provenance["architecture"], architecture)
+                self.assertIs(provenance["host_architecture_matches_binary"], True)
+                self.assertTrue(provenance["release_qualified"])
+                self.assertEqual(provenance["qualification_reasons"], [])
+
+    def test_host_binary_architecture_mismatches_fail_closed(self) -> None:
+        for host_architecture, binary_architecture in (
+            ("x86_64", "aarch64"),
+            ("aarch64", "x86_64"),
+        ):
+            with self.subTest(host=host_architecture, binary=binary_architecture):
+                provenance = self.collect(
+                    host_architecture=host_architecture,
+                    architecture=binary_architecture,
+                )
+                self.assertEqual(provenance["host_architecture"], host_architecture)
+                self.assertEqual(provenance["architecture"], binary_architecture)
+                self.assertIs(provenance["host_architecture_matches_binary"], False)
+                self.assertFalse(provenance["release_qualified"])
+                self.assertEqual(
+                    provenance["qualification_reasons"],
+                    ["host-binary-architecture-mismatch"],
+                )
+
+    def test_missing_and_unsupported_architecture_evidence_fails_closed(self) -> None:
+        fixtures = (
+            ("absent-host", None, "x86_64", None, ["host-architecture-missing"]),
+            (
+                "unsupported-host",
+                "riscv64",
+                "x86_64",
+                False,
+                ["host-architecture-unsupported", "host-binary-architecture-mismatch"],
+            ),
+            ("missing-binary", "x86_64", None, None, ["binary-architecture-missing"]),
+            (
+                "unsupported-binary",
+                "x86_64",
+                "riscv64",
+                False,
+                ["binary-architecture-unsupported", "host-binary-architecture-mismatch"],
+            ),
+        )
+        for name, host_architecture, binary_architecture, matches, reasons in fixtures:
+            with self.subTest(name=name):
+                provenance = self.collect(
+                    host_architecture=host_architecture,
+                    architecture=binary_architecture,
+                )
+                self.assertEqual(provenance["host_architecture"], host_architecture)
+                self.assertEqual(provenance["architecture"], binary_architecture)
+                self.assertIs(provenance["host_architecture_matches_binary"], matches)
+                self.assertFalse(provenance["release_qualified"])
+                self.assertEqual(provenance["qualification_reasons"], sorted(reasons))
+
+    def test_dynamic_dependencies_are_a_qualification_gate(self) -> None:
         allowed_subset = self.collect(needed=["libc.so.6"])
         unexpected = self.collect(needed=["libc.so.6", "libsurprise.so.1"])
-        self.assertTrue(x86_64["release_qualified"])
-        self.assertTrue(aarch64["release_qualified"])
-        self.assertFalse(riscv64["release_qualified"])
-        self.assertIn("architecture-not-qualified", riscv64["qualification_reasons"])
         self.assertTrue(allowed_subset["release_qualified"])
         self.assertFalse(unexpected["release_qualified"])
         self.assertIn("unexpected-dynamic-dependency", unexpected["qualification_reasons"])

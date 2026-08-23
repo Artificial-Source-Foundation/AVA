@@ -264,13 +264,18 @@ def dependency_records(repo: pathlib.Path) -> tuple[list[dict[str, Any]], list[s
     return records, reasons
 
 
-def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str, *, qualification_mode: bool = False, binary_version: str | None = None, architecture: str | None = None, needed: list[str] | None = None) -> dict[str, Any]:
+def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str, *, host_architecture: str | None, qualification_mode: bool = False, binary_version: str | None = None, architecture: str | None = None, needed: list[str] | None = None) -> dict[str, Any]:
     ava_version = project_version(repo)
     source_revision = run_git(repo, "rev-parse", "HEAD")
     source_dirty = worktree_dirty(repo)
     detected_architecture, detected_needed = elf_metadata(binary)
     architecture = architecture if architecture is not None else detected_architecture
     needed = needed if needed is not None else detected_needed
+    host_architecture_matches_binary = (
+        host_architecture == architecture
+        if host_architecture is not None and architecture is not None
+        else None
+    )
     dependencies, reasons = dependency_records(repo)
     if ava_version is None:
         reasons.append("ava-version-unavailable")
@@ -284,8 +289,16 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         reasons.append("qualification-mode-not-requested")
     if build_mode != "source-build":
         reasons.append("build-mode-not-source-build")
-    if architecture not in QUALIFIED_ARCHITECTURES:
-        reasons.append("architecture-not-qualified")
+    if host_architecture is None:
+        reasons.append("host-architecture-missing")
+    elif host_architecture not in QUALIFIED_ARCHITECTURES:
+        reasons.append("host-architecture-unsupported")
+    if architecture is None:
+        reasons.append("binary-architecture-missing")
+    elif architecture not in QUALIFIED_ARCHITECTURES:
+        reasons.append("binary-architecture-unsupported")
+    if host_architecture_matches_binary is False:
+        reasons.append("host-binary-architecture-mismatch")
     if needed is None:
         reasons.append("binary-not-elf")
     elif set(needed) - HOST_DYNAMIC_ALLOWLIST:
@@ -309,6 +322,8 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         }],
         "license_ids": license_ids,
         "architecture": architecture,
+        "host_architecture": host_architecture,
+        "host_architecture_matches_binary": host_architecture_matches_binary,
         "elf_dt_needed": needed,
         "host_dynamic_dependency_allowlist": sorted(HOST_DYNAMIC_ALLOWLIST),
         "release_qualified": not reasons,
@@ -321,6 +336,7 @@ def main() -> int:
     parser.add_argument("--repo", required=True, type=pathlib.Path)
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--build-mode", choices=("source-build", "supplied-binary"), required=True)
+    parser.add_argument("--host-architecture", help="canonical architecture of the packaging host")
     parser.add_argument("--binary-version", help="exact version reported by the snapshotted binary")
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--qualification-mode", action="store_true", help="evaluate and permit a qualification claim")
@@ -330,6 +346,7 @@ def main() -> int:
         parser.error(f"binary is not a regular file: {args.binary}")
     provenance = collect_provenance(
         args.repo, args.binary, args.build_mode,
+        host_architecture=args.host_architecture,
         qualification_mode=args.qualification_mode or args.require_release_qualified,
         binary_version=args.binary_version,
     )

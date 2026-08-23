@@ -136,19 +136,23 @@ class LayoutItem
   virtual ~LayoutItem() = default;
 
   // Accessors.
+
   uint32_t shrink_priority() const { return properties_.priority; }
   float shrink_weight() const { return properties_.weight; }
+
   Width minimum_width() const
   {
     // Clamp minimum_width to the natural width. This is used for example to set a fixed width by passing a Properties::minimum_width of `Width::greedy`.
     return cached_natural_width_ < properties_.minimum_width ? cached_natural_width_ : properties_.minimum_width;
   }
+
   Width natural_width() const
   {
     // Call initialize_cached_natural_width() after the most-derived class is fully initialized.
     ASSERT(!cached_natural_width_.is_unknown());
     return cached_natural_width_;
   }
+
   HorizontalAlignment horizontal_alignment() const { return properties_.alignment; }
 
   Width assigned_width() const

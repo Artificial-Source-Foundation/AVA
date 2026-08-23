@@ -157,23 +157,23 @@ void distribute(uint32_t columns, std::span<Item> items)
     }
   }
 
-  // Distribute the remaining_columns over the remaining items.
   // The situation is now as follows:
-
   //                                            │    │
   //                                   │     │  │    │
   //                       full  full  │⎻⎻⎻⎻⎻│┄┄│⎻⎻⎻⎻│┄ ⟵ final_level
   //                        ▼     ▼    │▒▒▒▒ │  │▒▒▒▒│
   //                                   │▒▒▒▒▒│  │▒▒▒▒│
   //   current_level ──➤ ┄┄┄┄┄┄┄┄│⎻⎻│┄┄│▒▒▒▒▒│┄┄│▒▒▒▒│┄
-  //                    ˰ │⎻⎻⎻│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│  ▓ = already filled
+  //                    ˰ │⎻⎻⎻│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│  ▓ = already filled (natural_width - minimum_width for each item).
   //                    │ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│
   // tubes[k].height()──│ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│  ▒ = remaining_columns (62)
   //                    │ │▓▓▓│  │▓▓│  │▒▒▒▒▒│  │▒▒▒▒│
   //                    ˅ └───┘  └──┘  └─────┘  └────┘┄ ⟵ level of minimum_width of each item (level 0).
   //                weight: 3      2      5        4
-  //                        ^      ^   ╰-------------╯
+  //                        ^      ^   ╰──────┬──────╯
   //                      set to zero  remaining items
+
+  // Distribute the remaining_columns over the remaining items.
 
   // Reorder the items by the fractional part of the extra columns each should get, from large to small.
   std::iota(ok.begin(), ok.begin() + items.size(), 0);

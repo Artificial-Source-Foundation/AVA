@@ -11,7 +11,7 @@ namespace ava::tui::terminal {
 class Paragraph : public LayoutItem
 {
  private:
-  std::vector<std::unique_ptr<TextSpan>> text_spans_;
+  std::vector<std::unique_ptr<TextSpan>> text_spans_;   // All the TextSpan's that make up this Paragraph, added in order with `append`.
   Rendition default_rendition_{ColorPair{}};            // The rendition used for TextSpan's that were created without a rendition of their own.
   Width natural_width_{0};                              // Cached sum of all the natural widths of text_spans_.
 

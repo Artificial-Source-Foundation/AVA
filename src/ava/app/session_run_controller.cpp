@@ -48,6 +48,14 @@ ava::core::Error queue_limit_error(std::string_view queue, std::size_t limit)
   return error;
 }
 
+ava::core::Error compaction_pending_error()
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session already has a pending compaction append");
+  error.with_context("queue", "compaction");
+  error.with_context("recovery", "wait for the pending compaction append to resolve, then retry with a fresh authoritative snapshot");
+  return error;
+}
+
 ava::core::Error reentrant_append_error()
 {
   return ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "reentrant session append is not allowed");
@@ -484,23 +492,10 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   auto bytes = batch_entry_byte_count(entries);
   if (!bytes)
     return std::unexpected(std::move(bytes.error()));
-  std::size_t expected_bytes = 0;
-  if (kind == SessionAppendRequestKind::Compaction)
-  {
-    for (auto const& expected_entry : expected)
-    {
-      auto entry_bytes = entry_byte_count(expected_entry);
-      if (!entry_bytes)
-        return std::unexpected(std::move(entry_bytes.error()));
-      if (*entry_bytes > std::numeric_limits<std::size_t>::max() - expected_bytes)
-        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append byte accounting overflow"));
-      expected_bytes += *entry_bytes;
-    }
-    if (expected_bytes > std::numeric_limits<std::size_t>::max() - *bytes)
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "session append byte accounting overflow"));
-    *bytes += expected_bytes;
-  }
 
+  // A compaction expected snapshot is CAS comparison data, not append payload,
+  // so it is never folded into queue byte accounting; only the appended entry
+  // bytes below count against kMaxSessionAppendQueueBytes.
   auto item = std::make_shared<ActiveRunGuard::State::AppendItem>();
   item->bytes = *bytes;
   item->entries = std::move(entries);
@@ -523,6 +518,13 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
       return std::unexpected(queue_limit_error("appends", kMaxSessionAppendQueueEntries));
     if (item->bytes > kMaxSessionAppendQueueBytes || state->append_bytes > kMaxSessionAppendQueueBytes - item->bytes)
       return std::unexpected(queue_limit_error("append_bytes", kMaxSessionAppendQueueBytes));
+    // Bound compaction snapshot memory amplification with one dedicated lane:
+    // queued tickets remain Pending until their terminal erase on every queue
+    // exit, so queue membership is the exact pending/in-flight signal. This
+    // admission rejection never latches persistence or stops an active run.
+    if (kind == SessionAppendRequestKind::Compaction &&
+        std::ranges::any_of(state->appends, [](auto const& queued) { return queued->kind == SessionAppendRequestKind::Compaction; }))
+      return std::unexpected(compaction_pending_error());
     state->appends.push_back(item);
     state->append_bytes += item->bytes;
   }

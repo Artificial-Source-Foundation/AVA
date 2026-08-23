@@ -202,6 +202,11 @@ class SessionRunController
   [[nodiscard]] ava::core::VoidResult append(ava::session::SessionEntry entry);
   [[nodiscard]] ava::core::Result<ava::session::SessionConditionalAppendResult> append_branch_summary_if_absent(
       ava::session::SessionEntry entry, ava::session::SessionCancelCallback cancel_requested = nullptr);
+  // The expected snapshot is CAS comparison data, not append payload: it never
+  // counts against kMaxSessionAppendQueueBytes. Memory amplification stays
+  // bounded by one dedicated lane accepting a single pending/in-flight
+  // compaction ticket per controller; a second concurrent compaction is
+  // rejected with an actionable admission error that never latches persistence.
   [[nodiscard]] ava::core::Result<ava::session::SessionCompactionAppendResult> append_compaction_if_snapshot_matches(
       ava::session::SessionEntry entry, std::vector<ava::session::SessionEntry> expected, ava::session::SessionCancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult append_batch(std::vector<ava::session::SessionEntry> entries);

@@ -32,8 +32,14 @@ During an active `run_prompt`, AgentLoop user/replay-user, assistant, reasoning,
 
 The controller owns compaction CAS admission as well as ordinary and branch-summary
 append admission. Queue tickets carry an explicit ordinary, branch-summary, or
-compaction kind; compaction tickets synchronously own and byte-account the
-bounded expected vector. Automatic/overflow work uses the guard's immutable
+compaction kind; compaction tickets synchronously own the expected vector as
+CAS comparison data, never as append payload. Queue byte accounting counts only
+payload bytes exactly, so an expected snapshot larger than the 4 MiB append
+queue budget still reaches authoritative comparison. Memory amplification stays
+bounded by one dedicated lane: at most one pending or in-flight compaction
+ticket is accepted per controller, and a second concurrent compaction is
+rejected with an actionable admission error that never latches persistence or
+stops an active run. Automatic/overflow work uses the guard's immutable
 run-generation route. Manual `/compact` snapshots the read authority and shared
 controller together, performs provider work without a Session lock, then uses
 the stable owner CAS route. Neither route exposes `SessionAppendTarget` through
@@ -68,4 +74,4 @@ Runtime history consumers receive this capability by value: AgentLoop/MessageBui
 
 ## Verification
 
-`ava_tests.session_run_controller` covers valid/invalid transitions, move/destructor release, same/different admission inspection, same-correlation wait outcome, FollowUp commands, inactive owner routing, stale-generation rejection, snapshots, queue overflow, observer shutdown/reset reentrancy, queued cross-thread closing, exact byte drain, immutable persistence failures, and target lease release. Session/agent/compaction/RPC suites cover pathname replacement after authority binding. The focused `tsan` CMake preset runs this deterministic controller suite; it is separate from the ASan/UBSan preset and CI job.
+`ava_tests.session_run_controller` covers valid/invalid transitions, move/destructor release, same/different admission inspection, same-correlation wait outcome, FollowUp commands, inactive owner routing, stale-generation rejection, snapshots, queue overflow, observer shutdown/reset reentrancy, queued cross-thread closing, exact byte drain, immutable persistence failures, and target lease release. Compaction coverage includes exact-match and mismatch CAS outcomes in both storage modes, commit-state latching, over-budget expected snapshots reaching authoritative comparison, payload-only queue byte accounting, non-latching second-compaction admission rejection, and lane release across success, mismatch, terminal drain, and shutdown. Session/agent/compaction/RPC suites cover pathname replacement after authority binding. The focused `tsan` CMake preset runs this deterministic controller suite; it is separate from the ASan/UBSan preset and CI job.

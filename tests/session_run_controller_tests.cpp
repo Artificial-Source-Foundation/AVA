@@ -163,6 +163,20 @@ ava::session::SessionEntry compaction_entry(std::string id)
   return std::move(*entry);
 }
 
+// Mirrors the controller's AppendItem payload byte accounting exactly.
+std::size_t controller_entry_bytes(ava::session::SessionEntry const& entry)
+{
+  return entry.id.size() + entry.parent_id.size() + entry.timestamp.size() + entry.data_json.size() + 32;
+}
+
+std::size_t controller_entries_bytes(std::vector<ava::session::SessionEntry> const& entries)
+{
+  std::size_t bytes = 0;
+  for (auto const& entry : entries)
+    bytes += controller_entry_bytes(entry);
+  return bytes;
+}
+
 ava::session::SessionEntry branch_summary_entry(ava::session::SessionStore const& store, std::string id, std::string parent_id, std::string root_id,
                                                 std::string tip_id)
 {
@@ -1999,6 +2013,293 @@ void test_session_run_controller_compaction_compare_and_append()
   expect(run_failure("committed", "committed_to_leased_inode"), "compaction CAS committed append failures latch with stable classification");
 }
 
+void test_session_run_controller_compaction_snapshot_lane()
+{
+  // Six ~768 KiB records byte-account above the 4 MiB ordinary append queue
+  // budget while staying inside the default 8 MiB file / 1 MiB line read
+  // limits, so the CAS comparison itself remains authoritative.
+  std::size_t constexpr kOversizedEntries = 6;
+  std::size_t constexpr kOversizedPadding = 768 * 1024;
+  auto seed_history = [](ava::session::SessionStore& store, ava::session::SessionLease const& lease, std::string_view prefix, std::size_t count,
+                         std::size_t padding_bytes) {
+    std::string parent;
+    for (std::size_t index = 0; index < count; ++index)
+    {
+      auto entry = append_entry(std::string(prefix) + "-" + std::to_string(index));
+      entry.parent_id = parent;
+      if (padding_bytes > 0)
+        entry.data_json = "{\"padding\":\"" + std::string(padding_bytes, 'x') + "\"}";
+      if (!store.append(lease, entry))
+        return false;
+      parent = entry.id;
+    }
+    return true;
+  };
+  auto create_owned_store = [](std::filesystem::path const& root) {
+    auto store = ava::session::SessionStore::create(std::filesystem::current_path(), root);
+    auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                       : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+    return std::pair<std::optional<ava::session::SessionStore>, std::optional<ava::session::SessionLease>>(
+        store ? std::optional<ava::session::SessionStore>(std::move(*store)) : std::nullopt,
+        lease ? std::optional<ava::session::SessionLease>(std::move(*lease)) : std::nullopt);
+  };
+
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-oversized-snapshot");
+    auto [store, lease] = create_owned_store(root);
+    expect(store && lease, "oversized snapshot fixture creates a persistent owned session");
+    if (!store || !lease)
+      return;
+    expect(seed_history(*store, *lease, "oversized", kOversizedEntries, kOversizedPadding), "oversized snapshot fixture seeds an over-budget history");
+    auto expected = store->load(*lease);
+    auto target = persistent_controller_target(*store, *lease);
+    if (!expected || !target)
+      return;
+    expect(controller_entries_bytes(*expected) > ava::app::kMaxSessionAppendQueueBytes,
+           "oversized snapshot fixture byte-accounting exceeds the ordinary append queue budget");
+    ava::app::SessionRunController controller(std::move(*target));
+    auto exact = controller.append_compaction_if_snapshot_matches(compaction_entry("oversized-compaction"), *expected);
+    auto after = store->load(*lease);
+    auto drained = controller.snapshot();
+    expect(exact && *exact == ava::session::SessionCompactionAppendResult::Appended && after && after->size() == kOversizedEntries + 1 &&
+               after->back().type == ava::session::EntryType::Compaction && drained.queued_appends == 0 && drained.queued_append_bytes == 0,
+           "compaction CAS carrying an over-budget expected snapshot reaches authoritative comparison and appends");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-lane");
+    auto [store, lease] = create_owned_store(root);
+    expect(store && lease, "compaction lane fixture creates a persistent owned session");
+    if (!store || !lease)
+      return;
+    expect(seed_history(*store, *lease, "lane", kOversizedEntries, kOversizedPadding), "compaction lane fixture seeds an over-budget history");
+    auto expected = store->load(*lease);
+    auto target = persistent_controller_target(*store, *lease);
+    if (!expected || !target)
+      return;
+    expect(controller_entries_bytes(*expected) > ava::app::kMaxSessionAppendQueueBytes,
+           "compaction lane fixture snapshot byte-accounting exceeds the ordinary append queue budget");
+    ava::app::SessionRunController controller(std::move(*target));
+    auto admitted = controller.admit({.request_id = "compaction-lane"});
+    expect(admitted.has_value(), "compaction lane fixture admits an active run");
+    if (!admitted)
+      return;
+    auto guard = std::move(*admitted);
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool in_flight = false;
+    bool release_first = false;
+    auto first_entry = compaction_entry("lane-first");
+    auto const first_payload_bytes = controller_entry_bytes(first_entry);
+    std::optional<ava::core::Result<ava::session::SessionCompactionAppendResult>> first_result;
+    std::jthread first_writer([&] {
+      first_result.emplace(controller.append_compaction_if_snapshot_matches(std::move(first_entry), *expected, [&] {
+        std::unique_lock lock(gate_mutex);
+        if (in_flight)
+          return false;
+        in_flight = true;
+        gate_changed.notify_all();
+        static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_first; }));
+        return false;
+      }));
+    });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return in_flight; }),
+             "first over-budget compaction is admitted and reaches its in-flight cancellation gate");
+    }
+
+    auto const gated = controller.snapshot();
+    auto second = controller.append_compaction_if_snapshot_matches(compaction_entry("lane-second"), *expected);
+    auto ordinary_entry = append_entry("lane-ordinary");
+    auto const ordinary_payload_bytes = controller_entry_bytes(ordinary_entry);
+    std::optional<ava::core::VoidResult> ordinary_result;
+    std::jthread ordinary_writer([&] { ordinary_result.emplace(controller.append(std::move(ordinary_entry))); });
+    auto const queue_deadline = ava::tests::now_plus_seconds(3);
+    auto queued = controller.snapshot();
+    while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+    {
+      std::this_thread::yield();
+      queued = controller.snapshot();
+    }
+    {
+      std::lock_guard lock(gate_mutex);
+      release_first = true;
+    }
+    gate_changed.notify_all();
+    first_writer.join();
+    ordinary_writer.join();
+
+    auto entries = store->load(*lease);
+    auto drained = controller.snapshot();
+    auto const admission = controller.inspect_admission({.request_id = "other"});
+    expect(gated.queued_appends == 1 && gated.queued_append_bytes == first_payload_bytes,
+           "an in-flight compaction ticket byte-accounts only its append payload, never the expected snapshot");
+    expect(!second && second.error().message() == "session already has a pending compaction append" &&
+               !append_error_context(second.error(), "append_commit_state"),
+           "a second concurrent compaction is rejected with an actionable non-latching admission error");
+    expect(queued.queued_appends == 2 && queued.queued_append_bytes == first_payload_bytes + ordinary_payload_bytes,
+           "an ordinary append queues behind the in-flight compaction with exact payload-only byte accounting");
+    expect(first_result && *first_result && **first_result == ava::session::SessionCompactionAppendResult::Appended && ordinary_result && *ordinary_result &&
+               entries && entries->size() == kOversizedEntries + 2 && entries->at(kOversizedEntries).type == ava::session::EntryType::Compaction &&
+               entries->back().id == "lane-ordinary" && !guard.stop_requested() && admission != ava::app::AdmissionDisposition::RejectPersistenceFailure &&
+               drained.queued_appends == 0 && drained.queued_append_bytes == 0,
+           "the gated compaction and queued ordinary append both persist in FIFO order without latching or stopping the run");
+
+    auto after_first = store->load(*lease);
+    expect(after_first && controller_entries_bytes(*after_first) > ava::app::kMaxSessionAppendQueueBytes,
+           "compaction lane fixture history remains over the ordinary append queue budget after growth");
+    auto released_after_success = after_first ? controller.append_compaction_if_snapshot_matches(compaction_entry("lane-after-success"), *after_first)
+                                              : ava::core::Result<ava::session::SessionCompactionAppendResult>(std::unexpected(after_first.error()));
+    auto mismatch = controller.append_compaction_if_snapshot_matches(compaction_entry("lane-stale"), *expected);
+    auto after_mismatch = store->load(*lease);
+    auto released_after_mismatch = after_mismatch ? controller.append_compaction_if_snapshot_matches(compaction_entry("lane-after-mismatch"), *after_mismatch)
+                                                  : ava::core::Result<ava::session::SessionCompactionAppendResult>(std::unexpected(after_mismatch.error()));
+    auto final_entries = store->load(*lease);
+    auto const compactions =
+        final_entries ? std::ranges::count_if(*final_entries, [](auto const& entry) { return entry.type == ava::session::EntryType::Compaction; }) : 0;
+    expect(released_after_success && *released_after_success == ava::session::SessionCompactionAppendResult::Appended && mismatch &&
+               *mismatch == ava::session::SessionCompactionAppendResult::SnapshotMismatch && released_after_mismatch &&
+               *released_after_mismatch == ava::session::SessionCompactionAppendResult::Appended && compactions == 3,
+           "the single-compaction lane is released after success and after an over-budget snapshot mismatch");
+    auto outcome = guard.complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError});
+    expect(outcome && outcome->reason == ava::app::StopReason::ProviderError, "compaction lane fixture run completes without a persistence override");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-lane-drain");
+    auto [store, lease] = create_owned_store(root);
+    expect(store && lease, "compaction lane drain fixture creates a persistent owned session");
+    if (!store || !lease)
+      return;
+    expect(store->append(*lease, append_entry("drain-prefix")).has_value(), "compaction lane drain fixture seeds history");
+    auto expected = store->load(*lease);
+    if (!expected)
+      return;
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool entered = false;
+    bool release_head = false;
+    store->set_before_append_identity_check_for_test([&] {
+      std::unique_lock lock(gate_mutex);
+      if (entered)
+        return;
+      entered = true;
+      gate_changed.notify_all();
+      static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_head; }));
+    });
+    auto control = std::make_shared<PartialAppendControl>();
+    store->set_append_write_for_test([control](int fd, std::string_view bytes) { return control->write(fd, bytes); });
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+
+    std::optional<ava::core::VoidResult> head_result;
+    std::jthread head_writer([&] { head_result.emplace(controller.append(append_entry("drain-head"))); });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "drain fixture head append reaches its write gate");
+    }
+    std::optional<ava::core::Result<ava::session::SessionCompactionAppendResult>> queued_compaction;
+    std::jthread compaction_writer(
+        [&] { queued_compaction.emplace(controller.append_compaction_if_snapshot_matches(compaction_entry("drain-queued"), *expected)); });
+    auto const queue_deadline = ava::tests::now_plus_seconds(3);
+    auto queued = controller.snapshot();
+    while (queued.queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+    {
+      std::this_thread::yield();
+      queued = controller.snapshot();
+    }
+    auto second = controller.append_compaction_if_snapshot_matches(compaction_entry("drain-second"), *expected);
+    {
+      std::lock_guard lock(gate_mutex);
+      release_head = true;
+    }
+    gate_changed.notify_all();
+    head_writer.join();
+    compaction_writer.join();
+
+    auto drained = controller.snapshot();
+    control->fail.store(false, std::memory_order_release);
+    auto recovered = controller.reset_persistence_failure();
+    auto released = controller.append_compaction_if_snapshot_matches(compaction_entry("drain-after-recovery"), *expected);
+    auto entries = store->load(*lease);
+    auto const expected_state = std::optional<std::string>("partial_or_unknown");
+    expect(queued.queued_appends == 2 && !second && second.error().message() == "session already has a pending compaction append" &&
+               !append_error_context(second.error(), "append_commit_state") && head_result && !*head_result &&
+               append_error_context(head_result->error(), "append_commit_state") == expected_state && queued_compaction && !*queued_compaction &&
+               append_error_context(queued_compaction->error(), "append_commit_state") == expected_state && drained.queued_appends == 0 &&
+               drained.queued_append_bytes == 0 && recovered && released && *released == ava::session::SessionCompactionAppendResult::Appended && entries &&
+               entries->size() == 2 && entries->back().id == "drain-after-recovery",
+           "a failing head terminally drains a queued compaction with the shared failure, a concurrent second compaction stays non-latching, and "
+           "recovery releases the lane");
+  }
+
+  {
+    auto const root = create_empty_root("session-run-controller-compaction-lane-shutdown");
+    auto [store, lease] = create_owned_store(root);
+    expect(store && lease, "compaction lane shutdown fixture creates a persistent owned session");
+    if (!store || !lease)
+      return;
+    expect(store->append(*lease, append_entry("shutdown-prefix")).has_value(), "compaction lane shutdown fixture seeds history");
+    auto expected = store->load(*lease);
+    if (!expected)
+      return;
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool entered = false;
+    bool release_head = false;
+    store->set_before_append_identity_check_for_test([&] {
+      std::unique_lock lock(gate_mutex);
+      if (entered)
+        return;
+      entered = true;
+      gate_changed.notify_all();
+      static_cast<void>(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return release_head; }));
+    });
+    auto target = persistent_controller_target(*store, *lease);
+    if (!target)
+      return;
+    ava::app::SessionRunController controller(std::move(*target));
+    auto owner = controller.owner_append_route();
+
+    std::optional<ava::core::VoidResult> head_result;
+    std::jthread head_writer([&] { head_result.emplace(controller.append(append_entry("shutdown-head"))); });
+    {
+      std::unique_lock lock(gate_mutex);
+      expect(gate_changed.wait_for(lock, std::chrono::seconds(3), [&] { return entered; }), "shutdown fixture head append reaches its write gate");
+    }
+    std::optional<ava::core::Result<ava::session::SessionCompactionAppendResult>> queued_compaction;
+    std::jthread compaction_writer(
+        [&] { queued_compaction.emplace(controller.append_compaction_if_snapshot_matches(compaction_entry("shutdown-queued"), *expected)); });
+    auto const queue_deadline = ava::tests::now_plus_seconds(3);
+    while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+      std::this_thread::yield();
+    std::jthread shutdown_thread([&] { controller.shutdown(); });
+    auto const close_deadline = ava::tests::now_plus_seconds(3);
+    while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
+           std::chrono::steady_clock::now() < close_deadline)
+      std::this_thread::yield();
+    {
+      std::lock_guard lock(gate_mutex);
+      release_head = true;
+    }
+    gate_changed.notify_all();
+    head_writer.join();
+    compaction_writer.join();
+    shutdown_thread.join();
+
+    auto drained = controller.snapshot();
+    expect(head_result && *head_result && queued_compaction && !*queued_compaction && queued_compaction->error().message() == "session has no active run" &&
+               drained.queued_appends == 0 && drained.queued_append_bytes == 0 && !owner(append_entry("shutdown-stale")),
+           "shutdown preserves the in-flight append, drains a queued compaction ticket as closing, and releases authority");
+  }
+}
+
 void test_session_run_controller_bounds_and_reentrant_snapshot()
 {
   ava::app::SessionRunController controller(ephemeral_controller_target());
@@ -2044,5 +2345,6 @@ void run_session_run_controller_tests()
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_exclusive_maintenance_reservation();
   test_session_run_controller_compaction_compare_and_append();
+  test_session_run_controller_compaction_snapshot_lane();
   test_session_run_controller_bounds_and_reentrant_snapshot();
 }

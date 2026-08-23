@@ -35,6 +35,8 @@ std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(av
     expect(request->body.find("\"store\":false") == std::string::npos, "OpenAI API-key request does not force storage flag");
     expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1,
            "OpenAI Responses request serializes the effective system prompt exactly once");
+    expect(request->body.find("\"instructions\":\"" + std::string(system_prompt_marker) + "\"") != std::string::npos,
+           "OpenAI Responses request places the effective system prompt in the instructions field");
     expect(request->body.find("hello \\\"ava\\\"") != std::string::npos, "OpenAI request JSON escapes message content");
     expect(request->body.find("\"tools\":[{\"type\":\"function\",\"name\":\"read_file\"}]") != std::string::npos, "OpenAI request includes tools array");
     expect(request->timeout_ms == 60000, "OpenAI request carries default HTTP timeout");

@@ -90,6 +90,9 @@ void test_agent_loop_text_only_turn()
          "agent loop includes tool schemas in provider request");
   expect(transport.requests().size() == 1 && ava::tests::count_occurrences(transport.requests()[0].body, system_prompt_marker) == 1,
          "agent loop sends the effective system prompt to the provider exactly once");
+  expect(transport.requests().size() == 1 &&
+             transport.requests()[0].body.find("\"instructions\":\"" + std::string(system_prompt_marker) + "\"") != std::string::npos,
+         "agent loop places the effective system prompt in the OpenAI instructions field");
   expect(transport.requests().size() == 1 && transport.requests()[0].url == "https://chatgpt.com/backend-api/codex/responses" &&
              transport.requests()[0].headers.at("ChatGPT-Account-Id") == "acct_123",
          "agent loop routes OpenAI OAuth turns through delegated endpoint");

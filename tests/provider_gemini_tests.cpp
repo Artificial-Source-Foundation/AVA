@@ -54,6 +54,9 @@ void test_gemini_provider_contract()
     expect(request->headers.at("x-goog-api-key") == "gemini-key", "Gemini request uses x-goog-api-key header");
     expect(request->headers.at("Accept") == "text/event-stream", "Gemini streaming request asks for SSE");
     expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1, "Gemini request serializes the effective system prompt exactly once");
+    auto const expected_system_instruction = std::string("\"systemInstruction\":{\"parts\":[{\"text\":\"") + std::string(system_prompt_marker) + "\"}]}";
+    expect(request->body.find(expected_system_instruction) != std::string::npos,
+           "Gemini request places the effective system prompt in the top-level systemInstruction parts text");
     expect(
         request->body.find(R"("contents":[{"role":"user","parts":[{"text":"hello \"ava\""}]},{"role":"model","parts":[{"text":"hi"}]})") != std::string::npos,
         "Gemini request maps assistant role to model and escapes content");

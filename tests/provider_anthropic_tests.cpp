@@ -69,6 +69,8 @@ void test_anthropic_provider_contract()
     expect(request->body.find("\"model\":\"claude-sonnet-4-5\"") != std::string::npos, "Anthropic request includes model id");
     expect(request->body.find("\"max_tokens\":64000") != std::string::npos, "Anthropic request uses model max output token metadata when supplied");
     expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1, "Anthropic request serializes the effective system prompt exactly once");
+    expect(request->body.find("\"system\":\"" + std::string(system_prompt_marker) + "\"") != std::string::npos,
+           "Anthropic request places the effective system prompt in the top-level system field");
     expect(request->body.find("\"stream\":true") != std::string::npos, "Anthropic request preserves stream flag");
     expect(request->body.find("\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}") != std::string::npos, "Anthropic request includes messages");
     expect(request->body.find("\"input_schema\":{\"type\":\"object\"") != std::string::npos, "Anthropic request maps OpenAI-style parameters to input_schema");

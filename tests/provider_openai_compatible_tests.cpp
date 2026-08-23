@@ -67,6 +67,8 @@ void test_openai_compatible_provider_contract()
            "OpenAI-compatible request includes model, fixed temperature, stream usage, and Kimi thinking option");
     expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1,
            "OpenAI-compatible request serializes the effective system prompt exactly once");
+    expect(request->body.find("\"messages\":[{\"role\":\"system\",\"content\":\"" + std::string(system_prompt_marker) + "\"") != std::string::npos,
+           "OpenAI-compatible request leads messages with the system-role system prompt");
     expect(request->body.find("\"reasoning_content\":\"prior reasoning\"") != std::string::npos,
            "OpenAI-compatible request preserves visible reasoning_content for compatible replay");
     expect(request->body.find("\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\"") != std::string::npos &&

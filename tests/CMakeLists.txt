@@ -683,6 +683,13 @@ if(Python3_Interpreter_FOUND)
               ${CMAKE_CURRENT_SOURCE_DIR}/live_acp_dogfood_test.py
               --source ${CMAKE_SOURCE_DIR})
     set_tests_properties(ava_tests.live_acp_dogfood_launcher PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "acp;interop;offline")
+
+    add_test(
+      NAME ava_tests.live_dogfood_launchers
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/live_dogfood_launcher_test.py
+              --source ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ava_tests.live_dogfood_launchers PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "provider;offline")
   endif()
 
   if(AVA_ENABLE_ACPX_INTEROP)

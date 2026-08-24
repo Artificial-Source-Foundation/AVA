@@ -1,5 +1,6 @@
 #!/bin/sh
 set -u
+umask 077
 
 # Provider live matrix runner.
 #
@@ -310,8 +311,13 @@ run_case_target()
           echo "live model dogfood script is missing: $script_dir/live-model-dogfood.sh"
           exit 127
         fi
+        case_parent=$run_root/$matrix_case
+        if ! mkdir -m 700 "$case_parent"; then
+          echo "could not create private matrix case parent: $case_parent"
+          exit 127
+        fi
         AVA_EXE=$ava_exe
-        AVA_LIVE_DOGFOOD_ROOT=$run_root/$matrix_case/model-dogfood
+        AVA_LIVE_DOGFOOD_ROOT=$case_parent
         export AVA_EXE AVA_LIVE_DOGFOOD_ROOT
         if [ -n "${AVA_LIVE_PROVIDER_MATRIX_KEEP:-}" ]; then
           AVA_LIVE_DOGFOOD_KEEP=1
@@ -324,8 +330,13 @@ run_case_target()
           echo "live coding dogfood script is missing: $script_dir/live-coding-dogfood.sh"
           exit 127
         fi
+        case_parent=$run_root/$matrix_case
+        if ! mkdir -m 700 "$case_parent"; then
+          echo "could not create private matrix case parent: $case_parent"
+          exit 127
+        fi
         AVA_EXE=$ava_exe
-        AVA_LIVE_CODING_DOGFOOD_ROOT=$run_root/$matrix_case/coding-dogfood
+        AVA_LIVE_CODING_DOGFOOD_ROOT=$case_parent
         export AVA_EXE AVA_LIVE_CODING_DOGFOOD_ROOT
         if [ -n "${AVA_LIVE_PROVIDER_MATRIX_KEEP:-}" ]; then
           AVA_LIVE_CODING_DOGFOOD_KEEP=1

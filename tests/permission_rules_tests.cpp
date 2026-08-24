@@ -2,6 +2,8 @@
 #include "tests/support/test_harness.h"
 #include "ava/command/private_group.h"
 #include "ava/tools/file_tools.h"
+#include "ava/tools/search_tools.h"
+#include "ava/tools/secure_workspace.h"
 #include "ava/permissions/permission_rules.h"
 #include "ava/core/mode.h"
 
@@ -11,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -307,12 +310,13 @@ void test_schema_v2_recipe_rules_bind_scope_and_deny_precedence()
                                                      .actor = "test"});
   auto denied = ava::permissions::match_persistent_permission_rule(store_b, prompt_b);
 
-  expect(workspace_allow && reloaded && reloaded->size() == 1 && workspace_match && *workspace_match &&
-             (*workspace_match)->rule_id == workspace_allow->rule_id && cross_workspace_miss && !*cross_workspace_miss && global_allow && global_match &&
-             *global_match && (*global_match)->rule_id == global_allow->rule_id && global_deny && denied && *denied &&
-             (*denied)->action == ava::permissions::PermissionAction::Deny && (*denied)->rule_id == global_deny->rule_id,
-         "schema-v2 recipe rules match by typed workspace key rather than raw command spelling, global recipe rules span workspaces, and exact recipe denies win "
-         "before Standard auto-allow");
+  expect(
+      workspace_allow && reloaded && reloaded->size() == 1 && workspace_match && *workspace_match && (*workspace_match)->rule_id == workspace_allow->rule_id &&
+          cross_workspace_miss && !*cross_workspace_miss && global_allow && global_match && *global_match &&
+          (*global_match)->rule_id == global_allow->rule_id && global_deny && denied && *denied &&
+          (*denied)->action == ava::permissions::PermissionAction::Deny && (*denied)->rule_id == global_deny->rule_id,
+      "schema-v2 recipe rules match by typed workspace key rather than raw command spelling, global recipe rules span workspaces, and exact recipe denies win "
+      "before Standard auto-allow");
 }
 
 void test_critical_command_allows_are_always_one_shot()
@@ -360,8 +364,8 @@ void test_critical_command_allows_are_always_one_shot()
   prompt.command_metadata = critical;
   auto unverified = ava::permissions::match_persistent_permission_rule(store, prompt);
 
-  expect(!missing_ack && !acknowledged && acknowledged.error().category() == ava::core::ErrorCategory::InvalidArgument && matched && !*matched &&
-             unverified && !*unverified,
+  expect(!missing_ack && !acknowledged && acknowledged.error().category() == ava::core::ErrorCategory::InvalidArgument && matched && !*matched && unverified &&
+             !*unverified,
          "Critical command Allows cannot be persisted with or without an acknowledgement and remain one-shot for every executor");
 }
 
@@ -669,24 +673,23 @@ void test_old_critical_acknowledgements_never_recover_authority()
                                                    .reason = "exact critical allow for uncontained network command",
                                                    .actor = "test"});
   auto old_rule = ava::permissions::PersistentPermissionRule{.rule_id = "permrule_old_critical_ack",
-                                                              .scope = ava::permissions::PermissionRuleScope::Workspace,
-                                                              .workspace_dir = store.workspace_dir,
-                                                              .action = ava::permissions::PermissionAction::Allow,
-                                                              .operation = ava::permissions::Operation::RunCommand,
-                                                              .mode = ava::permissions::PermissionRuleMode::Build,
-                                                              .tool_name = "bash",
-                                                              .target_path = {},
-                                                              .command = command,
-                                                              .command_recipe_key = {},
-                                                              .recipe_display = {},
-                                                              .critical_acknowledged = true,
-                                                              .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
-                                                              .reason = "old exact critical allow",
-                                                              .actor = "test",
-                                                              .created_at = "2026-07-19T00:00:00Z"};
+                                                             .scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                             .workspace_dir = store.workspace_dir,
+                                                             .action = ava::permissions::PermissionAction::Allow,
+                                                             .operation = ava::permissions::Operation::RunCommand,
+                                                             .mode = ava::permissions::PermissionRuleMode::Build,
+                                                             .tool_name = "bash",
+                                                             .target_path = {},
+                                                             .command = command,
+                                                             .command_recipe_key = {},
+                                                             .recipe_display = {},
+                                                             .critical_acknowledged = true,
+                                                             .schema_version = ava::permissions::kCurrentPermissionRulesSchemaVersion,
+                                                             .reason = "old exact critical allow",
+                                                             .actor = "test",
+                                                             .created_at = "2026-07-19T00:00:00Z"};
   std::filesystem::create_directories(store.workspace_rules_file.parent_path());
-  write_file_with_mode(store.workspace_rules_file,
-                       std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(old_rule) + "]}",
+  write_file_with_mode(store.workspace_rules_file, std::string("{\"schema_version\":2,\"rules\":[") + ava::permissions::permission_rule_json(old_rule) + "]}",
                        S_IRUSR | S_IWUSR);
   auto prompt = command_prompt(store, command);
 
@@ -708,8 +711,8 @@ void test_old_critical_acknowledgements_never_recover_authority()
   unverified.containment_status = ava::permissions::CommandContainmentStatus::UnverifiedDelegatedExecutor;
   prompt.command_metadata = unverified;
   auto unverified_match = ava::permissions::match_persistent_permission_rule(store, prompt);
-  expect(!rejected && rejected.error().category() == ava::core::ErrorCategory::InvalidArgument && unavailable_match && !*unavailable_match &&
-             available_match && !*available_match && unverified_match && !*unverified_match,
+  expect(!rejected && rejected.error().category() == ava::core::ErrorCategory::InvalidArgument && unavailable_match && !*unavailable_match && available_match &&
+             !*available_match && unverified_match && !*unverified_match,
          "new and old exact Critical acknowledgements never recover authority, regardless of containment or executor status");
 }
 
@@ -749,6 +752,514 @@ void test_permission_rule_broad_permissions_rejected()
 
   auto loaded = ava::permissions::load_persistent_permission_rules(store);
   expect(!loaded && loaded.error().category() == ava::core::ErrorCategory::PermissionDenied, "permission rule storage rejects group/world-readable rule files");
+}
+
+ava::core::Result<ava::permissions::PersistentPermissionRule> add_exact_workspace_deny(ava::permissions::PermissionRuleStore const& store,
+                                                                                       ava::permissions::Operation operation,
+                                                                                       std::filesystem::path const& target_path, std::string tool_name,
+                                                                                       std::string reason)
+{
+  return ava::permissions::add_persistent_permission_rule(store,
+                                                          ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                .action = ava::permissions::PermissionAction::Deny,
+                                                                                                .operation = operation,
+                                                                                                .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                .tool_name = std::move(tool_name),
+                                                                                                .target_path = std::move(target_path),
+                                                                                                .command = "",
+                                                                                                .command_recipe_key = {},
+                                                                                                .recipe_display = {},
+                                                                                                .critical_acknowledged = false,
+                                                                                                .reason = std::move(reason),
+                                                                                                .actor = "test"});
+}
+
+ava::tools::ToolContext persistent_rule_tool_context(ava::permissions::PermissionRuleStore const& store, int& fallback_prompts,
+                                                     std::vector<ava::tools::PermissionAuditEvent>& audits)
+{
+  auto fallback = [&fallback_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++fallback_prompts;
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  return ava::tools::ToolContext{
+      .workspace_dir = store.workspace_dir,
+      .mode = ava::core::Mode::Build,
+      .permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(store, std::move(fallback)),
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(store),
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      },
+  };
+}
+
+void test_deny_path_matching_follows_physical_aliases_without_broadening_allow()
+{
+  auto const root = create_empty_root("permission-rules-physical-matcher");
+  auto const store = test_store(root);
+  auto const real_dir = store.workspace_dir / "real";
+  auto const alias_dir = store.workspace_dir / "alias";
+  auto const denied_path = real_dir / "secret.txt";
+  auto const allowed_path = real_dir / "allowed.txt";
+  auto const unrelated_path = real_dir / "unrelated.txt";
+  auto const final_alias = store.workspace_dir / "final-secret.txt";
+  auto const denied_hardlink = store.workspace_dir / "secret-hardlink.txt";
+  auto const allowed_hardlink = store.workspace_dir / "allowed-hardlink.txt";
+  std::filesystem::create_directories(real_dir);
+  write_file_with_mode(denied_path, "matcher denied bytes\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(allowed_path, "matcher allowed bytes\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(unrelated_path, "matcher unrelated bytes\n", S_IRUSR | S_IWUSR);
+  std::error_code fixture_error;
+  std::filesystem::create_directory_symlink("real", alias_dir, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_symlink("real/secret.txt", final_alias, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_hard_link(denied_path, denied_hardlink, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_hard_link(allowed_path, allowed_hardlink, fixture_error);
+  expect(!fixture_error, "physical permission matcher creates contained symlink and hardlink aliases");
+  if (fixture_error)
+    return;
+
+  auto read_deny = add_exact_workspace_deny(store, ava::permissions::Operation::ReadFile, denied_path, "read_file", "deny physical read identity");
+  auto search_deny = add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, real_dir, "list_directory", "deny physical directory identity");
+  auto missing_deny =
+      add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, real_dir / "missing.txt", "write_file", "deny missing physical write identity");
+  auto read_allow =
+      ava::permissions::add_persistent_permission_rule(store, ava::permissions::PermissionRuleDraft{.scope = ava::permissions::PermissionRuleScope::Workspace,
+                                                                                                    .action = ava::permissions::PermissionAction::Allow,
+                                                                                                    .operation = ava::permissions::Operation::ReadFile,
+                                                                                                    .mode = ava::permissions::PermissionRuleMode::Build,
+                                                                                                    .tool_name = "read_file",
+                                                                                                    .target_path = allowed_path,
+                                                                                                    .command = "",
+                                                                                                    .command_recipe_key = {},
+                                                                                                    .recipe_display = {},
+                                                                                                    .critical_acknowledged = false,
+                                                                                                    .reason = "allow lexical path only",
+                                                                                                    .actor = "test"});
+  expect(read_deny && search_deny && missing_deny && read_allow, "physical matcher fixture writes exact persistent rules");
+  if (!read_deny || !search_deny || !missing_deny || !read_allow)
+    return;
+
+  std::array<std::filesystem::path, 3> const denied_aliases{alias_dir / "secret.txt", final_alias, denied_hardlink};
+  for (auto const& alias : denied_aliases)
+  {
+    auto prompt = read_prompt(store, alias);
+    auto matched = ava::permissions::match_persistent_permission_rule(store, prompt);
+    expect(matched && *matched && (*matched)->rule_id == read_deny->rule_id && (*matched)->action == ava::permissions::PermissionAction::Deny,
+           "exact persistent Deny matches intermediate, final symlink, and hardlink file identities");
+  }
+
+  auto list_prompt = ava::permissions::PermissionPrompt{.permission_request_id = "permreq_physical_list",
+                                                        .operation = ava::permissions::Operation::SearchFiles,
+                                                        .mode = ava::core::Mode::Build,
+                                                        .workspace_dir = store.workspace_dir,
+                                                        .target_path = alias_dir,
+                                                        .command = "",
+                                                        .tool_name = "list_directory",
+                                                        .reason = "tool requires permission",
+                                                        .risk = ava::permissions::PermissionRisk::Low};
+  auto list_match = ava::permissions::match_persistent_permission_rule(store, list_prompt);
+  auto missing_prompt = ava::permissions::PermissionPrompt{.permission_request_id = "permreq_physical_missing",
+                                                           .operation = ava::permissions::Operation::EditFile,
+                                                           .mode = ava::core::Mode::Build,
+                                                           .workspace_dir = store.workspace_dir,
+                                                           .target_path = alias_dir / "missing.txt",
+                                                           .command = "",
+                                                           .tool_name = "write_file",
+                                                           .reason = "tool requires permission",
+                                                           .risk = ava::permissions::PermissionRisk::Medium};
+  auto missing_match = ava::permissions::match_persistent_permission_rule(store, missing_prompt);
+  auto allow_alias_match = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, alias_dir / "allowed.txt"));
+  auto allow_hardlink_match = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, allowed_hardlink));
+  auto unrelated_match = ava::permissions::match_persistent_permission_rule(store, read_prompt(store, unrelated_path));
+
+  expect(list_match && *list_match && (*list_match)->rule_id == search_deny->rule_id && missing_match && *missing_match &&
+             (*missing_match)->rule_id == missing_deny->rule_id,
+         "persistent Deny matches a list root and missing write target beneath an aliased existing parent");
+  expect(allow_alias_match && !*allow_alias_match && allow_hardlink_match && !*allow_hardlink_match && unrelated_match && !*unrelated_match,
+         "persistent Allow and unrelated paths remain tied to exact lexical authority rather than physical identity");
+
+  auto const loop_a = store.workspace_dir / "loop-a";
+  auto const loop_b = store.workspace_dir / "loop-b";
+  fixture_error.clear();
+  std::filesystem::create_symlink("loop-b", loop_a, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_symlink("loop-a", loop_b, fixture_error);
+  expect(!fixture_error, "physical matcher creates an unresolvable identity fixture");
+  if (fixture_error)
+    return;
+  auto unresolved_prompt = read_prompt(store, loop_a);
+  auto unresolved_match = ava::permissions::match_persistent_permission_rule(store, unresolved_prompt);
+  int fallback_prompts = 0;
+  auto resolver = ava::permissions::build_persistent_permission_rule_resolver(
+      store, [&fallback_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++fallback_prompts;
+        return ava::permissions::PermissionResolution::Allow;
+      });
+  auto unresolved_resolution = resolver(unresolved_prompt);
+  expect(!unresolved_match && unresolved_match.error().message() == "failed to establish permission path identity" && unresolved_resolution &&
+             *unresolved_resolution == ava::permissions::PermissionResolution::Deny && unresolved_resolution->authoritative &&
+             unresolved_resolution->resolution_source == "persistent_rule_error" && fallback_prompts == 0,
+         "a required Deny identity comparison error is explicit and fails closed without turning valid unrelated path misses into Deny");
+}
+
+void test_file_and_search_tools_enforce_denies_across_physical_aliases()
+{
+  auto const root = create_empty_root("permission-rules-physical-tools");
+  auto const store = test_store(root);
+  auto const real_dir = store.workspace_dir / "real";
+  auto const alias_dir = store.workspace_dir / "alias";
+  auto const secret_path = real_dir / "denied.txt";
+  auto const edit_path = real_dir / "edit.txt";
+  auto const final_edit_path = real_dir / "final-edit.txt";
+  auto const hardlink_edit_path = real_dir / "hardlink-edit.txt";
+  auto const visible_path = real_dir / "visible.txt";
+  auto const final_secret_alias = store.workspace_dir / "final-denied.txt";
+  auto const final_edit_alias = store.workspace_dir / "final-edit-alias.txt";
+  auto const secret_hardlink = store.workspace_dir / "denied-hardlink.txt";
+  auto const edit_hardlink = store.workspace_dir / "edit-hardlink.txt";
+  std::filesystem::create_directories(real_dir);
+  write_file_with_mode(secret_path, "DENIED_ALIAS_BYTES search-marker\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(edit_path, "EDIT_ALIAS_OLD\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(final_edit_path, "FINAL_EDIT_ALIAS_OLD\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(hardlink_edit_path, "HARDLINK_EDIT_OLD\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(visible_path, "visible search-marker\n", S_IRUSR | S_IWUSR);
+  std::error_code fixture_error;
+  std::filesystem::create_directory_symlink("real", alias_dir, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_symlink("real/denied.txt", final_secret_alias, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_symlink("real/final-edit.txt", final_edit_alias, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_hard_link(secret_path, secret_hardlink, fixture_error);
+  if (!fixture_error)
+    std::filesystem::create_hard_link(hardlink_edit_path, edit_hardlink, fixture_error);
+  expect(!fixture_error, "physical tool fixture creates contained symlink and hardlink aliases");
+  if (fixture_error)
+    return;
+
+  auto read_deny = add_exact_workspace_deny(store, ava::permissions::Operation::ReadFile, secret_path, "", "deny aliased secret reads");
+  auto list_deny = add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, real_dir, "list_directory", "deny aliased directory listing");
+  auto edit_deny = add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, edit_path, "", "deny aliased existing edit");
+  auto final_edit_deny = add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, final_edit_path, "edit_file", "deny final symlink edit");
+  auto hardlink_edit_deny = add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, hardlink_edit_path, "write_file", "deny hardlink write");
+  auto missing_edit_deny =
+      add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, real_dir / "missing.txt", "write_file", "deny aliased missing write");
+  expect(read_deny && list_deny && edit_deny && final_edit_deny && hardlink_edit_deny && missing_edit_deny,
+         "physical tool fixture writes exact persistent denies");
+  if (!read_deny || !list_deny || !edit_deny || !final_edit_deny || !hardlink_edit_deny || !missing_edit_deny)
+    return;
+
+  auto secure_workspace = ava::tools::SecureWorkspace::open(store.workspace_dir);
+  expect(secure_workspace.has_value(), "physical tool fixture opens descriptor-secure workspace");
+  if (!secure_workspace)
+    return;
+  int fallback_prompts = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto context = persistent_rule_tool_context(store, fallback_prompts, audits);
+  context.secure_workspace = *secure_workspace;
+
+  context.permission_tool_name = "read_file";
+  auto intermediate_read = ava::tools::read_file(context, alias_dir / "denied.txt");
+  auto final_read = ava::tools::read_file(context, final_secret_alias);
+  auto hardlink_read = ava::tools::read_file(context, secret_hardlink);
+  context.permission_tool_name = "list_directory";
+  auto listed = ava::tools::list_directory(context, alias_dir);
+  context.permission_tool_name = "glob";
+  auto globbed = ava::tools::glob_files(context, "**/*.txt");
+  context.permission_tool_name = "grep";
+  auto grepped = ava::tools::grep_files(context, "search-marker", "**/*.txt");
+  context.permission_tool_name = "write_file";
+  auto written = ava::tools::write_file(context, alias_dir / "edit.txt", "EDIT_ALIAS_REPLACEMENT\n");
+  context.permission_tool_name = "edit_file";
+  auto edited = ava::tools::edit_file(context, alias_dir / "edit.txt", "EDIT_ALIAS_OLD", "EDIT_ALIAS_REPLACEMENT");
+  auto final_edited = ava::tools::edit_file(context, final_edit_alias, "FINAL_EDIT_ALIAS_OLD", "FINAL_EDIT_ALIAS_REPLACEMENT");
+  context.permission_tool_name = "write_file";
+  auto hardlink_written = ava::tools::write_file(context, edit_hardlink, "HARDLINK_EDIT_REPLACEMENT\n");
+  auto missing_written = ava::tools::write_file(context, alias_dir / "missing.txt", "MISSING_ALIAS_REPLACEMENT\n");
+
+  auto const read_text = [](std::filesystem::path const& path) {
+    std::ifstream file(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  };
+  bool const reads_do_not_leak = !intermediate_read && !final_read && !hardlink_read &&
+                                 intermediate_read.error().format().find("DENIED_ALIAS_BYTES") == std::string::npos &&
+                                 final_read.error().format().find("DENIED_ALIAS_BYTES") == std::string::npos &&
+                                 hardlink_read.error().format().find("DENIED_ALIAS_BYTES") == std::string::npos;
+  bool const list_does_not_leak =
+      !listed && listed.error().format().find("denied.txt") == std::string::npos && listed.error().format().find("DENIED_ALIAS_BYTES") == std::string::npos;
+  bool const searches_filter_aliases =
+      globbed && grepped && std::ranges::find(globbed->paths, visible_path) != globbed->paths.end() &&
+      std::ranges::find(globbed->paths, secret_path) == globbed->paths.end() && std::ranges::find(globbed->paths, secret_hardlink) == globbed->paths.end() &&
+      std::ranges::none_of(grepped->matches, [](ava::tools::GrepMatch const& match) { return match.line.find("DENIED_ALIAS_BYTES") != std::string::npos; }) &&
+      std::ranges::any_of(grepped->matches, [&visible_path](ava::tools::GrepMatch const& match) { return match.path == visible_path; });
+  bool const mutations_denied_without_diff =
+      !written && !edited && !final_edited && !hardlink_written && !missing_written && written.error().format().find("EDIT_ALIAS_OLD") == std::string::npos &&
+      edited.error().format().find("EDIT_ALIAS_OLD") == std::string::npos && final_edited.error().format().find("FINAL_EDIT_ALIAS_OLD") == std::string::npos &&
+      hardlink_written.error().format().find("HARDLINK_EDIT_OLD") == std::string::npos &&
+      missing_written.error().format().find("MISSING_ALIAS_REPLACEMENT") == std::string::npos && read_text(edit_path) == "EDIT_ALIAS_OLD\n" &&
+      read_text(final_edit_path) == "FINAL_EDIT_ALIAS_OLD\n" && read_text(hardlink_edit_path) == "HARDLINK_EDIT_OLD\n" &&
+      read_text(edit_hardlink) == "HARDLINK_EDIT_OLD\n" && !std::filesystem::exists(real_dir / "missing.txt");
+
+  std::array<std::string, 6> const expected_rule_ids{read_deny->rule_id,       list_deny->rule_id,          edit_deny->rule_id,
+                                                     final_edit_deny->rule_id, hardlink_edit_deny->rule_id, missing_edit_deny->rule_id};
+  bool const each_rule_audited = std::ranges::all_of(expected_rule_ids, [&audits](std::string const& rule_id) {
+    return std::ranges::any_of(audits, [&rule_id](ava::tools::PermissionAuditEvent const& event) {
+      return event.action == ava::permissions::PermissionAction::Deny && event.resolution == "deny" && event.resolution_source == "persistent_rule" &&
+             event.rule_id == rule_id;
+    });
+  });
+  bool const deny_audits_are_authoritative = std::ranges::none_of(audits, [](ava::tools::PermissionAuditEvent const& event) {
+    return event.action == ava::permissions::PermissionAction::Deny &&
+           (event.resolution != "deny" || event.resolution_source != "persistent_rule" || event.rule_id.empty());
+  });
+
+  expect(reads_do_not_leak && list_does_not_leak && searches_filter_aliases && mutations_denied_without_diff && fallback_prompts == 0 && each_rule_audited &&
+             deny_audits_are_authoritative,
+         "read, list, glob, grep, write, and edit enforce physical Denies without bytes, names, diffs, fallback resolution, or side effects");
+}
+
+void test_exact_workspace_root_deny_matches_list_directory_spellings()
+{
+  auto const root = create_empty_root("permission-rules-root-directory-spellings");
+  auto const store = test_store(root);
+  auto const canary_path = store.workspace_dir / "canary.txt";
+  std::filesystem::create_directories(store.workspace_dir / "nested");
+  write_file_with_mode(canary_path, "ROOT_LIST_PROVIDER_CANARY\n", S_IRUSR | S_IWUSR);
+
+  auto deny = add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, store.workspace_dir, "list_directory", "deny exact workspace listing");
+  expect(deny.has_value(), "workspace root list_directory spelling fixture writes an exact persistent deny");
+  if (!deny)
+    return;
+
+  std::array<std::filesystem::path, 3> const spellings{store.workspace_dir / ".", std::filesystem::path(store.workspace_dir.string() + "/"),
+                                                       store.workspace_dir / "nested" / ".." / "."};
+  for (auto const& spelling : spellings)
+  {
+    auto matched =
+        ava::permissions::match_persistent_permission_rule(store, ava::permissions::PermissionPrompt{.permission_request_id = "permreq_root_list_spelling",
+                                                                                                     .operation = ava::permissions::Operation::SearchFiles,
+                                                                                                     .mode = ava::core::Mode::Build,
+                                                                                                     .workspace_dir = store.workspace_dir,
+                                                                                                     .target_path = spelling,
+                                                                                                     .command = "",
+                                                                                                     .tool_name = "list_directory",
+                                                                                                     .reason = "tool requires permission",
+                                                                                                     .risk = ava::permissions::PermissionRisk::Low});
+    expect(matched && *matched && (*matched)->rule_id == deny->rule_id,
+           "exact workspace root rule matcher treats list_directory dot and trailing directory spellings identically");
+  }
+
+  int fallback_prompts = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto context = persistent_rule_tool_context(store, fallback_prompts, audits);
+  context.permission_tool_name = "list_directory";
+  for (auto const& spelling : spellings)
+  {
+    auto listed = ava::tools::list_directory(context, spelling);
+    expect(!listed && listed.error().format().find("ROOT_LIST_PROVIDER_CANARY") == std::string::npos,
+           "exact workspace root deny blocks list_directory directory spelling without leaking content");
+  }
+  bool const exact_deny_audits = audits.size() == spellings.size() && std::ranges::all_of(audits, [&](ava::tools::PermissionAuditEvent const& event) {
+                                   return event.tool_name == "list_directory" && event.action == ava::permissions::PermissionAction::Deny &&
+                                          event.resolution == "deny" && event.resolution_source == "persistent_rule" && event.rule_id == deny->rule_id;
+                                 });
+  expect(fallback_prompts == 0 && exact_deny_audits, "equivalent workspace root list_directory denials remain authoritative and audit the matching rule id");
+}
+
+void test_policy_allowed_file_and_search_tools_honor_exact_persistent_denies()
+{
+  auto const root = create_empty_root("permission-rules-policy-allow-denies");
+  auto const store = test_store(root);
+  auto const read_path = store.workspace_dir / "read-canary.txt";
+  auto const edit_path = store.workspace_dir / "edit-canary.txt";
+  write_file_with_mode(read_path, "READ_PROVIDER_CANARY\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(edit_path, "EDIT_ORIGINAL_CANARY\n", S_IRUSR | S_IWUSR);
+
+  auto read_deny = add_exact_workspace_deny(store, ava::permissions::Operation::ReadFile, read_path, "read_file", "deny exact read_file");
+  auto list_deny =
+      add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, store.workspace_dir, "list_directory", "deny exact list_directory");
+  auto glob_deny = add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, store.workspace_dir, "glob", "deny exact glob");
+  auto grep_deny = add_exact_workspace_deny(store, ava::permissions::Operation::SearchFiles, store.workspace_dir, "grep", "deny exact grep");
+  auto edit_deny = add_exact_workspace_deny(store, ava::permissions::Operation::EditFile, edit_path, "write_file", "deny exact write_file");
+  expect(read_deny && list_deny && glob_deny && grep_deny && edit_deny, "policy-Allow deny fixture writes exact persistent rules");
+  if (!read_deny || !list_deny || !glob_deny || !grep_deny || !edit_deny)
+    return;
+
+  int fallback_prompts = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto context = persistent_rule_tool_context(store, fallback_prompts, audits);
+
+  context.permission_tool_name = "read_file";
+  auto read = ava::tools::read_file(context, read_path);
+  context.permission_tool_name = "list_directory";
+  auto listed = ava::tools::list_directory(context, store.workspace_dir);
+  context.permission_tool_name = "glob";
+  auto globbed = ava::tools::glob_files(context, "**/*");
+  context.permission_tool_name = "grep";
+  auto grepped = ava::tools::grep_files(context, "PROVIDER_CANARY", "**/*");
+  context.permission_tool_name = "write_file";
+  auto written = ava::tools::write_file(context, edit_path, "EDIT_REPLACEMENT_CANARY\n");
+
+  std::ifstream edit_file(edit_path, std::ios::binary);
+  std::string const edit_content((std::istreambuf_iterator<char>(edit_file)), std::istreambuf_iterator<char>());
+  std::array<std::pair<std::string, std::string>, 5> const expected_rules{{{"read_file", read_deny->rule_id},
+                                                                           {"list_directory", list_deny->rule_id},
+                                                                           {"glob", glob_deny->rule_id},
+                                                                           {"grep", grep_deny->rule_id},
+                                                                           {"write_file", edit_deny->rule_id}}};
+  bool const exact_audits = audits.size() == expected_rules.size() && std::ranges::all_of(expected_rules, [&audits](auto const& expected) {
+                              return std::ranges::any_of(audits, [&expected](ava::tools::PermissionAuditEvent const& event) {
+                                return event.tool_name == expected.first && event.action == ava::permissions::PermissionAction::Deny &&
+                                       event.resolution == "deny" && event.resolution_source == "persistent_rule" && event.rule_id == expected.second;
+                              });
+                            });
+  expect(!read && !listed && !globbed && !grepped && !written && fallback_prompts == 0 && exact_audits &&
+             read.error().format().find("READ_PROVIDER_CANARY") == std::string::npos &&
+             listed.error().format().find("READ_PROVIDER_CANARY") == std::string::npos &&
+             globbed.error().format().find("READ_PROVIDER_CANARY") == std::string::npos &&
+             grepped.error().format().find("READ_PROVIDER_CANARY") == std::string::npos && edit_content == "EDIT_ORIGINAL_CANARY\n",
+         "exact persistent denies override policy Allows for read_file, list_directory, glob, grep, and adjacent writes without prompting or execution");
+}
+
+void test_search_filters_exact_persistent_read_denies_without_leaks()
+{
+  auto const root = create_empty_root("permission-rules-search-match-filter");
+  auto const store = test_store(root);
+  auto const visible_path = store.workspace_dir / "visible.txt";
+  auto const denied_path = store.workspace_dir / "denied-provider-canary.txt";
+  write_file_with_mode(visible_path, "visible search marker\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(denied_path, "DENIED_CONTENT_CANARY search marker\n", S_IRUSR | S_IWUSR);
+  auto read_deny = add_exact_workspace_deny(store, ava::permissions::Operation::ReadFile, denied_path, "", "deny search match read");
+  expect(read_deny.has_value(), "search match filter fixture writes an exact persistent ReadFile deny");
+  if (!read_deny)
+    return;
+
+  int fallback_prompts = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto context = persistent_rule_tool_context(store, fallback_prompts, audits);
+  auto const has_expected_deny_audit = [&] {
+    return audits.size() == 2 && std::ranges::any_of(audits, [&](ava::tools::PermissionAuditEvent const& event) {
+             return event.operation == ava::permissions::Operation::ReadFile && event.target_path == denied_path &&
+                    event.action == ava::permissions::PermissionAction::Deny && event.resolution_source == "persistent_rule" &&
+                    event.rule_id == read_deny->rule_id;
+           });
+  };
+
+  context.permission_tool_name = "list_directory";
+  auto listed = ava::tools::list_directory(context, store.workspace_dir);
+  bool const list_omits_deny =
+      listed && listed->entries.size() == 1 && listed->entries.front().name == visible_path.filename().string() && has_expected_deny_audit();
+
+  audits.clear();
+  context.permission_tool_name = "glob";
+  auto globbed = ava::tools::glob_files(context, "**/*.txt");
+  bool const glob_omits_deny = globbed && globbed->paths.size() == 1 && globbed->paths.front() == visible_path && has_expected_deny_audit();
+
+  audits.clear();
+  context.permission_tool_name = "grep";
+  auto grepped = ava::tools::grep_files(context, "search marker", "**/*.txt");
+  bool const grep_omits_deny = grepped && grepped->matches.size() == 1 && grepped->matches.front().path == visible_path &&
+                               grepped->matches.front().line.find("DENIED_CONTENT_CANARY") == std::string::npos && has_expected_deny_audit();
+
+  audits.clear();
+  context.permission_tool_name = "write_file";
+  auto written = ava::tools::write_file(context, denied_path, "replacement without denied preview\n");
+  bool const write_omits_denied_preview = written && written->diff.empty() && has_expected_deny_audit();
+
+  expect(list_omits_deny && glob_omits_deny && grep_omits_deny && write_omits_denied_preview && fallback_prompts == 0,
+         "list_directory, glob, grep, and write previews omit exact persistently denied file data without resolver prompts or per-file Allow audits");
+}
+
+void test_explicit_write_preview_checks_persistent_read_denies_without_extra_prompt()
+{
+  auto const root = create_empty_root("permission-rules-explicit-write-preview");
+  auto const store = test_store(root);
+  auto const visible_path = store.workspace_dir / "visible-old-content.txt";
+  auto const denied_path = store.workspace_dir / "denied-old-content.txt";
+  write_file_with_mode(visible_path, "VISIBLE_OLD_CONTENT\n", S_IRUSR | S_IWUSR);
+  write_file_with_mode(denied_path, "DENIED_OLD_CONTENT_CANARY\n", S_IRUSR | S_IWUSR);
+  auto read_deny = add_exact_workspace_deny(store, ava::permissions::Operation::ReadFile, denied_path, "", "deny write preview read");
+  expect(read_deny.has_value(), "explicit write preview fixture writes an exact persistent ReadFile deny");
+  if (!read_deny)
+    return;
+
+  std::vector<ava::permissions::PermissionPrompt> prompts;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto fallback = [&prompts](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto context = ava::tools::ToolContext{
+      .workspace_dir = store.workspace_dir,
+      .mode = ava::core::Mode::Build,
+      .permission_resolver = ava::permissions::build_persistent_permission_rule_resolver(store, std::move(fallback)),
+      .auto_allow_deny_preflight = ava::permissions::build_persistent_permission_deny_preflight(store),
+      .permission_audit_sink = [&audits](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+        audits.push_back(event);
+        return {};
+      },
+      .require_explicit_file_permissions = true,
+  };
+  context.permission_tool_name = "write_file";
+
+  auto visible_write = ava::tools::write_file(context, visible_path, "visible replacement\n");
+  auto denied_write = ava::tools::write_file(context, denied_path, "denied replacement\n");
+
+  bool const edit_prompts_only = prompts.size() == 2 && std::ranges::all_of(prompts, [](ava::permissions::PermissionPrompt const& prompt) {
+                                   return prompt.operation == ava::permissions::Operation::EditFile;
+                                 });
+  bool const visible_preview_in_write_prompt = edit_prompts_only && prompts.front().diff_preview.find("VISIBLE_OLD_CONTENT") != std::string::npos;
+  bool const denied_content_never_prompted = std::ranges::none_of(
+      prompts, [](ava::permissions::PermissionPrompt const& prompt) { return prompt.diff_preview.find("DENIED_OLD_CONTENT_CANARY") != std::string::npos; });
+  bool const exact_deny_audit = std::ranges::any_of(audits, [&](ava::tools::PermissionAuditEvent const& event) {
+    return event.operation == ava::permissions::Operation::ReadFile && event.target_path == denied_path &&
+           event.action == ava::permissions::PermissionAction::Deny && event.resolution_source == "persistent_rule" && event.rule_id == read_deny->rule_id;
+  });
+  bool const no_read_allow_audit = std::ranges::none_of(audits, [](ava::tools::PermissionAuditEvent const& event) {
+    return event.operation == ava::permissions::Operation::ReadFile && event.action == ava::permissions::PermissionAction::Allow;
+  });
+  expect(visible_write && denied_write && edit_prompts_only && visible_preview_in_write_prompt && denied_content_never_prompted && exact_deny_audit &&
+             no_read_allow_audit && visible_write->diff.find("VISIBLE_OLD_CONTENT") != std::string::npos && denied_write->diff.empty(),
+         "require-explicit writes request only mutation permission while persistent ReadFile deny omits and never leaks old preview content");
+}
+
+void test_policy_allowed_reads_fail_closed_on_malformed_global_and_workspace_rules()
+{
+  auto const root = create_empty_root("permission-rules-auto-allow-malformed");
+  auto const store = test_store(root);
+  auto const canary_path = store.workspace_dir / "provider-canary.txt";
+  write_file_with_mode(canary_path, "MALFORMED_STORAGE_PROVIDER_CANARY\n", S_IRUSR | S_IWUSR);
+
+  int fallback_prompts = 0;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  auto context = persistent_rule_tool_context(store, fallback_prompts, audits);
+  context.permission_tool_name = "read_file";
+  context.require_explicit_file_permissions = true;
+  context.permission_resolver =
+      [&fallback_prompts](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    ++fallback_prompts;
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  write_file_with_mode(store.global_rules_file, "{\"schema_version\":3,\"rules\":[]}", S_IRUSR | S_IWUSR);
+  auto global_malformed = ava::tools::read_file(context, canary_path);
+
+  write_file_with_mode(store.global_rules_file, "{\"schema_version\":2,\"rules\":[]}", S_IRUSR | S_IWUSR);
+  auto const workspace_rules_file = ava::permissions::enforceable_permission_rules_file(store, ava::permissions::PermissionRuleScope::Workspace);
+  write_file_with_mode(workspace_rules_file, "{\"schema_version\":3,\"rules\":[]}", S_IRUSR | S_IWUSR);
+  auto workspace_malformed = ava::tools::read_file(context, canary_path);
+
+  bool const error_audits = audits.size() == 2 && std::ranges::all_of(audits, [](ava::tools::PermissionAuditEvent const& event) {
+                              return event.action == ava::permissions::PermissionAction::Deny && event.resolution == "deny" &&
+                                     event.resolution_source == "persistent_rule_error" && event.rule_id.empty();
+                            });
+  expect(!global_malformed && !workspace_malformed && fallback_prompts == 0 && error_audits &&
+             global_malformed.error().format().find("MALFORMED_STORAGE_PROVIDER_CANARY") == std::string::npos &&
+             workspace_malformed.error().format().find("MALFORMED_STORAGE_PROVIDER_CANARY") == std::string::npos,
+         "malformed protected global and workspace rule storage fails closed before policy-Allowed reads without fallback prompts or canary access");
 }
 
 ava::permissions::PermissionRuleDraft persistent_deny_draft(std::filesystem::path const& target)
@@ -1057,6 +1568,13 @@ void run_permission_rules_tests()
   test_legacy_command_allows_do_not_authorize_sealed_critical_or_unverified_plans();
   test_permission_rule_storage_fail_closed();
   test_permission_rule_broad_permissions_rejected();
+  test_deny_path_matching_follows_physical_aliases_without_broadening_allow();
+  test_file_and_search_tools_enforce_denies_across_physical_aliases();
+  test_exact_workspace_root_deny_matches_list_directory_spellings();
+  test_policy_allowed_file_and_search_tools_honor_exact_persistent_denies();
+  test_search_filters_exact_persistent_read_denies_without_leaks();
+  test_explicit_write_preview_checks_persistent_read_denies_without_extra_prompt();
+  test_policy_allowed_reads_fail_closed_on_malformed_global_and_workspace_rules();
   test_permission_rule_storage_rejects_unsafe_ancestor_without_dropping_denies();
   test_permission_rule_storage_allows_private_primary_group_ancestor_when_verified();
   test_permission_rule_storage_rejects_symlinked_or_replaced_directories();

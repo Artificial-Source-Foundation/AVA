@@ -211,6 +211,55 @@ ava::core::VoidResult reject_permission_rules_file_mutation(ToolContext const& c
   return std::unexpected(std::move(error));
 }
 
+ava::core::Result<bool> write_permission_diff_preview_read_allowed(ToolContext const& context, std::filesystem::path const& path)
+{
+  auto const decision = ava::permissions::decide(ava::permissions::PermissionRequest{
+      .operation = ava::permissions::Operation::ReadFile,
+      .mode = context.mode,
+      .workspace_dir = context.workspace_dir,
+      .target_path = path,
+      .command = "",
+  });
+  if (decision.action != ava::permissions::PermissionAction::Allow)
+    return false;
+  if (!context.auto_allow_deny_preflight)
+    return true;
+
+  auto const permission_request_id = ava::core::make_id("permreq");
+  auto const tool_name = effective_tool_name(context, ava::permissions::Operation::ReadFile, {});
+  auto preflight = context.auto_allow_deny_preflight(ava::permissions::PermissionPrompt{
+      .permission_request_id = permission_request_id,
+      .tool_call_id = context.current_call_id,
+      .operation = ava::permissions::Operation::ReadFile,
+      .mode = context.mode,
+      .workspace_dir = context.workspace_dir,
+      .target_path = path,
+      .command = "",
+      .tool_name = tool_name,
+      .reason = decision.reason,
+      .risk = decision.risk,
+  });
+  if (preflight && (*preflight == ava::permissions::PermissionResolution::Allow || *preflight == ava::permissions::PermissionResolution::AllowSessionGrant))
+  {
+    return true;
+  }
+
+  auto denied = decision;
+  denied.action = ava::permissions::PermissionAction::Deny;
+  denied.risk = ava::permissions::PermissionRisk::Critical;
+  denied.reason = preflight ? (preflight->reason.empty() ? std::string("operation denied by persistent policy") : preflight->reason)
+                            : "persistent deny preflight failed: " + preflight.error().format();
+  auto event = audit_event(context, permission_request_id, ava::permissions::Operation::ReadFile, tool_name, denied, path, "", std::nullopt);
+  event.resolution = "deny";
+  event.resolution_source = preflight && !preflight->resolution_source.empty() ? preflight->resolution_source : "persistent_rule_error";
+  event.resolution_reason = denied.reason;
+  if (preflight)
+    event.rule_id = preflight->rule_id;
+  if (auto audited = record_permission_audit(context, event); !audited)
+    return std::unexpected(std::move(audited.error()));
+  return false;
+}
+
 ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_preview(ToolContext const& context, std::filesystem::path const& path,
                                                                                       std::string_view content)
 {
@@ -223,12 +272,14 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
   if (context.exact_file_access && context.exact_file_access->supports_write_text_file())
     return std::optional<PermissionDiffPreview>{};
   bool exists = false;
+  auto permission_target = path;
   if (context.secure_workspace)
   {
     auto resolved = context.secure_workspace->resolve(path, SecureWorkspaceResolveMode::AllowMissing);
     if (!resolved)
       return std::unexpected(std::move(resolved.error()));
     exists = resolved->exists;
+    permission_target = std::move(resolved->absolute);
   }
   else
   {
@@ -241,17 +292,13 @@ ava::core::Result<std::optional<PermissionDiffPreview>> write_permission_diff_pr
   std::string original;
   if (exists)
   {
-    auto const read_decision = ava::permissions::decide(ava::permissions::PermissionRequest{
-        .operation = ava::permissions::Operation::ReadFile,
-        .mode = context.mode,
-        .workspace_dir = context.workspace_dir,
-        .target_path = path,
-        .command = "",
-    });
-    if (read_decision.action != ava::permissions::PermissionAction::Allow)
-    {
+    auto read_allowed = write_permission_diff_preview_read_allowed(context, permission_target);
+    // An overwrite may proceed without a diff preview, but denied old bytes
+    // must not be read or returned through that optional preview. This safety
+    // check is deliberately preflight-only: preparing a write prompt must not
+    // acquire separate frontend read authority.
+    if (!read_allowed || !*read_allowed)
       return std::optional<PermissionDiffPreview>{};
-    }
     auto current = context.exact_file_access && !context.exact_file_access->supports_write_text_file()
                        ? detail::read_all_text_local_only(context, path, "write_file_permission_preview")
                        : read_all_text(context, path, "write_file_permission_preview");
@@ -285,9 +332,12 @@ ava::core::VoidResult announce_tool_execution_start(ToolContext const& context)
   return announce_execution_start_impl(context);
 }
 
-ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
-                                        std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
-                                        bool diff_truncated, std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
+namespace {
+
+ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
+                                             std::string_view command, std::string_view tool_name, std::string_view error_message,
+                                             std::string_view diff_preview, bool diff_truncated,
+                                             std::optional<ava::permissions::CommandPermissionMetadata> command_metadata, bool omit_policy_allow_audit)
 {
   auto permission_target = target_path;
   if (context.secure_workspace && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile ||
@@ -321,6 +371,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
       .command = std::string(command),
       .command_metadata = command_metadata,
   });
+  bool const backend_policy_allowed = decision.action == ava::permissions::PermissionAction::Allow;
   if (context.require_explicit_file_permissions && decision.action == ava::permissions::PermissionAction::Allow &&
       (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
   {
@@ -332,9 +383,7 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   std::string preflight_source;
   std::string preflight_rule_id;
   std::string preflight_reason;
-  auto const needs_auto_allow_deny_preflight =
-      decision.action == ava::permissions::PermissionAction::Allow && context.auto_allow_deny_preflight &&
-      ((operation == ava::permissions::Operation::RunCommand && command_metadata) || operation == ava::permissions::Operation::TaskRun);
+  auto const needs_auto_allow_deny_preflight = backend_policy_allowed && context.auto_allow_deny_preflight;
   if (needs_auto_allow_deny_preflight)
   {
     auto preflight = context.auto_allow_deny_preflight(ava::permissions::PermissionPrompt{
@@ -374,9 +423,12 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   {
     policy_event.resolution = ava::permissions::to_string(decision.action);
   }
-  if (auto audited = record_permission_audit(context, policy_event); !audited)
+  if (!(omit_policy_allow_audit && decision.action == ava::permissions::PermissionAction::Allow))
   {
-    return std::unexpected(std::move(audited.error()));
+    if (auto audited = record_permission_audit(context, policy_event); !audited)
+    {
+      return std::unexpected(std::move(audited.error()));
+    }
   }
   if (decision.action == ava::permissions::PermissionAction::Allow)
   {
@@ -464,6 +516,22 @@ ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permiss
   capture_permission_denial_guidance(context, resolution ? std::string_view(resolution->user_guidance) : std::string_view{});
   return std::unexpected(permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, resolution_context,
                                                  resolution_reason, permission_request_id));
+}
+
+}  // namespace
+
+ava::core::VoidResult ensure_permission(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
+                                        std::string_view command, std::string_view tool_name, std::string_view error_message, std::string_view diff_preview,
+                                        bool diff_truncated, std::optional<ava::permissions::CommandPermissionMetadata> command_metadata)
+{
+  return ensure_permission_impl(context, operation, target_path, command, tool_name, error_message, diff_preview, diff_truncated, std::move(command_metadata),
+                                false);
+}
+
+ava::core::VoidResult ensure_filtered_read_permission(ToolContext const& context, std::filesystem::path const& target_path, std::string_view tool_name,
+                                                      std::string_view error_message)
+{
+  return ensure_permission_impl(context, ava::permissions::Operation::ReadFile, target_path, "", tool_name, error_message, "", false, std::nullopt, true);
 }
 
 ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,

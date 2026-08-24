@@ -169,13 +169,12 @@ ava::core::Result<bool> can_read_search_match(ToolContext const& context, std::f
       .target_path = path,
       .command = "",
   });
-  if (decision.action == ava::permissions::PermissionAction::Allow)
+  if (decision.action == ava::permissions::PermissionAction::Allow && !context.auto_allow_deny_preflight)
     return true;
   if (decision.action == ava::permissions::PermissionAction::Deny)
     return false;
 
-  auto permission =
-      ensure_permission(context, ava::permissions::Operation::ReadFile, path, "", search_permission_tool_name(context), "search match requires permission");
+  auto permission = ensure_filtered_read_permission(context, path, search_permission_tool_name(context), "search match requires permission");
   if (permission)
     return true;
   // Search is best-effort per matched file: if an Ask resolver or audit sink fails,

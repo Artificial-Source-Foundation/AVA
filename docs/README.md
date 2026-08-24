@@ -35,7 +35,7 @@ Use the [extensions index](extensions/README.md) for local plugins, MCP servers,
 
 ## Operations
 
-The [operations index](operations/README.md) covers builds, tests, Docker, terminals, diagnostics, troubleshooting, and release artifacts. Start with the symptom-first [troubleshooting guide](operations/troubleshooting.md) when AVA or its build fails.
+The [operations index](operations/README.md) covers builds, tests, Docker, terminals, diagnostics, troubleshooting, local release artifacts, and the required but not-yet-implemented [official publication runbook](operations/publication.md). Start with the symptom-first [troubleshooting guide](operations/troubleshooting.md) when AVA or its build fails.
 
 ## Security
 
@@ -47,7 +47,7 @@ The [development index](development/README.md) links contribution, architecture,
 
 ## Product and current status
 
-The [product index](product/README.md) contains the current feature overview, MVP baseline, backend baseline, and capability-to-evidence ledger. These pages describe current status; release readiness still requires the relevant tests and [release checklist](operations/release-checklist.md).
+The [product index](product/README.md) contains canonical [product principles](product/principles.md), the single current [release-readiness cut](product/release-readiness.md), feature/capability baselines, and evidence mapping. Runtime version `1.0.0` is not a published release; complete candidate qualification and publication require the release ledger, [release checklist](operations/release-checklist.md), and publication runbook.
 
 ## Plans
 
@@ -62,7 +62,7 @@ Roadmaps and goals are planning surfaces even when they record completed slices;
 
 ## History and evidence
 
-- [History index](history/README.md): historical implementation ledgers.
+- [History index](history/README.md): dated audits, completed planning records, and historical implementation ledgers.
 - [Version index](versions/README.md): release-position journals and historical capability claims.
 - [Interoperability index](interop/README.md): the ACP evidence category, linking the [evidence policy and reports](interop/evidence/README.md) with dated, scoped interoperability observations.
 

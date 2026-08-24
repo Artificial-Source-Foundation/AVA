@@ -90,13 +90,13 @@ These variables are supported by the named repository scripts; they are not AVA 
 | `AVA_EXE` | `live-model-dogfood.sh`, `live-coding-dogfood.sh`, and `live-provider-matrix.sh`: AVA executable path. The dogfood scripts default to `./build/ava`; the matrix derives it from its build directory unless set. |
 | `AVA_BUILD_DIR` | `live-provider-matrix.sh`: configured build tree, default `build`; used to derive executables for matrix targets. |
 | `AVA_TESTS_EXE` | `live-provider-matrix.sh`: `ava_tests` executable override for the `provider-live-smoke` target; otherwise derived from `AVA_BUILD_DIR`. |
-| `AVA_LIVE_DOGFOOD_ROOT` | `live-model-dogfood.sh`: explicit evidence/work root instead of a temporary directory. The script recursively removes and recreates this path before use, so it must name a dedicated disposable directory. |
-| `AVA_LIVE_DOGFOOD_KEEP` | Any nonempty value keeps model-dogfood logs/root after the run; otherwise cleanup removes it. It does not prevent the initial removal of an explicit root. |
-| `AVA_LIVE_CODING_DOGFOOD_ROOT` | `live-coding-dogfood.sh`: explicit coding-dogfood evidence/work root. It has the same remove-and-recreate requirement as `AVA_LIVE_DOGFOOD_ROOT`. |
-| `AVA_LIVE_CODING_DOGFOOD_KEEP` | Any nonempty value keeps coding-dogfood logs/root; otherwise cleanup removes it. |
+| `AVA_LIVE_DOGFOOD_ROOT` | `live-model-dogfood.sh`: absolute existing private parent in which the script allocates an unpredictable evidence child. The parent must be current-euid-owned, non-symlink, and exact mode 0700; `/`, `HOME`, the checkout, and checkout descendants are rejected. The script never removes the parent or pre-existing paths beneath it. |
+| `AVA_LIVE_DOGFOOD_KEEP` | Any nonempty value retains and reports the invocation-created model-dogfood evidence child; otherwise cleanup removes only that child. |
+| `AVA_LIVE_CODING_DOGFOOD_ROOT` | `live-coding-dogfood.sh`: private-parent override with the same validation and child-allocation semantics as `AVA_LIVE_DOGFOOD_ROOT`. |
+| `AVA_LIVE_CODING_DOGFOOD_KEEP` | Any nonempty value retains and reports the invocation-created coding-dogfood evidence child; otherwise cleanup removes only that child. |
 | `AVA_LIVE_PROVIDER_MATRIX_TARGET` | `live-provider-matrix.sh`: `provider-live-smoke` (default), `model-dogfood`, or `coding-dogfood`. The older `AVA_LIVE_MATRIX_TARGET` is a compatibility fallback only when this variable is unset. |
 | `AVA_LIVE_PROVIDER_MATRIX_SUMMARY` | `live-provider-matrix.sh`: aggregate TSV path, defaulting beneath `${TMPDIR:-/tmp}`; a relative value resolves from the caller's starting directory. The script creates or truncates this file. |
-| `AVA_LIVE_PROVIDER_MATRIX_KEEP` | Any nonempty value retains the matrix temporary root and child logs and propagates the matching dogfood keep control. |
+| `AVA_LIVE_PROVIDER_MATRIX_KEEP` | Any nonempty value retains the matrix temporary root and child logs and propagates the matching dogfood keep control. Dogfood matrix cases receive distinct private parents beneath that invocation-owned root, so concurrent matrix invocations do not share evidence children. |
 | `AVA_LIVE_<PROVIDER>_MODEL` | Optional model override used by live selection/matrix code: `<PROVIDER>` is `OPENAI`, `ANTHROPIC`, `DEEPSEEK`, `GEMINI`, `KIMI`, `MOONSHOT`, or `OPENROUTER`. Defaults and result classification are in [TESTING.md](../operations/testing.md#provider-live-smoke-matrix). |
 
 `AVA_EXE`, dogfood roots, and keep flags affect evidence execution/storage only; they do not enable the credential gate. Live runs can consume credentials and make paid/network provider calls, so opt in deliberately and review retained logs as private material.

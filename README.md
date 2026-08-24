@@ -2,9 +2,11 @@
 
 [![CI](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Artificial-Source/AVA/actions/workflows/ci.yml)
 
-AVA is a native C++23 agentic coding tool. The active default branch is `develop`; historical branches are kept under `archive/*`. The current backend baseline declares runtime version `1.0.0` and includes live-verified provider paths, safe built-in tools, build/plan modes, permission prompts, tool visibility, append-only JSONL sessions, headless print/RPC modes, local plugin/MCP foundations, and an interactive TUI backed by wide-character ncurses (`ncursesw`). Backend release-position docs moved through the 0.60 platform catch-up, 0.65 provider-native hardening, bundled 0.70 reasoning/model lifecycle closeout, 0.75 extension foundation, 0.80 extension stabilization, and 0.90 release-candidate verification before this `1.0.0` runtime bump. A runtime version bump is not a published release by itself; tag, artifact, package, and external release publication steps remain separate manual operations.
+AVA is a native C++23, terminal-first, local-first coding agent with explicit backend authority for permissions, tools, providers, processes, and append-only sessions. The active default branch is `develop`.
 
-**Choose a path:** [use AVA](docs/core/usage.md), [configure AVA](docs/core/configuration.md), [delegate work](docs/core/subagents.md), [understand model tools](docs/core/tools.md), [troubleshoot](docs/operations/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the audience/task-oriented [documentation index](docs/README.md).
+The source reports runtime version `1.0.0`, but **AVA 1.0.0 is not a published release**. The dated audit verdict is **READY AFTER LISTED BLOCKERS**; see [product principles](docs/product/principles.md) and the single current [release-readiness ledger](docs/product/release-readiness.md).
+
+**Choose a path:** [use AVA](docs/core/usage.md), [configure AVA](docs/core/configuration.md), [delegate work](docs/core/subagents.md), [understand model tools](docs/core/tools.md), [troubleshoot](docs/operations/troubleshooting.md), [contribute](CONTRIBUTING.md), or browse the [documentation index](docs/README.md).
 
 ## Clone and Build
 
@@ -25,43 +27,36 @@ git submodule update --init --checkout --recursive
 
 Build-only requirements:
 
-- CMake 3.25+
+- CMake 3.27+
 - C++23 compiler
 - Boost development headers and CMake package
 - `ncursesw` development headers/library
+- Python 3 for the complete test/documentation/package gates
+- writable `GITACHE_ROOT` for the canonical debug-enabled presets
+- JSON-capable Universal Ctags for debug/libcwd print-member generation
 - Git and configuration-time access to required dependency sources
 
 The optional Qt Quick desktop prototype additionally requires Qt 6.5+ with QML, Quick, and Quick Controls 2. See `docs/interfaces/desktop-qml.md`.
 
-```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build
-scripts/run-tests.sh --build-dir build
-```
-
-Equivalent CMake presets are available for local development:
+The presets are the canonical quick start. Prepare a writable Gitache root first:
 
 ```sh
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
 cmake --preset dev
 scripts/build.sh
 scripts/run-tests.sh
 ```
 
-Sanitizer build:
-
-```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build-sanitize --jobs 2
-scripts/run-tests.sh --build-dir build-sanitize --jobs 2
-```
-
-Or with presets:
+Canonical ASan/UBSan build:
 
 ```sh
 cmake --preset sanitize
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
+
+Direct CMake configuration is a noncanonical fallback unless it supplies the cache-equivalent `BetaTest`, `EnableDebug=ON`, test, compile-command, and sanitizer values documented in the [development guide](docs/development/contributing.md).
 
 `scripts/build.sh` and `scripts/run-tests.sh` default to the `build` tree and all available logical cores. Pass `--jobs N` (or set `CMAKE_BUILD_PARALLEL_LEVEL` / `CTEST_PARALLEL_LEVEL`) to cap concurrency; build options such as `--target` and CTest filters such as `-R` are forwarded. Both runners share a build-tree lock so builds and tests cannot modify one tree concurrently. Sanitizer examples use two jobs to limit memory pressure.
 
@@ -79,7 +74,11 @@ scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
 
 The script builds Release `ava` plus the fake-provider smoke helper, stages only CMake component `ava`, extracts the archive fresh, verifies its checksum and CLI behavior, and runs the deterministic model smoke. `--binary /absolute/path/to/ava` accepts an existing binary; add `--fake-provider /absolute/path/to/ava_fake_provider_server` to run the model smoke in that mode. Without a fake helper the script prints an explicit skip.
 
-This is a dynamically linked **host** artifact, not a portable Linux bundle. The destination needs compatible glibc, libstdc++, and libgcc runtimes; ncursesw/tinfo libraries plus a usable terminfo database; and `curl` on `PATH`. Cross-distribution compatibility must be checked on the intended host.
+This is a dynamically linked **host** artifact, not a portable Linux bundle. The 2026-08-23 audited x64 candidate requires BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, a usable terminfo database, and `curl` on `PATH`. The first-publication target is Linux x64 only; another architecture may publish only after native exact-candidate evidence.
+
+Tested on Ubuntu 24.04.4 x64: GCC 13 BetaTest with Unix Makefiles and GCC 13 Release with Ninja. Clang 18 was environment-blocked; MSVC, Windows, macOS, and AArch64 were not qualified. Multi-config builds are not release-qualified. A dirty tree is never a qualified artifact, and these source results do not qualify future release bytes.
+
+`--require-release-qualified` and `PROVENANCE.json` field `release_qualified:true` prove only the implemented static source/gitlink/license/native-architecture/dynamic-dependency/package gates. Complete candidate qualification requires the [release ledger](docs/product/release-readiness.md) and [publication runbook](docs/operations/publication.md).
 
 ## Run
 
@@ -194,7 +193,7 @@ The [documentation index](docs/README.md) is organized by audience and task.
 
 ### Contributors and maintainers
 
-- [Contributing](CONTRIBUTING.md), [development guide](docs/development/contributing.md), [build configuration](docs/operations/build-configuration.md), [testing](docs/operations/testing.md), [architecture](docs/development/architecture.md), [codebase guide](docs/development/codebase-guide.md), and [documentation policy](docs/development/documentation-policy.md)
-- [Release checklist](docs/operations/release-checklist.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
+- [Product principles](docs/product/principles.md), [release readiness](docs/product/release-readiness.md), [Contributing](CONTRIBUTING.md), [development guide](docs/development/contributing.md), [build configuration](docs/operations/build-configuration.md), [testing](docs/operations/testing.md), [architecture](docs/development/architecture.md), [codebase guide](docs/development/codebase-guide.md), and [documentation policy](docs/development/documentation-policy.md)
+- [Release checklist](docs/operations/release-checklist.md), [publication runbook design](docs/operations/publication.md), [Code of Conduct](CODE_OF_CONDUCT.md), [Security](SECURITY.md), [Governance](GOVERNANCE.md), and [Changelog](CHANGELOG.md)
 
 Product status and future work live in the [product](docs/product/README.md), [plans](docs/plans/README.md), [roadmap](docs/roadmap/README.md), and [goals](docs/goals/README.md) indexes; historical release-position ledgers live under [versions](docs/versions/README.md). Plans and runtime version numbers are not evidence that a tag, artifact, package, or external release has been published.

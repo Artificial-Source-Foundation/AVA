@@ -1,12 +1,12 @@
-# AVA MVP Baseline With Pi And TUI Verification Plan
+# Historical/Closed AVA MVP Baseline With Pi And TUI Verification Plan
 
 ## Plan Status
 
-This is the active self-set execution plan. The user explicitly directed the agent to set the plan directly, so Plannotator gate approval is not required before launching the goal.
+**Closed historical plan.** It preserves the execution rationale for the completed goal and no longer authorizes implementation. Current authority is [`docs/product/principles.md`](../../docs/product/principles.md) and [`docs/product/release-readiness.md`](../../docs/product/release-readiness.md).
 
-## Solution Approach
+## Historical solution approach
 
-Drive AVA toward `docs/product/mvp-baseline.md` with a repeatable gap loop: pick a P0/P1 unchecked item, compare the behavior against Pi under `docs/reference-code/pi`, decide the AVA-native behavior, implement the smallest C++23 change, add focused tests, run real verification, and update the MVP checklist/docs with evidence. The current priority is TUI/frontend maturity, but backend/RPC/session/provider/tool work remains in scope when a TUI feature needs safe data or runtime contracts.
+The plan drove AVA toward the former MVP baseline with a repeatable gap loop: select an accepted gap, compare behavior against Pi.dev, choose an AVA-native behavior, implement a bounded C++23 change, add focused tests, run real verification, and update evidence. The remainder is preserved without rewriting its long execution body.
 
 Reference code is behavior input only. Do not copy Pi source or architecture into AVA.
 

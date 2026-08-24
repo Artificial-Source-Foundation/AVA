@@ -44,7 +44,6 @@ COMPONENT_FILES = {
     "share/doc/ava/docs/interop/evidence/README.md",
     "share/doc/ava/docs/interop/evidence/zed-1.9.0-2026-07-14.md",
     "share/doc/ava/docs/product/mvp-coverage-ledger.md",
-    "share/doc/ava/docs/plans/tui-pi-feature-expansion-plan.md",
     "share/doc/ava/docs/schema/theme.schema.json",
 }
 

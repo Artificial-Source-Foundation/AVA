@@ -4,25 +4,25 @@ Supported runtime, smoke, dogfood, and provider-matrix environment controls are 
 
 ## Normal Test Run
 
-```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build
-scripts/run-tests.sh --build-dir build
-```
-
-Preset equivalent:
+CMake 3.27+, Python 3, a writable `GITACHE_ROOT`, and JSON-capable Universal Ctags for enabled libcwd/debug print-member generation are required for the complete canonical test registration. Use the preset as the canonical path:
 
 ```sh
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
 cmake --preset dev
 scripts/build.sh
 scripts/run-tests.sh
 ```
 
+A direct configure is noncanonical unless it is cache-equivalent: `CMAKE_BUILD_TYPE=BetaTest`, `EnableDebug=ON`, `EnableAvaBuildTests=ON`, and compile commands enabled. The exact fallback is documented in [contributing](https://github.com/Artificial-Source/AVA/blob/develop/docs/development/contributing.md).
+
 The build and test runners default to the `build` tree, detect the available logical cores, and supply that positive job count to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap concurrency; append build options such as `--target` or CTest options such as `-R`. They share a build-tree safety lock so builds, fixed integration-test roots, and CTest logs cannot collide. An interrupted or untrappably terminated wrapper leaves `.ava-build-tree.lock.d` fail-closed because detached descendants cannot be ruled out; verify that no build/test worker remains before removing that directory manually.
 
 Do not use `cmake --build build --target test --parallel N` to request parallel test execution: it only parallelizes the build tool around one CTest command and does not propagate `N` to CTest. Use `scripts/run-tests.sh --build-dir build --jobs N` for the locked runner, or `ctest --test-dir build --parallel N` when directly diagnosing CTest behavior without the script's build-tree safety lock.
 
-The test suite is built as one `ava_tests` CTest target from focused test sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
+The test suite is built as `build/tests/ava_tests` and registered as focused `ava_tests.<suite>` CTests from sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
+
+The 2026-08-23 tested source-build matrix is Ubuntu 24.04.4 x64 with GCC 13.3: BetaTest/Unix Makefiles and Release/Ninja both passed full CTest. Clang 18 was environment-blocked, not qualified; MSVC, Windows, macOS, and AArch64 have no accepted native candidate evidence. Multi-config is not release-qualified. The audited x64 artifact requires BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, and `curl`, but exact retained bytes still need minimum-host smoke. This matrix does not qualify a dirty working tree or any future artifact; see the [release ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md).
 
 Plugin/MCP contract changes should also follow [`docs/plugin-compatibility-policy.md`](../plugin-compatibility-policy.md). Keep checked-in golden fixtures small and deterministic under `tests/golden/ava-080/`, and prefer existing `ava_tests` plugin/MCP suites for contract assertions.
 
@@ -48,7 +48,7 @@ scripts/run-tests.sh -R '^ava_release\.(provenance|install_component|package_lin
 scripts/package-linux.sh --require-release-qualified --output-dir /absolute/path/outside/AVA
 ```
 
-The strict package command creates a fresh private Release build tree with Gitache/libcwd disabled, the pinned in-tree nlohmann JSON source selected, and CMake FetchContent fully disconnected. It rejects supplied binaries, dirty/mismatched source dependencies, missing or unsupported host/binary architecture evidence, disagreement between the canonical packaging-host architecture and detected ELF architecture, and unexpected ELF dynamic dependencies. Qualification evidence requires the strict package command after the full CTest suite on native CI for each architecture; cross-compiled output is not evidence. Temporary, work, and publication directories are classified against the checkout by descriptor ancestry and device/inode identity, so invoking the script through a symlink cannot make a physically in-checkout directory appear external; logical source paths remain unchanged. Publication rechecks the already-opened output descriptor's ancestry before mutation and at namespace revalidation points. Static symlink, directory-identity, ownership, mode, and no-replace guarantees remain mandatory. A malicious process running concurrently under the same effective UID is outside this packaging threat model because it can directly alter the checkout and release inputs; this exclusion does not weaken those static guarantees. Ordinary `--binary` package workflows remain available but their packaged `PROVENANCE.json` is explicitly unqualified; no signing, SBOM, or attestation is implied.
+The strict package command creates a fresh private Release build tree with Gitache/libcwd disabled, the pinned in-tree nlohmann JSON source selected, and CMake FetchContent fully disconnected. It rejects supplied binaries, dirty/mismatched source dependencies, missing or unsupported host/binary architecture evidence, disagreement between the canonical packaging-host architecture and detected ELF architecture, unexpected ELF dynamic dependencies, and license-policy failures. The flag `--require-release-qualified` and resulting `release_qualified:true` prove only these implemented static source/gitlink/license/version/native-architecture/dynamic-dependency/package gates. They do **not** prove full CTest, native CI, sanitizer/TSan, terminal gates, retained exact bytes, or publication. Complete candidate qualification requires the [release-readiness ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md) and [publication runbook](https://github.com/Artificial-Source/AVA/blob/develop/docs/operations/publication.md). Cross-compiled output is not evidence. Temporary, work, and publication directories are classified against the checkout by descriptor ancestry and device/inode identity, so invoking the script through a symlink cannot make a physically in-checkout directory appear external; logical source paths remain unchanged. Publication rechecks the already-opened output descriptor's ancestry before mutation and at namespace revalidation points. Static symlink, directory-identity, ownership, mode, and no-replace guarantees remain mandatory. A malicious process running concurrently under the same effective UID is outside this packaging threat model because it can directly alter the checkout and release inputs; this exclusion does not weaken those static guarantees. Ordinary `--binary` package workflows remain available but their packaged `PROVENANCE.json` is explicitly unqualified; no signing, SBOM, or attestation is implied.
 
 Privacy-safe diagnostics have focused unit and full-binary coverage:
 
@@ -76,8 +76,8 @@ Recommended coverage:
 - `ava --rpc` with `question_reply` for the `question` tool.
 - `ava --rpc` command-registry smokes for `list_commands` and `invoke_command` across prompt commands, skills, plugin commands, and MCP prompt commands.
 - `ava --rpc` plugin/MCP diagnostics smokes for plugin discovery/validation/static resources/enablement/fail-closed execution, MCP server list/inspect/restart, invalid MCP config containment, and fail-closed MCP tool discovery without a TUI resolver. `ava_cli.headless_rpc_sample_plugin` copies `examples/plugins/todo/` into an isolated project plugin directory and verifies the real sample's discovery, resources, enable/disable flow, and fail-closed command execution without starting the sample process.
-- `./build/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
-- `./build/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
+- `./build/tests/ava_tests plugin` after plugin authoring changes. The plugin suite validates the checked-in sample under `examples/plugins/todo/` through source-path fixture plumbing instead of duplicating the sample manifest or protocol JSON, and remains the coverage for successful sample entrypoint execution.
+- `./build/tests/ava_tests mcp` after MCP contract changes. The MCP suite uses the local fake MCP server and golden fixtures for representative tool schema, resource read, and audit shapes; MCP resource behavior must stay behind explicit read-style permission coverage.
 
 LSP model tools are capability-gated in normal headless runtime; see [lsp.md](../extensions/lsp.md) for their current contract. `ava_tests.lsp` uses the stable fake server to cover default-off/global-only exact `clangd` opt-in, rejection of unsupported built-in server ids, executable hardlink/replacement rejection, replacement-sensitive launch permission identity, logical per-root cache deduplication, pull and routed publish diagnostics, full-text versioned `didChange`, cache bounds, malformed/out-of-workspace notifications, absolute deadlines, cancellation, environment filtering, and cleanup without downloads or provider calls. `ava_tests.lsp_real_clangd_smoke` is an explicitly opt-in offline real-server smoke. By default it returns CTest skip code 77 even when `clangd` is installed. When opted in, it discovers an already-installed safe `clangd`, uses no credentials or network access, runs against a private finite fixture, proves initialization plus definition, and cleans up; it also skips when `clangd` is absent or unsafe. It never installs or downloads clangd.
 
@@ -102,7 +102,7 @@ Opt-in full-binary live dogfood is intentionally separate from the default relea
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
 ```
 
-Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. Set `AVA_LIVE_DOGFOOD_ROOT=/tmp/ava-live-dogfood` to choose the temporary workspace, and `AVA_LIVE_DOGFOOD_KEEP=1` when the RPC logs should remain available for review.
+Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. `AVA_LIVE_DOGFOOD_ROOT` names an absolute existing private **parent**, not a disposable workspace: it must be current-euid-owned, non-symlink, and exact mode 0700, and it cannot be `/`, `HOME`, the checkout, or a checkout descendant. The launcher creates an unpredictable mode-0700 child beneath it and never removes the parent or any pre-existing path. Set `AVA_LIVE_DOGFOOD_KEEP=1` to report and retain that child for review; otherwise cleanup removes only the invocation-created child.
 
 The live dogfood script uses the first configured provider credential from the provider live-smoke matrix, writes an isolated `models.json`, starts `ava --rpc --allow read-only`, asks the live model to read `src/live-smoke.txt` with `read_file`, then validates session stats/messages. It prints one classification: `passed`, `skipped/not opted in`, `skipped/no credential`, `credential/auth-blocked`, `provider/rate-limited`, `network-blocked`, `provider-behavior/inconclusive`, or `AVA regression`. Treat provider-behavior/inconclusive as live dogfood evidence that the deterministic fake-provider E2E remains the release gate, not as a release blocker by itself.
 
@@ -112,25 +112,21 @@ Live coding dogfood exercises a broader coding-agent loop with a real provider:
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
 ```
 
-Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. Set `AVA_LIVE_CODING_DOGFOOD_ROOT=/tmp/ava-live-coding-dogfood` to choose the evidence root, and `AVA_LIVE_CODING_DOGFOOD_KEEP=1` when the RPC output, stderr, workspace, and session files should remain available for review.
+Set `AVA_EXE=/path/to/ava` when the binary is not `./build/ava`. `AVA_LIVE_CODING_DOGFOOD_ROOT` has the same validated private-parent semantics as `AVA_LIVE_DOGFOOD_ROOT`; the script allocates its own unpredictable mode-0700 evidence child beneath that parent. Set `AVA_LIVE_CODING_DOGFOOD_KEEP=1` to report and retain the child containing RPC output, stderr, workspace, and session files; otherwise cleanup removes only that child.
 
 The live coding dogfood script creates an isolated workspace, trusts a project-local `coding-smoke` skill, asks the live model to load that skill, read a target file, apply an exact edit through `apply_patch` or `edit_file`, and reply with the marker. It validates permission prompts/replies, successful tool results, the mutated file, session JSONL `tool_call`/`tool_result`/`permission_decision` entries, and `validate_session` output. It uses the same classification vocabulary as `live-model-dogfood.sh`; classify model non-compliance separately from AVA-owned regressions.
 
 ## Sanitizers
 
-```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build-sanitize --jobs 2
-scripts/run-tests.sh --build-dir build-sanitize --jobs 2
-```
-
-Preset equivalent:
+The `sanitize` preset is the canonical ASan/UBSan configuration: it inherits the `BetaTest`, debug, tests, and compile-command settings from `dev`, enables sanitizer instrumentation, and makes UndefinedBehaviorSanitizer non-recovering.
 
 ```sh
 cmake --preset sanitize
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
+
+Do not call a build-type-omitting direct sanitizer configure equivalent. A cache-equivalent direct fallback is documented in [contributing](https://github.com/Artificial-Source/AVA/blob/develop/docs/development/contributing.md).
 
 The explicit sanitizer cap avoids multiplying ASan/UBSan memory demand on smaller CI and developer hosts; raise it locally after measuring available memory.
 
@@ -184,9 +180,9 @@ git --no-pager diff --check
 
 ## Coverage Areas
 
-The product-level Pi-parity checklist is mapped to automated suites, CLI/RPC smokes, opt-in terminal smokes, live-provider smokes, or explicit manual/docs evidence in [`docs/product/mvp-coverage-ledger.md`](../product/mvp-coverage-ledger.md). Keep that ledger current when a checklist row changes from partial/deferred to present.
+The historical MVP checklist is mapped to automated suites, CLI/RPC smokes, opt-in terminal smokes, live-provider smokes, or explicit manual/docs evidence in the [MVP coverage ledger](../product/mvp-coverage-ledger.md). Current product and release decisions come from [principles](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/principles.md) and the [release-readiness ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md), not competitor parity.
 
-### Pi MVP Parity Release Evidence
+### MVP capability release evidence
 
 Pi's reference tree has broad Jest/Vitest coverage across provider protocols, coding-agent sessions, settings/packages, export, and a TypeScript virtual-terminal harness. AVA's MVP evidence uses CTest plus explicit opt-in smokes instead of copying Pi's harness architecture:
 
@@ -211,7 +207,7 @@ AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-model-dogfood.sh
 AVA_LIVE_PROVIDER_SMOKE=1 sh scripts/live-coding-dogfood.sh
 ```
 
-`ava_tests.provider_live_smoke` verifies provider transport/connectivity. `scripts/live-model-dogfood.sh` is the opt-in full-binary dogfood path for CLI/RPC startup, agent loop, read-only tool use, permission policy, and session persistence with a live model. `scripts/live-coding-dogfood.sh` extends that coverage to skill loading, file mutation, edit permission prompts, and persisted coding-session evidence. Both dogfood scripts use the shared provider selector in `scripts/live-provider-selection.sh` so the first available OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, or OpenRouter credential is handled consistently.
+`ava_tests.provider_live_smoke` verifies provider transport/connectivity. `scripts/live-model-dogfood.sh` is the opt-in full-binary dogfood path for CLI/RPC startup, agent loop, read-only tool use, permission policy, and session persistence with a live model. `scripts/live-coding-dogfood.sh` extends that coverage to skill loading, file mutation, edit permission prompts, and persisted coding-session evidence. Both dogfood scripts use the shared provider selector in `scripts/live-provider-selection.sh` so the first available OpenAI, Anthropic, DeepSeek, Gemini, Kimi, Moonshot, or OpenRouter credential is handled consistently. `scripts/live-provider-matrix.sh` gives each dogfood case a separate private parent beneath its own private run root, preserving the same child-ownership rules across concurrent matrix invocations.
 
 | Provider | Credential env | Default model / override | Expected CTest behavior without credentials | Result classification |
 | --- | --- | --- | --- | --- |
@@ -265,7 +261,7 @@ For TUI-only changes, the focused suite is:
 
 ```sh
 scripts/build.sh --target ava_tests
-./build/ava_tests tui_composer
+./build/tests/ava_tests tui_composer
 scripts/run-tests.sh -R "ava_tests.tui_composer"
 ```
 
@@ -316,7 +312,7 @@ AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.terminal_l
 AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.osc8_smoke$'
 ```
 
-The tmux family dispatches the 23 independent scenarios listed in the [Pi MVP Parity Release Evidence](#pi-mvp-parity-release-evidence) table, including `nested_settings_preview`, `startup_overview`, `branch_summary`, `plugin_ui`, and `mermaid`. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. Drivers enforce a 50-second internal deadline, clean private tmux/provider process groups on SIGINT or SIGTERM, and receive a 10-second graceful-cleanup window before CTest's 60-second outer timeout. The fake-provider request logs remain under each scenario root, including active/restore and the two question-tool runs. Where scenarios assert delivered conversation turns, local request-log accounting excludes only requests whose system prompt exactly matches the stable title-generation prompt; the complete raw log remains available for content checks and diagnostics report both normal-turn and total-request counts.
+The tmux family dispatches the 23 independent scenarios listed in the [MVP capability release evidence](#mvp-capability-release-evidence) table, including `nested_settings_preview`, `startup_overview`, `branch_summary`, `plugin_ui`, and `mermaid`. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. Drivers enforce a 50-second internal deadline, clean private tmux/provider process groups on SIGINT or SIGTERM, and receive a 10-second graceful-cleanup window before CTest's 60-second outer timeout. The fake-provider request logs remain under each scenario root, including active/restore and the two question-tool runs. Where scenarios assert delivered conversation turns, local request-log accounting excludes only requests whose system prompt exactly matches the stable title-generation prompt; the complete raw log remains available for content checks and diagnostics report both normal-turn and total-request counts.
 
 The `mermaid` scenario verifies disabled/pending/failure/stale original-fence fallback and the bounded successful projection path without a live provider. Mermaid execution is application-owned; no renderer subprocess or semantic transcript mutation is claimed.
 

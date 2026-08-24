@@ -105,12 +105,12 @@ These rules define the C++ subset we will use.
 
 ### Running Tests
 
-Normal development uses a `BetaTest` build with `EnableDebug=ON`, keeping Release-style optimization and assertions together with AVA's libcwd instrumentation:
+Normal development uses the canonical `dev` preset (`BetaTest`, `EnableDebug=ON`), keeping Release-style optimization and assertions together with AVA's libcwd instrumentation. Complete debug-enabled configuration also needs Python 3 and JSON-capable Universal Ctags:
 
 ```sh
 export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
 mkdir -p "$GITACHE_ROOT"
-cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
+cmake --preset dev
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
@@ -120,7 +120,7 @@ scripts/run-tests.sh --build-dir build
 ASan/UBSan are test diagnostics, not a production security boundary:
 
 ```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
+cmake --preset sanitize
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```

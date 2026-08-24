@@ -1,12 +1,10 @@
-# AVA MVP Work Ledger
+# Historical/Closed AVA MVP Work Ledger
 
-This ledger is the active planning surface for applying `docs/product/mvp-baseline.md`. Pi is a behavior reference only; do not copy source or architecture from `docs/reference-code/pi`.
+**Status: closed for the former MVP parity goal.** This is preserved execution evidence, not an active planning surface. Current authority is [`docs/product/principles.md`](../../docs/product/principles.md) and [`docs/product/release-readiness.md`](../../docs/product/release-readiness.md). Pi.dev remains comparative input only; do not copy source or architecture.
 
-## Current Priority
+## Historical priority
 
-Status: `closed for MVP parity`
-
-Start with TUI/frontend MVP maturity because the current goal explicitly moves TUI work into scope. Backend/RPC/session/provider/tool changes remain part of the work whenever the TUI needs safe contracts behind it.
+The completed goal started with TUI/frontend maturity while retaining backend/RPC/session/provider/tool changes when safe contracts were required. The long evidence body below is intentionally preserved.
 
 Primary Pi references:
 

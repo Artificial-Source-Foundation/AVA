@@ -1,8 +1,8 @@
 # AVA Release Artifact Checklist
 
-This is the operator checklist for AVA's implemented local Linux host artifact. It is not a publish pipeline. The workflow does **not** commit, tag, push, publish, upload CI artifacts, sign, notarize, generate an SBOM, or call a live provider.
+This is the operator checklist for AVA's implemented local Linux host artifact. It is not a publish pipeline or complete release-candidate qualification. Runtime version `1.0.0` is not a published release. The workflow does **not** commit, tag, push, publish, upload CI artifacts, sign, notarize, generate an SBOM, or call a live provider.
 
-For the broader deterministic, sanitizer, terminal, and opt-in live-provider evidence map, see [`TESTING.md`](testing.md).
+For the current decision and exact-byte blockers, see the [release-readiness ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md). For the required but not-yet-implemented official lifecycle, see [publication.md](https://github.com/Artificial-Source/AVA/blob/develop/docs/operations/publication.md). For deterministic, sanitizer, terminal, and opt-in live-provider evidence, see [testing.md](testing.md).
 
 ## Artifact contract
 
@@ -54,11 +54,10 @@ share/doc/ava/docs/plugin-compatibility-policy.md
 share/doc/ava/docs/interop/evidence/README.md
 share/doc/ava/docs/interop/evidence/zed-1.9.0-2026-07-14.md
 share/doc/ava/docs/product/mvp-coverage-ledger.md
-share/doc/ava/docs/plans/tui-pi-feature-expansion-plan.md
 share/doc/ava/docs/schema/theme.schema.json
 ```
 
-The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. The curated documentation payload is exactly 33 source files (31 Markdown and 2 JSON) mirrored under their source categories; category indexes remain source-only. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
+The installed `README.md` comes from the artifact-specific source template at `docs/operations/release-artifact-readme.md`, not the repository README. The curated documentation payload is exactly 32 source files (30 Markdown and 2 JSON) mirrored under their source categories; category indexes and historical/planning documents remain source-only. `THIRD_PARTY_NOTICES.md` is the distribution notice; `PROVENANCE.json` is a deterministic, privacy-safe description of this binary, its source/dependency state, architecture, and ELF dynamic dependencies. The staged documentation layout must follow the categorized source layout so included local links resolve. `scripts/verify-markdown-links.py` verifies every staged Markdown relative path before archive creation.
 
 The allowlist excludes reference repositories, source and test trees, build trees, examples, credentials, auth/config/session state, provider output, raw interoperability evidence, and the optional desktop prototype. CMake component `ava` must remain exact; always pass `--component ava` for a manual stage:
 
@@ -70,9 +69,11 @@ cmake --install build-release \
 
 ## Portability boundary
 
-This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The destination host needs compatible Linux glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo shared libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport. Release qualification is limited to native x86_64 and AArch64 builds whose detected ELF architecture agrees with the recorded packaging-host architecture; each qualified architecture requires its own native CI Release build, full CTest run, clean-checkout assertion, and successful strict source-package run. Cross-compilation is not qualification evidence.
+This is a dynamically linked **host artifact**, not a universal or manylinux-style bundle. The 2026-08-23 audited x64 artifact requires a CPU with BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, a usable terminfo database, and `curl` on `PATH`. The audit host was Ubuntu 24.04.4 x64; this floor came from exact binary inspection and still requires extracted-artifact smoke on the chosen minimum supported host.
 
-Build-only dependencies are not packaged. Building from this checkout needs CMake 3.25+, a C++23 compiler, Boost and ncurses development files, Git, and configured source dependencies. Packaging additionally needs Bash, Python 3, `tar`, `sha256sum`, and Linux `renameat2`. Python is used only for staged-link verification, negative tests, and descriptor-anchored no-replace publication; it is not a runtime dependency.
+The first-publication target is Linux x64 only. Every published architecture requires its own native exact-candidate CI build, full deterministic and required terminal/sanitizer evidence, clean source/package gates, retained exact archive/checksum bytes, and minimum-floor smoke. Cross-compilation and source branches are not qualification evidence. AArch64, MSVC, Windows, and macOS were not qualified; multi-config is not release-qualified. Dirty working trees are always unqualified.
+
+Build-only dependencies are not packaged. Building from this checkout needs CMake 3.27+, a C++23 compiler, Boost and ncurses development files, Git, and configured source dependencies. Canonical debug-enabled development/sanitizer configurations also require a writable `GITACHE_ROOT`, Python 3, and JSON-capable Universal Ctags. Packaging additionally needs Bash, Python 3, `tar`, `sha256sum`, and Linux `renameat2`. Python is not a runtime dependency.
 
 ## Release-candidate checks
 
@@ -85,11 +86,17 @@ Build-only dependencies are not packaged. Building from this checkout needs CMak
 
 ### 2. Developer build and deterministic tests
 
+Prepare the canonical preset prerequisites, then build and test:
+
 ```sh
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
 cmake --preset dev
 scripts/build.sh
 scripts/run-tests.sh
 ```
+
+Python 3 and JSON-capable Universal Ctags are required for the complete debug-enabled registration/generation path.
 
 Focused release-closure coverage uses the registered CTest names. Python 3 and built `ava`, `ava_fake_provider_server`, and `ava_fake_mcp_server` executables are prerequisites for `ava_cli.acp_subprocess`.
 
@@ -116,15 +123,19 @@ scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 
 If the host cannot run ASan/UBSan, record the exact environment blocker rather than claiming a pass.
 
-### 4. Optional terminal evidence
+### 4. Terminal evidence
 
-On a host with tmux and terminal support:
+A developer run is supplemental, but exact-candidate qualification requires all 23 tmux and four direct PTY gates with zero skips under `AVA-REL-011`:
 
 ```sh
 AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 23 -R '^ava_tui\.tmux_smoke_'
+AVA_TUI_KITTY_IMAGE_SMOKE=1 AVA_TUI_ITERM2_IMAGE_SMOKE=1 \
+AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 AVA_TUI_OSC8_SMOKE=1 \
+  scripts/run-tests.sh --build-dir build --jobs 4 \
+  -R '^ava_tui\.(kitty_image_smoke|iterm2_image_smoke|terminal_lifecycle_smoke|osc8_smoke)$'
 ```
 
-Other terminal and intentionally credential-gated live-provider checks remain classified in [`TESTING.md`](testing.md). They are not package-script steps.
+Intentionally credential-gated live-provider checks remain classified in [testing.md](testing.md). They are not package-script steps or substitutes for deterministic terminal evidence.
 
 ## Build and verify the Linux host artifact
 
@@ -134,12 +145,14 @@ Ordinary build mode configures a fresh private Release build tree, builds the cu
 scripts/package-linux.sh --output-dir /absolute/path/outside/AVA
 ```
 
-The release-qualified contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, missing or unsupported host/binary architecture evidence, disagreement between the canonical packaging-host architecture and detected ELF architecture, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
+The static package/provenance qualification contract is explicit and fail-closed. It rejects supplied binaries, any source or dependency worktree change (including untracked files), mismatched gitlinks, missing or unsupported host/binary architecture evidence, disagreement between the canonical packaging-host architecture and detected ELF architecture, unexpected ELF `DT_NEEDED` entries, and direct license-file SHA-256 policy mismatches or missing license evidence:
 
 ```sh
 scripts/package-linux.sh --require-release-qualified \
   --output-dir /absolute/path/outside/AVA
 ```
+
+The flag and resulting `PROVENANCE.json` field `release_qualified:true` prove only those implemented static source/gitlink/license/version/native-architecture/dynamic-dependency/package gates. They do not prove full CTest, native CI, sanitizer/TSan, the 23 tmux plus four PTY gates, retention of exact bytes, or official publication. Complete qualification requires the [release ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md) and [publication runbook](https://github.com/Artificial-Source/AVA/blob/develop/docs/operations/publication.md).
 
 Accepted-binary mode does not configure or build:
 
@@ -162,7 +175,7 @@ The deterministic package/provenance harness covers dependency-disconnected sour
 scripts/run-tests.sh -R '^ava_release\.package_linux$'
 ```
 
-Build mode should also be run once for the release candidate because the CTest harness deliberately uses the already-built test binary.
+Build mode should also be exercised during local candidate preparation because the CTest harness deliberately uses the already-built test binary. Final publication still requires CI to test and retain the exact packaged bytes under `AVA-REL-011`; this local run cannot substitute.
 
 Independent inspection remains useful:
 
@@ -190,13 +203,6 @@ git --no-pager diff --check
 
 Format changed C++ with the repository `clang-format`. Record exact commands, pass/skip results, and environment blockers; do not report checks that were not run.
 
-## Explicitly deferred work
+## Work outside this local checklist
 
-- CI artifact jobs and retention policy.
-- Commit/version-bump automation, tags, pushes, and release publication.
-- CPack or distribution package formats.
-- Cross-compilation and cross-distribution compatibility matrices.
-- Static/runtime dependency bundling.
-- Artifact signing, notarization, SBOM, and provenance attestations.
-- Registry/package-manager publishing.
-- Desktop artifacts.
+Exact-byte CI retention and official publication are open first-release blockers, not implemented by this checklist; follow `AVA-REL-011` through `AVA-REL-013` in the [release ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md). Post-release P2/P3 work includes deterministic archives, SBOM/signing/attestation policy, CPack/distribution formats, cross-build matrices, runtime bundling, registries/package managers, and desktop artifacts.

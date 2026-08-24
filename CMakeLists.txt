@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25...4.3.4)
+cmake_minimum_required(VERSION 3.27...4.3.4)
 
 project(ava
   VERSION 1.0.0
@@ -276,11 +276,6 @@ install(
 install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/product/mvp-coverage-ledger.md"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/product"
-  COMPONENT ava
-)
-install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/plans/tui-pi-feature-expansion-plan.md"
-  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/plans"
   COMPONENT ava
 )
 install(

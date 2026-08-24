@@ -23,11 +23,13 @@ Every `.cpp` below `src/ava/` includes `sys.h` first. Use canonical
 `ava/<module>/...` includes across modules. CMake target visibility describes
 build propagation; it does not make headers a stable public SDK.
 
+CMake 3.27 is the minimum. The canonical `dev`/`sanitize` presets require a writable `GITACHE_ROOT`, Python 3 for complete test registration, and JSON-capable Universal Ctags when debug/libcwd print-member generation is enabled. The tested 2026-08-23 source matrix is Ubuntu 24.04.4 x64 with GCC 13 under BetaTest/Make and Release/Ninja. Clang was environment-blocked; MSVC/Windows/macOS and AArch64 were not qualified, multi-config is not release-qualified, and dirty trees are never artifact candidates. Current release authority is the [release-readiness ledger](../product/release-readiness.md).
+
 ## Module catalog
 
 “Nearest tests” names the first regression suites to inspect, not an exhaustive
-list. CTest names generally use `ava_tests.<suite>`; many suites can also be run
-as `./build/ava_tests <suite>`.
+list. CTest names generally use `ava_tests.<suite>`; suites can also be run
+through the locked runner or directly as `./build/tests/ava_tests <suite>`.
 
 ### `agent/`
 
@@ -544,14 +546,17 @@ runtime behavior.
 
 ## Focused validation workflow
 
-Configure once, then use the repository wrappers so build and tests do not race
-in one tree:
+Configure once with the canonical preset, after exporting a writable `GITACHE_ROOT`, then use the repository wrappers so build and tests do not race in one tree. The debug-enabled preset also requires Python 3 and JSON-capable Universal Ctags when libcwd print-member generation is active:
 
 ```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
+cmake --preset dev
 scripts/build.sh --build-dir build --target ava_tests
 scripts/run-tests.sh --build-dir build -R '^ava_tests\.<suite>$' --output-on-failure
 ```
+
+For direct diagnosis after the target is built, use `./build/tests/ava_tests <suite>`. Direct CMake configuration is noncanonical unless it supplies the cache-equivalent `BetaTest`, debug, test, and compile-command values documented in [contributing](contributing.md).
 
 For whole-process changes, build `ava` and the necessary fake support target,
 then run the narrow CTest expression named in [`../TESTING.md`](../operations/testing.md).

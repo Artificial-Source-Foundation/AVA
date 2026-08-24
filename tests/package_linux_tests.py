@@ -493,7 +493,6 @@ def expected_files(package_name: str) -> set[str]:
         "docs/interop/evidence/README.md",
         "docs/interop/evidence/zed-1.9.0-2026-07-14.md",
         "docs/product/mvp-coverage-ledger.md",
-        "docs/plans/tui-pi-feature-expansion-plan.md",
         "docs/schema/theme.schema.json",
     }
     return {f"{package_name}/bin/ava"} | {f"{package_name}/share/doc/ava/{doc}" for doc in docs}
@@ -1027,7 +1026,7 @@ def create_fake_build_repository(
     shutil.copy2(repo / "scripts" / "generate-release-provenance.py", fake_repo / "scripts" / "generate-release-provenance.py")
     shutil.copy2(repo / "scripts" / "verify-markdown-links.py", fake_repo / "scripts" / "verify-markdown-links.py")
     (fake_repo / "CMakeLists.txt").write_text(
-        f"cmake_minimum_required(VERSION 3.25)\nproject(ava VERSION {version})\n",
+        f"cmake_minimum_required(VERSION 3.27)\nproject(ava VERSION {version})\n",
         encoding="utf-8",
     )
 

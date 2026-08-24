@@ -31,7 +31,7 @@ jobs:
     env:
       CC: gcc-16
       CXX: g++-16
-      GITACHE_ROOT: ${{ runner.temp }}/gitache
+      GITACHE_ROOT: /tmp/ava-gitache-${{ matrix.build_type }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,7 +86,7 @@ jobs:
     env:
       CC: gcc-13
       CXX: g++-13
-      GITACHE_ROOT: ${{ runner.temp }}/gitache
+      GITACHE_ROOT: /tmp/ava-gitache-arm64-release
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

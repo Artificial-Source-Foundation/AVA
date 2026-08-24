@@ -57,20 +57,24 @@ std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition 
 
 void TextSpan::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
 {
-  basic_window.attr_set(use_default_rendition() ? default_rendition : rendition());
+  Rendition const current_rendition = basic_window.current_rendition();
   std::size_t const assigned_width = this->assigned_width().value();
   GraphemeRun const grapheme_run(*this);
   std::size_t length = std::min(grapheme_run.str().length(), assigned_width);
-  basic_window.addstr(grapheme_run.str().data(), static_cast<int>(length));
-  if (std::size_t additional_spaces = assigned_width - length)
+  std::size_t spaces = assigned_width - length; // The total number of required filler spaces.
+  if (spaces > 0 && horizontal_alignment() != HorizontalAlignment::left)
   {
-    // If we're not using the default rendition already, and the text doesn't end on a space,
-    // then restore the rendition to the default rendition before writing any trailing filler spaces.
-    if ((AI_UNLIKELY(grapheme_run.empty()) || grapheme_run.str().back() != L' ')  && !use_default_rendition())
-      basic_window.attr_set(default_rendition);
-    std::wstring spaces(additional_spaces, L' ');
-    basic_window.addstr(spaces.data(), additional_spaces);
+    std::size_t const leading_spaces = horizontal_alignment() == HorizontalAlignment::right ? spaces : spaces / 2;
+    basic_window.addspaces(leading_spaces, default_rendition);
+    // Adjust `spaces` to become the number of trailing spaces.
+    spaces -= leading_spaces;
   }
+  // Write the TextSpan content.
+  basic_window.addstr(grapheme_run.str().data(), static_cast<int>(length), use_default_rendition() ? default_rendition : rendition());
+  // Write the trailing spaces, if any.
+  if (spaces > 0)
+    basic_window.addspaces(spaces, default_rendition);
+  basic_window.restore_rendition(current_rendition);
 }
 
 Rendition StyledTextSpan::rendition() const

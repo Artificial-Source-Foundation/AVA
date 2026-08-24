@@ -27,6 +27,8 @@ class Position
   // coordinates although in that case they use (y, x) instead of (row, col).
   Position(uint32_t row, uint32_t col) : row_(row), col_(col) { }
 
+  void advance_row() { ++row_; }
+
   // Accessors.
   uint32_t row() const { return row_; }
   uint32_t col() const { return col_; }

@@ -195,22 +195,13 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
 {
   // Track the rendition that ncurses would still use, starting from the current one,
   // so that an unchanged rendition never needs an attr_set call.
-  Rendition original_rendition = basic_window.get_rendition();
-  Rendition current_rendition{original_rendition};
+  Rendition original_rendition = basic_window.current_rendition();
 
-  // Append `n` characters of the wide character string `str` to `basic_window` using `rendition`.
-  auto&& addstr = [&basic_window, &current_rendition](wchar_t const* str, int n, Rendition const& rendition) {
-    if (current_rendition != rendition)
-    {
-      basic_window.attr_set(rendition);
-      current_rendition = rendition;
-    }
-    basic_window.addstr(str, n);
-  };
+  std::vector<std::size_t> per_grapheme_run_wide_character_count;
+  per_grapheme_run_wide_character_count.reserve(grapheme_runs_.size());
 
-  uint32_t remaining_columns = max_columns_;
   bool row_full = false;          // Set once a character was clipped; from then on only white-space may follow.
-
+  uint32_t remaining_columns = max_columns_;
   for (GraphemeRun const& grapheme_run : grapheme_runs_)
   {
     // An empty GraphemeRun has nothing to write; just go to the next one.
@@ -218,13 +209,13 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
       continue;
 
     // Determine how many wide characters of this grapheme_run fit (also) on the basic_window row.
-    std::size_t count = 0;
+    std::size_t wide_character_count = 0;
     for (auto const& character_metadata : grapheme_run.metadata())
     {
       if (!row_full && static_cast<uint32_t>(character_metadata.columns) <= remaining_columns)
       {
         remaining_columns -= static_cast<uint32_t>(character_metadata.columns);
-        ++count;
+        ++wide_character_count;
       }
       else
       {
@@ -237,44 +228,52 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
         row_full = true;
       }
     }
-
-    // Since grapheme_run is not empty there was at least one element in grapheme_run.characters_meta(),
-    // therefore now either count is larger than 0 or row_full is true, or both.
-    //
-    // If count is zero then no character in this grapheme_run did fit on this row and all characters
-    // truncated were whitespace (see the above ASSERT).
-    if (count > 0)
-    {
-      TextSpan const* text_span = grapheme_run.text_span();
-      Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
-      addstr(grapheme_run.str().data(), static_cast<int>(count), required_rendition);
-    }
+    per_grapheme_run_wide_character_count.push_back(wide_character_count);
 
     // If the row is full then we expect any additional characters, of subsequent GraphemeRun's if any, to be whitespace.
     if (row_full)
       break;
   }
 
-  while (remaining_columns > 0)
+  std::size_t spaces = remaining_columns; // The total number of required filler spaces.
+  if (spaces > 0 && alignment_ != HorizontalAlignment::left)
   {
-    constexpr static uint32_t number_of_spaces = 32;
-    constexpr static auto spaces = [] {
-      std::array<wchar_t, number_of_spaces> result;
-      result.fill(L' ');
-      return result;
-    }();
-    addstr(spaces.data(), std::min(remaining_columns, number_of_spaces), default_rendition);
-    if (AI_UNLIKELY(remaining_columns > number_of_spaces))
-    {
-      remaining_columns -= number_of_spaces;
-      continue;
-    }
-    break;
+    std::size_t const leading_spaces = alignment_ == HorizontalAlignment::right ? spaces : spaces / 2;
+    basic_window.addspaces(leading_spaces, default_rendition);
+    // Adjust `spaces` to become the number of trailing spaces.
+    spaces -= leading_spaces;
   }
 
+  int gr = 0;
+  for (GraphemeRun const& grapheme_run : grapheme_runs_)
+  {
+    // An empty GraphemeRun has nothing to write; just go to the next one.
+    if (grapheme_run.empty())
+      continue;
+
+    // Since grapheme_run is not empty there was at least one element in grapheme_run.characters_meta(),
+    // therefore now either count is larger than 0 or row_full is true, or both.
+    //
+    // If count is zero then no character in this grapheme_run did fit on this row and all characters
+    // truncated were whitespace (see the above ASSERT).
+    if (per_grapheme_run_wide_character_count[gr] > 0)
+    {
+      TextSpan const* text_span = grapheme_run.text_span();
+      Rendition const required_rendition = text_span->use_default_rendition() ? default_rendition : text_span->rendition();
+      basic_window.addstr(grapheme_run.str().data(), static_cast<int>(per_grapheme_run_wide_character_count[gr]), required_rendition);
+    }
+
+    // If the row is full then we expect any additional characters, of subsequent GraphemeRun's if any, to be whitespace.
+    if (++gr == per_grapheme_run_wide_character_count.size())
+      break;
+  }
+
+  // Write the trailing spaces, if any.
+  if (spaces > 0)
+    basic_window.addspaces(spaces, default_rendition);
+
   // Restore the rendition that the basic_window had before writing this row.
-  if (!(current_rendition == original_rendition))
-    basic_window.attr_set(original_rendition);
+  basic_window.restore_rendition(original_rendition);
 }
 
 } // namespace ava::tui::terminal

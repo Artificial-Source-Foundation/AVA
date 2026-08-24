@@ -7,6 +7,7 @@ namespace ava::tui::terminal {
 
 class BasicWindow;
 class Rendition;
+class Position;
 
 // class HorizontalLayout
 //
@@ -27,8 +28,8 @@ class HorizontalLayout
 
   void set_width(uint32_t columns);
 
-  // Write this HorizontalLayout to a BasicWindow at the current cursor position.
-  void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const;
+  // Write this HorizontalLayout to a BasicWindow starting at pos.
+  void write_to(Position pos, BasicWindow& basic_window, Rendition const& default_rendition) const;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

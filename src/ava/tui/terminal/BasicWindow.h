@@ -390,6 +390,42 @@ class BasicWindow
   // Commented out because this requires a central registry of BasicWindow objects that we don't have (yet).
 // std::optional<BasicWindow> getparent() const;                              // wgetparent
 
+  //----------------------------------------------------------------------------------------------------------
+  // Support for writing wide characters with a given rendition, while keeping track of the current rendition.
+  //
+ private:
+  Rendition current_rendition_{{}};
+
+ public:
+  // Like `get_rendition` but also stores the returned value in `current_rendition_`.
+  // At the end of the function that uses this, call restore_rendition with the returned value to restore the rendition to what it was.
+  Rendition current_rendition()
+  {
+    current_rendition_ = get_rendition();
+    return current_rendition_;
+  }
+
+  // Append `n` characters of the wide character string `str` to `basic_window` using `rendition`.
+  void addstr(wchar_t const* str, uint32_t n, Rendition const& rendition)
+  {
+    if (current_rendition_ != rendition)
+    {
+      attr_set(rendition);
+      current_rendition_ = rendition;
+    }
+    addstr(str, n);
+  };
+
+  // Append `n` spaces to `basic_window` using `rendition`.
+  void addspaces(uint32_t n, Rendition const& rendition);
+
+  // Restores the rendition, if it was changed; `original_rendition` must be the value that was returned by a previous call to `current_rendition`.
+  void restore_rendition(Rendition original_rendition)
+  {
+    if (!(current_rendition_ == original_rendition))
+      attr_set(original_rendition);
+  }
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 

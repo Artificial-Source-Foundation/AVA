@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GraphemeRun.h"
+#include "HorizontalAlignment.h"
 #include <vector>
 
 namespace ava::tui::terminal {
@@ -40,15 +41,17 @@ class GraphemeSpan
 {
  private:
   std::size_t const max_columns_;                       // The maximum number of terminal columns in this row, ignoring trailing white-space.
+  HorizontalAlignment const alignment_;                 // Where filler spaces need to go if max_columns_ is larger than the number of columns this span uses.
   std::size_t columns_;                                 // The current number of terminal columns in this row, including trailing white-space.
   std::vector<GraphemeRun> grapheme_runs_;              // A list of GraphemeRun's that make up the row.
 
  public:
   // Construct an empty GraphemeSpan.
-  GraphemeSpan(std::size_t max_columns) : max_columns_(max_columns), columns_(0) { }
+  GraphemeSpan(std::size_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), columns_(0) { }
 
   // Move constructor.
-  GraphemeSpan(GraphemeSpan&& collector) : max_columns_(collector.max_columns_), columns_(collector.columns_), grapheme_runs_(std::move(collector.grapheme_runs_))
+  GraphemeSpan(GraphemeSpan&& collector) :
+    max_columns_(collector.max_columns_), alignment_(collector.alignment_), columns_(collector.columns_), grapheme_runs_(std::move(collector.grapheme_runs_))
   {
     // Reset the collector for further use(!) as if it was just constructed (empty).
     collector.columns_ = 0;

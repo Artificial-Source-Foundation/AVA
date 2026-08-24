@@ -65,7 +65,7 @@ std::vector<GraphemeSpan> Paragraph::create_grapheme_spans(uint32_t columns) con
   ASSERT(columns > 0);
 
   std::vector<GraphemeSpan> grapheme_spans;
-  GraphemeSpan grapheme_span{static_cast<size_t>(columns)};
+  GraphemeSpan grapheme_span{static_cast<size_t>(columns), horizontal_alignment()};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
   {

@@ -1879,4 +1879,26 @@ ScrollRegion BasicWindow::getscrreg() const
   return region;
 }
 
+void BasicWindow::addspaces(uint32_t n, Rendition const& rendition)
+{
+  // A static array with 32 spaces.
+  constexpr static uint32_t number_of_spaces = 32;
+  constexpr static auto spaces = [] {
+    std::array<wchar_t, number_of_spaces> result;
+    result.fill(L' ');
+    return result;
+  }();
+
+  while (n > 0)
+  {
+    addstr(spaces.data(), std::min(n, number_of_spaces), rendition);
+    if (AI_UNLIKELY(n > number_of_spaces))
+    {
+      n -= number_of_spaces;
+      continue;
+    }
+    break;
+  }
+}
+
 } // namespace ava::tui::terminal

@@ -6,10 +6,9 @@ namespace ava::tui::terminal {
 
 void Spacer::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
 {
-  basic_window.attr_set(default_rendition);
-  std::size_t number_of_spaces = assigned_width().value();
-  std::wstring spaces(number_of_spaces, L' ');
-  basic_window.addstr(spaces.data(), number_of_spaces);
+  Rendition const current_rendition = basic_window.current_rendition();
+  basic_window.addspaces(assigned_width().value(), default_rendition);
+  basic_window.restore_rendition(current_rendition);
 }
 
 } // namespace ava::tui::terminal

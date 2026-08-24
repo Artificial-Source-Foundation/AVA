@@ -51,9 +51,9 @@ int main()
     //   2          2          5               12
     //   3          0          3               unlimited
 
-    auto item0 = terminal::TextSpan::create(u8"1234567890123", {.priority = 5, .minimum_width = 4});
+    auto item0 = terminal::TextSpan::create(u8"abcdefghijklm", {.priority = 5, .minimum_width = 4});
     auto item1 = terminal::TextSpan::create(u8"12345678901234", {.priority = 2, .minimum_width = 8});
-    auto item2 = terminal::TextSpan::create(u8"123456789012", {.priority = 2, .minimum_width = 5});
+    auto item2 = terminal::TextSpan::create(u8"𞱱𞱲𞱳𞱴𞱵𞱶𞱷𞱸𞱹𞱺𞱹𞱺", {.priority = 2, .minimum_width = 5});
     auto item3 = terminal::Spacer::create({.minimum_width = 3});
 
     horizontal_layout2.append(std::move(item3));
@@ -82,9 +82,11 @@ int main()
     Dout(dc::notice, "horizontal_layout3 = " << horizontal_layout3);
   }
 
-  terminal::Position top_left{5, 5};
-  stdscr.move(top_left);
-  horizontal_layout1.write_to(stdscr, terminal_context.default_rendition());
+  terminal::Position top_left1{5, 5};
+  horizontal_layout1.write_to(top_left1, stdscr, terminal_context.default_rendition());
+
+  terminal::Position top_left2{9, 5};
+  horizontal_layout2.write_to(top_left2, stdscr, terminal_context.default_rendition());
 
   //... display it
   //... allow resizing with keyboard

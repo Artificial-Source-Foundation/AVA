@@ -166,6 +166,9 @@ class LayoutItem
 
   // Rendering
 
+  // Write assigned_width_ spaces, using rendition.
+  void write_spaces_to(BasicWindow& basic_window, Rendition const& rendition) const;
+
   // Write this LayoutItem to a BasicWindow at the current cursor position.
   // Can not be used for a Paragraph.
   virtual void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const = 0;

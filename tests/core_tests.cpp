@@ -65,6 +65,7 @@ void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_terminal_horizontal_layout_tests();
 void run_terminal_paragraph_tests();
+void run_terminal_window_tests();
 void run_run_observer_tests();
 void run_runtime_diagnostics_tests();
 void run_containment_tests();
@@ -127,6 +128,7 @@ constexpr std::array kTestSuites{
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"terminal_horizontal_layout", run_terminal_horizontal_layout_tests},
     TestSuite{"terminal_paragraph", run_terminal_paragraph_tests},
+    TestSuite{"terminal_window", run_terminal_window_tests},
     TestSuite{"run_observer", run_run_observer_tests},
     TestSuite{"runtime_diagnostics", run_runtime_diagnostics_tests},
     TestSuite{"containment", run_containment_tests},

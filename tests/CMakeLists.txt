@@ -174,6 +174,7 @@ set(AVA_TESTS_SOURCES
   "tui_transcript_search_tests.cpp"
   "terminal_horizontal_layout_tests.cpp"
   "terminal_paragraph_tests.cpp"
+  "terminal_window_tests.cpp"
   "run_observer_tests.cpp"
   "runtime_diagnostics_tests.cpp"
   "containment_tests.cpp"
@@ -248,6 +249,7 @@ set(AVA_TEST_SUITES
   tui_composer
   terminal_horizontal_layout
   terminal_paragraph
+  terminal_window
   run_observer
   runtime_diagnostics
   containment

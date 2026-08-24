@@ -1,67 +1,60 @@
 #pragma once
 
 #include "BasicWindow.h"
-#include "debug.h"              // ASSERT
 
 namespace ava::tui::terminal {
 
 using InnerWindow = BasicWindow;        // The writable area inside the margin.
 
+// Own an ncurses window whose inherited BasicWindow interface addresses only the writable area inside an immutable border margin.
+//
+// A non-empty margin creates a derived ncurses window for the inherited interface and retains its parent as `outer_window()`.
+// An empty margin creates no derived window: the inherited BasicWindow is the sole ncurses handle and is also returned by
+// `outer_window()`. Margins must leave at least one writable row and column; an oversized margin is a programming error rather
+// than being clamped.
+//
+// Window always creates and owns a new ncurses window. It cannot wrap `stdscr` or another ncurses-owned WINDOW; use BasicWindow
+// directly for those handles. Window is deliberately immovable because replacing either of its related handles would have to
+// destroy the derived window before its parent.
 class Window : public InnerWindow
 {
  private:
-  BasicWindow outer_window_;            // The handle to the outer window. If we have no border then this wraps a null-pointer.
-  Border border_;                       // The border that is drawn around the inner window.
-  bool need_border_refresh_;            // Set to true iff we have a border that was just (re)drawn.
+  BasicWindow outer_window_;            // The margin-inclusive parent, or an empty wrapper when the margin is empty.
+  Border const border_;                 // The immutable border and margin configuration.
+  bool need_border_refresh_ = false;    // True iff the outer border must be staged before refreshing the writable area.
 
  public:
-  // Construct a Window with an optional border.
-  Window(Dimension size, Position pos, Border const& border = {}) : outer_window_(size, pos), border_(border)
-  {
-    if (has_margin())
-    {
-      // Use the same Rendition for the whole window as that is passed with the border.
-      // Call set_background after construction of this object to change the background of the innner window.
-      outer_window_.set_background({border_.rendition()}, false);
-      InnerWindow inner_window(outer_window_.derwin(border.margin()));
-      std::swap(InnerWindow::impl_, inner_window.impl_);                // Use inner_window for the base class.
-      draw_border();
-      // Erase the inner window; this also erases the spaces of the just-drawn border where we have no margin (although is probably
-      // not a visible side-effect since we're using the same rendition for the (inner) window as we used for the margin/border.
-      erase();
-    }
-    else
-      std::swap(InnerWindow::impl_, outer_window_.impl_);               // Make the base class the outer window and set outer_window_ to null.
-  }
+  // Construct an owned Window of `size` at screen position `pos`, using the immutable margin and styling in `border`.
+  //
+  // The inherited BasicWindow coordinates and dimensions describe the writable interior. The border is drawn on the
+  // margin-inclusive outer window. `border.margin()` must leave at least one interior row and column.
+  Window(Dimension size, Position pos, Border const& border = {});
+
+  Window(Window const&) = delete;
+  Window& operator=(Window const&) = delete;
+  Window(Window&&) = delete;
+  Window& operator=(Window&&) = delete;
+
+  // Destroy the derived writable-area handle before destroying its margin-inclusive parent.
+  ~Window();
 
   // Accessors.
 
-  BasicWindow const& outer_window() const { return outer_window_.impl_ ? outer_window_ : static_cast<InnerWindow const&>(*this); }
-  BasicWindow& outer_window() { return outer_window_.impl_ ? outer_window_ : static_cast<InnerWindow&>(*this); }
+  BasicWindow const& outer_window() const;
+  BasicWindow& outer_window();
 
   Border const& border() const { return border_; }
 
   // Return true if this Window has a margin (and border).
   bool has_margin() const { return !border_.empty(); }
 
-  // (Re)draw the border of the outer window.
-  void draw_border()
-  {
-    // Do not call this function on a window with an empty margin.
-    ASSERT(outer_window_.impl_);
-    outer_window_.set_border(border_);
-    need_border_refresh_ = true;
-  }
+  // Redraw the configured border on the margin-inclusive outer window.
+  //
+  // Calling this on a Window with an empty margin is a programming error because no separate outer window exists.
+  void draw_border();
 
-  void refresh()
-  {
-    if (need_border_refresh_ && outer_window_.impl_)
-    {
-      outer_window_.wnoutrefresh();
-      need_border_refresh_ = false;
-    }
-    InnerWindow::refresh();
-  }
+  // Refresh the writable area, staging a newly drawn outer border first when necessary.
+  void refresh();
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

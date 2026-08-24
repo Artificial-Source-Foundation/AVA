@@ -2,7 +2,7 @@
 
 This is the single current cut line for AVA's first official release. It records the frozen decision and actionable ledger; dated audit detail is preserved in the [2026-08-23 audit history](../history/2026-08-23-release-readiness-audit.md). Runtime version `1.0.0` is **not** a published release, and this audit creates no tag, release, or official artifact.
 
-> **Review sequencing:** the initial Carlo review commit carries the nontechnical scope, evidence, and release decisions only. Items described as fixed were prepared and validated in a separate local audit patch set; they are not part of the baseline commit or this documentation commit and require separate technical review before candidate integration.
+> **Review sequencing:** the initial review commit carries the nontechnical scope, evidence, and release decisions. Separate follow-up commits now carry `AVA-REL-001`, `AVA-REL-002`, and `AVA-REL-014` without changing the terminal frontend. The validated `AVA-REL-003` sanitizer patch remains outside the review series because it overlaps Carlo's active terminal files; it requires coordinated technical review before candidate integration. The review branch is not a release candidate.
 
 ## Candidate decision
 
@@ -18,6 +18,17 @@ This is the single current cut line for AVA's first official release. It records
 | Publication state | No official release or tag exists; none is created by this audit |
 
 The comparison audit used fetched pins Pi.dev `460191cfcf27d60ff81fc0178812f4ff09e8df06` (`0.84.2`), OpenCode `03bba464d46f3eddf74195919b1344aa937f7b11` (`1.18.21`), and Grok Build `07b2f7144fd5c5c9d3dd1966937a87852d2dbdb8` (core `1.0.8`, npm wrapper `0.1.220-alpha.4`). The repository's separately preserved comparison checkouts remain at Pi.dev `936aff00918de1187f085f123c2812d8f2d67745`, OpenCode `38e10eb1408feb700021b8e8766fb0ab41bf84e2`, and Grok Build `8a14c91d88875a831a38b3a066b1683116bcb31c`; they were not moved to perform the audit.
+
+## Review-series integration status
+
+| Item | Local review status |
+| --- | --- |
+| Scope, principles, audit history, and publication design | Committed as the nontechnical first review unit |
+| `AVA-REL-001` persistent deny precedence | Committed as an isolated backend unit; focused 6/6 and clean-series full 143/143 CTest passed |
+| `AVA-REL-002` truncated provider tool calls | Committed as an isolated backend unit; focused 4/4 and clean-series full 143/143 CTest passed |
+| `AVA-REL-014` destructive dogfood roots | Committed as an isolated script/test unit; direct harness, focused 1/1, and clean-series full 143/143 CTest passed |
+| `AVA-REL-003` canonical sanitizer gate | Validated in the audit patch set but deliberately not committed while Carlo owns overlapping terminal implementation files |
+| Publication | Not attempted; nothing was pushed, tagged, packaged as official, or released |
 
 ## Frozen scope and admission rule
 

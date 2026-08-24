@@ -2025,7 +2025,10 @@ void test_session_run_controller_compaction_snapshot_lane()
     std::string parent;
     for (std::size_t index = 0; index < count; ++index)
     {
-      auto entry = append_entry(std::string(prefix) + "-" + std::to_string(index));
+      std::string entry_id(prefix);
+      entry_id.push_back('-');
+      entry_id += std::to_string(index);
+      auto entry = append_entry(std::move(entry_id));
       entry.parent_id = parent;
       if (padding_bytes > 0)
         entry.data_json = "{\"padding\":\"" + std::string(padding_bytes, 'x') + "\"}";

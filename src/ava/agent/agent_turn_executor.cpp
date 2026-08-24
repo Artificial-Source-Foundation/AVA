@@ -214,6 +214,24 @@ ava::core::Result<AgentLoopResult> AgentTurnExecutor::run()
       return result_;
     }
 
+    if (*turn.finish_reason == ava::provider::ProviderFinishReason::MaxTokens)
+    {
+      if (auto committed = commit_truncated_provider_tool_results(turn, pending_tool_results); !committed)
+        return std::unexpected(std::move(committed.error()));
+      ++tool_iterations_;
+      result_.tool_iterations = tool_iterations_;
+      if (tool_iterations_ >= options_.max_tool_iterations)
+      {
+        if (auto phase = publish_phase(RunPhase::Completing); !phase)
+          return std::unexpected(std::move(phase.error()));
+        result_.outcome = ava::core::RuntimeTerminalOutcome::MaxTurnRequests;
+        return result_;
+      }
+      if (auto phase = publish_phase(RunPhase::AwaitingProvider); !phase)
+        return std::unexpected(std::move(phase.error()));
+      continue;
+    }
+
     if (auto phase = publish_phase(RunPhase::PreparingTools); !phase)
       return std::unexpected(std::move(phase.error()));
     if (auto executed = execute_tools(turn, pending_tool_results); !executed)

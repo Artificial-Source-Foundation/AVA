@@ -9,6 +9,9 @@
 #include "ava/session/assistant_output.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
+#include "ava/provider/anthropic_provider.h"
+#include "ava/provider/gemini_provider.h"
+#include "ava/provider/openai_compatible_provider.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
 #include "ava/core/json.h"
@@ -59,6 +62,82 @@ class CallbackTransport final : public ava::http::Transport
   std::function<void()> after_send_;
   std::vector<ava::http::HttpRequest> requests_;
 };
+
+class SequencedProviderTransport final : public ava::http::Transport
+{
+ public:
+  SequencedProviderTransport(std::vector<ava::http::HttpResponse> responses, bool streaming) : responses_(std::move(responses)), streaming_(streaming) { }
+
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send(ava::http::HttpRequest const& request) override
+  {
+    requests_.push_back(request);
+    return take_response();
+  }
+
+  [[nodiscard]] bool supports_streaming() const noexcept override { return streaming_; }
+
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> send_streaming(ava::http::HttpRequest const& request, BodyChunkSink on_body_chunk,
+                                                                          CancelCallback cancel_requested) override
+  {
+    requests_.push_back(request);
+    if (cancel_requested && cancel_requested())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "sequenced provider stream canceled"));
+    auto response = take_response();
+    if (!response)
+      return std::unexpected(std::move(response.error()));
+    auto const midpoint = response->body.size() / 2;
+    if (auto first = on_body_chunk(std::string_view(response->body).substr(0, midpoint)); !first)
+      return std::unexpected(std::move(first.error()));
+    if (auto second = on_body_chunk(std::string_view(response->body).substr(midpoint)); !second)
+      return std::unexpected(std::move(second.error()));
+    return response;
+  }
+
+  [[nodiscard]] std::vector<ava::http::HttpRequest> const& requests() const noexcept { return requests_; }
+
+ private:
+  [[nodiscard]] ava::core::Result<ava::http::HttpResponse> take_response()
+  {
+    if (responses_.empty())
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "sequenced provider transport has no response"));
+    auto response = std::move(responses_.front());
+    responses_.erase(responses_.begin());
+    return response;
+  }
+
+  std::vector<ava::http::HttpResponse> responses_;
+  bool streaming_ = false;
+  std::vector<ava::http::HttpRequest> requests_;
+};
+
+std::string chat_stream_tool_call(std::string_view call_id, std::string_view name, std::string_view arguments, std::string_view finish_reason)
+{
+  return "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"" + ava::core::json::escape(call_id) + "\",\"function\":{\"name\":\"" +
+         ava::core::json::escape(name) + "\",\"arguments\":\"" + ava::core::json::escape(arguments) +
+         "\"}}]}}]}\n\n"
+         "data: {\"choices\":[{\"finish_reason\":\"" +
+         ava::core::json::escape(finish_reason) + "\"}]}\n\ndata: [DONE]\n\n";
+}
+
+std::string anthropic_stream_tool_call(std::string_view call_id, std::string_view name, std::string_view arguments, std::string_view stop_reason)
+{
+  return "event: content_block_start\n"
+         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"" +
+         ava::core::json::escape(call_id) + "\",\"name\":\"" + ava::core::json::escape(name) +
+         "\",\"input\":{}}}\n\n"
+         "event: content_block_delta\n"
+         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"" +
+         ava::core::json::escape(arguments) +
+         "\"}}\n\n"
+         "event: content_block_stop\n"
+         "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+         "event: message_delta\n"
+         "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"" +
+         ava::core::json::escape(stop_reason) +
+         "\"}}\n\n"
+         "event: message_stop\n"
+         "data: {\"type\":\"message_stop\"}\n\n";
+}
 
 void test_agent_loop_cancellation_boundaries()
 {
@@ -415,23 +494,39 @@ void test_agent_loop_error_paths_and_bounds()
     std::filesystem::create_directories(workspace);
     ava::session::SessionStore store(ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "arg-bound"});
     ava::tests::FakeTransport transport(
-        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"read_file\"}\n\n"
+        {sse_response("data: {\"type\":\"response.function_call.added\",\"call_id\":\"call_1\",\"name\":\"write_file\"}\n\n"
                       "data: "
                       "{\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":"
-                      "\\\"note.txt\\\"}\"}\n\n"
+                      "\\\"parser-limit-must-not-exist.txt\\\",\\\"content\\\":\\\"forbidden\\\"}\"}\n\n"
                       "data: [DONE]\n\n")});
+    int permission_requests = 0;
+    int tool_events = 0;
     ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
         .workspace_dir = workspace,
         .mode = ava::agent::Mode::Build,
         .model = agent_loop_test::model_invocation_options(),
         .access_token = "token",
         .max_tool_argument_bytes = 5,
+        .tool_execution = ava::agent::ToolExecutionOptions{.require_explicit_file_permissions = true},
+        .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const&) { ++tool_events; },
+        .permission_resolver =
+            [&permission_requests](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++permission_requests;
+          return ava::permissions::PermissionResolution::Allow;
+        },
         .append_entry = append_route_for_test(store),
         .append_batch = append_batch_route_for_test(store),
         .session_read_authority = read_authority_for_test(store),
     });
     auto result = loop.run_turn("hi", store, provider, transport);
-    expect(!result && result.error().message().find("argument byte limit") != std::string::npos, "agent loop enforces tool argument byte bounds");
+    auto entries = store.load();
+    bool const has_tool_lifecycle = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                                      return entry.type == ava::session::EntryType::AssistantOutputItem ||
+                                             entry.type == ava::session::EntryType::AssistantTurnCommit || entry.type == ava::session::EntryType::ToolResult;
+                                    });
+    expect(!result && result.error().message().find("argument byte limit") != std::string::npos && permission_requests == 0 && tool_events == 0 && entries &&
+               !has_tool_lifecycle && !std::filesystem::exists(workspace / "parser-limit-must-not-exist.txt"),
+           "agent loop parser limits fail closed before persistence, permission, dispatch, or side effects");
   }
 
   {
@@ -491,6 +586,347 @@ void test_agent_loop_error_paths_and_bounds()
   }
 }
 
+void test_agent_loop_truncated_provider_output_never_dispatches_tools()
+{
+  constexpr std::string_view sentinel_name = "truncated-call-must-not-run.txt";
+  std::string const write_arguments = "{\"path\":\"" + std::string(sentinel_name) + "\",\"content\":\"forbidden provider side effect\"}";
+  std::string const bash_arguments = "{\"command\":\"touch " + std::string(sentinel_name) + "\"}";
+  std::string const malformed_bash_arguments = "{\"command\":\"touch " + std::string(sentinel_name) + "\"";
+
+  ava::provider::OpenAICompatibleProvider const compatible_provider(ava::provider::OpenAICompatibleProviderOptions{
+      .base_url = "https://compatible.example.test", .provider_name = "Compatible test", .require_credential = false});
+  ava::provider::OpenAIProvider const openai_provider("https://openai.example.test");
+  ava::provider::AnthropicProvider const anthropic_provider("https://anthropic.example.test");
+  ava::provider::GeminiProvider const gemini_provider("https://gemini.example.test");
+
+  std::string const compatible_final_stream =
+      "data: {\"choices\":[{\"delta\":{\"content\":\"continued\"}}]}\n\n"
+      "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+  std::string const openai_final_stream =
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"continued\"}\n\n"
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n";
+  std::string const anthropic_final_stream =
+      "event: content_block_start\n"
+      "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+      "event: content_block_delta\n"
+      "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"continued\"}}\n\n"
+      "event: content_block_stop\n"
+      "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+      "event: message_delta\n"
+      "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+      "event: message_stop\n"
+      "data: {\"type\":\"message_stop\"}\n\n";
+  std::string const gemini_final_stream =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"continued\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+      "data: [DONE]\n\n";
+
+  struct TruncationCase
+  {
+    std::string name;
+    ava::provider::Provider const* provider = nullptr;
+    std::string provider_id;
+    std::string model_id;
+    std::string api_family;
+    bool stream = false;
+    std::string truncated_body;
+    std::string final_body;
+    std::vector<std::string> call_ids;
+  };
+
+  std::vector<TruncationCase> const cases{
+      TruncationCase{
+          .name = "openai-compatible-buffered",
+          .provider = &compatible_provider,
+          .provider_id = "compatible",
+          .model_id = "compatible-test",
+          .api_family = "openai_chat_completions",
+          .stream = false,
+          .truncated_body = "{\"choices\":[{\"message\":{\"tool_calls\":[{\"id\":\"chat_write\",\"function\":{\"name\":\"write_file\","
+                            "\"arguments\":\"" +
+                            ava::core::json::escape(write_arguments) + "\"}},{\"id\":\"chat_bash\",\"function\":{\"name\":\"bash\",\"arguments\":\"" +
+                            ava::core::json::escape(bash_arguments) + "\"}}]},\"finish_reason\":\"length\"}]}",
+          .final_body = R"({"choices":[{"message":{"content":"continued"},"finish_reason":"stop"}]})",
+          .call_ids = {"chat_write", "chat_bash"},
+      },
+      TruncationCase{.name = "openai-compatible-streaming",
+                     .provider = &compatible_provider,
+                     .provider_id = "compatible",
+                     .model_id = "compatible-test",
+                     .api_family = "openai_chat_completions",
+                     .stream = true,
+                     .truncated_body = chat_stream_tool_call("chat_partial_bash", "bash", malformed_bash_arguments, "length"),
+                     .final_body = compatible_final_stream,
+                     .call_ids = {"chat_partial_bash"}},
+      TruncationCase{
+          .name = "openai-responses-buffered",
+          .provider = &openai_provider,
+          .provider_id = "openai",
+          .model_id = "gpt-test",
+          .api_family = "openai_responses",
+          .stream = false,
+          .truncated_body = "{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_tokens\"},\"output\":[{\"id\":\"fc_write\","
+                            "\"type\":\"function_call\",\"call_id\":\"responses_write\",\"name\":\"write_file\",\"arguments\":\"" +
+                            ava::core::json::escape(write_arguments) + "\"}]}",
+          .final_body = R"({"status":"completed","output_text":"continued"})",
+          .call_ids = {"responses_write"},
+      },
+      TruncationCase{
+          .name = "openai-responses-streaming",
+          .provider = &openai_provider,
+          .provider_id = "openai",
+          .model_id = "gpt-test",
+          .api_family = "openai_responses",
+          .stream = true,
+          .truncated_body = agent_loop_test::tool_call_sse("responses_partial_bash", "bash", malformed_bash_arguments) +
+                            "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\","
+                            "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+          .final_body = openai_final_stream,
+          .call_ids = {"responses_partial_bash"},
+      },
+      TruncationCase{.name = "anthropic-buffered",
+                     .provider = &anthropic_provider,
+                     .provider_id = "anthropic",
+                     .model_id = "claude-test",
+                     .api_family = "anthropic_messages",
+                     .stream = false,
+                     .truncated_body = "{\"content\":[{\"type\":\"tool_use\",\"id\":\"anthropic_write\",\"name\":\"write_file\",\"input\":" + write_arguments +
+                                       "}],\"stop_reason\":\"max_tokens\"}",
+                     .final_body = R"({"content":[{"type":"text","text":"continued"}],"stop_reason":"end_turn"})",
+                     .call_ids = {"anthropic_write"}},
+      TruncationCase{.name = "anthropic-streaming",
+                     .provider = &anthropic_provider,
+                     .provider_id = "anthropic",
+                     .model_id = "claude-test",
+                     .api_family = "anthropic_messages",
+                     .stream = true,
+                     .truncated_body = anthropic_stream_tool_call("anthropic_partial_bash", "bash", malformed_bash_arguments, "max_tokens"),
+                     .final_body = anthropic_final_stream,
+                     .call_ids = {"anthropic_partial_bash"}},
+      TruncationCase{.name = "gemini-buffered",
+                     .provider = &gemini_provider,
+                     .provider_id = "gemini",
+                     .model_id = "gemini-test",
+                     .api_family = "gemini_generate_content",
+                     .stream = false,
+                     .truncated_body = "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"id\":\"gemini_write\","
+                                       "\"name\":\"write_file\",\"args\":" +
+                                       write_arguments + "}}]},\"finishReason\":\"MAX_TOKENS\"}]}",
+                     .final_body = R"({"candidates":[{"content":{"role":"model","parts":[{"text":"continued"}]},"finishReason":"STOP"}]})",
+                     .call_ids = {"gemini_write"}},
+      TruncationCase{.name = "gemini-streaming",
+                     .provider = &gemini_provider,
+                     .provider_id = "gemini",
+                     .model_id = "gemini-test",
+                     .api_family = "gemini_generate_content",
+                     .stream = true,
+                     .truncated_body = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"id\":\"gemini_bash\","
+                                       "\"name\":\"bash\",\"args\":" +
+                                       bash_arguments + "}}]},\"finishReason\":\"MAX_TOKENS\"}]}\n\ndata: [DONE]\n\n",
+                     .final_body = gemini_final_stream,
+                     .call_ids = {"gemini_bash"}},
+  };
+
+  for (auto const& test_case : cases)
+  {
+    auto const root = create_empty_root("agent-truncated-provider-" + test_case.name);
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    expect(::chmod(root.c_str(), S_IRWXU) == 0 && ::chmod(workspace.c_str(), S_IRWXU) == 0, test_case.name + " secures the command fixture roots");
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "truncated-provider"});
+    SequencedProviderTransport transport({sse_response(test_case.truncated_body), sse_response(test_case.final_body)}, test_case.stream);
+    int permission_requests = 0;
+    int deny_preflights = 0;
+    std::vector<ava::agent::ToolTimelineEntry> tool_events;
+    auto model = agent_loop_test::model_invocation_options("system prompt", test_case.provider_id, test_case.model_id);
+    model.api_family = test_case.api_family;
+    model.stream = test_case.stream;
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .anchor_set = command_anchors_for_test(workspace, store.session_path().parent_path() / "spill"),
+        .mode = ava::agent::Mode::Build,
+        .model = std::move(model),
+        .access_token = "token",
+        .tool_execution = ava::agent::ToolExecutionOptions{.require_explicit_file_permissions = true},
+        .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const& event) { tool_events.push_back(event); },
+        .permission_resolver =
+            [&permission_requests](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++permission_requests;
+          return ava::permissions::PermissionResolution::Allow;
+        },
+        .auto_allow_deny_preflight =
+            [&deny_preflights](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+          ++deny_preflights;
+          return ava::permissions::PermissionResolution::Allow;
+        },
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+    });
+
+    auto result = loop.run_turn("do not run truncated calls", store, *test_case.provider, transport);
+    auto entries = store.load();
+    auto const projection = entries ? ava::session::classify_assistant_output(*entries) : ava::session::AssistantOutputProjection{};
+    std::vector<std::string> persisted_call_ids;
+    std::vector<std::string> persisted_call_names;
+    std::vector<std::string> function_entry_ids;
+    bool truncated_commit = false;
+    for (auto const& turn : projection.turns)
+    {
+      bool turn_has_function = false;
+      for (auto const& item : turn.items)
+      {
+        if (auto const* function = std::get_if<ava::session::AssistantOutputFunctionCall>(&item.item.payload))
+        {
+          turn_has_function = true;
+          persisted_call_ids.push_back(function->call_id);
+          persisted_call_names.push_back(function->name);
+          function_entry_ids.push_back(item.entry_id);
+        }
+      }
+      if (turn_has_function)
+        truncated_commit = turn.commit.finish_reason == "max_tokens";
+    }
+
+    std::vector<ava::session::SessionEntry const*> tool_results;
+    std::size_t permission_entries = 0;
+    if (entries)
+    {
+      for (auto const& entry : *entries)
+      {
+        if (entry.type == ava::session::EntryType::ToolResult)
+          tool_results.push_back(&entry);
+        permission_entries += entry.type == ava::session::EntryType::PermissionDecision;
+      }
+    }
+    bool exact_results = tool_results.size() == test_case.call_ids.size() && function_entry_ids.size() == test_case.call_ids.size() &&
+                         persisted_call_names.size() == test_case.call_ids.size();
+    for (std::size_t index = 0; exact_results && index < tool_results.size(); ++index)
+    {
+      auto const& entry = *tool_results[index];
+      auto const structured = ava::core::json::object_field(entry.data_json, "structured_result");
+      auto const error = structured ? ava::core::json::object_field(*structured, "error") : std::nullopt;
+      auto const result_json = ava::core::json::string_field(entry.data_json, "result");
+      auto const message = error ? ava::core::json::string_field(*error, "message") : std::nullopt;
+      exact_results = ava::core::json::string_field(entry.data_json, "call_id") == test_case.call_ids[index] &&
+                      ava::core::json::string_field(entry.data_json, "name") == persisted_call_names[index] &&
+                      ava::core::json::string_field(entry.data_json, "assistant_output_entry_id") == function_entry_ids[index] &&
+                      ava::core::json::string_field(entry.data_json, "status") == "error" && error &&
+                      ava::core::json::string_field(*error, "code") == "provider_output_truncated" && message && message->size() <= 256 && result_json &&
+                      result_json->find("\"retryable\":false") != std::string::npos;
+    }
+    auto const validation = entries ? ava::session::validate_session_replay(*entries) : ava::session::SessionReplayValidation{};
+    bool continuation_has_results = transport.requests().size() == 2 && transport.requests()[1].body.find("provider_output_truncated") != std::string::npos;
+    for (auto const& call_id : test_case.call_ids)
+      continuation_has_results = continuation_has_results && transport.requests()[1].body.find(call_id) != std::string::npos;
+
+    expect(result && result->outcome == ava::core::RuntimeTerminalOutcome::Completed && result->final_text == "continued" && result->provider_iterations == 2 &&
+               result->tool_iterations == 1 && result->tool_calls == 0 && result->tool_timeline.empty() && entries && projection.turns.size() == 2 &&
+               truncated_commit && persisted_call_ids == test_case.call_ids && exact_results && validation.ok() && permission_requests == 0 &&
+               deny_preflights == 0 && permission_entries == 0 && tool_events.empty() && !std::filesystem::exists(workspace / sentinel_name) &&
+               continuation_has_results,
+           test_case.name + " binds non-retryable truncation results and continues without dispatch, permission, or side effects");
+  }
+
+  {
+    auto const root = create_empty_root("agent-max-tokens-without-calls");
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "max-tokens-no-calls"});
+    ava::tests::FakeTransport transport({sse_response(R"({"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]})")});
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .model = ava::agent::ModelInvocationOptions{.provider_id = "compatible",
+                                                    .model_id = "compatible-test",
+                                                    .system_prompt = "system prompt",
+                                                    .stream = false,
+                                                    .api_family = "openai_chat_completions"},
+        .access_token = "token",
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+    });
+    auto result = loop.run_turn("remain terminal", store, compatible_provider, transport);
+    expect(result && result->outcome == ava::core::RuntimeTerminalOutcome::MaxTokens && result->final_text == "partial answer" &&
+               result->provider_iterations == 1 && result->tool_iterations == 0 && result->tool_calls == 0 && transport.requests().size() == 1,
+           "max-tokens output without tool calls remains terminal");
+  }
+
+  {
+    auto const root = create_empty_root("agent-truncated-provider-iteration-bound");
+    auto const workspace = root / "workspace";
+    std::filesystem::create_directories(workspace);
+    ava::session::SessionStore store(
+        ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "truncated-provider-bound"});
+    ava::tests::FakeTransport transport(
+        {sse_response(chat_stream_tool_call("bounded_call", "write_file", write_arguments, "length")), sse_response(compatible_final_stream)});
+    ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+        .workspace_dir = workspace,
+        .mode = ava::agent::Mode::Build,
+        .model =
+            ava::agent::ModelInvocationOptions{
+                .provider_id = "compatible", .model_id = "compatible-test", .system_prompt = "system prompt", .api_family = "openai_chat_completions"},
+        .access_token = "token",
+        .max_tool_iterations = 1,
+        .append_entry = append_route_for_test(store),
+        .append_batch = append_batch_route_for_test(store),
+        .session_read_authority = read_authority_for_test(store),
+    });
+    auto result = loop.run_turn("respect the iteration cap", store, compatible_provider, transport);
+    auto entries = store.load();
+    bool const has_truncated_result =
+        entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+          return entry.type == ava::session::EntryType::ToolResult && entry.data_json.find("provider_output_truncated") != std::string::npos;
+        });
+    expect(result && result->outcome == ava::core::RuntimeTerminalOutcome::MaxTurnRequests && result->provider_iterations == 1 &&
+               result->tool_iterations == 1 && result->tool_calls == 0 && transport.requests().size() == 1 && has_truncated_result,
+           "a truncated tool-call batch consumes one existing tool-iteration slot before another provider request");
+  }
+}
+
+void test_agent_loop_unknown_incomplete_reason_remains_fail_closed()
+{
+  auto const root = create_empty_root("agent-unknown-incomplete-reason");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::session::SessionStore store(
+      ava::session::SessionStoreOptions{.root_dir = root / "sessions", .workspace_dir = workspace, .session_id = "unknown-incomplete"});
+  ava::provider::OpenAIProvider const provider("https://openai.example.test");
+  ava::tests::FakeTransport transport({sse_response(
+      R"({"status":"incomplete","incomplete_details":{"reason":"future_limit"},"output":[{"id":"fc_unknown","type":"function_call","call_id":"unknown_incomplete_call","name":"write_file","arguments":"{\"path\":\"must-not-exist.txt\",\"content\":\"forbidden\"}"}]})")});
+  int permission_requests = 0;
+  int tool_events = 0;
+  ava::agent::AgentLoop loop(ava::agent::AgentLoopOptions{
+      .workspace_dir = workspace,
+      .mode = ava::agent::Mode::Build,
+      .model =
+          ava::agent::ModelInvocationOptions{
+              .provider_id = "openai", .model_id = "gpt-test", .system_prompt = "system prompt", .stream = false, .api_family = "openai_responses"},
+      .access_token = "token",
+      .tool_execution = ava::agent::ToolExecutionOptions{.require_explicit_file_permissions = true},
+      .on_tool_event = [&tool_events](ava::agent::ToolTimelineEntry const&) { ++tool_events; },
+      .permission_resolver =
+          [&permission_requests](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ++permission_requests;
+        return ava::permissions::PermissionResolution::Allow;
+      },
+      .append_entry = append_route_for_test(store),
+      .append_batch = append_batch_route_for_test(store),
+      .session_read_authority = read_authority_for_test(store),
+  });
+  auto result = loop.run_turn("unknown incomplete output", store, provider, transport);
+  auto entries = store.load();
+  bool const has_tool_lifecycle = entries && std::ranges::any_of(*entries, [](ava::session::SessionEntry const& entry) {
+                                    return entry.type == ava::session::EntryType::AssistantOutputItem ||
+                                           entry.type == ava::session::EntryType::AssistantTurnCommit || entry.type == ava::session::EntryType::ToolResult;
+                                  });
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Provider && permission_requests == 0 && tool_events == 0 && entries &&
+             !has_tool_lifecycle && !std::filesystem::exists(workspace / "must-not-exist.txt"),
+         "an unknown incomplete reason with an actionable call remains fail closed before persistence, permission, or dispatch");
+}
+
 void test_agent_loop_max_iteration_guard()
 {
   auto const root = create_empty_root("agent-max");
@@ -536,5 +972,7 @@ void run_agent_loop_resilience_tests()
 {
   test_agent_loop_cancellation_boundaries();
   test_agent_loop_error_paths_and_bounds();
+  test_agent_loop_truncated_provider_output_never_dispatches_tools();
+  test_agent_loop_unknown_incomplete_reason_remains_fail_closed();
   test_agent_loop_max_iteration_guard();
 }

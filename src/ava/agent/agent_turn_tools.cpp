@@ -38,6 +38,25 @@ ToolDispatchResult synthetic_failed_dispatch_result(ProviderToolCall const& call
       ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = dispatch_error_result_json(call, error)});
 }
 
+ToolDispatchResult synthetic_truncated_provider_output_result(ProviderToolCall const& call)
+{
+  constexpr std::string_view message =
+      "Provider output reached its token limit before this tool call was known to be complete. AVA did not execute it; reissue a complete call.";
+  std::string result_text = "{\"tool\":\"" + ava::core::json::escape(call.name) +
+                            "\",\"ok\":false,\"retryable\":false,\"error\":{\"category\":\"provider\","
+                            "\"code\":\"provider_output_truncated\",\"message\":\"" +
+                            ava::core::json::escape(message) + "\"}}";
+  ToolResultPayload payload;
+  payload.status = ToolResultStatus::Error;
+  payload.summary = "Skipped incomplete tool call from truncated provider output";
+  payload.content_type = "application/json";
+  payload.error_category = "provider";
+  payload.error_code = "provider_output_truncated";
+  payload.error_message = message;
+  payload.error_details = "The provider may reissue the complete call on the next turn.";
+  return ToolDispatchResult{.call_id = call.id, .name = call.name, .success = false, .result_text = std::move(result_text), .payload = std::move(payload)};
+}
+
 bool is_run_command_call(ProviderToolCall const& call)
 {
   return call.name == "bash";
@@ -298,6 +317,21 @@ ava::core::VoidResult AgentTurnExecutor::persist_assistant_turn(ProviderTurn con
 
   // A tool call becomes finalized only after the complete v4 turn is durable.
   finalized_provider_tool_call_ids_.insert(provider_turn.iteration_tool_call_ids.begin(), provider_turn.iteration_tool_call_ids.end());
+  return {};
+}
+
+ava::core::VoidResult AgentTurnExecutor::commit_truncated_provider_tool_results(ParsedAssistantTurn const& turn, PendingCommittedToolResults& pending_results)
+{
+  for (auto const& call : turn.tool_calls)
+  {
+    auto assistant_output_entry_id = pending_results.output_binding_for(call);
+    if (!assistant_output_entry_id)
+      return std::unexpected(std::move(assistant_output_entry_id.error()));
+    auto appended = session_.append_tool_result(synthetic_truncated_provider_output_result(call), *assistant_output_entry_id);
+    pending_results.mark_result_durable(call, appended);
+    if (!appended)
+      return std::unexpected(std::move(appended.error()));
+  }
   return {};
 }
 

@@ -371,6 +371,8 @@ void HorizontalLayout::set_width(uint32_t columns)
 
 void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Rendition const& default_rendition) const
 {
+  DoutEntering(dc::terminal, "HorizontalLayout::write_to(" << pos << ", " << basic_window << ", " << default_rendition << ")");
+
   int const number_of_items = layout_items_.size();
 
   // You can't write an empty HorizontalLayout. Use the `append` member function to fill it.

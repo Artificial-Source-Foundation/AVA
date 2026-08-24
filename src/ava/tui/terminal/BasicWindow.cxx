@@ -1881,6 +1881,8 @@ ScrollRegion BasicWindow::getscrreg() const
 
 void BasicWindow::addspaces(uint32_t n, Rendition const& rendition)
 {
+  DoutEntering(dc::terminal, "BasicWindow::addspaces(" << n << ", " << rendition << ")");
+
   // A static array with 32 spaces.
   constexpr static uint32_t number_of_spaces = 32;
   constexpr static auto spaces = [] {

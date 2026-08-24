@@ -22,5 +22,6 @@ Channel provider("PROVIDER");
 Channel session("SESSION");
 Channel tools("TOOLS");
 Channel tui("TUI");
+Channel terminal("TERMINAL");
 libcwd::FatalChannel const& coredump{libcwd::channels::dc::core};
 NAMESPACE_DEBUG_CHANNELS_END

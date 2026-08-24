@@ -193,6 +193,9 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
 //
 void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
 {
+  DoutEntering(dc::terminal, "GraphemeSpan::write_to(" << basic_window << ", " << default_rendition << ")");
+  Dout(dc::terminal, "Contents of this GraphemeSpan: " << *this);
+
   // Track the rendition that ncurses would still use, starting from the current one,
   // so that an unchanged rendition never needs an attr_set call.
   Rendition original_rendition = basic_window.current_rendition();

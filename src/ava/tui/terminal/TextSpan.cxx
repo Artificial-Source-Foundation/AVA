@@ -57,9 +57,12 @@ std::unique_ptr<TextSpan> TextSpan::create(std::u8string const& text, Rendition 
 
 void TextSpan::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
 {
+  DoutEntering(dc::terminal, "TextSpan::write_to(" << basic_window << ", " << default_rendition << ")");
+
   Rendition const current_rendition = basic_window.current_rendition();
   std::size_t const assigned_width = this->assigned_width().value();
   GraphemeRun const grapheme_run(*this);
+  Dout(dc::terminal, "This TextSpan as GraphemeRun: " << grapheme_run);
   std::size_t length = std::min(grapheme_run.str().length(), assigned_width);
   std::size_t spaces = assigned_width - length; // The total number of required filler spaces.
   if (spaces > 0 && horizontal_alignment() != HorizontalAlignment::left)

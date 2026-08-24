@@ -158,7 +158,25 @@ std::u8string_view GraphemeRun::get_u8string_view() const
 void GraphemeRun::print_on(std::ostream& os) const
 {
   LIBCWD_USING_OSTREAM_PRELUDE;
-  os << "{text_span:" << print_pointer(text_span_) << ", characters_:" << get_u8string_view() << '}';
+  os << "{text_span:" << print_pointer(text_span_) <<
+     ", characters_:" << get_u8string_view() <<
+     ", metadata:{";
+  char const* separator = "";
+  for (Metadata const& metadata : metadata_)
+  {
+    os << separator << '{';
+    os << std::u8string_view{&text_span_->text()[0] + metadata.utf8_begin, metadata.utf8_size};
+    os << ", columns:" << metadata.columns;
+    if (metadata.utf8_size != 1)
+      os << ", utf8_size:" << static_cast<unsigned int>(metadata.utf8_size);
+    if (metadata.whitespace)
+      os << " (WS)";
+    else if (metadata.combining)
+      os << " (combining)";
+    os << '}';
+    separator = ", ";
+  }
+  os << "}}";
 }
 #endif
 

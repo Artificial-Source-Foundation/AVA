@@ -9,6 +9,26 @@ namespace ava::tui::terminal {
 class TextSpan;
 class GraphemeSpan;
 
+// class GraphemeRun
+//
+// A contiguous fragment of one TextSpan. It contains whole grapheme clusters
+// and retains a pointer to its source TextSpan for rendition and hyperlink data:
+//
+//       ┊◄──────── run A ────────►┊◄───── run B ────►┊
+//       ┌─────────────────────────┬──────────────────┐
+//       │ ordinary text           │ bold text        │
+//       └─────────────────────────┴──────────────────┘
+//           source TextSpan A       source TextSpan B
+//
+//       compact graphemes within run A:
+//
+//       ┌───┬───┬───┬─────┬───┬───┬───┬───┬───┬───┬──
+//       │ o │ r │ d │  i  │ n │ a │ r │ y │   │ t │ ···
+//       └───┴───┴───┴─────┴───┴───┴───┴───┴───┴───┴──
+//
+// Wrapping may split one TextSpan into more than one GraphemeRun, but never changes
+// which TextSpan supplies the rendition.
+//
 class GraphemeRun
 {
  public:

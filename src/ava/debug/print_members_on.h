@@ -79,6 +79,7 @@ extern Channel provider;
 extern Channel session;
 extern Channel tools;
 extern Channel tui;
+extern Channel terminal;
 extern libcwd::FatalChannel const& coredump;
 } // namespace LIBCWD_DEBUG_CHANNELS::dc
 

@@ -11,6 +11,7 @@ target_sources(ava_terminal
     "GraphemeSpan.cxx"
     "HorizontalLayout.cxx"
     "LayoutItem.cxx"
+    "Spacer.cxx"
     "Pad.cxx"
     "Paragraph.cxx"
     "TextSpan.cxx"

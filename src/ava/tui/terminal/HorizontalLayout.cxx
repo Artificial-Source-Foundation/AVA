@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "HorizontalLayout.h"
+#include "Paragraph.h"
 #include "utils/macros.h"
 #include <algorithm>
 #include <span>
@@ -365,6 +366,32 @@ void HorizontalLayout::set_width(uint32_t columns)
   // Assign `assigned_width_` of each item.
   for (int i = 0; i < number_of_items; ++i)
     ordered_items[i].ptr->assigned_width_ = ordered_items[i].assigned_width;
+}
+
+void HorizontalLayout::write_to(BasicWindow& basic_window, Rendition const& default_rendition) const
+{
+  int const number_of_items = layout_items_.size();
+
+  // You can't write an empty HorizontalLayout. Use the `append` member function to fill it.
+  ASSERT(number_of_items > 0);
+
+  std::vector<std::vector<GraphemeSpan>> paragraph_grapheme_spans;
+  std::size_t max_paragraph_rows = 0;
+
+  for (int i = 0; i < number_of_items; ++i)
+  {
+    LayoutItem const* layout_item = layout_items_[i].get();
+    // Paragraph's need special treatment.
+    if (Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_item))
+    {
+      paragraph_grapheme_spans.emplace_back(paragraph->create_grapheme_spans());
+      max_paragraph_rows = std::max(max_paragraph_rows, paragraph_grapheme_spans.back().size());
+      paragraph_grapheme_spans.back().front().write_to(basic_window, default_rendition);
+    }
+    // The rest is assumed to exist of only a single grapheme run.
+    else
+      layout_item->write_to(basic_window, default_rendition);
+  }
 }
 
 } // namespace ava::tui::terminal

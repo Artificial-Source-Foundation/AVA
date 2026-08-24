@@ -50,8 +50,15 @@ class Paragraph : public LayoutItem
   // Accessor; the rendition used for TextSpan's without a rendition of their own.
   Rendition const& default_rendition() const { return default_rendition_; }
 
-  // Wrap this Paragraph to `columns` terminal columns, returning GraphemeSpans for that width.
-  std::vector<GraphemeSpan> wrap_to(uint32_t columns);
+  // Wrap this Paragraph to `columns` terminal columns, returning the GraphemeSpans corresponding to that width.
+  std::vector<GraphemeSpan> create_grapheme_spans(uint32_t columns) const;
+  std::vector<GraphemeSpan> create_grapheme_spans() const { return create_grapheme_spans(assigned_width().value()); }
+
+  void write_to(BasicWindow& UNUSED_ARG(basic_window), Rendition const& UNUSED_ARG(default_rendition)) const override
+  {
+    // You can't call this method of a Paragraph. See HorizontalLayout::write_to for code that has the work around.
+    ASSERT(false);
+  }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

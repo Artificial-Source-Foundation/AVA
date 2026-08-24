@@ -59,9 +59,9 @@ namespace ava::tui::terminal {
 // Note how all GraphemeRun's in this list are views into the existing TextSpan's of the Paragraph.
 // The catenation of all GraphemeRun's gives again the original string.
 //
-std::vector<GraphemeSpan> Paragraph::wrap_to(uint32_t columns)
+std::vector<GraphemeSpan> Paragraph::create_grapheme_spans(uint32_t columns) const
 {
-  // Pass at least one terminal column so wrapping can always make progress.
+  // The algorithm requires at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
 
   std::vector<GraphemeSpan> grapheme_spans;

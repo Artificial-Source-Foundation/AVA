@@ -10,6 +10,9 @@
 
 namespace ava::tui::terminal {
 
+class BasicWindow;
+class Rendition;
+
 // class TextSpan
 //
 // Represents the UTF8 characters that make up a span of characters to be displayed with the same rendition.
@@ -65,6 +68,9 @@ class TextSpan : public LayoutItem
 
   // Only call this if is_hyperlink() returns true.
   virtual Hyperlink hyperlink() const;
+
+  // Write the TextSpan to a BasicWindow at the current cursor position.
+  void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const override;
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(LayoutItem)
 

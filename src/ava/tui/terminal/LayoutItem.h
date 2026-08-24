@@ -11,6 +11,8 @@
 namespace ava::tui::terminal {
 
 // Forward declarations.
+class BasicWindow;
+class Rendition;
 class Width;
 Width operator-(Width w1, Width w2);
 
@@ -162,11 +164,11 @@ class LayoutItem
     return assigned_width_;
   }
 
-  // Rendering.
+  // Rendering
 
-  // Convert this LayoutItem into one or more GraphemeRun objects using `columns` terminal columns, one object per output row.
-  // FIXME: Box is already used.
-//  Box generate_box(int columns);
+  // Write this LayoutItem to a BasicWindow at the current cursor position.
+  // Can not be used for a Paragraph.
+  virtual void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

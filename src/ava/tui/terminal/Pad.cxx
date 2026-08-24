@@ -22,7 +22,7 @@ void Pad::generate(uint32_t columns)
   uint32_t pad_height = 0;
   for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
   {
-    wrapped_paragraphs.push_back(paragraph->wrap_to(columns));
+    wrapped_paragraphs.push_back(paragraph->create_grapheme_spans(columns));
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.back().size());
   }
   if (wrapped_paragraphs.size() > 1)

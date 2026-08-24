@@ -57,7 +57,7 @@ class GraphemeSpan
   // Append as much of a GraphemeRun to the end as possible, returns what didn't fit.
   GraphemeRun append(GraphemeRun&& source);
 
-  // Write the span to a Window.
+  // Write the span to a BasicWindow at the current cursor position.
   void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const;
 
   // Accessors.

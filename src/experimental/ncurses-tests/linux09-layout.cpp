@@ -20,16 +20,18 @@ int main()
 #endif
 
   terminal::Context terminal_context;
-  terminal::BasicWindow const& stdscr = terminal_context.stdscr();
+  terminal::BasicWindow& stdscr = terminal_context.stdscr();
 
   terminal::HorizontalLayout horizontal_layout1;
   terminal::HorizontalLayout horizontal_layout2;
   terminal::HorizontalLayout horizontal_layout3;
 
   {
-    auto exit_text = terminal::TextSpan::create(u8"Exit the app", {.priority = 1});
+    terminal::Rendition const rendition(terminal_context.create_color_pair(0xeeddcc, 0x335500));
+    auto exit_text = terminal::TextSpan::create(u8"Exit the app", rendition, {.priority = 1});
     auto spacer = terminal::Spacer::create();
-    auto shortcuts = terminal::Paragraph::create({.priority = 2, .alignment = terminal::HorizontalAlignment::right});
+    terminal::Rendition const rendition2(terminal_context.create_color_pair(0xeeddcc, 0x006655));
+    auto shortcuts = terminal::Paragraph::create(rendition2, {.priority = 2, .alignment = terminal::HorizontalAlignment::right});
     auto shortcuts_text = terminal::TextSpan::create(u8"ctrl+c, ctrl+d, ctrl+x q");
     shortcuts->append(std::move(shortcuts_text));
     shortcuts->initialize_cached_natural_width();
@@ -81,8 +83,11 @@ int main()
   }
 
   terminal::Position top_left{5, 5};
-//  horizontal_layout1.show(stdscr, top_left);
+  stdscr.move(top_left);
+  horizontal_layout1.write_to(stdscr, terminal_context.default_rendition());
 
   //... display it
   //... allow resizing with keyboard
+
+  [[maybe_unused]] int wch = terminal_context.get_wch();
 }

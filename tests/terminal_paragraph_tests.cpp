@@ -95,7 +95,7 @@ void test_paragraph_wrap_comment_example()
 {
   auto paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
 
-  std::vector<terminal::GraphemeSpan> rows = paragraph->wrap_to(9);
+  std::vector<terminal::GraphemeSpan> rows = paragraph->create_grapheme_spans(9);
 
   std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
   expect(rows.size() == expected.size(),
@@ -295,7 +295,7 @@ void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t colu
   paragraph->append(terminal::TextSpan::create(text));
   paragraph->initialize_cached_natural_width();
 
-  std::vector<terminal::GraphemeSpan> const rows = paragraph->wrap_to(columns);
+  std::vector<terminal::GraphemeSpan> const rows = paragraph->create_grapheme_spans(columns);
   expect(!rows.empty(), std::string{name} + " must produce at least one wrapped row");
   if (!rows.empty())
     expect(rows.front().columns() == expected_first_row_columns, std::string{name} + " first row must occupy " + std::to_string(expected_first_row_columns) +

@@ -1,13 +1,23 @@
 #include "sys.h"
+#include "terminal/BasicWindow.h"
+#include "terminal/ColorPair.h"
 #include "terminal/HorizontalLayout.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Spacer.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
 
+#include <clocale>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <string_view>
+
+#define NCURSES_NOMACROS
+#include <curses.h>
+#undef getbegyx
+#undef getmaxyx
+#undef getyx
 
 namespace terminal = ava::tui::terminal;
 
@@ -90,12 +100,73 @@ void test_weighted_layout()
   expect_assigned_width(*item_c_ptr, 17, "weighted item C");
 }
 
+// Verify that TextSpan truncation counts terminal columns rather than wide characters when rendering mixed-width text.
+//
+// Runs ncurses against temporary files and checks the resulting cursor position. The seven-column prefix ends before zeta;
+// including it would consume eight columns and place the cursor one cell beyond the assigned layout width.
+void test_mixed_width_text_span_rendering()
+{
+  char const* previous_locale_value = std::setlocale(LC_CTYPE, nullptr);
+  std::string const previous_locale = previous_locale_value == nullptr ? std::string{} : std::string{previous_locale_value};
+  if (std::setlocale(LC_CTYPE, "") == nullptr)
+  {
+    expect(false, "the environment locale must support UTF-8 for mixed-width TextSpan rendering");
+    return;
+  }
+
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  if (!input || !output)
+  {
+    if (input)
+      static_cast<void>(std::fclose(input));
+    if (output)
+      static_cast<void>(std::fclose(output));
+    if (!previous_locale.empty())
+      static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
+    expect(false, "tmpfile must be available for mixed-width TextSpan rendering");
+    return;
+  }
+
+  SCREEN* screen = newterm(nullptr, output, input);
+  if (!screen)
+  {
+    static_cast<void>(std::fclose(input));
+    static_cast<void>(std::fclose(output));
+    if (!previous_locale.empty())
+      static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
+    expect(false, "newterm must initialize ncurses for mixed-width TextSpan rendering");
+    return;
+  }
+  static_cast<void>(set_term(screen));
+
+  {
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(terminal::TextSpan::create(u8"αβ😀γδεζ🚀ηθ", {.minimum_width = 5}));
+    horizontal_layout.set_width(7);
+
+    terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 9});
+    horizontal_layout.write_to({0, 0}, pad, terminal::Rendition{terminal::ColorPair{}});
+    terminal::Position const cursor = pad.getyx();
+    expect(cursor.row() == 0 && cursor.col() == 7, "a seven-column TextSpan assignment must advance the ncurses cursor by exactly seven columns");
+  }
+
+  static_cast<void>(endwin());
+  delscreen(screen);
+  static_cast<void>(std::fclose(input));
+  static_cast<void>(std::fclose(output));
+  if (!previous_locale.empty())
+    static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
+}
+
 } // namespace
 
-// Run deterministic HorizontalLayout width-negotiation coverage without initializing ncurses or debug output.
+// Run deterministic HorizontalLayout width negotiation and terminal-backed mixed-width rendering coverage.
 void run_terminal_horizontal_layout_tests()
 {
   test_status_line_layout();
   test_priority_boundary_layout();
   test_weighted_layout();
+  test_mixed_width_text_span_rendering();
 }

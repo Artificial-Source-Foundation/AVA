@@ -53,7 +53,7 @@ int main()
 
     auto item0 = terminal::TextSpan::create(u8"abcdefghijklm", {.priority = 5, .minimum_width = 4});
     auto item1 = terminal::TextSpan::create(u8"12345678901234", {.priority = 2, .minimum_width = 8});
-    auto item2 = terminal::TextSpan::create(u8"𞱱𞱲𞱳𞱴𞱵𞱶𞱷𞱸𞱹𞱺𞱹𞱺", {.priority = 2, .minimum_width = 5});
+    auto item2 = terminal::TextSpan::create(u8"αβ😀γδ🚀εζηθ", {.priority = 2, .minimum_width = 5});
     auto item3 = terminal::Spacer::create({.minimum_width = 3});
 
     horizontal_layout2.append(std::move(item3));

@@ -1,8 +1,10 @@
 #include "sys.h"
-#include "TextSpan.h"
-#include "GraphemeRun.h"
 #include "BasicWindow.h"
+#include "GraphemeRun.h"
+#include "TextSpan.h"
 #include "utils/macros.h"
+
+#include <iterator>
 #include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
@@ -63,8 +65,33 @@ void TextSpan::write_to(BasicWindow& basic_window, Rendition const& default_rend
   std::size_t const assigned_width = this->assigned_width().value();
   GraphemeRun const grapheme_run(*this);
   Dout(dc::terminal, "This TextSpan as GraphemeRun: " << grapheme_run);
-  std::size_t length = std::min(grapheme_run.str().length(), assigned_width);
-  std::size_t spaces = assigned_width - length; // The total number of required filler spaces.
+
+  // Find the longest whole-cluster prefix that fits in the assigned terminal columns. `length` is a wide-character count for
+  // BasicWindow::addstr, while `content_columns` tracks the potentially different cursor advance.
+  std::size_t length = 0;
+  std::size_t content_columns = 0;
+  auto const& metadata = grapheme_run.metadata();
+  for (auto cluster = metadata.begin(); cluster != metadata.end();)
+  {
+    auto next_cluster = std::next(cluster);
+    std::size_t cluster_columns = cluster->columns;
+    // Include all combining wide characters in the current grapheme.
+    while (next_cluster != metadata.end() && next_cluster->combining)
+    {
+      cluster_columns += next_cluster->columns;
+      ++next_cluster;
+    }
+
+    // If this cluster does not fit in the remaining space then exit the loop.
+    if (content_columns + cluster_columns > assigned_width)
+      break;
+
+    content_columns += cluster_columns;
+    length += static_cast<std::size_t>(next_cluster - cluster);
+    cluster = next_cluster;
+  }
+
+  std::size_t spaces = assigned_width - content_columns; // The total number of required filler spaces.
   if (spaces > 0 && horizontal_alignment() != HorizontalAlignment::left)
   {
     std::size_t const leading_spaces = horizontal_alignment() == HorizontalAlignment::right ? spaces : spaces / 2;

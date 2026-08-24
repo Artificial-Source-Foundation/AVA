@@ -69,7 +69,10 @@ class TextSpan : public LayoutItem
   // Only call this if is_hyperlink() returns true.
   virtual Hyperlink hyperlink() const;
 
-  // Write the TextSpan to a BasicWindow at the current cursor position.
+  // Write this TextSpan to `basic_window` at its current cursor, using `default_rendition` when this span has no explicit rendition.
+  //
+  // Content is clipped to the assigned terminal-column width without splitting a compact grapheme cluster. Any columns not
+  // occupied by content are filled with spaces according to the configured horizontal alignment.
   void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const override;
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(LayoutItem)

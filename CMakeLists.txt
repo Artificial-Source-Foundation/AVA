@@ -176,6 +176,15 @@ if(AVA_ENABLE_TSAN AND NOT MSVC)
   add_link_options(-fsanitize=thread)
 endif()
 
+# ai-utils probes x86 BMI2 by compiling and running GCC x86 builtins. Those
+# builtins do not exist on non-x86 targets, where a failed probe must mean
+# "unsupported" rather than aborting configuration.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _ava_system_processor)
+if(NOT _ava_system_processor MATCHES "^(x86_64|amd64|i[3-6]86)$")
+  set(CW_BMI2_SUPPORT 0 CACHE INTERNAL "BMI2 is unavailable on non-x86 targets" FORCE)
+endif()
+unset(_ava_system_processor)
+
 # Declare aicxx submodules.
 include(AICxxSubmodules)
 

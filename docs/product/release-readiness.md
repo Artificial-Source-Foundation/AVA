@@ -2,7 +2,7 @@
 
 This is the single current cut line for AVA's first official release. It records the frozen decision and actionable ledger; dated audit detail is preserved in the [2026-08-23 audit history](../history/2026-08-23-release-readiness-audit.md). Runtime version `1.0.0` is **not** a published release, and this audit creates no tag, release, or official artifact.
 
-> **Review sequencing:** the initial review commit carries the nontechnical scope, evidence, and release decisions. Separate follow-up commits now carry `AVA-REL-001`, `AVA-REL-002`, and `AVA-REL-014` without changing the terminal frontend. The validated `AVA-REL-003` sanitizer patch remains outside the review series because it overlaps Carlo's active terminal files; it requires coordinated technical review before candidate integration. The review branch is not a release candidate.
+> **Integration status:** the audit scope and the isolated `AVA-REL-001`, `AVA-REL-002`, `AVA-REL-003`, and `AVA-REL-014` fixes are integrated on `develop`. The sanitizer policy is applied centrally to `ava_terminal`; no terminal frontend source was changed for that integration. GitHub Actions run `32795413575` passed every required job at commit `546fa0aa7a9faece8adb9937796464b01a5d86f9`. This is still not an exact retained release candidate.
 
 ## Candidate decision
 
@@ -10,7 +10,7 @@ This is the single current cut line for AVA's first official release. It records
 | --- | --- |
 | Candidate version | `1.0.0` |
 | Baseline commit | `c43794e91bb8d4f706ad4c916387f5487fca14ee` |
-| Audit integration state | Fixed code/test/script/CMake changes were uncommitted during this audit; the next candidate must be a clean committed tree and exact retained bytes |
+| Audit integration state | Safety, documentation, package-policy, and CI fixes are integrated through `546fa0aa7a9faece8adb9937796464b01a5d86f9`; exact retained candidate bytes are still required |
 | Freeze date | 2026-08-23 |
 | Verdict | **READY AFTER LISTED BLOCKERS** |
 | Open release blockers | `AVA-REL-011`, then `AVA-REL-013`, then `AVA-REL-012` as ordered below |
@@ -19,20 +19,21 @@ This is the single current cut line for AVA's first official release. It records
 
 The comparison audit used fetched pins Pi.dev `460191cfcf27d60ff81fc0178812f4ff09e8df06` (`0.84.2`), OpenCode `03bba464d46f3eddf74195919b1344aa937f7b11` (`1.18.21`), and Grok Build `07b2f7144fd5c5c9d3dd1966937a87852d2dbdb8` (core `1.0.8`, npm wrapper `0.1.220-alpha.4`). The repository's separately preserved comparison checkouts remain at Pi.dev `936aff00918de1187f085f123c2812d8f2d67745`, OpenCode `38e10eb1408feb700021b8e8766fb0ab41bf84e2`, and Grok Build `8a14c91d88875a831a38b3a066b1683116bcb31c`; they were not moved to perform the audit.
 
-## Review-series integration status
+## Integration status
 
-| Item | Local review status |
+| Item | Current status |
 | --- | --- |
-| Scope, principles, audit history, and publication design | Committed as the nontechnical first review unit |
-| `AVA-REL-001` persistent deny precedence | Committed as an isolated backend unit; focused 6/6 and clean-series full 143/143 CTest passed |
-| `AVA-REL-002` truncated provider tool calls | Committed as an isolated backend unit; focused 4/4 and clean-series full 143/143 CTest passed |
-| `AVA-REL-014` destructive dogfood roots | Committed as an isolated script/test unit; direct harness, focused 1/1, and clean-series full 143/143 CTest passed |
-| `AVA-REL-003` canonical sanitizer gate | Validated in the audit patch set but deliberately not committed while Carlo owns overlapping terminal implementation files |
-| Publication | Not attempted; nothing was pushed, tagged, packaged as official, or released |
+| Scope, principles, audit history, and publication design | Integrated on `develop` |
+| `AVA-REL-001` persistent deny precedence | Integrated as an isolated backend unit; focused 6/6 and clean-series full 143/143 CTest passed |
+| `AVA-REL-002` truncated provider tool calls | Integrated as an isolated backend unit; focused 4/4 and clean-series full 143/143 CTest passed |
+| `AVA-REL-014` destructive dogfood roots | Integrated as an isolated script/test unit; direct harness, focused 1/1, and clean-series full 143/143 CTest passed |
+| `AVA-REL-003` canonical sanitizer gate | Integrated centrally without terminal source edits; clean local 146/146 and GitHub sanitizer jobs passed |
+| CI | Run `32795413575` passed Debug, Release, sanitizer, focused TSan, ACP SDK interoperability, and native AArch64 build/test/static-package jobs |
+| Publication | Commits were pushed to `develop`; no tag, official package, or release was created |
 
 ## Frozen scope and admission rule
 
-The frozen P0 scope is `AVA-REL-001` and `AVA-REL-002`; both are fixed in this working tree. The frozen P1 scope contains fixed `AVA-REL-003` and `AVA-REL-014`, plus open `AVA-REL-011`, `AVA-REL-012`, and `AVA-REL-013`. Documentation closure `AVA-REL-015` is a completed P2 audit deliverable, not a release blocker. `AVA-REL-010` is not a separate blocker: its exact-candidate terminal gate is merged into `AVA-REL-011`. All former release candidates `AVA-REL-004` through `AVA-REL-009` remain downgraded to P2 after independent scope review.
+The frozen P0 scope is `AVA-REL-001` and `AVA-REL-002`; both are fixed on `develop`. The frozen P1 scope contains integrated `AVA-REL-003` and `AVA-REL-014`, plus open `AVA-REL-011`, `AVA-REL-012`, and `AVA-REL-013`. Documentation closure `AVA-REL-015` is a completed P2 audit deliverable, not a release blocker. `AVA-REL-010` is not a separate blocker: its exact-candidate terminal gate is merged into `AVA-REL-011`. All former release candidates `AVA-REL-004` through `AVA-REL-009` remain downgraded to P2 after independent scope review.
 
 After this freeze, a new P0/P1 requires all of: a reproducible impact on the narrow Linux x86-64 first release, exact AVA source/runtime evidence, measurable acceptance, and independent technical and scope approval. Competitor parity, breadth, cleanup value, or an untested concern is insufficient. Existing downgrades stay downgraded unless new evidence satisfies the same rule.
 
@@ -49,7 +50,7 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 ### AVA-REL-001 — Persistent deny precedence
 
-- **Tier/status/owner:** P0; fixed in working tree; Andrés.
+- **Tier/status/owner:** P0; integrated on `develop`; Andrés.
 - **Subsystem:** permissions and file/search tools.
 - **Exact evidence:** pre-fix whole-process reproductions are `$AUDIT_ROOT/logs/p0-reproductions/ava-br-001-{valid,malformed}-summary.json`; fixed-tree reruns are the matching `ava-br-001-fixed-*` summaries. The fix and adversarial cases are in `src/ava/permissions/permission_rule_{matching,path}.cpp`, `src/ava/tools/file_tools.*`, `src/ava/tools/search_tools.cpp`, and `tests/permission_rules_tests.cpp`. The tests cover dot/trailing spellings plus contained intermediate/final symlinks, hardlinks, and missing targets while keeping persistent Allows lexical-only. `ava_tests.permission_rules` and adjacent tool/ACP/agent cases passed inside the final integrated runs; `$AUDIT_ROOT/logs/final-after-review-normal/tests.log` records 143/143 PASS and `$AUDIT_ROOT/logs/final-after-review-sanitize/tests.log` records 146/146 PASS, each with 30 declared expected skips.
 - **Impact:** a durable operator deny could otherwise allow workspace content acquisition, provider transmission, or mutation through policy auto-Allow or an equivalent path alias.
@@ -60,7 +61,7 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 ### AVA-REL-002 — Truncated provider tool calls never execute
 
-- **Tier/status/owner:** P0; fixed in working tree; Andrés.
+- **Tier/status/owner:** P0; integrated on `develop`; Andrés.
 - **Subsystem:** provider normalization, agent loop, and tool dispatch.
 - **Exact evidence:** `tests/agent_loop_resilience_tests.cpp` covers buffered and streaming truncation for OpenAI Responses, OpenAI-compatible Chat Completions, Anthropic Messages, and Gemini GenerateContent. It proves zero permission/preflight calls, timeline events, registry dispatches, and side effects while binding bounded `provider_output_truncated` results for continuation. `ava_tests.agent_loop_resilience` passed inside the final integrated normal 143/143, sanitizer 146/146, and Release 141/141 runs under `$AUDIT_ROOT/logs/final-after-review-{normal,sanitize,release}/`.
 - **Impact:** valid-looking but incomplete destructive arguments could otherwise execute after a provider length limit.
@@ -71,9 +72,9 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 ### AVA-REL-003 — Canonical sanitizer gate
 
-- **Tier/status/owner:** P1; fixed in working tree; Andrés.
+- **Tier/status/owner:** P1; integrated on `develop`; Andrés.
 - **Subsystem:** CMake, CI, sanitizer tests, terminal library, and death-test handling.
-- **Exact evidence:** the initial fresh sanitizer default build failed on uninstrumented consumers and exposed libcwd/death-test instability. Current changes make the `sanitize` preset/CI path canonical BetaTest plus debug instrumentation, make UBSan non-recovering, propagate sanitizer runtime from static libraries, instrument/warn `ava_terminal`, add static-consumer/UB/command contract tests, and disable core dumps in intentional abort children. `$AUDIT_ROOT/logs/postfix-sanitize/tests.log` recorded the fresh 145-test closure pass before the launcher test was registered; the final integrated `$AUDIT_ROOT/logs/final-after-review-sanitize/tests.log` records 146/146 PASS with 30 expected skips. The three previously sensitive cases repeated cleanly in `$AUDIT_ROOT/logs/postfix-sanitize-repeat/tests.log`. Consolidation validation also exposed Release-only ncurses result variables used only by debug assertions; they are now explicitly `[[maybe_unused]]`, and the Release `ava`/fake-provider build plus `ava_tests.tui_composer` passed.
+- **Exact evidence:** the initial fresh sanitizer default build failed on uninstrumented consumers and exposed libcwd/death-test instability. The integrated change makes the `sanitize` preset/CI path canonical BetaTest plus debug instrumentation, makes UBSan non-recovering, propagates sanitizer runtime from static libraries, instruments `ava_terminal` centrally, adds static-consumer/UB/command contract tests, and disables core dumps in intentional abort children. A clean local run passed 146/146, and GitHub Actions run `32795413575` passed its sanitizer job. `$AUDIT_ROOT/logs/final-after-review-sanitize/tests.log` preserves the audit's 146/146 closure evidence.
 - **Impact:** a partial or recoverable sanitizer configuration could report success while production terminal objects or violations escaped the gate.
 - **Measurable acceptance:** fresh default sanitizer configure/build succeeds; compile/link commands instrument all first-party production targets; the UB fixture must fail internally and therefore pass its `WILL_FAIL` CTest; full sanitizer CTest passes with only declared skips.
 - **Verification:** `cmake --preset sanitize`, complete locked build/test at two jobs, sanitizer contract tests, compile-command inspection, and repeat of core-mode/libcwd-sensitive tests.
@@ -82,7 +83,7 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 ### AVA-REL-014 — Destructive live-dogfood roots
 
-- **Tier/status/owner:** P1; fixed in working tree; Andrés.
+- **Tier/status/owner:** P1; integrated on `develop`; Andrés.
 - **Subsystem:** live-provider dogfood launchers.
 - **Exact evidence:** `scripts/live-model-dogfood.sh`, `scripts/live-coding-dogfood.sh`, and `scripts/live-provider-matrix.sh` now treat overrides as validated private parents, allocate mode-0700 invocation-owned unpredictable children, and remove only those children. `tests/live_dogfood_launcher_test.py` exercises canary, symlink, root/home/checkout overlap, mode, ownership, cleanup, retention, and matrix cases; its direct invocation and registered `ava_tests.live_dogfood_launchers` CTest passed during consolidation.
 - **Impact:** the old override contract could recursively delete a caller-supplied path after a typo or hostile value.
@@ -108,7 +109,7 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 - **Tier/status/owner:** P1; open blocker; shared.
 - **Subsystem:** CI, native terminal qualification, artifact retention, and package promotion.
-- **Exact evidence:** exact-baseline GitHub run `32653859737` failed with zero jobs. Local GCC 13 BetaTest/Make and Release/Ninja full runs passed; an audited local strict x64 archive passed checksum, extraction, CLI, fake-provider, provenance, and package gates; the audit's terminal wave was effectively 23/23 tmux after a short-root rerun plus 4/4 PTY. None proves the future exact retained candidate bytes. See `$AUDIT_ROOT/logs/{dev-gcc,release-gcc-ninja,strict-package,tmux,pty}/`.
+- **Exact evidence:** exact-baseline GitHub run `32653859737` failed before job creation because `runner.temp` was invalid in job-level workflow environment expressions. That parser defect and subsequent GCC 16, AArch64 BMI2, sanitizer, and architecture-specific loader-policy failures were fixed. Run `32795413575` then passed Debug, Release, sanitizer, focused TSan, ACP SDK interoperability, and native AArch64 build/test/static-package jobs. Local strict x64 packaging and 23 tmux plus four PTY gates also passed, but CI still rebuilds for packaging, does not run the 27 terminal gates on the exact packaged binary, and retains no promotable archive/checksum pair. See `$AUDIT_ROOT/logs/{dev-gcc,release-gcc-ninja,strict-package,tmux,pty}/`.
 - **Impact:** rebuilding after tests can publish bytes that CI never tested, while non-retained logs/artifacts cannot be independently promoted or verified.
 - **Measurable acceptance:** a successful exact-candidate native Linux x64 CI run builds the final binary once; that binary receives full deterministic CTest, canonical sanitizer evidence, focused TSan, all exact candidate 23 tmux and four PTY gates with zero skips, install/provenance/package checks, checksum and extracted CLI/fake-provider smoke; the unchanged archive/checksum pair is retained with explicit retention and recorded digests; promotion re-verifies those digests and never rebuilds. No architecture without equivalent native evidence is emitted or advertised.
 - **Verification:** retained workflow/run IDs, job conclusions, test reports, terminal evidence, package manifest, archive/checksum digests before and after promotion, and extracted `bin/ava --version` from the retained archive.
@@ -119,7 +120,7 @@ After this freeze, a new P0/P1 requires all of: a reproducible impact on the nar
 
 - **Tier/status/owner:** P1; open blocker; shared.
 - **Subsystem:** build support, runtime portability, architecture, and documentation.
-- **Exact evidence:** Ubuntu 24.04.4 x86-64 with GCC 13.3 passed BetaTest/Unix Makefiles and Release/Ninja full runs. Clang 18 was BLOCKED by scanner/default GCC 16 and Clang/libstdc++ C++23 `std::expected` incompatibilities. MSVC, macOS, Windows, and AArch64 were not qualified. The audited x64 binary contains BMI2 instructions and requires symbol floors `GLIBC_2.38`, `GLIBCXX_3.4.32`, and `CXXABI_1.3.13`, plus `libncursesw.so.6`, `libtinfo.so.6`, and `curl`; CMake timeout properties require CMake 3.27. Multi-config is not release-qualified.
+- **Exact evidence:** Ubuntu 24.04.4 x86-64 with GCC 13.3 passed BetaTest/Unix Makefiles and Release/Ninja full runs. GitHub run `32795413575` added successful GCC 16 Debug/Release and native AArch64 Release build/test/static-package evidence; AArch64 remains outside the first-publication target because it has no exact retained-byte terminal/minimum-host qualification. Clang 18 was BLOCKED by scanner/default GCC 16 and Clang/libstdc++ C++23 `std::expected` incompatibilities. MSVC, macOS, and Windows were not qualified. The audited x64 binary contains BMI2 instructions and requires symbol floors `GLIBC_2.38`, `GLIBCXX_3.4.32`, and `CXXABI_1.3.13`, plus `libncursesw.so.6`, `libtinfo.so.6`, and `curl`; CMake timeout properties require CMake 3.27. Multi-config is not release-qualified.
 - **Impact:** users can receive an artifact that will not start on an older CPU/runtime or infer support from source branches that were never natively tested.
 - **Measurable acceptance:** first-publication docs and release body name Linux x64 only; exact retained bytes are inspected for ISA, symbol versions, and dynamic dependencies; extracted smoke passes on the chosen minimum supported host/CPU profile; CMake minimum is 3.27 everywhere; tested/best-effort/unsupported matrices agree; every future architecture has independent native exact-candidate evidence before publication.
 - **Verification:** `file`, `readelf`, `objdump`, `ldd`/loader inspection without broadening dependency claims; native minimum-host extraction, checksum, `--version`, `--help`, `doctor`, and fake-provider smoke; documentation gates.

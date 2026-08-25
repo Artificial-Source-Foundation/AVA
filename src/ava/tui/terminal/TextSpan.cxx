@@ -62,19 +62,19 @@ void TextSpan::write_to(BasicWindow& basic_window, Rendition const& default_rend
   DoutEntering(dc::terminal, "TextSpan::write_to(" << basic_window << ", " << default_rendition << ")");
 
   Rendition const current_rendition = basic_window.current_rendition();
-  std::size_t const assigned_width = this->assigned_width().value();
+  columns_t const assigned_width = this->assigned_width().columns();
   GraphemeRun const grapheme_run(*this);
   Dout(dc::terminal, "This TextSpan as GraphemeRun: " << grapheme_run);
 
   // Find the longest whole-cluster prefix that fits in the assigned terminal columns. `length` is a wide-character count for
   // BasicWindow::addstr, while `content_columns` tracks the potentially different cursor advance.
   std::size_t length = 0;
-  std::size_t content_columns = 0;
+  columns_t content_columns = 0;
   auto const& metadata = grapheme_run.metadata();
   for (auto cluster = metadata.begin(); cluster != metadata.end();)
   {
     auto next_cluster = std::next(cluster);
-    std::size_t cluster_columns = cluster->columns;
+    columns_t cluster_columns = cluster->columns;
     // Include all combining wide characters in the current grapheme.
     while (next_cluster != metadata.end() && next_cluster->combining)
     {
@@ -91,10 +91,10 @@ void TextSpan::write_to(BasicWindow& basic_window, Rendition const& default_rend
     cluster = next_cluster;
   }
 
-  std::size_t spaces = assigned_width - content_columns; // The total number of required filler spaces.
+  columns_t spaces = assigned_width - content_columns; // The total number of required filler spaces.
   if (spaces > 0 && horizontal_alignment() != HorizontalAlignment::left)
   {
-    std::size_t const leading_spaces = horizontal_alignment() == HorizontalAlignment::right ? spaces : spaces / 2;
+    columns_t const leading_spaces = horizontal_alignment() == HorizontalAlignment::right ? spaces : spaces / 2;
     basic_window.addspaces(leading_spaces, default_rendition);
     // Adjust `spaces` to become the number of trailing spaces.
     spaces -= leading_spaces;

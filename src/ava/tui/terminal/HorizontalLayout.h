@@ -26,7 +26,7 @@ class HorizontalLayout
     layout_items_.push_back(std::move(layout_item));
   }
 
-  void set_width(uint32_t columns);
+  void set_width(columns_t columns);
 
   // Write this HorizontalLayout to a BasicWindow starting at pos.
   void write_to(Position pos, BasicWindow& basic_window, Rendition const& default_rendition) const;

@@ -8,7 +8,7 @@
 
 namespace ava::tui::terminal {
 
-void Pad::generate(uint32_t columns)
+void Pad::generate(columns_t columns)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);

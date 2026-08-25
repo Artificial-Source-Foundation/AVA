@@ -4,10 +4,10 @@
 #include "terminal/ColorPair.h"
 #include "terminal/ComplexChar.h"
 #include "terminal/GraphemeRun.h"
+#include "terminal/GraphemeSpan.h"
 #include "terminal/Pad.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Rendition.h"
-#include "terminal/GraphemeSpan.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
 

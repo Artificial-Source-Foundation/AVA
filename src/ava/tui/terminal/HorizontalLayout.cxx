@@ -15,16 +15,16 @@ static constexpr std::size_t max_items = 16;
 
 struct Item {
   LayoutItem* ptr;
-  uint32_t assigned_width;
+  columns_t assigned_width;
 };
 
-void distribute(uint32_t columns, std::span<Item> items)
+void distribute(columns_t columns, std::span<Item> items)
 {
   // Fast path: if there is only 1 item - then that gets it all.
   if (items.size() == 1)
   {
     // Assign all columns to the first (and only) item.
-    items.front().assigned_width = items.front().ptr->minimum_width().value() + columns;
+    items.front().assigned_width = items.front().ptr->minimum_width().columns() + columns;
     return;
   }
 
@@ -33,7 +33,7 @@ void distribute(uint32_t columns, std::span<Item> items)
   //
   // that is: each of the first `number_of_items` `Item`s is assigned:
   //
-  //   items[k].assigned_width = items[k].ptr->minimum_width().value() + columns_part(k)
+  //   items[k].assigned_width = items[k].ptr->minimum_width().columns() + columns_part(k)
   //
   // where the sum of columns_part(k) over all k equals `columns`.
   //
@@ -64,7 +64,7 @@ void distribute(uint32_t columns, std::span<Item> items)
 
   struct Tube           // Tube k
   {
-    uint32_t delta;     // natural_width - minimum_width : the maximum number of columns on top of minimum_width.
+    uint32_t delta;     // natural_width - minimum_width : the maximum number of columns on top of minimum_width. Can be `unlimited`.
     float weight;       // w(k), or zero when the Tube is full.
 
     // Return the height of the tube.
@@ -83,7 +83,7 @@ void distribute(uint32_t columns, std::span<Item> items)
     LayoutItem const* layout_item = items[k].ptr;
     tubes[k] = Tube{
       .delta = layout_item->natural_width().is_unlimited() ? Width::unlimited
-                                                           : (layout_item->natural_width() - layout_item->minimum_width()).value(),
+                                                           : (layout_item->natural_width() - layout_item->minimum_width()).columns(),
       .weight = layout_item->shrink_weight()
     };
 
@@ -143,19 +143,19 @@ void distribute(uint32_t columns, std::span<Item> items)
   }
 
   // Run over all items again and assign the natural width to all items that were stretched to their maximum width (the 'tube' was completely filled).
-  uint32_t remaining_columns = columns;
+  columns_t remaining_columns = columns;
   for (int k = 0; k < items.size(); ++k)
   {
     LayoutItem const* layout_item = items[k].ptr;
     if (tubes[k].is_full())
     {
-      items[k].assigned_width = layout_item->natural_width().value();
+      items[k].assigned_width = layout_item->natural_width().columns();
       remaining_columns -= tubes[k].delta;
     }
     else
     {
       // For now, assign the minimum width (level 0) to non-full tubes.
-      items[k].assigned_width = layout_item->minimum_width().value();
+      items[k].assigned_width = layout_item->minimum_width().columns();
     }
   }
 
@@ -197,7 +197,7 @@ void distribute(uint32_t columns, std::span<Item> items)
     if (tubes[k].is_full())
       continue;
     float desired_extra_columns = final_level * tubes[k].weight;
-    uint32_t extra_columns = std::floor(desired_extra_columns);
+    columns_t extra_columns = std::floor(desired_extra_columns);
     items[k].assigned_width += extra_columns;
     remaining_columns -= extra_columns;
   }
@@ -251,7 +251,7 @@ void distribute(uint32_t columns, std::span<Item> items)
 // to be interpreted as the minimum-width lower bound values at which we need
 // to switch to a lower priority.
 //
-void HorizontalLayout::set_width(uint32_t columns)
+void HorizontalLayout::set_width(columns_t columns)
 {
   int const number_of_items = layout_items_.size();
   // Increase max_items if required.
@@ -261,10 +261,10 @@ void HorizontalLayout::set_width(uint32_t columns)
   // Sort the items on the stack by priority from high to low.
   std::array<Item, max_items> ordered_items;
   std::size_t item_count = 0;
-  uint32_t sum_of_widths = 0;
+  columns_t sum_of_widths = 0;
   for (std::unique_ptr<LayoutItem> const& layout_item : layout_items_)
   {
-    sum_of_widths += layout_item->minimum_width().value();
+    sum_of_widths += layout_item->minimum_width().columns();
     ordered_items[item_count++].ptr = layout_item.get();
   }
   std::sort(
@@ -308,7 +308,7 @@ void HorizontalLayout::set_width(uint32_t columns)
       if (prev_priority == 0)
         break;
     }
-    sum_of_widths += (ordered_items[i].ptr->natural_width() - ordered_items[i].ptr->minimum_width()).value();
+    sum_of_widths += (ordered_items[i].ptr->natural_width() - ordered_items[i].ptr->minimum_width()).columns();
     // That runs `sum_of_widths` over the values:
     //   i      sum_of_widths
     //   0      20 + (13 - 4) = 29
@@ -319,7 +319,7 @@ void HorizontalLayout::set_width(uint32_t columns)
   }
 
   // The number of columns that `columns` is larger than the minimum-width of the columns_j range.
-  uint32_t const columns_delta = columns - boundary[columns_j];
+  columns_t const columns_delta = columns - boundary[columns_j];
 
   // Set assigned_width_ on all items that have minimum or maximum width,
   // and store the items that have a width somewhere in between those values.
@@ -330,9 +330,9 @@ void HorizontalLayout::set_width(uint32_t columns)
     Item& item = ordered_items[i];
     uint32_t const priority = item.ptr->shrink_priority();
     if (priority < columns_priority)
-      item.assigned_width = item.ptr->minimum_width().value();
+      item.assigned_width = item.ptr->minimum_width().columns();
     else if (priority > columns_priority)
-      item.assigned_width = item.ptr->natural_width().value();
+      item.assigned_width = item.ptr->natural_width().columns();
     else
     {
       if (first_flex_item == -1)

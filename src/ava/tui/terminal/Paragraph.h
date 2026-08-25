@@ -51,8 +51,8 @@ class Paragraph : public LayoutItem
   Rendition const& default_rendition() const { return default_rendition_; }
 
   // Wrap this Paragraph to `columns` terminal columns, returning the GraphemeSpans corresponding to that width.
-  std::vector<GraphemeSpan> create_grapheme_spans(uint32_t columns) const;
-  std::vector<GraphemeSpan> create_grapheme_spans() const { return create_grapheme_spans(assigned_width().value()); }
+  std::vector<GraphemeSpan> create_grapheme_spans(columns_t columns) const;
+  std::vector<GraphemeSpan> create_grapheme_spans() const { return create_grapheme_spans(assigned_width().columns()); }
 
   void write_to(BasicWindow& UNUSED_ARG(basic_window), Rendition const& UNUSED_ARG(default_rendition)) const override
   {

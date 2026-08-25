@@ -9,6 +9,8 @@ namespace ava::tui::terminal {
 class TextSpan;
 class GraphemeSpan;
 
+using columns_t = uint32_t;
+
 // class GraphemeRun
 //
 // A contiguous fragment of one TextSpan. It contains whole grapheme clusters
@@ -36,7 +38,7 @@ class GraphemeRun
   struct Metadata
   {
     std::size_t utf8_begin;     // The offset into the parents text to the first byte of the UTF8 encoding of this Character.
-    uint32_t columns;           // The number of terminal columns that this Character will occupy (unfortunately, this is just an approximation).
+    columns_t columns;          // The number of terminal columns that this Character will occupy (unfortunately, this is just an approximation).
     uint8_t utf8_size;          // The total number of UTF8 bytes that are consumed by this Character.
     uint8_t whitespace : 1;     // True if this Character is white-space.
     uint8_t combining : 1;      // True if this Character continues the preceding compact grapheme cluster.

@@ -51,7 +51,7 @@ class CompactClusterState
   //
   // Returns true when this character continues the preceding compact grapheme cluster. Orphan marks and
   // incomplete trailing joiners begin their own clusters instead of attaching across a TextSpan boundary.
-  bool classify(char32_t codepoint, uint32_t columns, bool has_following_character)
+  bool classify(char32_t codepoint, columns_t columns, bool has_following_character)
   {
     if (joined_character_waiting_)
     {

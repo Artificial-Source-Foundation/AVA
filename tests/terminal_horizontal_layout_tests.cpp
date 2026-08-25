@@ -26,7 +26,7 @@ namespace {
 // Verify the assigned width of `item` against `expected_width`, identifying failures with `name`.
 void expect_assigned_width(terminal::LayoutItem const& item, uint32_t expected_width, std::string_view name)
 {
-  uint32_t const actual_width = item.assigned_width().value();
+  terminal::columns_t const actual_width = item.assigned_width().columns();
   expect(actual_width == expected_width,
          std::string{name} + " must be assigned " + std::to_string(expected_width) + " columns, got " + std::to_string(actual_width));
 }

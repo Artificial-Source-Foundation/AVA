@@ -15,14 +15,14 @@ class Dimension
 {
  private:
   uint32_t height_;     // The height in rows.
-  uint32_t width_;      // The width in columns.
+  columns_t width_;     // The width in columns.
 
  public:
   Dimension(uint32_t height, uint32_t width) : height_(height), width_(width) { }
 
   // Accessors.
   uint32_t height() const { return height_; }
-  uint32_t width() const { return width_; }
+  columns_t width() const { return width_; }
 
   // Note: all arthimetic rounds the results *down* to the nearest integer.
 

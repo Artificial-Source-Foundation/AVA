@@ -1,9 +1,9 @@
 #include "sys.h"
-#include "GraphemeSpan.h"
-#include "GraphemeRun.h"
 #include "BasicWindow.h"
-#include "TextSpan.h"
+#include "GraphemeRun.h"
+#include "GraphemeSpan.h"
 #include "Rendition.h"
+#include "TextSpan.h"
 #include "utils/macros.h"
 
 #include <iterator>
@@ -79,12 +79,13 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
   auto prefix_end = source_begin;
   auto cursor = source_begin;
   size_t appended_width = 0;
+  size_t const max_columns = max_columns_;
 
   // Leading whitespace remains trailing whitespace on this row until another
   // word is accepted, so preserve all of it even when it crosses the limit.
   while (cursor != source_end && cursor->whitespace)
   {
-    appended_width += static_cast<size_t>(cursor->columns);
+    appended_width += cursor->columns;
     prefix_end = ++cursor;
   }
 
@@ -92,27 +93,27 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
   while (cursor != source_end)
   {
     auto const word_begin = cursor;
-    size_t word_width = 0;
+    columns_t word_width = 0;
     while (cursor != source_end && !cursor->whitespace)
     {
-      word_width += static_cast<size_t>(cursor->columns);
+      word_width += cursor->columns;
       ++cursor;
     }
 
-    if (columns_ + appended_width + word_width > max_columns_)
+    if (columns_ + appended_width + word_width > max_columns)
     {
       // Only an overlong first word may be split. A normally sized word that
       // does not fit in the remaining cells must start on the next row.
       if (first_word && word_width > max_columns_)
       {
         cursor = word_begin;
-        while (cursor != source_end && !cursor->whitespace && columns_ + appended_width <= max_columns_)
+        while (cursor != source_end && !cursor->whitespace && columns_ + appended_width <= max_columns)
         {
           auto cluster_end = std::next(cursor);
-          size_t cluster_width = static_cast<size_t>(cursor->columns);
+          columns_t cluster_width = cursor->columns;
           while (cluster_end != source_end && cluster_end->combining)
           {
-            cluster_width += static_cast<size_t>(cluster_end->columns);
+            cluster_width += cluster_end->columns;
             ++cluster_end;
           }
 
@@ -144,7 +145,7 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
     // portion beyond max_columns_, because it is ignored for wrapping.
     while (cursor != source_end && cursor->whitespace)
     {
-      appended_width += static_cast<size_t>(cursor->columns);
+      appended_width += cursor->columns;
       prefix_end = ++cursor;
     }
   }
@@ -215,9 +216,9 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
     std::size_t wide_character_count = 0;
     for (auto const& character_metadata : grapheme_run.metadata())
     {
-      if (!row_full && static_cast<uint32_t>(character_metadata.columns) <= remaining_columns)
+      if (!row_full && character_metadata.columns <= remaining_columns)
       {
-        remaining_columns -= static_cast<uint32_t>(character_metadata.columns);
+        remaining_columns -= character_metadata.columns;
         ++wide_character_count;
       }
       else

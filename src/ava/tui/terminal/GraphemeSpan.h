@@ -2,6 +2,7 @@
 
 #include "GraphemeRun.h"
 #include "HorizontalAlignment.h"
+
 #include <vector>
 
 namespace ava::tui::terminal {
@@ -40,14 +41,14 @@ class Rendition;
 class GraphemeSpan
 {
  private:
-  std::size_t const max_columns_;                       // The maximum number of terminal columns in this row, ignoring trailing white-space.
+  columns_t const max_columns_;                         // The maximum number of terminal columns in this row, ignoring trailing white-space.
   HorizontalAlignment const alignment_;                 // Where filler spaces need to go if max_columns_ is larger than the number of columns this span uses.
-  std::size_t columns_;                                 // The current number of terminal columns in this row, including trailing white-space.
+  columns_t columns_;                                   // The current number of terminal columns in this row, including trailing white-space.
   std::vector<GraphemeRun> grapheme_runs_;              // A list of GraphemeRun's that make up the row.
 
  public:
   // Construct an empty GraphemeSpan.
-  GraphemeSpan(std::size_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), columns_(0) { }
+  GraphemeSpan(columns_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), columns_(0) { }
 
   // Move constructor.
   GraphemeSpan(GraphemeSpan&& collector) :
@@ -64,8 +65,8 @@ class GraphemeSpan
   void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const;
 
   // Accessors.
-  std::size_t max_columns() const { return max_columns_; }
-  std::size_t columns() const { return columns_; }
+  columns_t max_columns() const { return max_columns_; }
+  columns_t columns() const { return columns_; }
   std::vector<GraphemeRun> const& grapheme_runs() const { return grapheme_runs_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

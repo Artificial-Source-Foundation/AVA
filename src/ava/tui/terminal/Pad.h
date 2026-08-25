@@ -39,7 +39,7 @@ class Pad
   // is destroyed. Every TextSpan is written with its own rendition, falling back to the default rendition
   // of the Paragraph that it belongs to. The terminal must have been initialized (Context) before calling
   // this function.
-  void generate(uint32_t columns);
+  void generate(columns_t columns);
 
   // Calls pad_.prefresh.
   void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size);

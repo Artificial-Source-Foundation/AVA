@@ -10,6 +10,9 @@
 
 namespace ava::tui::terminal {
 
+// A finite count of terminal columns. These are actual columns, not 'unknown' or 'unlimited'.
+using columns_t = uint32_t;
+
 // Forward declarations.
 class BasicWindow;
 class Rendition;
@@ -24,13 +27,13 @@ class Width
   static constexpr uint32_t unlimited = std::numeric_limits<int>::max();
 
  private:
-  uint32_t columns_;
+  uint32_t columns_;    // Either `unknown`, `unlimited` or a finite number of columns.
 
  public:
   // Construct an unknown Width.
   constexpr Width() : columns_(unknown) { }
 
-  // Construct a Width from an integer value.
+  // Construct a Width from an integer value. The value can be `unlimited/greedy`.
   constexpr Width(uint32_t columns) : columns_(columns)
   {
     // Do not construct a Width with an unknown value using this constructor.
@@ -39,7 +42,7 @@ class Width
 
   Width& operator+=(Width w);
 
-  uint32_t value() const
+  columns_t columns() const
   {
     // Should only use `value` for known, finite values.
     ASSERT(!is_unknown() && !is_unlimited());

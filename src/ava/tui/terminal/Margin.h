@@ -6,6 +6,8 @@
 
 namespace ava::tui::terminal {
 
+using columns_t = uint32_t;
+
 // Struct Margin
 //
 // Aggregate containing the desired rows and columns of cell offset between a parent Window and a to be created subwindow.
@@ -34,7 +36,7 @@ struct Margin
   uint8_t right = 0;
 
   uint32_t height() const { return top + bottom; }
-  uint32_t width() const { return left + right; }
+  columns_t width() const { return left + right; }
   bool empty() const { return (top | bottom | left | right) == 0; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

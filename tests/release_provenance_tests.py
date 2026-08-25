@@ -371,6 +371,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     qualification_mode=True, binary_version="1.0.0"
                 )
         self.assertEqual(provenance["elf_dt_needed"], ["libc.so.6", "libsurprise.so.1"])
+        self.assertEqual(provenance["unexpected_dynamic_dependencies"], ["libsurprise.so.1"])
         self.assertFalse(provenance["release_qualified"])
         self.assertIn("unexpected-dynamic-dependency", provenance["qualification_reasons"])
 
@@ -442,7 +443,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
         allowed_subset = self.collect(needed=["libc.so.6"])
         unexpected = self.collect(needed=["libc.so.6", "libsurprise.so.1"])
         self.assertTrue(allowed_subset["release_qualified"])
+        self.assertEqual(allowed_subset["unexpected_dynamic_dependencies"], [])
         self.assertFalse(unexpected["release_qualified"])
+        self.assertEqual(unexpected["unexpected_dynamic_dependencies"], ["libsurprise.so.1"])
         self.assertIn("unexpected-dynamic-dependency", unexpected["qualification_reasons"])
 
     def test_non_strict_and_supplied_binary_cannot_be_qualified(self) -> None:

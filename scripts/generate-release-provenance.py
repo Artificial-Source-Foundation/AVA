@@ -299,9 +299,10 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         reasons.append("binary-architecture-unsupported")
     if host_architecture_matches_binary is False:
         reasons.append("host-binary-architecture-mismatch")
+    unexpected_dynamic_dependencies = None if needed is None else sorted(set(needed) - HOST_DYNAMIC_ALLOWLIST)
     if needed is None:
         reasons.append("binary-not-elf")
-    elif set(needed) - HOST_DYNAMIC_ALLOWLIST:
+    elif unexpected_dynamic_dependencies:
         reasons.append("unexpected-dynamic-dependency")
     license_ids = {record["name"]: record["license_id"] for record in dependencies}
     license_ids["boost_headers"] = "BSL-1.0"
@@ -326,6 +327,7 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         "host_architecture_matches_binary": host_architecture_matches_binary,
         "elf_dt_needed": needed,
         "host_dynamic_dependency_allowlist": sorted(HOST_DYNAMIC_ALLOWLIST),
+        "unexpected_dynamic_dependencies": unexpected_dynamic_dependencies,
         "release_qualified": not reasons,
         "qualification_reasons": reasons,
     }
@@ -353,6 +355,9 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.require_release_qualified and not provenance["release_qualified"]:
+        unexpected = provenance["unexpected_dynamic_dependencies"]
+        if unexpected:
+            print("error: unexpected dynamic dependencies: " + ", ".join(unexpected), file=sys.stderr)
         print("error: release qualification failed: " + ", ".join(provenance["qualification_reasons"]), file=sys.stderr)
         return 1
     return 0

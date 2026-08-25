@@ -48,6 +48,10 @@ EXPECTED_LICENSE_SHA256 = {
     "nlohmann_json": "d64d1b4d948aa7751cfb613c02dc246aab7b358d760053e6580f01affe946906",
 }
 HOST_DYNAMIC_ALLOWLIST = frozenset({"libncursesw.so.6", "libtinfo.so.6", "libstdc++.so.6", "libm.so.6", "libgcc_s.so.1", "libc.so.6"})
+ARCHITECTURE_DYNAMIC_ALLOWLISTS = {
+    "x86_64": HOST_DYNAMIC_ALLOWLIST,
+    "aarch64": HOST_DYNAMIC_ALLOWLIST | {"ld-linux-aarch64.so.1"},
+}
 QUALIFIED_ARCHITECTURES = frozenset({"x86_64", "aarch64"})
 MACHINE_ARCHITECTURES = {3: "x86", 62: "x86_64", 183: "aarch64"}
 
@@ -299,7 +303,8 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         reasons.append("binary-architecture-unsupported")
     if host_architecture_matches_binary is False:
         reasons.append("host-binary-architecture-mismatch")
-    unexpected_dynamic_dependencies = None if needed is None else sorted(set(needed) - HOST_DYNAMIC_ALLOWLIST)
+    dynamic_dependency_allowlist = ARCHITECTURE_DYNAMIC_ALLOWLISTS.get(architecture, HOST_DYNAMIC_ALLOWLIST)
+    unexpected_dynamic_dependencies = None if needed is None else sorted(set(needed) - dynamic_dependency_allowlist)
     if needed is None:
         reasons.append("binary-not-elf")
     elif unexpected_dynamic_dependencies:
@@ -326,7 +331,7 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         "host_architecture": host_architecture,
         "host_architecture_matches_binary": host_architecture_matches_binary,
         "elf_dt_needed": needed,
-        "host_dynamic_dependency_allowlist": sorted(HOST_DYNAMIC_ALLOWLIST),
+        "host_dynamic_dependency_allowlist": sorted(dynamic_dependency_allowlist),
         "unexpected_dynamic_dependencies": unexpected_dynamic_dependencies,
         "release_qualified": not reasons,
         "qualification_reasons": reasons,

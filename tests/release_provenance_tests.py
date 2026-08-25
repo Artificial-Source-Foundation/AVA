@@ -389,6 +389,21 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 self.assertTrue(provenance["release_qualified"])
                 self.assertEqual(provenance["qualification_reasons"], [])
 
+    def test_aarch64_loader_is_allowed_only_for_aarch64(self) -> None:
+        loader = "ld-linux-aarch64.so.1"
+        aarch64 = self.collect(
+            host_architecture="aarch64",
+            architecture="aarch64",
+            needed=["libc.so.6", loader],
+        )
+        x86_64 = self.collect(needed=["libc.so.6", loader])
+        self.assertTrue(aarch64["release_qualified"])
+        self.assertIn(loader, aarch64["host_dynamic_dependency_allowlist"])
+        self.assertEqual(aarch64["unexpected_dynamic_dependencies"], [])
+        self.assertFalse(x86_64["release_qualified"])
+        self.assertNotIn(loader, x86_64["host_dynamic_dependency_allowlist"])
+        self.assertEqual(x86_64["unexpected_dynamic_dependencies"], [loader])
+
     def test_host_binary_architecture_mismatches_fail_closed(self) -> None:
         for host_architecture, binary_architecture in (
             ("x86_64", "aarch64"),

@@ -37,6 +37,9 @@ class Rendition;
 //                              columns_
 //
 // The `columns_` in the above examples are the concatenation of all the GraphemeRun::str_ wstring's.
+// `columns_excluding_trailing_whitespace_` excludes only the trailing white-space from `str_` so right
+// alignment can position the last visible grapheme independently of retained trailing spaces in
+// GraphemeRun's.
 //
 class GraphemeSpan
 {
@@ -44,18 +47,28 @@ class GraphemeSpan
   columns_t const max_columns_;                         // The maximum number of terminal columns in this row, ignoring trailing white-space.
   HorizontalAlignment const alignment_;                 // Where filler spaces need to go if max_columns_ is larger than the number of columns this span uses.
   columns_t columns_;                                   // The current number of terminal columns in this row, including trailing white-space.
+  // Columns from the start through the last non-white-space grapheme, excluding only trailing white-space.
+  columns_t columns_excluding_trailing_whitespace_;
   std::vector<GraphemeRun> grapheme_runs_;              // A list of GraphemeRun's that make up the row.
 
  public:
   // Construct an empty GraphemeSpan.
-  GraphemeSpan(columns_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), columns_(0) { }
+  GraphemeSpan(columns_t max_columns, HorizontalAlignment alignment)
+      : max_columns_(max_columns), alignment_(alignment), columns_(0), columns_excluding_trailing_whitespace_(0)
+  {
+  }
 
   // Move constructor.
-  GraphemeSpan(GraphemeSpan&& collector) :
-    max_columns_(collector.max_columns_), alignment_(collector.alignment_), columns_(collector.columns_), grapheme_runs_(std::move(collector.grapheme_runs_))
+  GraphemeSpan(GraphemeSpan&& collector)
+      : max_columns_(collector.max_columns_),
+        alignment_(collector.alignment_),
+        columns_(collector.columns_),
+        columns_excluding_trailing_whitespace_(collector.columns_excluding_trailing_whitespace_),
+        grapheme_runs_(std::move(collector.grapheme_runs_))
   {
     // Reset the collector for further use(!) as if it was just constructed (empty).
     collector.columns_ = 0;
+    collector.columns_excluding_trailing_whitespace_ = 0;
   }
 
   // Append as much of a GraphemeRun to the end as possible, returns what didn't fit.
@@ -67,6 +80,9 @@ class GraphemeSpan
   // Accessors.
   columns_t max_columns() const { return max_columns_; }
   columns_t columns() const { return columns_; }
+
+  // Return the number of columns from the start through the final non-white-space grapheme, or zero for an all-white-space span.
+  columns_t columns_excluding_trailing_whitespace() const { return columns_excluding_trailing_whitespace_; }
   std::vector<GraphemeRun> const& grapheme_runs() const { return grapheme_runs_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

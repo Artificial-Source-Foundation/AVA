@@ -240,6 +240,59 @@ void test_pad_generate_comment_example()
                where + " must use the " + (styled ? "bold" : "normal") + " attributes");
       }
     }
+
+    // A right-aligned row ignores trailing spaces when positioning its visible content. The trailing spaces deliberately cross
+    // TextSpan/GraphemeRun boundaries and cover totals below, equal to, and above the six-column pad width.
+    for (std::size_t trailing_spaces : {3U, 4U, 5U})
+    {
+      auto right_aligned = terminal::Paragraph::create({.alignment = terminal::HorizontalAlignment::right});
+      right_aligned->append(terminal::TextSpan::create(u8"ab "));
+      for (std::size_t space = 1; space < trailing_spaces; ++space)
+      {
+        if ((space & 1U) != 0)
+          right_aligned->append(terminal::TextSpan::create(u8" ", styled_rendition));
+        else
+          right_aligned->append(terminal::TextSpan::create(u8" "));
+      }
+
+      std::vector<terminal::GraphemeSpan> right_aligned_rows = right_aligned->create_grapheme_spans(6);
+      expect(right_aligned_rows.size() == 1 && right_aligned_rows.front().columns() == 2 + trailing_spaces &&
+                 right_aligned_rows.front().columns_excluding_trailing_whitespace() == 2,
+             "a GraphemeSpan must distinguish total columns from its width through the last non-space grapheme");
+      if (right_aligned_rows.size() == 1)
+      {
+        std::wstring retained_text;
+        for (terminal::GraphemeRun const& run : right_aligned_rows.front().grapheme_runs())
+          retained_text += run.str();
+        expect(retained_text == std::wstring{L"ab"} + std::wstring(trailing_spaces, L' '),
+               "right alignment must retain every source character and its GraphemeRun ownership");
+      }
+
+      terminal::Pad right_aligned_pad;
+      right_aligned_pad.append(std::move(right_aligned));
+      right_aligned_pad.generate(6);
+
+      std::array<terminal::ComplexChar, 6> right_aligned_cells;
+      right_aligned_pad.basic_window().instr({0, 0}, right_aligned_cells.data(), static_cast<int>(right_aligned_cells.size()));
+      std::wstring right_aligned_text;
+      for (terminal::ComplexChar const& cell : right_aligned_cells)
+        right_aligned_text += cell.cell_character().data()[0];
+      expect(right_aligned_text == L"    ab",
+             "right alignment must place the last non-space grapheme at the writable area's right edge for every trailing-space width");
+    }
+
+    // Centered alignment deliberately keeps its prior behavior: retained trailing spaces participate in centering.
+    auto centered = terminal::Paragraph::create({.alignment = terminal::HorizontalAlignment::centered});
+    centered->append(terminal::TextSpan::create(u8"ab   "));
+    terminal::Pad centered_pad;
+    centered_pad.append(std::move(centered));
+    centered_pad.generate(6);
+    std::array<terminal::ComplexChar, 6> centered_cells;
+    centered_pad.basic_window().instr({0, 0}, centered_cells.data(), static_cast<int>(centered_cells.size()));
+    std::wstring centered_text;
+    for (terminal::ComplexChar const& cell : centered_cells)
+      centered_text += cell.cell_character().data()[0];
+    expect(centered_text == L"ab    ", "trailing spaces must continue to participate in centered alignment");
   }
 
   static_cast<void>(endwin());

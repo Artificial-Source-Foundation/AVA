@@ -10,50 +10,50 @@
 
 namespace ava::tui::terminal {
 
-// Determine how much of `source` still fits on this GraphemeSpan.
+// Determine how much of `run` still fits on this GraphemeSpan.
 //
-// If everything fits, move-append source to grapheme_runs_ and return a default constructed GraphemeRun.
+// If everything fits, move-append `run` to grapheme_runs_ and return a default constructed GraphemeRun.
 //
 // For example if GraphemeSpan currently contains the GraphemeRun's "current ", "CONTENT" and " ":
 //
 //           <--------max_columns_------->
 //  this:   |current CONTENT #            |
 //           ''''''''^^^^^^^'                 <--
-//  source: |hello world|
+//  run:    |hello world|
 //
 //  result: |current CONTENT hello world# |
 //           ''''''''^^^^^^^'^^^^^^^^^^^      <-- this line shows which characters belong to which GraphemeRun element (alternating ' and ~ characters).
 //
-// If the first word of `source` is longer than max_columns_, use it to fill the current GraphemeSpan by splitting
+// If the first word of `run` is longer than max_columns_, use it to fill the current GraphemeSpan by splitting
 // that word only between compact grapheme clusters and return the remainder. A cluster wider than an otherwise
 // empty row is appended whole, exceeding max_columns_, so wrapping can make progress without splitting it.
 //
 // For example,
 //             <--------max_columns_------->
 //  this:     |foo#                         |
-//  source:   |AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
+//  run:      |AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
 //  result:   |fooAAAAAAAAAAAAAAAAAAAAAAAAAA|
 //  returned: |AAAAAAAAAAA BBB|
 //
-// otherwise if nothing fits, return source itself.
+// otherwise if nothing fits, return `run` itself.
 //
 // For example,
 //             <--------max_columns_------->
 //  this:     |foo#                         |
-//  source:   |AAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
+//  run:      |AAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
 //  result:   |foo#                         |
 //  returned: |AAAAAAAAAAAAAAAAAAAAAAAAAAA BBB|
 //
-// Otherwise, append all grapheme clusters up till the first white-space of `source` that still fit,
+// Otherwise, append all grapheme clusters up till the first white-space of `run` that still fit,
 // plus any subsequent white-space even if they don't fit, as a single GraphemeRun to to this GraphemeSpan
 // and return the remaining grapheme clusters as a GraphemeRun.
 //
 // For example,
 //             <--------max_columns_------->
 //  this:     |aaaaaaa bbbbbbb #            |
-//  source:   |ccccc ddddd eeeeeee fffff ggggg hhhhh|
+//  run:      |ccccc ddddd eeeeeee fffff ggggg hhhhh|
 //
 //  result:   |aaaaaaa bbbbbbb ccccc ddddd #|
 //             ''''''''''''''''^^^^^^^^^^^^
@@ -62,116 +62,125 @@ namespace ava::tui::terminal {
 //  or
 //             <--------max_columns_------->
 //  this:     |aaaaaaa bbbbbbb #            |
-//  source:   |ccccc ddddddd    eeeeeee fffff ggggg hhhhh|
+//  run:      |ccccc ddddddd    eeeeeee fffff ggggg hhhhh|
 //
 //  result:   |aaaaaaa bbbbbbb ccccc ddddddd|    #
 //             ''''''''''''''''^^^^^^^^^^^^^^^^^^
 //  returned: |eeeeeee fffff ggggg hhhhh|
 //
-GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
+GraphemeRun GraphemeSpan::append(GraphemeRun&& run)
 {
-  if (source.empty())
-    // Pretend we succesfully appended source.
+  if (run.empty())
+    // Pretend we succesfully appended `run`.
     return {};
 
-  auto const source_begin = source.metadata().begin();
-  auto const source_end = source.metadata().end();
-  auto prefix_end = source_begin;
-  auto cursor = source_begin;
-  size_t appended_width = 0;
-  size_t const max_columns = max_columns_;
+  auto const run_begin = run.metadata().begin();
+  auto const run_end = run.metadata().end();
+  auto appended_end = run_begin;
+  auto scan = run_begin;
+  columns_t appended_columns = 0;
 
   // Leading whitespace remains trailing whitespace on this row until another
-  // word is accepted, so preserve all of it even when it crosses the limit.
-  while (cursor != source_end && cursor->whitespace)
+  // word is appended, so preserve all of it even when it crosses the limit.
+  while (scan != run_end && scan->whitespace)
   {
-    appended_width += cursor->columns;
-    prefix_end = ++cursor;
+    appended_columns += scan->columns;
+    appended_end = ++scan;
   }
 
   bool first_word = true;
-  while (cursor != source_end)
+  while (scan != run_end)
   {
-    auto const word_begin = cursor;
-    columns_t word_width = 0;
-    while (cursor != source_end && !cursor->whitespace)
+    auto const word_begin = scan;
+    columns_t word_columns = 0;
+    while (scan != run_end && !scan->whitespace)
     {
-      word_width += cursor->columns;
-      ++cursor;
+      word_columns += scan->columns;
+      ++scan;
     }
 
-    if (columns_ + appended_width + word_width > max_columns)
+    // Can we append this word too?
+    if (columns_ + appended_columns + word_columns > max_columns_)
     {
       // Only an overlong first word may be split. A normally sized word that
       // does not fit in the remaining cells must start on the next row.
-      if (first_word && word_width > max_columns_)
+      if (first_word && word_columns > max_columns_)
       {
-        cursor = word_begin;
-        while (cursor != source_end && !cursor->whitespace && columns_ + appended_width <= max_columns)
+        scan = word_begin;
+        while (scan != run_end && !scan->whitespace && columns_ + appended_columns <= max_columns_)
         {
-          auto cluster_end = std::next(cursor);
-          columns_t cluster_width = cursor->columns;
-          while (cluster_end != source_end && cluster_end->combining)
+          auto cluster_end = std::next(scan);
+          columns_t cluster_width = scan->columns;
+          while (cluster_end != run_end && cluster_end->combining)
           {
             cluster_width += cluster_end->columns;
             ++cluster_end;
           }
 
-          if (columns_ + appended_width + cluster_width > max_columns_)
+          if (columns_ + appended_columns + cluster_width > max_columns_)
           {
             // An indivisible cluster wider than an empty row must be kept whole so wrapping makes progress.
-            if (columns_ == 0 && appended_width == 0)
+            if (columns_ == 0 && appended_columns == 0)
             {
-              appended_width = cluster_width;
-              prefix_end = cluster_end;
-              cursor = cluster_end;
+              appended_columns = cluster_width;
+              appended_end = cluster_end;
+              scan = cluster_end;
             }
             break;
           }
 
-          appended_width += cluster_width;
-          prefix_end = cluster_end;
-          cursor = cluster_end;
+          appended_columns += cluster_width;
+          appended_end = cluster_end;
+          scan = cluster_end;
         }
       }
       break;
     }
 
-    appended_width += word_width;
-    prefix_end = cursor;
+    appended_columns += word_columns;
+    appended_end = scan;
     first_word = false;
 
-    // Whitespace following an accepted word stays on this row, including the
+    // Whitespace following an appended word stays on this row, including the
     // portion beyond max_columns_, because it is ignored for wrapping.
-    while (cursor != source_end && cursor->whitespace)
+    while (scan != run_end && scan->whitespace)
     {
-      appended_width += cursor->columns;
-      prefix_end = ++cursor;
+      appended_columns += scan->columns;
+      appended_end = ++scan;
     }
   }
 
-  if (prefix_end == source_begin)
-    return std::move(source);
+  if (appended_end == run_begin)
+    return std::move(run);
 
-  if (prefix_end == source_end)
+  // Update columns_excluding_trailing_whitespace_ by adding all appended columns through the last non-whitespace.
+  columns_t column_count = 0;
+  for (auto iter = run_begin; iter != appended_end; ++iter)
   {
-    columns_ += appended_width;
-    grapheme_runs_.push_back(std::move(source));
+    column_count += iter->columns;
+    if (!iter->whitespace)
+      columns_excluding_trailing_whitespace_ = columns_ + column_count;
+  }
+
+  if (appended_end == run_end)
+  {
+    columns_ += appended_columns;
+    grapheme_runs_.push_back(std::move(run));
     return {};
   }
 
-  // The prefix takes the first `prefix_size` entries of both parallel containers;
+  // The appended run takes the first `appended_character_count` entries of both parallel containers;
   // wide_[N] corresponds to metadata_[N].
-  auto const prefix_size = static_cast<std::size_t>(prefix_end - source_begin);
+  std::size_t const appended_character_count = static_cast<std::size_t>(appended_end - run_begin);
 
-  GraphemeRun prefix;
-  prefix.text_span_ = source.text_span_;
-  prefix.copy_prefix(source, prefix_size);
-  source.remove_prefix(prefix_size);
+  GraphemeRun appended_run;
+  appended_run.text_span_ = run.text_span_;
+  appended_run.copy_prefix(run, appended_character_count);
+  run.remove_prefix(appended_character_count);
 
-  columns_ += appended_width;
-  grapheme_runs_.push_back(std::move(prefix));
-  return std::move(source);
+  columns_ += appended_columns;
+  grapheme_runs_.push_back(std::move(appended_run));
+  return std::move(run);
 }
 
 // Write one GraphemeSpan into the ncurses handle `basic_window` at the current cursor position.
@@ -183,8 +192,12 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& source)
 //
 // Wrapping (for example of a Paragraph) may have kept trailing white-space past the end of the GraphemeSpan.
 // Trailing white-space is still written - it carries the background color of its rendition - but is clipped
-// at `max_columns_` terminal columns. A GraphemeSpan only contains spaces that go beyond its `max_columns_`,
-// therefore nothing else will be clipped.
+// at `max_columns_` terminal columns. A GraphemeSpan can only go beyond its `max_columns_` with spaces,
+// therefore only spaces might get clipped. Retained trailing white-space is written with its source rendition
+// when it falls inside `max_columns_`, while extra filler space is written using the default rendition.
+//
+// In the case of right alignment the width through the last non-white-space grapheme is used, so no trailing
+// white-space is visible.
 //
 // Rows are extended to `max_columns_` terminal columns using spaces with `default_rendition`, so that the
 // background of the whole row equals the paragraph background. A row that is written to the very last row
@@ -204,8 +217,12 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
   std::vector<std::size_t> per_grapheme_run_wide_character_count;
   per_grapheme_run_wide_character_count.reserve(grapheme_runs_.size());
 
+  std::size_t leading_spaces = 0;
+  if (alignment_ == HorizontalAlignment::right)
+    leading_spaces = columns_excluding_trailing_whitespace_ < max_columns_ ? max_columns_ - columns_excluding_trailing_whitespace_ : 0;
+
   bool row_full = false;          // Set once a character was clipped; from then on only white-space may follow.
-  uint32_t remaining_columns = max_columns_;
+  columns_t remaining_columns = max_columns_ - leading_spaces;
   for (GraphemeRun const& grapheme_run : grapheme_runs_)
   {
     // An empty GraphemeRun has nothing to write; just go to the next one.
@@ -239,14 +256,15 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
       break;
   }
 
-  std::size_t spaces = remaining_columns; // The total number of required filler spaces.
-  if (spaces > 0 && alignment_ != HorizontalAlignment::left)
+  // Preserve centered alignment's existing treatment of trailing white-space: center the columns that were actually retained.
+  if (alignment_ == HorizontalAlignment::centered)
   {
-    std::size_t const leading_spaces = alignment_ == HorizontalAlignment::right ? spaces : spaces / 2;
-    basic_window.addspaces(leading_spaces, default_rendition);
-    // Adjust `spaces` to become the number of trailing spaces.
-    spaces -= leading_spaces;
+    leading_spaces = remaining_columns / 2;
+    remaining_columns -= leading_spaces;
   }
+
+  if (leading_spaces > 0)
+    basic_window.addspaces(leading_spaces, default_rendition);
 
   int gr = 0;
   for (GraphemeRun const& grapheme_run : grapheme_runs_)
@@ -273,8 +291,8 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
   }
 
   // Write the trailing spaces, if any.
-  if (spaces > 0)
-    basic_window.addspaces(spaces, default_rendition);
+  if (remaining_columns > 0)
+    basic_window.addspaces(remaining_columns, default_rendition);
 
   // Restore the rendition that the basic_window had before writing this row.
   basic_window.restore_rendition(original_rendition);

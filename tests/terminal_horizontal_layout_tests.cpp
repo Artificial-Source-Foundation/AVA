@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace terminal = ava::tui::terminal;
 
@@ -24,6 +25,14 @@ void expect_assigned_width(terminal::LayoutItem const& item, uint32_t expected_w
   terminal::columns_t const actual_width = item.assigned_width().columns();
   expect(actual_width == expected_width,
          std::string{name} + " must be assigned " + std::to_string(expected_width) + " columns, got " + std::to_string(actual_width));
+}
+
+// Verify the first wide character stored at `pos` in `window`, identifying failures with `description`.
+void expect_character(terminal::BasicWindow const& window, terminal::Position pos, wchar_t expected_character, std::string_view description)
+{
+  terminal::ComplexChar cell;
+  window.in_wch(pos, cell);
+  expect(cell.cell_character().data()[0] == expected_character, std::string{description});
 }
 
 // Verify priority negotiation among an exit label, greedy spacer, and right-aligned shortcut paragraph.
@@ -97,8 +106,9 @@ void test_weighted_layout()
 
 // Verify that TextSpan truncation counts terminal columns rather than wide characters when rendering mixed-width text.
 //
-// Runs ncurses against temporary files and checks the resulting cursor position. The seven-column prefix ends before zeta;
-// including it would consume eight columns and place the cursor one cell beyond the assigned layout width.
+// Runs ncurses against temporary files and inspects both left- and right-aligned output. The rocket cannot fit in the
+// one column remaining after the six-column prefix, so the left-aligned TextSpan gets a trailing filler space. For a
+// right-aligned Paragraph, leading filler moves that prefix to the right edge and all retained trailing spaces are clipped.
 void test_mixed_width_text_span_rendering()
 {
   FILE* input = std::tmpfile();
@@ -120,14 +130,85 @@ void test_mixed_width_text_span_rendering()
   expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
 
   {
-    terminal::HorizontalLayout horizontal_layout;
-    horizontal_layout.append(terminal::TextSpan::create(u8"αβ😀γδ🚀εζηθ", {.minimum_width = 5}));
-    horizontal_layout.set_width(7);
+    //   index i    priority   minimum width   natural width
+    //   0          5          4               13
+    //   1          2          8               14
+    //   2          2          5               12
+    //   3          0          3               unlimited
+    auto item0 = terminal::TextSpan::create(u8"abcdefghijklm", {.priority = 5, .minimum_width = 4});
+    auto item1 = terminal::TextSpan::create(u8"12345678901234", {.priority = 2, .minimum_width = 8});
+    auto item2 = terminal::TextSpan::create(u8"αβ😀γδ🚀εζηθ", {.priority = 2, .minimum_width = 5});
+    auto item3 = terminal::Spacer::create({.minimum_width = 3});
 
-    terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 9});
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(std::move(item3));
+    horizontal_layout.append(std::move(item0));
+    horizontal_layout.append(std::move(item2));
+    horizontal_layout.append(std::move(item1));
+    horizontal_layout.set_width(32);
+
+    terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 34});
     horizontal_layout.write_to({0, 0}, pad, terminal::Rendition{terminal::ColorPair{}});
     terminal::Position const cursor = pad.getyx();
-    expect(cursor.row() == 0 && cursor.col() == 7, "a seven-column TextSpan assignment must advance the ncurses cursor by exactly seven columns");
+    expect(cursor.row() == 0 && cursor.col() == 32, "a 32-column HorizontalLayout assignment must advance the ncurses cursor by exactly 32 columns");
+    std::wstring expected_output = L"   abcdefghijklmαβ😀γδ 123456789";
+    terminal::columns_t col = 0;
+    for (size_t i = 0; i != expected_output.size(); ++i)
+    {
+      std::ostringstream oss;
+      oss << "left-aligned mixed-width output must put expected_output[" << i << "] in column " << col;
+      expect_character(pad, {0, col}, expected_output[i], oss.str());
+      col += (expected_output[i] == L'😀') ? 2 : 1;
+    }
+  }
+
+  {
+    //                      A         B         C
+    //   minimum width |    5         7        11
+    //   natural width |   20        31        17
+    //          weight |  1.0       1.5       2.0
+    auto item_A = terminal::TextSpan::create(u8"12345678901234567890", {.weight = 1, .minimum_width = 5});
+    auto item_B = terminal::TextSpan::create(u8"1234567890123456789012345678901", {.weight = 1.5, .minimum_width = 7});
+    auto item_C = terminal::TextSpan::create(u8"12345678901234567", {.weight = 2, .minimum_width = 11});
+    auto ptr_A = item_A.get();
+    auto ptr_B = item_B.get();
+    auto ptr_C = item_C.get();
+
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(std::move(item_A));
+    horizontal_layout.append(std::move(item_B));
+    horizontal_layout.append(std::move(item_C));
+    horizontal_layout.set_width(43);
+
+    // Expected output: "1234567890112345678901234512345678901234567".
+    expect(ptr_A->assigned_width().columns() == 11, "the first item should be assigned a width of 11");
+    expect(ptr_B->assigned_width().columns() == 15, "the second item should be assigned a width of 15");
+    expect(ptr_C->assigned_width().columns() == 17, "the third item should be assigned a width of 17");
+  }
+
+  {
+    auto paragraph = terminal::Paragraph::create({.alignment = terminal::HorizontalAlignment::right});
+    paragraph->append(terminal::TextSpan::create(u8"αβ😀  🚀εζηθ"));
+    std::vector<terminal::GraphemeSpan> rows = paragraph->create_grapheme_spans(7);
+    expect(!rows.empty(), "right-aligned mixed-width Paragraph must produce at least one GraphemeSpan");
+    if (!rows.empty())
+    {
+      expect(rows.front().columns() == 6 && rows.front().columns_excluding_trailing_whitespace() == 4,
+             "the first mixed-width GraphemeSpan must retain six source columns while excluding its two trailing spaces");
+      expect(!rows.front().grapheme_runs().empty() && rows.front().grapheme_runs().front().str() == L"αβ😀  ",
+             "right-alignment rendering must not remove the source GraphemeRun's trailing spaces");
+
+      terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 9});
+      rows.front().write_to(pad, terminal::Rendition{terminal::ColorPair{}});
+      terminal::Position const cursor = pad.getyx();
+      expect(cursor.row() == 0 && cursor.col() == 7, "right-aligned mixed-width output must advance by exactly seven columns");
+      expect_character(pad, {0, 0}, L' ', "right-aligned mixed-width output must begin with filler space");
+      expect_character(pad, {0, 1}, L' ', "right-aligned mixed-width output must begin with filler spaces");
+      expect_character(pad, {0, 2}, L' ', "right-aligned mixed-width output must begin with three filler spaces");
+      expect_character(pad, {0, 3}, L'α', "right-aligned mixed-width output must put alpha in column 1");
+      expect_character(pad, {0, 4}, L'β', "right-aligned mixed-width output must put beta in column 2");
+      expect_character(pad, {0, 5}, L'😀', "right-aligned mixed-width output must put the two-column emoji in column 3");
+    }
   }
 
   static_cast<void>(std::fclose(input));

@@ -23,8 +23,6 @@ int main()
   terminal::BasicWindow& stdscr = terminal_context.stdscr();
 
   terminal::HorizontalLayout horizontal_layout1;
-  terminal::HorizontalLayout horizontal_layout2;
-  terminal::HorizontalLayout horizontal_layout3;
 
   {
     terminal::Rendition const rendition(terminal_context.create_color_pair(0xeeddcc, 0x335500));
@@ -44,49 +42,8 @@ int main()
     Dout(dc::notice, "horizontal_layout1 = " << horizontal_layout1);
   }
 
-  {
-    //   index i    priority   minimum width   natural width
-    //   0          5          4               13
-    //   1          2          8               14
-    //   2          2          5               12
-    //   3          0          3               unlimited
-
-    auto item0 = terminal::TextSpan::create(u8"abcdefghijklm", {.priority = 5, .minimum_width = 4});
-    auto item1 = terminal::TextSpan::create(u8"12345678901234", {.priority = 2, .minimum_width = 8});
-    auto item2 = terminal::TextSpan::create(u8"αβ😀γδ🚀εζηθ", {.priority = 2, .minimum_width = 5});
-    auto item3 = terminal::Spacer::create({.minimum_width = 3});
-
-    horizontal_layout2.append(std::move(item3));
-    horizontal_layout2.append(std::move(item0));
-    horizontal_layout2.append(std::move(item2));
-    horizontal_layout2.append(std::move(item1));
-
-    horizontal_layout2.set_width(32);
-    Dout(dc::notice, "horizontal_layout2 = " << horizontal_layout2);
-  }
-
-  {
-    //                      A         B         C
-    //   minimum width |    5         7        11
-    //   natural width |   20        31        17
-    //          weight |  1.0       1.5       2.0
-
-    auto item_A = terminal::TextSpan::create(u8"12345678901234567890", {.weight = 1, .minimum_width = 5});
-    auto item_B = terminal::TextSpan::create(u8"1234567890123456789012345678901", {.weight = 1.5, .minimum_width = 7});
-    auto item_C = terminal::TextSpan::create(u8"12345678901234567", {.weight = 2, .minimum_width = 11});
-    horizontal_layout3.append(std::move(item_A));
-    horizontal_layout3.append(std::move(item_B));
-    horizontal_layout3.append(std::move(item_C));
-
-    horizontal_layout3.set_width(43);
-    Dout(dc::notice, "horizontal_layout3 = " << horizontal_layout3);
-  }
-
   horizontal_layout1.write_to({5, 5}, stdscr, terminal_context.default_rendition());
-  horizontal_layout2.write_to({9, 5}, stdscr, terminal_context.default_rendition());
-  horizontal_layout3.write_to({11, 5}, stdscr, terminal_context.default_rendition());
 
-  //... display it
   //... allow resizing with keyboard
 
   [[maybe_unused]] int wch = terminal_context.get_wch();

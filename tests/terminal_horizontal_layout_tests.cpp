@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "terminal/BasicWindow.h"
 #include "terminal/ColorPair.h"
+#include "terminal/Context.h"
 #include "terminal/HorizontalLayout.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Spacer.h"
@@ -12,12 +13,6 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-
-#define NCURSES_NOMACROS
-#include <curses.h>
-#undef getbegyx
-#undef getmaxyx
-#undef getyx
 
 namespace terminal = ava::tui::terminal;
 
@@ -106,15 +101,6 @@ void test_weighted_layout()
 // including it would consume eight columns and place the cursor one cell beyond the assigned layout width.
 void test_mixed_width_text_span_rendering()
 {
-  char const* previous_locale_value = std::setlocale(LC_CTYPE, nullptr);
-  std::string const previous_locale = previous_locale_value == nullptr ? std::string{} : std::string{previous_locale_value};
-  if (std::setlocale(LC_CTYPE, "") == nullptr)
-  {
-    expect(false, "the environment locale must support UTF-8 for mixed-width TextSpan rendering");
-    return;
-  }
-
-  ScopedEnvVar term_guard("TERM", "xterm-256color");
   FILE* input = std::tmpfile();
   FILE* output = std::tmpfile();
   if (!input || !output)
@@ -123,27 +109,19 @@ void test_mixed_width_text_span_rendering()
       static_cast<void>(std::fclose(input));
     if (output)
       static_cast<void>(std::fclose(output));
-    if (!previous_locale.empty())
-      static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
     expect(false, "tmpfile must be available for mixed-width TextSpan rendering");
     return;
   }
 
-  SCREEN* screen = newterm(nullptr, output, input);
-  if (!screen)
-  {
-    static_cast<void>(std::fclose(input));
-    static_cast<void>(std::fclose(output));
-    if (!previous_locale.empty())
-      static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
-    expect(false, "newterm must initialize ncurses for mixed-width TextSpan rendering");
-    return;
-  }
-  static_cast<void>(set_term(screen));
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  terminal::Context terminal_context(output, input);
+
+  bool const color_support = terminal_context.has_colors();
+  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
 
   {
     terminal::HorizontalLayout horizontal_layout;
-    horizontal_layout.append(terminal::TextSpan::create(u8"αβ😀γδεζ🚀ηθ", {.minimum_width = 5}));
+    horizontal_layout.append(terminal::TextSpan::create(u8"αβ😀γδ🚀εζηθ", {.minimum_width = 5}));
     horizontal_layout.set_width(7);
 
     terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 9});
@@ -152,12 +130,8 @@ void test_mixed_width_text_span_rendering()
     expect(cursor.row() == 0 && cursor.col() == 7, "a seven-column TextSpan assignment must advance the ncurses cursor by exactly seven columns");
   }
 
-  static_cast<void>(endwin());
-  delscreen(screen);
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
-  if (!previous_locale.empty())
-    static_cast<void>(std::setlocale(LC_CTYPE, previous_locale.c_str()));
 }
 
 } // namespace

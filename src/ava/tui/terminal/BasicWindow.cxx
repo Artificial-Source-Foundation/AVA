@@ -396,9 +396,12 @@ struct BasicWindow::Handle
     NCURSES_PAIRS_T pair = 0;
     int extended_pair = 0;
     int res = ::wattr_get(handle_, &attrs, &pair, &extended_pair);
-    ColorPair color_pair;
-    color_pair.index() = extended_pair;
-    rendition = Rendition{color_pair, convert_to_Attributes(attrs)};
+    if (res == OK)
+    {
+      // With valid ncurses usage and res == OK, extended_pair should be nonnegative.
+      ASSERT(extended_pair >= 0);
+      rendition = Rendition{{{}, static_cast<uint32_t>(extended_pair)}, convert_to_Attributes(attrs)};
+    }
     return res;
   }
 

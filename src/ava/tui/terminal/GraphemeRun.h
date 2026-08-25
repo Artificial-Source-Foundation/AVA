@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 #include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {

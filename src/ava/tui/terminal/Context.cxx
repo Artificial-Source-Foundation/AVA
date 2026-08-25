@@ -9,7 +9,7 @@
 
 namespace ava::tui::terminal {
 
-Context::Context() : default_rendition_(ColorPair{0})
+Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
 {
   setlocale(LC_ALL, "");
 
@@ -19,9 +19,18 @@ Context::Context() : default_rendition_(ColorPair{0})
   ::use_env(TRUE);
   ::use_tioctl(TRUE);
 
-  initscr();
+  bool use_stdscr = outfd == nullptr && infd == nullptr;
 
-  stdscr_.init_as_stdscr();
+  if (use_stdscr)
+  {
+    initscr();
+    stdscr_.init_as_stdscr();
+  }
+  else
+  {
+    BasicScreen first_screen(nullptr, outfd, infd);
+    first_screen_ = std::move(first_screen);
+  }
 
   wchar_t fill[] = L" ";
 
@@ -79,6 +88,9 @@ int Context::get_wch()
 ColorPair Context::create_color_pair(Color foreground, Color background)
 {
   // Support for non-direct terminals has not be implemented yet.
+  if (COLORS != 16777216)
+    DoutFatal(dc::coredump, "COLORS = " << COLORS);
+
   // If this fires, the TUI was started on a terminal without direct color; run it only on a terminal reporting
   // COLORS == 16777216, or implement the non-direct-color path first.
   ASSERT(COLORS == 16777216);
@@ -96,11 +108,16 @@ ColorPair Context::create_color_pair(Color foreground, Color background)
     // the number of created pairs within the terminal limit and pass valid Color values.
     ASSERT(status == OK);
     // Create the new ColorPair from the new color pair index.
-    color_pairs_.push_back(color_pair_index);
+    color_pairs_.push_back(ConvertToColorPair{color_pair_index});
   }
 
   // This function should push the new ColorPair to the end of colors_pairs_.
   return color_pairs_.back();
+}
+
+bool Context::has_colors()
+{
+  return ::has_colors();
 }
 
 } // namespace ava::tui::terminal

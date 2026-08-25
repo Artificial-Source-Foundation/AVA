@@ -4,6 +4,7 @@ add_library(ava_terminal)
 # Declare source files.
 target_sources(ava_terminal
   PRIVATE
+    "BasicScreen.cxx"
     "BasicWindow.cxx"
     "ComplexChar.cxx"
     "Context.cxx"

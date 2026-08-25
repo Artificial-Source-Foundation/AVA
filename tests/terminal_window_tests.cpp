@@ -1,14 +1,10 @@
 #include "sys.h"
 #include "terminal/ColorPair.h"
+#include "terminal/Context.h"
 #include "terminal/Window.h"
 #include "tests/support/test_harness.h"
 
 #include <cstdio>
-
-#define NCURSES_NOMACROS
-#include <curses.h>
-#undef getbegyx
-#undef getmaxyx
 
 namespace terminal = ava::tui::terminal;
 
@@ -20,7 +16,6 @@ namespace {
 // without writing to a real terminal.
 void test_margin_aware_window_geometry_and_lifetime()
 {
-  ScopedEnvVar term_guard("TERM", "xterm-256color");
   FILE* input = std::tmpfile();
   FILE* output = std::tmpfile();
   if (!input || !output)
@@ -33,15 +28,8 @@ void test_margin_aware_window_geometry_and_lifetime()
     return;
   }
 
-  SCREEN* screen = newterm(nullptr, output, input);
-  if (!screen)
-  {
-    static_cast<void>(std::fclose(input));
-    static_cast<void>(std::fclose(output));
-    expect(false, "newterm must initialize ncurses for terminal::Window tests");
-    return;
-  }
-  static_cast<void>(set_term(screen));
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  terminal::Context terminal_context(output, input);
 
   for (int iteration = 0; iteration != 3; ++iteration)
   {
@@ -68,8 +56,6 @@ void test_margin_aware_window_geometry_and_lifetime()
            "an empty-margin Window must use one BasicWindow wrapper for inner and outer access");
   }
 
-  static_cast<void>(endwin());
-  delscreen(screen);
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
 }

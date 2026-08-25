@@ -82,11 +82,9 @@ int main()
     Dout(dc::notice, "horizontal_layout3 = " << horizontal_layout3);
   }
 
-  terminal::Position top_left1{5, 5};
-  horizontal_layout1.write_to(top_left1, stdscr, terminal_context.default_rendition());
-
-  terminal::Position top_left2{9, 5};
-  horizontal_layout2.write_to(top_left2, stdscr, terminal_context.default_rendition());
+  horizontal_layout1.write_to({5, 5}, stdscr, terminal_context.default_rendition());
+  horizontal_layout2.write_to({9, 5}, stdscr, terminal_context.default_rendition());
+  horizontal_layout3.write_to({11, 5}, stdscr, terminal_context.default_rendition());
 
   //... display it
   //... allow resizing with keyboard

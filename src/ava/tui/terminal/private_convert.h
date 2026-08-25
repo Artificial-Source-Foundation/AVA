@@ -35,3 +35,17 @@ attr_t convert_to_attr(Attributes attributes);
 Attributes convert_to_Attributes(attr_t attributes);
 cchar_t convert_to_cchar(ComplexChar const& complex_char);
 ComplexChar convert_to_ComplexChar(cchar_t const& cchar);
+
+namespace ava::tui::terminal {
+struct ConvertToColorPair
+{
+  int extended_color_pair_;
+
+  operator ColorPair() const
+  {
+    return ColorPair{{}, static_cast<uint32_t>(extended_color_pair_)};
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+} // namespace ava::tui::terminal

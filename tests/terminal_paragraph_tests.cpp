@@ -1,8 +1,10 @@
 #include "sys.h"
 #include "terminal/Attributes.h"
+#include "terminal/BasicScreen.h"
 #include "terminal/BasicWindow.h"
 #include "terminal/ColorPair.h"
 #include "terminal/ComplexChar.h"
+#include "terminal/Context.h"
 #include "terminal/GraphemeRun.h"
 #include "terminal/GraphemeSpan.h"
 #include "terminal/Pad.h"
@@ -17,11 +19,6 @@
 #include <cstdio>
 #include <string>
 #include <vector>
-
-// Disable the ncurses convenience macros (e.g. instr(str)): they collide with
-// calls to the like-named terminal::Window member functions below.
-#define NCURSES_NOMACROS
-#include <curses.h>
 
 namespace terminal = ava::tui::terminal;
 
@@ -172,7 +169,6 @@ std::array<ExpectedPadRow, 16> const& expected_pad_rows()
 // the pad is inspected through Window::instr.
 void test_pad_generate_comment_example()
 {
-  ScopedEnvVar term_guard("TERM", "xterm-256color");
   FILE* input = std::tmpfile();
   FILE* output = std::tmpfile();
   if (!input || !output)
@@ -185,31 +181,15 @@ void test_pad_generate_comment_example()
     return;
   }
 
-  SCREEN* screen = newterm(nullptr, output, input);
-  if (!screen)
-  {
-    static_cast<void>(std::fclose(input));
-    static_cast<void>(std::fclose(output));
-    expect(false, "newterm must initialize ncurses for the terminal::Pad test");
-    return;
-  }
-  static_cast<void>(set_term(screen));
+  ScopedEnvVar term_guard("TERM", "xterm-256color");
+  terminal::Context terminal_context(output, input);
 
-  bool const color_support = has_colors();
+  bool const color_support = terminal_context.has_colors();
   expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
-  if (color_support)
-  {
-    static_cast<void>(start_color());
-    // Register two color pairs; only their (distinct) indices matter, the actual colors are never inspected.
-    static_cast<void>(::init_extended_pair(1, 2, 0));
-    static_cast<void>(::init_extended_pair(2, 4, 0));
-  }
 
   if (color_support)
   {
-    terminal::ColorPair styled_pair;
-    styled_pair.index() = 1;
-
+    terminal::ColorPair styled_pair = terminal_context.create_color_pair(0x111111, 0x888888);
     terminal::Rendition const styled_rendition{styled_pair, terminal::Attribute::bold};
 
     terminal::Pad pad;
@@ -295,8 +275,6 @@ void test_pad_generate_comment_example()
     expect(centered_text == L"ab    ", "trailing spaces must continue to participate in centered alignment");
   }
 
-  static_cast<void>(endwin());
-  delscreen(screen);
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
 }

@@ -14,11 +14,12 @@ namespace ava::tui::terminal {
 // Unfortunately, it depends on the terminal how such a color is displayed,
 // as well as any Attributes that are in effect of course.
 //
-// Because on direct-color terminals (where COLORS is 16777216) this
-// value will used as direct color index, meaning that the values
-// 1 through 7 have a special meaning (COLOR_RED through COLOR_WHITE).
-// To avoid confusion, this class will not store such values, but instead
-// replaces those with 0 (black).
+// On direct-color terminals (where COLORS is 16777216) the rgb_ value will be
+// used as index, and the values 1 through 7 have a special meaning (COLOR_RED
+// through COLOR_WHITE).
+//
+// Because of that, to avoid confusion, this class will not store such values,
+// but instead replaces those with 0 (black).
 //
 class Color
 {
@@ -42,6 +43,7 @@ class Color
     ASSERT(rgb_ < 0x1000000);
   }
 
+  bool is_default() const { return rgb_ == default_terminal_color; }
   int as_int() const { return static_cast<int>(static_cast<int32_t>(rgb_)); }
 
   AVA_DEBUG_PRINT_MEMBERS_ON

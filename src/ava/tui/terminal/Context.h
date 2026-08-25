@@ -1,10 +1,10 @@
 #pragma once
 
+#include "BasicScreen.h"
+#include "BasicWindow.h"
 #include "Color.h"
 #include "ColorPair.h"
 #include "ComplexChar.h"
-#include "BasicScreen.h"
-#include "BasicWindow.h"
 
 #include <vector>
 
@@ -18,9 +18,10 @@ namespace ava::tui::terminal {
 class Context final
 {
  private:
-  BasicScreen first_screen_;                                            // Use iff a `outfd` and `infd` are passed to the constructor.
-  BasicWindow stdscr_;                                                  // The entire surface of the terminal. Only used when the default constructor was used.
+  BasicScreen first_screen_;                                            // Owns the screen iff `outfd` and `infd` are passed to the constructor.
+  BasicWindow stdscr_;                                                  // The entire surface of the current terminal screen.
   Rendition default_rendition_;                                         // The rendition to use for text that doesn't have any defined of its own.
+  bool default_colors_enabled_ = false;                                 // Whether -1 selects the terminal's default colors.
   std::vector<ColorPair> color_pairs_;                                  // All registered foreground/background color pairs so far.
 
  public:
@@ -29,7 +30,10 @@ class Context final
 
   Rendition const& default_rendition() const { return default_rendition_; }
 
-  // Return a suitable ColorPair for the given colors.
+  // Return a ColorPair for `foreground` and `background`, using exact RGB on direct-color terminals and nearest palette
+  // colors otherwise.
+  //
+  // The terminal must support colors and have room for another color pair. The default terminal color is preserved on both paths.
   ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair
 
   BasicScreen const& first_screen() const { return first_screen_; }

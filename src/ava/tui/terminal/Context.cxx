@@ -2,12 +2,67 @@
 #include "Context.h"
 
 #include <clocale>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 // This header must be included last.
 #include "private_convert.h"
 
 namespace ava::tui::terminal {
+namespace {
+
+// Return the terminal's nearest available indexed color for the concrete RGB `color`.
+//
+// RGB distances are compared without rounding by scaling the 8-bit requested components by 1000 and the ncurses
+// components by 255. Ties select the lower terminal color index for deterministic behavior.
+int nearest_indexed_color(Color color)
+{
+  int const rgb = color.as_int();
+  // Pass a concrete RGB color; handle the default-color sentinel before requesting a nearest palette entry.
+  ASSERT(rgb >= 0);
+
+  int const requested_red = (rgb >> 16) & 0xff;
+  int const requested_green = (rgb >> 8) & 0xff;
+  int const requested_blue = rgb & 0xff;
+  std::int64_t nearest_distance = std::numeric_limits<std::int64_t>::max();
+  int nearest_index = -1;
+
+  for (int color_index = 0; color_index < COLORS; ++color_index)
+  {
+    int red;
+    int green;
+    int blue;
+    if (::extended_color_content(color_index, &red, &green, &blue) == ERR)
+      continue;
+
+    std::int64_t const red_delta = static_cast<std::int64_t>(red) * 255 - static_cast<std::int64_t>(requested_red) * 1000;
+    std::int64_t const green_delta = static_cast<std::int64_t>(green) * 255 - static_cast<std::int64_t>(requested_green) * 1000;
+    std::int64_t const blue_delta = static_cast<std::int64_t>(blue) * 255 - static_cast<std::int64_t>(requested_blue) * 1000;
+    std::int64_t const distance = red_delta * red_delta + green_delta * green_delta + blue_delta * blue_delta;
+    if (distance < nearest_distance)
+    {
+      nearest_distance = distance;
+      nearest_index = color_index;
+    }
+  }
+
+  // A color-capable terminal must expose at least one readable palette entry; initialize Context only after start_color succeeds.
+  ASSERT(nearest_index >= 0);
+  return nearest_index;
+}
+
+// Convert `color` to a terminal color index, using `fallback_default_index` when -1 default colors are unsupported.
+//
+// Direct-color terminals use RGB values as indices. Other terminals select their nearest existing palette entry.
+int terminal_color_index(Color color, bool direct_color, bool default_colors_enabled, int fallback_default_index)
+{
+  if (color.is_default())
+    return default_colors_enabled ? -1 : fallback_default_index;
+  return direct_color ? color.as_int() : nearest_indexed_color(color);
+}
+
+} // namespace
 
 Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
 {
@@ -30,6 +85,9 @@ Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
   {
     BasicScreen first_screen(nullptr, outfd, infd);
     first_screen_ = std::move(first_screen);
+    // newterm created a screen-specific stdscr just as initscr does; wrap it so Context initialization and callers can use
+    // the same BasicWindow interface with either constructor mode.
+    stdscr_.init_as_stdscr();
   }
 
   wchar_t fill[] = L" ";
@@ -40,10 +98,7 @@ Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
     // Enable ncurses' default-color extension: after this succeeds, color
     // number -1 in init_pair/init_extended_pair means the terminal's default
     // foreground or background color instead of an RGB/direct-color index.
-    int const status = ::use_default_colors();
-    // use_default_colors returns ERR when the terminal does not support default colors; only initialize a Context on
-    // a terminal with the default-color capability.
-    ASSERT(status == OK);
+    default_colors_enabled_ = ::use_default_colors() == OK;
     Color foreground_color{0xffffff};
     Color background_color{};
     default_rendition_ = Rendition{create_color_pair(foreground_color, background_color)};
@@ -87,29 +142,25 @@ int Context::get_wch()
 
 ColorPair Context::create_color_pair(Color foreground, Color background)
 {
-  // Support for non-direct terminals has not be implemented yet.
-  if (COLORS != 16777216)
-    DoutFatal(dc::coredump, "COLORS = " << COLORS);
-
-  // If this fires, the TUI was started on a terminal without direct color; run it only on a terminal reporting
-  // COLORS == 16777216, or implement the non-direct-color path first.
-  ASSERT(COLORS == 16777216);
-
-  if (COLORS == 16777216)
+  bool const direct_color = COLORS == 16777216;
+  int fallback_foreground_index = COLOR_WHITE;
+  int fallback_background_index = COLOR_BLACK;
+  if (!default_colors_enabled_ && !direct_color)
   {
-    // On a direct color indexing terminal, the color itself is the color index.
-    // Therefore we do not need to call init_color or init_extended_color.
-
-    // The next color pair index.
-    int color_pair_index = color_pairs_.size() + 1;
-    // Initialize the new color pair.
-    int const status = ::init_extended_pair(color_pair_index, foreground.as_int(), background.as_int());
-    // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep
-    // the number of created pairs within the terminal limit and pass valid Color values.
-    ASSERT(status == OK);
-    // Create the new ColorPair from the new color pair index.
-    color_pairs_.push_back(ConvertToColorPair{color_pair_index});
+    fallback_foreground_index = nearest_indexed_color(Color{0xffffff});
+    fallback_background_index = nearest_indexed_color(Color{0x000000});
   }
+  int const foreground_index = terminal_color_index(foreground, direct_color, default_colors_enabled_, fallback_foreground_index);
+  int const background_index = terminal_color_index(background, direct_color, default_colors_enabled_, fallback_background_index);
+
+  // On a direct-color terminal an RGB value is itself the color index. Indexed terminals instead use the nearest color from
+  // the palette reported by ncurses; neither path needs to modify the terminal's palette with init_extended_color.
+  int const color_pair_index = static_cast<int>(color_pairs_.size()) + 1;
+  int const status = ::init_extended_pair(color_pair_index, foreground_index, background_index);
+  // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep
+  // the number of created pairs within the terminal limit and pass valid Color values.
+  ASSERT(status == OK);
+  color_pairs_.push_back(ConvertToColorPair{color_pair_index});
 
   // This function should push the new ColorPair to the end of colors_pairs_.
   return color_pairs_.back();

@@ -1,12 +1,14 @@
 # AVA Linux Host Artifact
 
-This archive contains the AVA terminal executable for the Linux host on which it was built. It is a dynamically linked host artifact, not a portable Linux distribution package.
+This archive contains the AVA terminal executable for the Linux host on which it was built. It is a dynamically linked host artifact, not a portable Linux distribution package or evidence that an official release was published.
 
-This README is the **offline documentation spine** for the artifact. All 31 packaged source documents (29 Markdown and 2 JSON) are indexed below; the source-tree category indexes and `docs/README.md` are intentionally not installed because their maintainer and history navigation depends on the repository checkout.
+This README is the **offline documentation spine** for the artifact. All 32 packaged source documents (30 Markdown and 2 JSON) are indexed below; source-tree category indexes, plans, and history are intentionally not installed because their maintainer/evidence navigation depends on the repository checkout.
 
 ## Runtime requirements
 
-The destination host needs compatible glibc, libstdc++, and libgcc runtimes; compatible ncursesw/tinfo libraries and a usable terminfo database; and `curl` on `PATH` for provider HTTP transport. Python and CMake are packaging-only requirements and are not needed to run AVA.
+The audited Linux x64 candidate requires an x86-64 CPU with BMI2, glibc providing `GLIBC_2.38`, libstdc++ providing `GLIBCXX_3.4.32`, C++ ABI `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, a usable terminfo database, and `curl` on `PATH`. The first-publication target is Linux x64 only; only architectures with native exact-candidate evidence may publish. Python and CMake are packaging-only requirements and are not needed to run AVA.
+
+The 2026-08-23 source matrix passed on Ubuntu 24.04.4 x64 with GCC 13.3 under BetaTest/Unix Makefiles and Release/Ninja. Clang 18 was environment-blocked; MSVC, Windows, macOS, AArch64, and multi-config release qualification were not established.
 
 ## Basic commands
 
@@ -27,6 +29,7 @@ AVA stores user configuration and state under the XDG paths documented in [`docs
 
 - [`docs/core/usage.md`](docs/core/usage.md): complete CLI, TUI, print, RPC, ACP, and command usage.
 - [`docs/core/configuration.md`](docs/core/configuration.md) and [`docs/core/environment-variables.md`](docs/core/environment-variables.md): configuration, credentials, XDG paths, permissions, and process inputs.
+- [`docs/core/custom-providers.md`](docs/core/custom-providers.md): bounded user-defined provider and model configuration.
 - [`docs/core/providers.md`](docs/core/providers.md): current provider/model support, authentication, compatibility, and evidence status.
 - [`docs/core/context-resources.md`](docs/core/context-resources.md): prompts, instructions, commands, skills, subagents, extensions, project trust, and reload behavior.
 - [`docs/core/subagents.md`](docs/core/subagents.md): foreground/background delegation, job controls, permissions, completion delivery, durability, limits, and lifecycle.
@@ -65,4 +68,4 @@ AVA stores user configuration and state under the XDG paths documented in [`docs
 - [`docs/operations/release-checklist.md`](docs/operations/release-checklist.md): exact artifact layout, local verification, provenance checks, and explicitly deferred publication work.
 - [`docs/schema/theme.schema.json`](docs/schema/theme.schema.json): installed theme JSON schema.
 
-The adjacent `LICENSE` applies to this artifact. `THIRD_PARTY_NOTICES.md` contains direct-dependency notices and distinguishes bundled dependencies from host runtime libraries. `PROVENANCE.json` records deterministic binary/source/dependency/architecture evidence; `release_qualified: false` is an explicit non-qualification, not a release claim.
+The adjacent `LICENSE` applies to this artifact. `THIRD_PARTY_NOTICES.md` contains direct-dependency notices and distinguishes bundled dependencies from host runtime libraries. `PROVENANCE.json` records binary/source/dependency/architecture evidence. `release_qualified:true` proves only the implemented static source/gitlink/license/version/native-architecture/dynamic-dependency/package gates; it does not prove full CTest, native CI, sanitizer/terminal evidence, exact-byte retention, or official publication. `release_qualified:false` is explicit static non-qualification. No value is itself a release claim.

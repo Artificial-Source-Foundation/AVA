@@ -98,6 +98,13 @@ inline constexpr std::size_t kMaxSessionAppendQueueEntries = 256;
 inline constexpr std::size_t kMaxSessionAppendQueueBytes = 4 * 1024 * 1024;
 inline constexpr std::size_t kMaxRetainedRunOutcomes = 64;
 
+enum class SessionAppendRequestKind
+{
+  Ordinary,
+  BranchSummary,
+  Compaction,
+};
+
 class SessionRunController;
 class SessionMaintenanceReservation;
 
@@ -122,6 +129,7 @@ class ActiveRunGuard
   // because they only retain controller state, never runtime::Session.
   [[nodiscard]] ava::agent::SessionAppendSink append_route() const;
   [[nodiscard]] ava::agent::SessionAppendBatchSink append_batch_route() const;
+  [[nodiscard]] ava::session::SessionCompactionAppendSink compaction_append_route() const;
 
  private:
   struct State;
@@ -194,6 +202,13 @@ class SessionRunController
   [[nodiscard]] ava::core::VoidResult append(ava::session::SessionEntry entry);
   [[nodiscard]] ava::core::Result<ava::session::SessionConditionalAppendResult> append_branch_summary_if_absent(
       ava::session::SessionEntry entry, ava::session::SessionCancelCallback cancel_requested = nullptr);
+  // The expected snapshot is CAS comparison data, not append payload: it never
+  // counts against kMaxSessionAppendQueueBytes. Memory amplification stays
+  // bounded by one dedicated lane accepting a single pending/in-flight
+  // compaction ticket per controller; a second concurrent compaction is
+  // rejected with an actionable admission error that never latches persistence.
+  [[nodiscard]] ava::core::Result<ava::session::SessionCompactionAppendResult> append_compaction_if_snapshot_matches(
+      ava::session::SessionEntry entry, std::vector<ava::session::SessionEntry> expected, ava::session::SessionCancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult append_batch(std::vector<ava::session::SessionEntry> entries);
   [[nodiscard]] ava::agent::SessionAppendSink owner_append_route() const;
   [[nodiscard]] ava::agent::SessionAppendBatchSink owner_append_batch_route() const;
@@ -207,7 +222,9 @@ class SessionRunController
  private:
   [[nodiscard]] static ava::core::VoidResult append_for_generation(std::shared_ptr<ActiveRunGuard::State> const& state, std::uint64_t generation,
                                                                    std::vector<ava::session::SessionEntry> entries, bool owner_route,
-                                                                   ava::session::SessionConditionalAppendResult* conditional_result = nullptr,
+                                                                   SessionAppendRequestKind kind, std::vector<ava::session::SessionEntry> expected = {},
+                                                                   ava::session::SessionConditionalAppendResult* branch_summary_result = nullptr,
+                                                                   ava::session::SessionCompactionAppendResult* compaction_result = nullptr,
                                                                    ava::session::SessionCancelCallback cancel_requested = nullptr);
   std::shared_ptr<ActiveRunGuard::State> state_;
   friend class ActiveRunGuard;

@@ -1,6 +1,6 @@
-# Pi-Inspired TUI Feature Expansion Plan
+# Historical Pi-Inspired TUI Feature Expansion
 
-Status: Complete for retained Waves 0–3 and 5–6. Wave 4 was removed and superseded by product decision; it is not a current capability.
+**Status: completed historical planning record.** Retained Waves 0–3 and 5–6 are complete. Wave 4 was removed and superseded by product decision; this document is not current implementation authority or active authorization.
 
 This plan originally proposed six user-facing terminal capabilities after comparing AVA with Pi. Five remain implemented; the fourth was subsequently removed:
 
@@ -172,7 +172,7 @@ Wave 4's local setup wizard was removed and superseded by product decision. AVA 
 
 ### Likely Files
 
-- `docs/plans/tui-pi-feature-expansion-plan.md`
+- `docs/history/tui-pi-feature-expansion.md`
 - `docs/roadmap/frontend.md`
 - `docs/goals/pi-mvp-parity/context-extensions-mcp-lsp.md`
 - `docs/extensions/plugin-system.md`

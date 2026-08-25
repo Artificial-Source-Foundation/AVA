@@ -22,6 +22,7 @@ void test_session_lease_creation_and_link_safety();
 void test_session_torn_tail_recovery();
 void test_session_torn_tail_listing();
 void test_session_resume_and_listing();
+void test_compaction_snapshot_matcher_is_exact();
 void test_session_compaction_entry_round_trip();
 void test_session_markdown_export();
 void test_session_portable_jsonl_sanitizer();

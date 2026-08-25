@@ -142,7 +142,13 @@ inode identity):
   fails ("persistent read authority does not identify one regular leased inode").
 - **`SessionAppendTarget`** — the sole append authority. All runtime writes flow
   through it; it revalidates the published inode before accepting it and latches
-  a persistence error until explicit recovery.
+  a persistence error until explicit recovery. Its compaction-specific
+  conditional append owns the compare-and-swap boundary: while holding the
+  target lock and then the shared persistent-path (or ephemeral mutation) lock,
+  it reloads the authoritative bounded history, compares every ordered
+  `SessionEntry` field (including `version`), and appends only on an exact match.
+  The sole tolerated suffix is strictly validated, context-neutral
+  `actor: "auto-title"` metadata.
 
 The combined property is **fail-closed on pathname replacement**: a live swap of
 the session file is detected and refused rather than silently feeding replaced
@@ -164,9 +170,14 @@ test. An ephemeral store keeps its entries in `ephemeral_state_` (shared
 in-memory state) instead of a JSONL file, writes no resumable file, and holds no
 lease. Consequently an ephemeral read authority owns only the shared in-memory
 state (no lease descriptor), and an ephemeral append target mutates that same
-in-memory state. In-process commands can still use runtime entries, but nothing
-is resumable after the process exits. Sessionless mode is mutually exclusive
-with session resume/fork options.
+in-memory state. Conditional compaction has the same atomic compare-and-append
+semantics in this mode, serialized by the shared ephemeral mutation mutex. A
+snapshot mismatch is a successful, nonmutating result and does not latch
+recovery; rejections before an append attempt likewise do not latch. Once an
+append is attempted, commit-state classification and recovery behavior are
+identical to ordinary target policy. In-process commands can still use runtime
+entries, but nothing is resumable after the process exits. Sessionless mode is
+mutually exclusive with session resume/fork options.
 
 ## Glossary
 

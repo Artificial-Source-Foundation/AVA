@@ -2,7 +2,7 @@
 
 This document defines AVA's backend maturity target. External systems are behavior references only; AVA should match the useful backend capability shape while preserving AVA's C++23, one-binary, terminal-first, permissioned local-agent architecture.
 
-This is a historical backend maturity baseline, not a current release ledger. It is not a frontend polish goal: the baseline concerns semantic contracts, runtime correctness, provider/tool/session robustness, extension containment, and tests. UI layout, cards, borders, modals, colors, and terminal rendering remain Carlo-owned frontend work. For current Linux artifact qualification, see [`../release-checklist.md`](../operations/release-checklist.md); that narrow x86_64/x64 provenance closure does not retroactively complete baseline rows.
+This is a historical backend maturity baseline, not a current release ledger. It is not a frontend polish goal: the baseline concerns semantic contracts, runtime correctness, provider/tool/session robustness, extension containment, and tests. UI layout, cards, borders, modals, colors, and terminal rendering remain Carlo-owned frontend work. Static native x64/AArch64 package/provenance gates do not retroactively complete baseline rows or prove a release; current authority is the [release-readiness ledger](../product/release-readiness.md).
 
 ## Baseline Definition
 

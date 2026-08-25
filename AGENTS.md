@@ -44,17 +44,17 @@ AVA is a native C++23 terminal coding agent. Treat the codebase as a small syste
 
 ## Local Workflow
 
-Use `BetaTest` with `EnableDebug=ON` for normal local development. It keeps Release-style optimization and assertions while compiling AVA's `CWDEBUG`/libcwd instrumentation and debug-dependent tests. Keep runtime debug output off unless a diagnosis specifically needs it. Before configuring any non-Release tree, export a writable `GITACHE_ROOT`; agent-run builds use the AVA-specific `$HOME/.cache/ava/gitache` when it is otherwise unset.
+Use the canonical `dev` preset (`BetaTest` with `EnableDebug=ON`) for normal local development. It keeps Release-style optimization and assertions while compiling AVA's `CWDEBUG`/libcwd instrumentation and debug-dependent tests. Keep runtime debug output off unless a diagnosis specifically needs it. Before configuring any non-Release tree, export a writable `GITACHE_ROOT`; agent-run builds use the AVA-specific `$HOME/.cache/ava/gitache` when it is otherwise unset. Complete debug-enabled configuration also needs Python 3 and JSON-capable Universal Ctags.
 
 ```sh
 export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
 mkdir -p "$GITACHE_ROOT"
-cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
+cmake -S . -B build -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
 
-Preset equivalent:
+Canonical preset:
 
 ```sh
 cmake --preset dev
@@ -75,7 +75,7 @@ Return to `build/` for ordinary work. Use a Release build only as an additional 
 Sanitizers:
 
 ```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON
+cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=BetaTest -DEnableDebug=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```

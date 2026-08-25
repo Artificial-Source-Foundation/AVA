@@ -60,6 +60,33 @@ target_compile_definitions(ava_rpc_broken_pipe_subprocess_test PRIVATE AVA_EXE_P
 ava_apply_warnings(ava_rpc_broken_pipe_subprocess_test)
 ava_apply_sanitizers(ava_rpc_broken_pipe_subprocess_test)
 
+if(OptionEnableAvaSanitizers AND NOT MSVC)
+  add_library(ava_sanitizer_static_contract STATIC "sanitizer_static_contract.cpp")
+  ava_apply_warnings(ava_sanitizer_static_contract)
+  ava_apply_sanitizers(ava_sanitizer_static_contract)
+
+  add_executable(ava_sanitizer_static_consumer "sanitizer_static_consumer.cpp")
+  target_link_libraries(ava_sanitizer_static_consumer PRIVATE ava_sanitizer_static_contract)
+  ava_apply_warnings(ava_sanitizer_static_consumer)
+  add_test(NAME ava_tests.sanitizer_static_consumer COMMAND ava_sanitizer_static_consumer)
+
+  add_executable(ava_sanitizer_ub_fixture "sanitizer_ub_fixture.cpp")
+  ava_apply_warnings(ava_sanitizer_ub_fixture)
+  ava_apply_sanitizers(ava_sanitizer_ub_fixture)
+  add_test(NAME ava_tests.sanitizer_undefined_behavior COMMAND ava_sanitizer_ub_fixture)
+  set_tests_properties(ava_tests.sanitizer_undefined_behavior PROPERTIES WILL_FAIL TRUE)
+
+  if(CMAKE_GENERATOR MATCHES "^Ninja")
+    add_test(
+      NAME ava_tests.sanitizer_command_contract
+      COMMAND "${CMAKE_COMMAND}"
+        "-DAVA_BUILD_TOOL=${CMAKE_MAKE_PROGRAM}"
+        "-DAVA_BUILD_DIR=${CMAKE_BINARY_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/sanitizer_command_contract.cmake"
+    )
+  endif()
+endif()
+
 set(AVA_TESTS_SOURCES
   "acp_client_tools_tests.cpp"
   "acp_content_tests.cpp"
@@ -685,6 +712,13 @@ if(Python3_Interpreter_FOUND)
               ${CMAKE_CURRENT_SOURCE_DIR}/live_acp_dogfood_test.py
               --source ${CMAKE_SOURCE_DIR})
     set_tests_properties(ava_tests.live_acp_dogfood_launcher PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "acp;interop;offline")
+
+    add_test(
+      NAME ava_tests.live_dogfood_launchers
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/live_dogfood_launcher_test.py
+              --source ${CMAKE_SOURCE_DIR})
+    set_tests_properties(ava_tests.live_dogfood_launchers PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1" LABELS "provider;offline")
   endif()
 
   if(AVA_ENABLE_ACPX_INTEROP)

@@ -29,6 +29,9 @@
 ## Product direction and evidence
 
 - [Current product baseline](docs/product/README.md)
+- [Product principles](docs/product/principles.md)
+- [Current release readiness](docs/product/release-readiness.md)
+- [Official publication runbook design](docs/operations/publication.md)
 - [Plans](docs/plans/README.md)
 - [Roadmaps](docs/roadmap/README.md)
 - [Goal packages](docs/goals/README.md)

@@ -6,15 +6,17 @@ For the community entry point and project policies, see the root [`CONTRIBUTING.
 
 ## Prerequisites
 
-- CMake 3.25 or newer.
-- A C++23 compiler. GCC 13+, Clang 16+, or a recent MSVC 2022 toolchain are good starting points.
-- `ctest` from CMake.
+- CMake 3.27 or newer; current CTests use timeout signal/grace properties introduced in 3.27.
+- A C++23 compiler. GCC 13 is the tested Ubuntu 24.04 x64 compiler; other compilers are best-effort until the matrix below passes.
+- `ctest` from CMake and Python 3 for the complete registered test, documentation, install, and package gates.
 - Boost development headers and CMake package (`boost-devel` on Fedora).
 - Wide-character ncurses development headers/library (`ncurses-devel` on Fedora).
+- A writable `GITACHE_ROOT` before configuring the canonical non-Release presets.
+- JSON-capable Universal Ctags when debug/libcwd print-member generation is enabled.
 - `clang-format` version 22 or newer.
 - `clang-tidy` when touching core logic or safety-sensitive paths.
 - Optional `sccache` or `ccache` for faster repeated compilation.
-- internet access to `github.com` is required during configuration.
+- Internet access to `github.com` is required during configuration when pinned sources are not already present.
 
 ## Cloning the repository
 
@@ -25,19 +27,18 @@ cd AVA
 
 A recursive clone is ready for the CMake quick start below. For an older nonrecursive clone, run `git submodule update --init --checkout --recursive`. `./autogen.sh` is optional maintainer convenience: it initializes missing submodules at AVA's pinned commits, sets `push.recurseSubmodules` when missing, and prints build guidance. It does not configure or build AVA and is not required after the recursive clone command.
 
-If you want to compile with debug output then you need to have:
+The canonical `dev`, `sanitize`, and `tsan` presets enable debug instrumentation. Before configuring them, set `GITACHE_ROOT` to an existing writable directory where Gitache packages can be compiled. The current requirement is approximately 50 MB. For example:
 
-* `GITACHE_ROOT`: full path to an existing (initially empty) directory where gitache packages are compiled. For example `$HOME/gitache` or `/opt/gitache`. Make sure you can write to it; the current requirement is approximately 50MB.
+```sh
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
+```
+
+When libcwd/debug print-member generation is enabled, configuration also requires Universal Ctags with JSON output support; Exuberant Ctags is insufficient. Python 3 is required for the complete debug-enabled test registration.
 
 ## Quick Start (build and test)
 
-```sh
-cmake -S . -B build -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build
-scripts/run-tests.sh --build-dir build
-```
-
-Preset equivalent:
+After preparing `GITACHE_ROOT` above, use the canonical developer preset:
 
 ```sh
 cmake --preset dev
@@ -45,15 +46,7 @@ scripts/build.sh
 scripts/run-tests.sh
 ```
 
-Sanitizer pass:
-
-```sh
-cmake -S . -B build-sanitize -DAVA_ENABLE_SANITIZERS=ON -DAVA_BUILD_TESTS=ON
-scripts/build.sh --build-dir build-sanitize --jobs 2
-scripts/run-tests.sh --build-dir build-sanitize --jobs 2
-```
-
-Preset equivalent:
+Canonical sanitizer pass:
 
 ```sh
 cmake --preset sanitize
@@ -61,11 +54,43 @@ scripts/build.sh --build-dir build-sanitize --jobs 2
 scripts/run-tests.sh --build-dir build-sanitize --jobs 2
 ```
 
+A direct configure is noncanonical unless it is cache-equivalent to the preset. The equivalent fallback commands are:
+
+```sh
+cmake -S . -B build \
+  -DEnableAvaBuildTests=ON \
+  -DCMAKE_BUILD_TYPE=BetaTest \
+  -DEnableDebug=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+cmake -S . -B build-sanitize \
+  -DEnableAvaBuildTests=ON \
+  -DEnableAvaSanitizers=ON \
+  -DCMAKE_BUILD_TYPE=BetaTest \
+  -DEnableDebug=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+```
+
+Use the repository build/test wrappers after either direct configuration. Do not describe a Release-default direct configure as equivalent to `dev` or `sanitize`.
+
 The repository build and test runners detect the available logical cores and pass an explicit positive parallel level to CMake/CTest. Use `--jobs N`, `CMAKE_BUILD_PARALLEL_LEVEL=N`, or `CTEST_PARALLEL_LEVEL=N` to cap it; build options such as `--target` and CTest options such as `-R` are forwarded. The runners share one build-tree lock because concurrent builds/tests and several fixed integration-test roots are unsafe. Sanitizer examples use two jobs to limit memory pressure.
 
 Parallel jobs speed clean builds; a compiler cache speeds repeated builds. To enable an installed cache, configure once with `cmake --preset dev -DCMAKE_CXX_COMPILER_LAUNCHER=sccache` (or replace `sccache` with `ccache`). Use the same option with the sanitizer preset if desired; compiler flags keep those cache entries separate.
 
-Tests currently build into one `ava_tests` CTest target from focused test sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
+Tests currently build into `tests/ava_tests`, registered as focused `ava_tests.<suite>` CTests from sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
+
+## Tested build matrix
+
+| Combination | Status | 2026-08-23 evidence |
+| --- | --- | --- |
+| Ubuntu 24.04.4 x64, GCC 13.3, Unix Makefiles, `BetaTest`, debug enabled | Tested | Configure, build, and full CTest passed |
+| Ubuntu 24.04.4 x64, GCC 13.3, Ninja, `Release`, debug disabled | Tested additional build | Configure, build, full CTest, and version check passed |
+| Clang 18 on the audit host | Best-effort; environment-blocked | Scanner/default GCC 16 interaction and Clang/libstdc++ C++23 `std::expected` combinations did not produce a qualifying build |
+| MSVC, Windows, macOS | Unsupported | No native clean build/test evidence |
+| AArch64 | Not qualified for the first publication | No native exact-candidate evidence in the frozen audit |
+| Multi-config generators | Not release-qualified | Configuration/output/package selection is not proven configuration-safe |
+
+Only Linux x64 is targeted for the first official publication, and dirty working trees are always unqualified. The audited x64 artifact requires BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, and `curl`; publication still requires minimum-host smoke of the exact retained bytes. See [build configuration](../operations/build-configuration.md) and the [release-readiness ledger](../product/release-readiness.md).
 
 ## Configuration
 

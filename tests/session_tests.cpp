@@ -24,6 +24,7 @@ void run_session_tests()
   session_tests::test_session_torn_tail_recovery();
   session_tests::test_session_torn_tail_listing();
   session_tests::test_session_resume_and_listing();
+  session_tests::test_compaction_snapshot_matcher_is_exact();
   session_tests::test_session_compaction_entry_round_trip();
   session_tests::test_session_markdown_export();
   session_tests::test_session_portable_jsonl_sanitizer();

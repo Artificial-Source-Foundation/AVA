@@ -140,6 +140,7 @@ class AgentTurnExecutor final
                                                               ava::provider::ProviderRequest const& provider_request, ProviderEventAccumulator& accumulator);
   [[nodiscard]] ava::core::VoidResult initialize_tools();
   [[nodiscard]] ava::core::VoidResult persist_assistant_turn(ProviderTurn const& provider_turn, PendingCommittedToolResults& pending_results);
+  [[nodiscard]] ava::core::VoidResult commit_truncated_provider_tool_results(ParsedAssistantTurn const& turn, PendingCommittedToolResults& pending_results);
   [[nodiscard]] ava::core::Result<ToolDispatchResult> dispatch_and_commit_tool(ProviderToolCall const& call, PendingCommittedToolResults& pending_results);
   [[nodiscard]] ava::core::VoidResult commit_buffered_tool(ProviderToolCall const& call, ToolDispatchResult dispatch_result,
                                                            BufferedToolCallbacks const& callbacks, PendingCommittedToolResults& pending_results);

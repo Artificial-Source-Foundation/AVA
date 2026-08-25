@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/session/assistant_output.h"
+#include "ava/session/compaction.h"
 #include "ava/session/record.h"
 #include "ava/session/session_store_internal.h"
 #include "ava/core/json.h"
@@ -708,6 +709,114 @@ ava::core::Result<SessionConditionalAppendResult> SessionAppendTarget::append_br
     auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional branch summary append failed unexpectedly");
     return std::unexpected(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
   }
+}
+
+SessionAppendTarget::CompactionAppendOutcome SessionAppendTarget::append_compaction_if_snapshot_matches_classified(
+    SessionEntry const& entry, std::vector<SessionEntry> const& expected, SessionCancelCallback const& cancel_requested)
+{
+  auto rejected = [](ava::core::Error error) {
+    return CompactionAppendOutcome{.completion = ConditionalAppendCompletion::RejectedBeforeAppend, .result = std::nullopt, .error = std::move(error)};
+  };
+  auto append_failed = [](ava::core::Error error) {
+    return CompactionAppendOutcome{.completion = ConditionalAppendCompletion::AppendFailed, .result = std::nullopt, .error = std::move(error)};
+  };
+
+  std::unique_lock target_lock(mutex_, std::defer_lock);
+  std::optional<std::unique_lock<std::mutex>> serialization_lock;
+  bool append_attempted = false;
+  try
+  {
+    target_lock.lock();
+    if (recovery_required_)
+      return rejected(append_target_recovery_required_error(store_.session_path()));
+    if (entry.type != EntryType::Compaction)
+      return rejected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "conditional compaction append requires a Compaction entry"));
+
+    // Lock order is target then destination. Keep both continuously through
+    // authoritative reload, compare, preflight, append, and cache publication.
+    if (lease_)
+      serialization_lock.emplace(append_mutex_for_path(lease_->canonical_path()));
+    else
+      serialization_lock.emplace(store_.ephemeral_state_->mutation_mutex);
+
+    auto history = lease_ ? store_.load_bounded(*lease_, read_limits_, cancel_requested) : store_.load_bounded(read_limits_, cancel_requested);
+    if (!history)
+      return rejected(std::move(history.error()));
+    if (!compaction_snapshot_matches(expected, *history))
+    {
+      return CompactionAppendOutcome{
+          .completion = ConditionalAppendCompletion::Succeeded, .result = SessionCompactionAppendResult::SnapshotMismatch, .error = std::nullopt};
+    }
+
+    // Cancellation linearizes after the exact compare and before append-state
+    // rebuild/preflight. A later cancellation may race with a committed write
+    // and is represented by append_impl's stable commit state.
+    if (cancel_requested && cancel_requested())
+      return rejected(ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional compaction append canceled"));
+
+    auto rebuilt_state = AssistantOutputAppendState::from_validated_history(*history);
+    if (!rebuilt_state)
+      return rejected(std::move(rebuilt_state.error()));
+    AssistantOutputAppendState next_state = std::move(*rebuilt_state);
+    if (auto preflight = next_state.apply_candidate(entry); !preflight)
+      return rejected(std::move(preflight.error()));
+
+    append_attempted = true;
+    auto appended = store_.append_impl(lease_ ? &*lease_ : nullptr, entry, true);
+    if (!appended && lease_ && !has_append_commit_state(appended.error()))
+      appended = std::unexpected(with_append_commit_state(std::move(appended.error()), AppendCommitState::NotStarted, store_.session_path()));
+    if (!appended)
+    {
+      auto error = std::move(appended.error());
+      if (append_partial_or_unknown(error))
+      {
+        recovery_required_ = true;
+        bump_append_epoch();
+      }
+      else if (append_committed_to_leased_inode(error))
+      {
+        assistant_output_state_ = std::move(next_state);
+        advance_append_epoch();
+      }
+      return append_failed(std::move(error));
+    }
+
+    assistant_output_state_ = std::move(next_state);
+    advance_append_epoch();
+    return CompactionAppendOutcome{
+        .completion = ConditionalAppendCompletion::Succeeded, .result = SessionCompactionAppendResult::Appended, .error = std::nullopt};
+  }
+  catch (std::exception const& exception)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional compaction append failed unexpectedly");
+    error.with_context("cause", exception.what());
+    if (!append_attempted)
+      return rejected(std::move(error));
+    recovery_required_ = true;
+    bump_append_epoch();
+    return append_failed(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
+  catch (...)
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional compaction append failed unexpectedly");
+    if (!append_attempted)
+      return rejected(std::move(error));
+    recovery_required_ = true;
+    bump_append_epoch();
+    return append_failed(with_append_commit_state(std::move(error), AppendCommitState::PartialOrUnknown, store_.session_path()));
+  }
+}
+
+ava::core::Result<SessionCompactionAppendResult> SessionAppendTarget::append_compaction_if_snapshot_matches(SessionEntry const& entry,
+                                                                                                            std::vector<SessionEntry> const& expected,
+                                                                                                            SessionCancelCallback cancel_requested)
+{
+  auto outcome = append_compaction_if_snapshot_matches_classified(entry, expected, cancel_requested);
+  if (outcome.completion == ConditionalAppendCompletion::Succeeded && outcome.result)
+    return *outcome.result;
+  if (outcome.error)
+    return std::unexpected(std::move(*outcome.error));
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "conditional compaction append produced no outcome"));
 }
 
 ava::core::VoidResult SessionAppendTarget::append_batch(std::vector<SessionEntry> entries)

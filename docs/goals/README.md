@@ -4,10 +4,16 @@ This directory contains docs-first execution packages for long-running AVA produ
 
 ## Active packages
 
-- [Pi MVP parity](pi-mvp-parity/index.md): build a Pi-style native C++ coding-agent experience while preserving AVA's safety, MCP, LSP, and tool boundaries.
+There are no active goal packages in this directory.
+
+## Completed and historical packages
+
+- [Pi MVP parity](pi-mvp-parity/index.md): closed historical execution package retained for rationale and evidence; it no longer authorizes parity work.
 
 ## Related authority
 
+- [Product principles](../product/principles.md)
+- [Current release-readiness ledger](../product/release-readiness.md)
 - [Current product baseline](../product/mvp-baseline.md)
 - [Current coverage ledger](../product/mvp-coverage-ledger.md)
 - [Plans](../plans/README.md)

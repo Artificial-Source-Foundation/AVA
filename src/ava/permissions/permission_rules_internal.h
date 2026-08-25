@@ -56,6 +56,7 @@ ava::core::Error rule_file_error(ava::core::ErrorCategory category, std::string 
 ava::core::Error rule_parse_error(std::string message, std::filesystem::path const& path, std::string_view field = {},
                                   std::optional<std::size_t> index = std::nullopt);
 std::filesystem::path normalized_path(std::filesystem::path const& path);
+ava::core::Result<bool> paths_refer_to_same_file(std::filesystem::path const& a, std::filesystem::path const& b);
 bool contains_parent_reference(std::filesystem::path const& path);
 std::filesystem::path rules_file_path(PermissionRuleStore const& store, PermissionRuleScope scope);
 ava::core::Result<std::optional<RuleDirectory>> open_rule_directory_for_read(std::filesystem::path const& file_path,

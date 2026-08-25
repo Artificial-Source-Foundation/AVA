@@ -266,8 +266,8 @@ excluded; local built-in/custom themes are complete while count parity, remote
 packs, and marketplace delivery are excluded; and a standalone diff viewer is
 deferred behind stable backend contracts. Session revert/redo remains a
 separate product decision. Background-job controls landed after this matrix.
-The constrained host-rendered plugin UI contract is implemented by the separate
-[Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md).
+The constrained host-rendered plugin UI contract is implemented and recorded in the
+[historical Pi-inspired TUI feature expansion record](../history/tui-pi-feature-expansion.md).
 It does not approve arbitrary plugin renderers or terminal control.
 
 Matching behavior does not mean adopting all OpenCode surfaces. AVA may choose
@@ -1191,7 +1191,7 @@ mixed transcript items at `96x30` under twenty seconds; 86 mixed items across
 800–900-line Markdown/code/list sources, an 18,000-byte token, 180 incremental
 appends, and a 90,000-byte streaming tool argument. These are regression
 ceilings, not product-speed benchmarks. Run them with
-`./build/ava_tests tui_composer` or the focused CTest target.
+`./build/tests/ava_tests tui_composer` or the focused CTest target.
 
 The F6 review ledger is closed: `F6-R1` strengthened cursor and exact termios
 restoration and fixed the exposed cursor-teardown defect; `F6-R2` replaced host
@@ -1523,8 +1523,8 @@ The following are not implied by this roadmap:
 
 This historical cut line governed the staged F0–F6 implementation. F8 now
 closes the roadmap: completed work is recorded above, and no further
-implementation is authorized by this document alone. The separate
-[Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md)
+implementation is authorized by this document alone. The
+[historical Pi-inspired TUI feature expansion record](../history/tui-pi-feature-expansion.md)
 records the retained expansion waves and their final integrated verification gate. Wave 4's local-only setup wizard was removed and superseded by product decision; the constrained host-rendered plugin UI remains implemented, while arbitrary plugin renderers and terminal control remain excluded.
 
 ## Approved post-roadmap rich-tool and responsiveness pass

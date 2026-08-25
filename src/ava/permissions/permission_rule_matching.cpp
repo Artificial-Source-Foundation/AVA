@@ -111,14 +111,22 @@ bool scope_matches(PermissionRuleStore const& store, PersistentPermissionRule co
   return rule.workspace_dir == store_workspace && prompt_workspace == store_workspace;
 }
 
-bool path_matches(PermissionRuleStore const& store, PersistentPermissionRule const& rule, PermissionPrompt const& prompt)
+ava::core::Result<bool> path_matches(PermissionRuleStore const& store, PersistentPermissionRule const& rule, PermissionPrompt const& prompt)
 {
   if (rule.target_path.empty())
     return true;
   if (prompt.target_path.empty())
     return false;
   auto const target = normalize_rule_target_path(store, rule.scope, prompt.target_path);
-  return target && *target == rule.target_path;
+  if (!target)
+    return false;
+  if (*target == rule.target_path)
+    return true;
+  // Persistent Allows retain their exact lexical authority. Only a Deny may
+  // extend across a physically identical alias of its exact target.
+  if (rule.action != PermissionAction::Deny)
+    return false;
+  return paths_refer_to_same_file(*target, rule.target_path);
 }
 
 bool command_recipe_matches(PersistentPermissionRule const& rule, PermissionPrompt const& prompt)
@@ -131,7 +139,7 @@ bool command_recipe_matches(PersistentPermissionRule const& rule, PermissionProm
   return !key.empty() && key == rule.command_recipe_key;
 }
 
-bool rule_matches(PermissionRuleStore const& store, PersistentPermissionRule const& rule, PermissionPrompt const& prompt)
+ava::core::Result<bool> rule_matches(PermissionRuleStore const& store, PersistentPermissionRule const& rule, PermissionPrompt const& prompt)
 {
   if (rule.operation != prompt.operation)
     return false;
@@ -230,9 +238,17 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
 
   std::optional<PersistentPermissionRule> matched_deny;
   std::optional<PersistentPermissionRule> matched_allow;
+  std::optional<ava::core::Error> deny_identity_error;
   for (auto const& rule : *rules)
   {
-    if (!rule_matches(store, rule, prompt))
+    auto matches = rule_matches(store, rule, prompt);
+    if (!matches)
+    {
+      if (!deny_identity_error)
+        deny_identity_error.emplace(std::move(matches.error()));
+      continue;
+    }
+    if (!*matches)
       continue;
     if (rule.action == PermissionAction::Deny)
     {
@@ -245,6 +261,8 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
   }
   if (matched_deny)
     return matched_deny;
+  if (deny_identity_error)
+    return std::unexpected(std::move(*deny_identity_error));
   if (matched_allow)
     return matched_allow;
   return std::optional<PersistentPermissionRule>{};

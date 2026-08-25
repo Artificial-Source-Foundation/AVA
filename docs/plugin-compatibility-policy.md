@@ -34,7 +34,7 @@ Compatible additions should be covered by focused tests and, when they affect st
 
 ### Additive Host-Rendered UI Boundary
 
-The bounded host-rendered UI slice approved by the [Pi-inspired TUI feature expansion plan](plans/tui-pi-feature-expansion-plan.md) is now an additive `ava.plugin.v1` contract. Old manifests and every existing record retain their meaning. A new manifest opts into the exact independent capabilities `ui.status`, `ui.widget`, `ui.select`, and/or `ui.confirm`; there is no wildcard capability and none is implied by `commands`.
+The bounded host-rendered UI slice approved by the [historical Pi-inspired TUI feature expansion record](https://github.com/Artificial-Source/AVA/blob/develop/docs/history/tui-pi-feature-expansion.md) is now an additive `ava.plugin.v1` contract. Old manifests and every existing record retain their meaning. A new manifest opts into the exact independent capabilities `ui.status`, `ui.widget`, `ui.select`, and/or `ui.confirm`; there is no wildcard capability and none is implied by `commands`.
 
 The new requests have exact required fields: `ui.status` has `id`, `type`, and `text`; `ui.widget` has `id`, `type`, non-empty `title`, and 1–8 `lines`; `ui.select` has `id`, `type`, non-empty `title`, `description`, and 1–32 `choices`, whose objects have required unique `id` and non-empty `label` plus optional `description`; `ui.confirm` has `id`, `type`, non-empty `title`, and `description`. Unknown and duplicate fields are invalid. The host's exact `ui.action` has matching `id`, `type`, and `action`; status/widget require `ack`, select permits `select` plus a declared `option_id` or `cancel`, and confirm permits `confirm` or `cancel`. `option_id` exists only for `select`.
 

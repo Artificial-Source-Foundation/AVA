@@ -9,12 +9,14 @@
 
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ava::tests::provider_openai_suite {
 
 void test_openai_compatible_provider_contract()
 {
+  constexpr std::string_view system_prompt_marker = "AVA-ISSUE-54-COMPAT-SYSTEM-PROMPT";
   ava::provider::OpenAICompatibleProvider const provider(ava::provider::OpenAICompatibleProviderOptions{.base_url = "https://compat.example.test/api",
                                                                                                         .chat_completions_path = "/v1/chat/completions",
                                                                                                         .provider_name = "Compat",
@@ -27,7 +29,7 @@ void test_openai_compatible_provider_contract()
       ava::provider::ProviderRequest{
           .provider_id = "kimi",
           .model_id = "kimi-k2-thinking",
-          .system_prompt = "system",
+          .system_prompt = std::string(system_prompt_marker),
           .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello"},
                        ava::provider::ChatMessage{
                            .role = "assistant",
@@ -63,6 +65,10 @@ void test_openai_compatible_provider_contract()
                request->body.find("\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096") != std::string::npos &&
                request->body.find("\"display\":\"summarized\"") != std::string::npos && request->body.find("\"keep\":\"all\"") != std::string::npos,
            "OpenAI-compatible request includes model, fixed temperature, stream usage, and Kimi thinking option");
+    expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1,
+           "OpenAI-compatible request serializes the effective system prompt exactly once");
+    expect(request->body.find("\"messages\":[{\"role\":\"system\",\"content\":\"" + std::string(system_prompt_marker) + "\"") != std::string::npos,
+           "OpenAI-compatible request leads messages with the system-role system prompt");
     expect(request->body.find("\"reasoning_content\":\"prior reasoning\"") != std::string::npos,
            "OpenAI-compatible request preserves visible reasoning_content for compatible replay");
     expect(request->body.find("\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\"") != std::string::npos &&

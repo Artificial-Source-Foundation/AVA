@@ -364,33 +364,7 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
 
 bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual)
 {
-  if (actual.size() < expected.size())
-    return false;
-  for (std::size_t index = 0; index < expected.size(); ++index)
-  {
-    if (expected[index].id != actual[index].id || expected[index].parent_id != actual[index].parent_id || expected[index].type != actual[index].type ||
-        expected[index].timestamp != actual[index].timestamp || expected[index].data_json != actual[index].data_json)
-    {
-      return false;
-    }
-  }
-  // Automatic title metadata is context-neutral. Allow it to finish while a
-  // provider-backed compaction is in flight without spending a retry or
-  // treating the generated title as conversation history.
-  for (std::size_t index = expected.size(); index < actual.size(); ++index)
-  {
-    auto const& entry = actual[index];
-    if (entry.type != ava::session::EntryType::SessionMetadata || ava::core::json::string_field(entry.data_json, "actor").value_or("") != "auto-title" ||
-        !ava::core::json::string_field(entry.data_json, "generated_title") || ava::core::json::field_value_start(entry.data_json, "name") ||
-        ava::core::json::field_value_start(entry.data_json, "labels") || ava::core::json::field_value_start(entry.data_json, "archived") ||
-        ava::core::json::field_value_start(entry.data_json, "parent_session_id") || ava::core::json::field_value_start(entry.data_json, "source_session_id") ||
-        ava::core::json::field_value_start(entry.data_json, "branch_from_entry_id") || ava::core::json::field_value_start(entry.data_json, "branch_origin") ||
-        ava::core::json::field_value_start(entry.data_json, "original_cwd"))
-    {
-      return false;
-    }
-  }
-  return true;
+  return ava::session::compaction_snapshot_matches(expected, actual);
 }
 
 ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries)
@@ -776,45 +750,28 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
       return std::unexpected(agent_loop_canceled_error());
     }
 
-    bool snapshot_stale = false;
-    auto validate_and_append = [&]() -> ava::core::Result<bool> {
-      auto current_entries = read_authority.load();
-      if (!current_entries)
-        return std::unexpected(std::move(current_entries.error()));
-      if (options.cancel_requested && options.cancel_requested())
-      {
-        return std::unexpected(agent_loop_canceled_error());
-      }
-      if (!same_session_snapshot(*entries, *current_entries))
-      {
-        snapshot_stale = true;
-        last_snapshot_entries = entries->size();
-        last_current_entries = current_entries->size();
-        return false;
-      }
-      auto entry =
-          ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
-                                                                                           .instructions = "",
-                                                                                           .config = *config,
-                                                                                           .estimated_tokens = estimated_tokens,
-                                                                                           .threshold_tokens = threshold_tokens,
-                                                                                           .retained_tokens = prepared->retained_tokens,
-                                                                                           .trigger = trigger_text,
-                                                                                           .recent_context = prepared->recent_context,
-                                                                                           .recent_context_omitted = prepared->recent_context_omitted});
-      if (!entry)
-        return std::unexpected(std::move(entry.error()));
-      auto appended = options.active_append_route ? options.active_append_route(std::move(*entry))
-                                                  : session_ts::wat(unlocked_session)->append_owned(std::move(*entry));
-      if (!appended)
-        return std::unexpected(std::move(appended.error()));
-      return true;
-    };
-    ava::core::Result<bool> appended = false;
-    appended = validate_and_append();
+    auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{.summary = *summary,
+                                                                                                  .instructions = "",
+                                                                                                  .config = *config,
+                                                                                                  .estimated_tokens = estimated_tokens,
+                                                                                                  .threshold_tokens = threshold_tokens,
+                                                                                                  .retained_tokens = prepared->retained_tokens,
+                                                                                                  .trigger = trigger_text,
+                                                                                                  .recent_context = prepared->recent_context,
+                                                                                                  .recent_context_omitted = prepared->recent_context_omitted});
+    if (!entry)
+      return std::unexpected(std::move(entry.error()));
+    if (!options.active_compaction_append_route)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "active compaction append route is unavailable"));
+    }
+
+    auto const snapshot_entries = entries->size();
+    auto appended = options.active_compaction_append_route(std::move(*entry), std::move(*entries), options.cancel_requested);
     if (!appended)
       return std::unexpected(std::move(appended.error()));
-    if (*appended)
+    bool const snapshot_stale = *appended == ava::session::SessionCompactionAppendResult::SnapshotMismatch;
+    if (!snapshot_stale)
     {
       ava::event::CompactionPayload end_payload;
       end_payload.provider = config->provider_id;
@@ -838,7 +795,12 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
       }
       return true;
     }
-    if (snapshot_stale && attempt + 1 < max_compaction_attempts)
+    last_snapshot_entries = snapshot_entries;
+    auto current_entries = read_authority.load();
+    if (!current_entries)
+      return std::unexpected(std::move(current_entries.error()));
+    last_current_entries = current_entries->size();
+    if (attempt + 1 < max_compaction_attempts)
     {
       ava::event::RetryPayload retry_payload;
       retry_payload.status = "started";
@@ -858,8 +820,6 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
         return std::unexpected(std::move(emitted.error()));
       }
     }
-    if (!snapshot_stale)
-      return false;
   }
   return std::unexpected(stale_compaction_snapshot_error(trigger_text, last_snapshot_entries, last_current_entries));
 }

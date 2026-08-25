@@ -374,7 +374,7 @@ Protocol rules:
 - Non-mutating event hooks: observe lifecycle events and optionally add diagnostics, but not rewrite provider requests in 1.0.
 - MCP servers: configured endpoints that AVA can launch and adapt into AVA tools. MCP server declarations in plugin manifests are deferred.
 
-Provider plugins, custom UI renderers, and prompt/provider interception remain deferred. The implemented additive host-rendered status/widget/select/confirm contract is the narrow slice approved by the [Pi-inspired TUI feature expansion plan](../plans/tui-pi-feature-expansion-plan.md); it does not authorize plugin terminal output, arbitrary geometry, styles, themes, editors, key handlers, or render callbacks.
+Provider plugins, custom UI renderers, and prompt/provider interception remain deferred. The implemented additive host-rendered status/widget/select/confirm contract is the narrow slice approved by the [historical Pi-inspired TUI feature expansion record](https://github.com/Artificial-Source/AVA/blob/develop/docs/history/tui-pi-feature-expansion.md); it does not authorize plugin terminal output, arbitrary geometry, styles, themes, editors, key handlers, or render callbacks.
 
 ### Pi Extension Capability Disposition
 

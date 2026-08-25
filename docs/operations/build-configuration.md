@@ -4,13 +4,17 @@ This document describes the current CMake surface. For prerequisites and normal 
 
 ## Presets
 
-CMake 3.25+ reads `CMakePresets.json` (version 6). Configure with `cmake --preset NAME`, then use the repository wrappers so build and test operations share the per-tree lock:
+CMake 3.27+ reads `CMakePresets.json` (version 6); 3.27 is required because current CTests use timeout signal/grace properties introduced in that release. The `dev` and `sanitize` presets are canonical. Python 3 is required for the complete test/documentation/package gates, and debug-enabled libcwd print-member generation requires JSON-capable Universal Ctags. Prepare a writable `GITACHE_ROOT`, configure with `cmake --preset NAME`, then use the repository wrappers so build and test operations share the per-tree lock:
 
 ```sh
+export GITACHE_ROOT="${GITACHE_ROOT:-$HOME/.cache/ava/gitache}"
+mkdir -p "$GITACHE_ROOT"
 cmake --preset dev
 scripts/build.sh --build-dir build
 scripts/run-tests.sh --build-dir build
 ```
+
+Direct configuration is noncanonical unless it supplies the cache-equivalent `BetaTest`, `EnableDebug=ON`, `EnableAvaBuildTests=ON`, compile-command, and sanitizer settings listed in [contributing](../development/contributing.md).
 
 | Preset | Binary directory | Key cache settings |
 | --- | --- | --- |
@@ -66,8 +70,19 @@ Use `scripts/build.sh` and `scripts/run-tests.sh`, optionally `--jobs N`. The wr
 
 ## Platform and dependency boundaries
 
-The maintained build is a Unix-like C++23 terminal application with wide ncurses, Boost, CMake, and gitache/AICxx dependencies; the repository CI/build scripts and security-sensitive process implementation target Linux. Linux-specific containment, descriptor handling, and package/test paths are not portable promises. The QML target is explicitly experimental.
+The maintained build is a Linux C++23 terminal application with wide ncurses, Boost, CMake, and Gitache/AICxx dependencies. Linux-specific containment, descriptor handling, and package/test paths are not portable promises. The QML target is explicitly experimental.
 
-CMake has conditional MSVC warning/sanitizer branches, but this is **not** a claim that MSVC or Windows builds work or are supported. Likewise, do not infer macOS support from generic CMake code. Validate a target platform from its current CI/release evidence before treating it as supported.
+| Combination | Classification |
+| --- | --- |
+| Ubuntu 24.04.4 x64, GCC 13.3, Unix Makefiles, `BetaTest`, debug enabled | Tested: configure/build/full CTest passed on 2026-08-23 |
+| Ubuntu 24.04.4 x64, GCC 13.3, Ninja, `Release`, debug disabled | Tested additional configuration: configure/build/full CTest/version passed |
+| Clang 18 | Best-effort and environment-blocked during the audit; not supported/qualified |
+| MSVC, Windows, macOS | Unsupported and untested |
+| AArch64 | No accepted native exact-candidate evidence for the first publication |
+| Multi-config generators | Not release-qualified; build/output/package configuration selection remains unproven |
 
-For a clean source checkout, dependency pins/submodules and the release provenance rules remain authoritative; see [CONTRIBUTING.md](../development/contributing.md), [release-checklist.md](release-checklist.md), and `THIRD_PARTY_NOTICES.md`.
+The first official publication target is Linux x64 only. The audited x64 artifact requires BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, and `curl`. Only architectures with native exact-candidate evidence may publish. Dirty working trees are always unqualified.
+
+CMake's conditional MSVC branches do not imply support. A `--require-release-qualified` package or `release_qualified:true` provenance field proves only the implemented static source/gitlink/license/version/native-architecture/dynamic-dependency/package gates, not CTest, native CI, terminal gates, exact-byte retention, or publication. Complete support/qualification comes from the [release ledger](../product/release-readiness.md) and [publication runbook](publication.md).
+
+For a clean source checkout, dependency pins/submodules and static provenance rules remain authoritative; see [contributing](../development/contributing.md), [release checklist](release-checklist.md), and `THIRD_PARTY_NOTICES.md`.

@@ -50,13 +50,20 @@ ava::core::Error rule_parse_error(std::string message, std::filesystem::path con
 
 std::filesystem::path normalized_path(std::filesystem::path const& path)
 {
-  return ava::core::normalized_absolute_path(path);
+  auto normalized = ava::core::normalized_absolute_path(path);
+  // lexically_normal preserves a trailing empty component for directory forms
+  // such as "/workspace/."; exact permission identity does not.
+  while (normalized != normalized.root_path() && normalized.filename().empty())
+  {
+    normalized = normalized.parent_path();
+  }
+  return normalized;
 }
 
 // Compare resolved inode ancestry plus the still-missing lexical suffix. This
 // detects existing directory aliases without canonicalizing or replacing either
 // caller-visible path identity, and also protects not-yet-created rule files.
-bool paths_refer_to_same_file(std::filesystem::path const& a, std::filesystem::path const& b)
+ava::core::Result<bool> paths_refer_to_same_file(std::filesystem::path const& a, std::filesystem::path const& b)
 {
   struct Identity
   {
@@ -64,30 +71,43 @@ bool paths_refer_to_same_file(std::filesystem::path const& a, std::filesystem::p
     ino_t inode = 0;
     std::vector<std::string> missing_suffix;
   };
-  auto const identity = [](std::filesystem::path path) -> std::optional<Identity> {
+  auto const identity = [](std::filesystem::path path) -> ava::core::Result<Identity> {
     if (path.empty())
-      return std::nullopt;
+      return std::unexpected(rule_file_error(ava::core::ErrorCategory::InvalidArgument, "permission path identity requires a non-empty path", path));
     path = normalized_path(path);
+    auto const original_path = path;
     std::vector<std::string> suffix;
     for (std::size_t depth = 0; depth < 256; ++depth)
     {
       struct stat status{};
       if (::stat(path.c_str(), &status) == 0)
         return Identity{.device = status.st_dev, .inode = status.st_ino, .missing_suffix = std::move(suffix)};
-      if (errno != ENOENT && errno != ENOTDIR)
-        return std::nullopt;
+      int const error_number = errno;
+      if (error_number != ENOENT && error_number != ENOTDIR)
+      {
+        auto error = rule_file_error(ava::core::ErrorCategory::Io, "failed to establish permission path identity", original_path);
+        error.with_context("identity_component", path.string());
+        error.with_context("cause", std::strerror(error_number));
+        return std::unexpected(std::move(error));
+      }
       auto const parent = path.parent_path();
       if (parent.empty() || parent == path)
-        return std::nullopt;
+      {
+        return std::unexpected(rule_file_error(ava::core::ErrorCategory::Io, "failed to find an existing permission path ancestor", original_path));
+      }
       suffix.push_back(path.filename().string());
       path = parent;
     }
-    return std::nullopt;
+    return std::unexpected(rule_file_error(ava::core::ErrorCategory::Io, "permission path identity exceeded the component limit", original_path));
   };
 
   auto const left = identity(a);
+  if (!left)
+    return std::unexpected(std::move(left.error()));
   auto const right = identity(b);
-  return left && right && left->device == right->device && left->inode == right->inode && left->missing_suffix == right->missing_suffix;
+  if (!right)
+    return std::unexpected(std::move(right.error()));
+  return left->device == right->device && left->inode == right->inode && left->missing_suffix == right->missing_suffix;
 }
 
 bool contains_parent_reference(std::filesystem::path const& path)
@@ -425,9 +445,16 @@ bool is_enforceable_permission_rules_file(PermissionRuleStore const& store, std:
 {
   if (path.empty())
     return false;
-  if (!store.global_rules_file.empty() && paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Global)))
-    return true;
-  return !store.workspace_dir.empty() && paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Workspace));
+  if (!store.global_rules_file.empty())
+  {
+    auto const global_match = paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Global));
+    if (global_match && *global_match)
+      return true;
+  }
+  if (store.workspace_dir.empty())
+    return false;
+  auto const workspace_match = paths_refer_to_same_file(path, enforceable_permission_rules_file(store, PermissionRuleScope::Workspace));
+  return workspace_match && *workspace_match;
 }
 
 void register_enforceable_permission_rule_files(PermissionRuleStore const& store)
@@ -450,7 +477,10 @@ bool is_registered_enforceable_permission_rules_file(std::filesystem::path const
     return false;
   std::lock_guard lock(protected_rule_paths_mutex());
   auto const& paths = protected_rule_paths();
-  return std::ranges::any_of(paths, [&](std::filesystem::path const& registered) { return paths_refer_to_same_file(path, registered); });
+  return std::ranges::any_of(paths, [&](std::filesystem::path const& registered) {
+    auto const matched = paths_refer_to_same_file(path, registered);
+    return matched && *matched;
+  });
 }
 
 }  // namespace ava::permissions

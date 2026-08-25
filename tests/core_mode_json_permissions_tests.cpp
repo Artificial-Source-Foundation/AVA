@@ -55,6 +55,7 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -96,6 +97,8 @@ class TestApplication final : public ava::core::Application
   [[nodiscard]] std::string_view application_name() const noexcept override { return "test application"; }
 };
 
+constexpr int lifecycle_child_setup_failed = 125;
+
 struct ChildWaitResult
 {
   bool reaped = false;
@@ -129,6 +132,10 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
   }
   if (child == 0)
   {
+    rlimit const core_limit{.rlim_cur = 0, .rlim_max = 0};
+    if (::setrlimit(RLIMIT_CORE, &core_limit) != 0)
+      _exit(lifecycle_child_setup_failed);
+
     // The child is expected to abort; nothing it writes is part of any test
     // assertion (the parent only checks WTERMSIG == SIGABRT). In particular
     // the intentional LIBCWD_ASSERT in the lifecycle invariants emits
@@ -158,6 +165,11 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
   if (!result.reaped)
   {
     expect(false, "Application lifecycle death test could not observe its child: " + std::string(description));
+    return;
+  }
+  if (WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_setup_failed)
+  {
+    expect(false, "Application lifecycle death test child could not disable core dumps: " + std::string(description));
     return;
   }
 

@@ -62,10 +62,22 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
   {
     return fail_compaction(std::move(config.error()));
   }
-  auto read_authority = runtime::session_ts::rat(unlocked_session)->read_authority_1();
+  ava::core::Result<ava::session::SessionReadAuthority> read_authority =
+      std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session read authority was not captured"));
+  std::shared_ptr<SessionRunController> run_controller;
+  std::optional<long long> context_window_tokens;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    read_authority = session_r->read_authority_1();
+    run_controller = session_r->run_controller();
+    context_window_tokens = session_r->model().context_window_tokens;
+  }
   if (!read_authority)
     return fail_compaction(std::move(read_authority.error()));
-  auto const context_window_tokens = runtime::session_ts::rat(unlocked_session)->model().context_window_tokens;
+  if (!run_controller)
+  {
+    return fail_compaction(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  }
 
   constexpr std::size_t max_compaction_attempts = 2;
   std::size_t last_snapshot_entries = 0;
@@ -74,12 +86,7 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
   {
     if (command_canceled(request))
       return fail_compaction(command_canceled_error());
-    ava::core::Result<std::vector<ava::session::SessionEntry>> entries =
-        std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "session entries were not loaded"));
-    {
-      SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-      entries = read_authority->load();
-    }
+    ava::core::Result<std::vector<ava::session::SessionEntry>> entries = read_authority->load();
     if (!entries)
     {
       return fail_compaction(std::move(entries.error()));
@@ -125,40 +132,24 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
       return fail_compaction(std::move(error));
     }
 
-    bool snapshot_stale = false;
-    auto validate_and_append = [&]() -> ava::core::VoidResult {
-      SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-      auto current_entries = read_authority->load();
-      if (!current_entries)
-        return std::unexpected(std::move(current_entries.error()));
-      if (command_canceled(request))
-        return std::unexpected(command_canceled_error());
-      if (!same_session_snapshot(*entries, *current_entries))
-      {
-        snapshot_stale = true;
-        last_snapshot_entries = entries->size();
-        last_current_entries = current_entries->size();
-        return {};
-      }
-      auto entry = ava::session::make_manual_compaction_entry(ava::session::ManualCompactionRequest{
-          .summary = *summary,
-          .instructions = instructions,
-          .config = *config,
-          .estimated_tokens = prepared->estimated_tokens,
-          .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, context_window_tokens),
-          .retained_tokens = prepared->retained_tokens,
-          .trigger = "manual",
-          .recent_context = prepared->recent_context,
-          .recent_context_omitted = prepared->recent_context_omitted});
-      if (!entry)
-        return std::unexpected(std::move(entry.error()));
-      return session_w->append_owned(std::move(*entry));
-    };
-    auto appended = validate_and_append();
+    auto entry = ava::session::make_manual_compaction_entry(
+        ava::session::ManualCompactionRequest{.summary = *summary,
+                                              .instructions = instructions,
+                                              .config = *config,
+                                              .estimated_tokens = prepared->estimated_tokens,
+                                              .threshold_tokens = ava::session::effective_auto_threshold_tokens(*config, context_window_tokens),
+                                              .retained_tokens = prepared->retained_tokens,
+                                              .trigger = "manual",
+                                              .recent_context = prepared->recent_context,
+                                              .recent_context_omitted = prepared->recent_context_omitted});
+    if (!entry)
+      return fail_compaction(std::move(entry.error()));
+
+    auto const snapshot_entries = entries->size();
+    auto appended = run_controller->append_compaction_if_snapshot_matches(std::move(*entry), std::move(*entries), request.cancel_requested);
     if (!appended)
-    {
       return fail_compaction(std::move(appended.error()));
-    }
+    bool const snapshot_stale = *appended == ava::session::SessionCompactionAppendResult::SnapshotMismatch;
     if (!snapshot_stale)
     {
       ava::event::CompactionPayload end_payload{
@@ -185,6 +176,11 @@ ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlock
       add_output(result, "compaction summary recorded");
       return result;
     }
+    last_snapshot_entries = snapshot_entries;
+    auto current_entries = read_authority->load();
+    if (!current_entries)
+      return fail_compaction(std::move(current_entries.error()));
+    last_current_entries = current_entries->size();
     if (attempt + 1 < max_compaction_attempts)
     {
       ava::event::RetryPayload retry_payload;

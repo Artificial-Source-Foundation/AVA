@@ -4,9 +4,10 @@
 #include "ava/session/compaction.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/session_store.h"
-#include "ava/core/error.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/error.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -43,8 +44,7 @@ class FailingStreambuf final : public std::streambuf
 std::filesystem::path temp_root();
 // Create an empty logical root. If the directory already exists it will be cleaned out.
 std::filesystem::path create_empty_root(std::filesystem::path root_name);
-std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace,
-                                                               std::filesystem::path const& spill_dir);
+std::shared_ptr<ava::core::AnchorSet> command_anchors_for_test(std::filesystem::path const& workspace, std::filesystem::path const& spill_dir);
 
 class ScopedEnvVar
 {
@@ -65,6 +65,20 @@ class ScopedEnvVar
 
 std::string strip_sgr(std::string_view text);
 bool has_active_sgr_at_text(std::string_view line, std::string_view text, std::string_view sgr);
+
+namespace ava::tests {
+inline std::size_t count_occurrences(std::string_view text, std::string_view needle)
+{
+  if (needle.empty())
+    return 0;
+
+  std::size_t count = 0;
+  for (std::size_t offset = text.find(needle); offset != std::string_view::npos; offset = text.find(needle, offset + needle.size()))
+    ++count;
+  return count;
+}
+}  // namespace ava::tests
+
 // Test-only authority adapter. Persistent test fixtures acquire the exact
 // lease for the duration of one append; runtime tests instead use owner routes.
 ava::core::VoidResult append_session_entry_for_test(ava::session::SessionStore& store, ava::session::SessionEntry const& entry);

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -u
+umask 077
 
 enabled="${AVA_LIVE_PROVIDER_SMOKE:-}"
 if [ "$enabled" != "1" ] && [ "$enabled" != "true" ] && [ "$enabled" != "TRUE" ] && [ "$enabled" != "yes" ] && [ "$enabled" != "on" ]; then
@@ -53,16 +54,79 @@ classify_failure()
   esac
 }
 
-if [ -n "${AVA_LIVE_DOGFOOD_ROOT:-}" ]; then
-  root="$AVA_LIVE_DOGFOOD_ROOT"
-  case "$root" in
+private_parent_error()
+{
+  echo "live dogfood private parent rejected: $1" >&2
+  exit 1
+}
+
+private_parent_metadata()
+{
+  if metadata=$(stat -c '%u %a' "$1" 2>/dev/null); then
+    printf '%s\n' "$metadata"
+    return 0
+  fi
+  if metadata=$(stat -f '%u %Lp' "$1" 2>/dev/null); then
+    printf '%s\n' "$metadata"
+    return 0
+  fi
+  return 1
+}
+
+validate_private_parent()
+{
+  parent=$1
+  case "$parent" in
     /*) ;;
-    *) root="$PWD/$root" ;;
+    *) private_parent_error "path must be absolute" ;;
   esac
-  rm -rf "$root"
-  mkdir -p "$root"
+  while [ "$parent" != "/" ] && [ "${parent%/}" != "$parent" ]; do
+    parent=${parent%/}
+  done
+  [ -d "$parent" ] || private_parent_error "path must be an existing directory"
+  [ ! -L "$parent" ] || private_parent_error "path must not be a symlink"
+
+  parent_physical=$(CDPATH= cd -P "$parent" 2>/dev/null && pwd -P) ||
+    private_parent_error "directory cannot be resolved"
+  [ "$parent_physical" != "/" ] || private_parent_error "filesystem root is not allowed"
+
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+    home_physical=$(CDPATH= cd -P "$HOME" 2>/dev/null && pwd -P) || home_physical=
+    [ "$parent_physical" != "$home_physical" ] || private_parent_error "HOME itself is not allowed"
+  fi
+
+  checkout_physical=$(CDPATH= cd -P "$script_dir/.." 2>/dev/null && pwd -P) ||
+    private_parent_error "checkout cannot be resolved"
+  case "$parent_physical" in
+    "$checkout_physical"|"$checkout_physical"/*)
+      private_parent_error "the checkout and directories inside it are not allowed"
+      ;;
+  esac
+
+  metadata=$(private_parent_metadata "$parent_physical") ||
+    private_parent_error "directory ownership and mode cannot be inspected"
+  set -- $metadata
+  [ "$#" -eq 2 ] || private_parent_error "directory metadata is invalid"
+  [ "$1" = "$(id -u)" ] || private_parent_error "directory must be owned by the current effective user"
+  case "$2" in
+    700|0700) ;;
+    *) private_parent_error "directory mode must be exactly 0700" ;;
+  esac
+
+  printf '%s\n' "$parent_physical"
+}
+
+if [ -n "${AVA_LIVE_DOGFOOD_ROOT:-}" ]; then
+  private_parent=$(validate_private_parent "$AVA_LIVE_DOGFOOD_ROOT") || exit 1
+  root=$(mktemp -d "$private_parent/ava-live-dogfood.XXXXXX") ||
+    private_parent_error "could not allocate an evidence directory"
 else
-  root=$(mktemp -d "${TMPDIR:-/tmp}/ava-live-dogfood.XXXXXX")
+  root=$(mktemp -d "${TMPDIR:-/tmp}/ava-live-dogfood.XXXXXX") ||
+    private_parent_error "could not allocate an evidence directory"
+fi
+if ! chmod 700 "$root"; then
+  rm -rf "$root"
+  private_parent_error "could not make the evidence directory private"
 fi
 
 workspace="$root/workspace"
@@ -84,14 +148,19 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
+evidence_note_printed=
 print_evidence_note()
 {
   if [ -n "${AVA_LIVE_DOGFOOD_KEEP:-}" ]; then
-    echo "evidence_root=$root"
+    if [ -z "$evidence_note_printed" ]; then
+      echo "evidence_root=$root"
+      evidence_note_printed=1
+    fi
   else
     echo "set AVA_LIVE_DOGFOOD_KEEP=1 to retain RPC logs"
   fi
 }
+if [ -n "${AVA_LIVE_DOGFOOD_KEEP:-}" ]; then print_evidence_note; fi
 
 mkdir -p "$workspace/src" "$home_dir" "$config_dir/ava" "$state_dir" "$data_dir"
 marker="ava-live-dogfood-marker"

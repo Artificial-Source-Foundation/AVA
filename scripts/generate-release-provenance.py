@@ -32,10 +32,10 @@ DEPENDENCY_USAGE = {
 # This committed policy makes the direct-license evidence independently
 # auditable. A license identifier alone cannot establish what file was used.
 EXPECTED_GITLINK_REVISIONS = {
-    "cwds": "3bef487a734de41fe4af52003f9186a485f8d287",
+    "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
     "aicxx": "411eae316e75f798611afc5223d861b213e9d503",
-    "utils": "ce73eaf3292dce5b149d9459f5733a31688ce864",
-    "threadsafe": "7e749d1735f817952239c2351b24aaf78514e5a0",
+    "utils": "5ed11a1763eb982efcbc4d8407433010a8a317be",
+    "threadsafe": "76c3ccab0ef913f6c472175eb3994b20b5b40a0e",
     "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
     "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",
 }
@@ -48,6 +48,11 @@ EXPECTED_LICENSE_SHA256 = {
     "nlohmann_json": "d64d1b4d948aa7751cfb613c02dc246aab7b358d760053e6580f01affe946906",
 }
 HOST_DYNAMIC_ALLOWLIST = frozenset({"libncursesw.so.6", "libtinfo.so.6", "libstdc++.so.6", "libm.so.6", "libgcc_s.so.1", "libc.so.6"})
+ARCHITECTURE_DYNAMIC_ALLOWLISTS = {
+    "x86_64": HOST_DYNAMIC_ALLOWLIST,
+    "aarch64": HOST_DYNAMIC_ALLOWLIST | {"ld-linux-aarch64.so.1"},
+}
+QUALIFIED_ARCHITECTURES = frozenset({"x86_64", "aarch64"})
 MACHINE_ARCHITECTURES = {3: "x86", 62: "x86_64", 183: "aarch64"}
 
 
@@ -263,13 +268,18 @@ def dependency_records(repo: pathlib.Path) -> tuple[list[dict[str, Any]], list[s
     return records, reasons
 
 
-def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str, *, qualification_mode: bool = False, binary_version: str | None = None, architecture: str | None = None, needed: list[str] | None = None) -> dict[str, Any]:
+def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str, *, host_architecture: str | None, qualification_mode: bool = False, binary_version: str | None = None, architecture: str | None = None, needed: list[str] | None = None) -> dict[str, Any]:
     ava_version = project_version(repo)
     source_revision = run_git(repo, "rev-parse", "HEAD")
     source_dirty = worktree_dirty(repo)
     detected_architecture, detected_needed = elf_metadata(binary)
     architecture = architecture if architecture is not None else detected_architecture
     needed = needed if needed is not None else detected_needed
+    host_architecture_matches_binary = (
+        host_architecture == architecture
+        if host_architecture is not None and architecture is not None
+        else None
+    )
     dependencies, reasons = dependency_records(repo)
     if ava_version is None:
         reasons.append("ava-version-unavailable")
@@ -283,11 +293,21 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         reasons.append("qualification-mode-not-requested")
     if build_mode != "source-build":
         reasons.append("build-mode-not-source-build")
-    if architecture != "x86_64":
-        reasons.append("architecture-not-x86_64")
+    if host_architecture is None:
+        reasons.append("host-architecture-missing")
+    elif host_architecture not in QUALIFIED_ARCHITECTURES:
+        reasons.append("host-architecture-unsupported")
+    if architecture is None:
+        reasons.append("binary-architecture-missing")
+    elif architecture not in QUALIFIED_ARCHITECTURES:
+        reasons.append("binary-architecture-unsupported")
+    if host_architecture_matches_binary is False:
+        reasons.append("host-binary-architecture-mismatch")
+    dynamic_dependency_allowlist = ARCHITECTURE_DYNAMIC_ALLOWLISTS.get(architecture, HOST_DYNAMIC_ALLOWLIST)
+    unexpected_dynamic_dependencies = None if needed is None else sorted(set(needed) - dynamic_dependency_allowlist)
     if needed is None:
         reasons.append("binary-not-elf")
-    elif set(needed) - HOST_DYNAMIC_ALLOWLIST:
+    elif unexpected_dynamic_dependencies:
         reasons.append("unexpected-dynamic-dependency")
     license_ids = {record["name"]: record["license_id"] for record in dependencies}
     license_ids["boost_headers"] = "BSL-1.0"
@@ -308,8 +328,11 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         }],
         "license_ids": license_ids,
         "architecture": architecture,
+        "host_architecture": host_architecture,
+        "host_architecture_matches_binary": host_architecture_matches_binary,
         "elf_dt_needed": needed,
-        "host_dynamic_dependency_allowlist": sorted(HOST_DYNAMIC_ALLOWLIST),
+        "host_dynamic_dependency_allowlist": sorted(dynamic_dependency_allowlist),
+        "unexpected_dynamic_dependencies": unexpected_dynamic_dependencies,
         "release_qualified": not reasons,
         "qualification_reasons": reasons,
     }
@@ -320,6 +343,7 @@ def main() -> int:
     parser.add_argument("--repo", required=True, type=pathlib.Path)
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--build-mode", choices=("source-build", "supplied-binary"), required=True)
+    parser.add_argument("--host-architecture", help="canonical architecture of the packaging host")
     parser.add_argument("--binary-version", help="exact version reported by the snapshotted binary")
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--qualification-mode", action="store_true", help="evaluate and permit a qualification claim")
@@ -329,12 +353,16 @@ def main() -> int:
         parser.error(f"binary is not a regular file: {args.binary}")
     provenance = collect_provenance(
         args.repo, args.binary, args.build_mode,
+        host_architecture=args.host_architecture,
         qualification_mode=args.qualification_mode or args.require_release_qualified,
         binary_version=args.binary_version,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.require_release_qualified and not provenance["release_qualified"]:
+        unexpected = provenance["unexpected_dynamic_dependencies"]
+        if unexpected:
+            print("error: unexpected dynamic dependencies: " + ", ".join(unexpected), file=sys.stderr)
         print("error: release qualification failed: " + ", ".join(provenance["qualification_reasons"]), file=sys.stderr)
         return 1
     return 0

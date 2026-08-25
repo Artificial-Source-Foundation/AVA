@@ -1,24 +1,14 @@
-# Pi MVP Parity Goal Index
+# Historical Pi MVP Parity Goal Index
 
-## Objective
+**Status: closed.** This package reached its documented closure on 2026-07-04 and is retained only as historical rationale and evidence. It is not an active planning surface, does not authorize agents to pursue 100 percent parity, and must not reopen deferred/excluded work.
 
-Make AVA a Pi-style local terminal coding agent implemented in C++23, while preserving AVA-specific advantages: granular permissions and audit, MCP, LSP, web tools, the `question` tool, `apply_patch`, safer process boundaries, and real terminal smoke coverage.
+Current authority is [AVA product principles](../../product/principles.md), then the [release-readiness ledger](../../product/release-readiness.md), current implementation/tests, the [product baseline](../../product/mvp-baseline.md), and the [coverage ledger](../../product/mvp-coverage-ledger.md). Pi.dev is comparative input only.
 
-This package is the planning surface for pushing the Pi parity score toward 100 percent. It is intentionally split into area files so Codex can run one focused `/goal` at a time instead of trying to finish the entire product backlog in one run.
+## Historical objective
 
-## Current Source Of Truth
+The completed package sought a Pi-style local terminal coding-agent outcome in C++23 while preserving AVA-specific permissions, audit, MCP, LSP, tools, process boundaries, and terminal evidence. The area files and repository-level [plan](../../../goals/ava-mvp-baseline-pi-tui/plan.md) and [work ledger](../../../goals/ava-mvp-baseline-pi-tui/mvp-work-ledger.md) preserve how that work was decomposed; do not execute them as current instructions.
 
-Read these before starting any area goal:
-
-1. [Product MVP baseline](../../product/mvp-baseline.md)
-2. [Product MVP coverage ledger](../../product/mvp-coverage-ledger.md)
-3. [Repository goal plan](../../../goals/ava-mvp-baseline-pi-tui/plan.md)
-4. [Repository goal work ledger](../../../goals/ava-mvp-baseline-pi-tui/mvp-work-ledger.md)
-5. This file, then the specific area file for the goal.
-
-If the area file conflicts with the product MVP baseline, update the area file or ask for a product decision before implementation.
-
-## Codex Goal Rules
+## Historical goal rules (not current instruction)
 
 Use the [Codex goal workflow](codex-goal-workflow.md) for the goal command contract. The short version:
 
@@ -49,7 +39,7 @@ Use the [Codex goal workflow](codex-goal-workflow.md) for the goal command contr
 | Backend pending goals | [backend-pending-goals-goal.md](backend-pending-goals-goal.md) | Tracks bounded closure of remaining approved backend goals. |
 | Full parity closure | [full-parity-all-goals-goal.md](full-parity-all-goals-goal.md) | Coordinates the complete package without replacing area-specific acceptance criteria. |
 
-## Definition Of 100 Percent
+## Historical closure definition
 
 100 percent does not mean AVA literally copies Pi. It means every Pi baseline capability has one of these dispositions:
 
@@ -62,7 +52,7 @@ Use the [Codex goal workflow](codex-goal-workflow.md) for the goal command contr
 
 Rows left as vague `partial` are not 100 percent. Each area goal must reduce partials into implemented, deferred, or excluded rows.
 
-## Execution Order
+## Historical execution order
 
 The highest leverage order is:
 

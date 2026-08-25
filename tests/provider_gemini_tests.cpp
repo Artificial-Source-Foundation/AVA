@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -31,12 +32,13 @@ void test_gemini_profiles_and_registry()
 
 void test_gemini_provider_contract()
 {
+  constexpr std::string_view system_prompt_marker = "AVA-ISSUE-54-GEMINI-SYSTEM-PROMPT";
   ava::provider::GeminiProvider const provider("https://gemini.example.test/");
   auto const request = provider.build_request(
       ava::provider::ProviderRequest{
           .provider_id = "gemini",
           .model_id = "gemini-2.5-pro",
-          .system_prompt = "system",
+          .system_prompt = std::string(system_prompt_marker),
           .messages = {ava::provider::ChatMessage{.role = "user", .content = "hello \"ava\""},
                        ava::provider::ChatMessage{.role = "assistant", .content = "hi"}},
           .tools_json =
@@ -51,7 +53,10 @@ void test_gemini_provider_contract()
            "Gemini streaming request targets streamGenerateContent SSE endpoint with trimmed base URL");
     expect(request->headers.at("x-goog-api-key") == "gemini-key", "Gemini request uses x-goog-api-key header");
     expect(request->headers.at("Accept") == "text/event-stream", "Gemini streaming request asks for SSE");
-    expect(request->body.find(R"("systemInstruction":{"parts":[{"text":"system"}]})") != std::string::npos, "Gemini request serializes systemInstruction");
+    expect(ava::tests::count_occurrences(request->body, system_prompt_marker) == 1, "Gemini request serializes the effective system prompt exactly once");
+    auto const expected_system_instruction = std::string("\"systemInstruction\":{\"parts\":[{\"text\":\"") + std::string(system_prompt_marker) + "\"}]}";
+    expect(request->body.find(expected_system_instruction) != std::string::npos,
+           "Gemini request places the effective system prompt in the top-level systemInstruction parts text");
     expect(
         request->body.find(R"("contents":[{"role":"user","parts":[{"text":"hello \"ava\""}]},{"role":"model","parts":[{"text":"hi"}]})") != std::string::npos,
         "Gemini request maps assistant role to model and escapes content");

@@ -1,8 +1,8 @@
 # AVA dogfood qualification
 
-Status: active qualification on `develop` (2026-07-23).
+Status: historical dogfood qualification record, with current release authority moved to the [release-readiness ledger](../product/release-readiness.md).
 
-AVA is ready for regular repository dogfooding. Linux release closure is implemented for qualified x86_64/x64 source-built artifacts; non-x86 architectures remain unqualified pending provenance or replacement of the non-Carlo AArch64 `yield` contribution.
+AVA is ready for regular repository dogfooding. This page does not qualify an official artifact, and dirty trees are always unqualified. The frozen first-publication target is Linux x64 only after exact-byte/support/publication blockers close; other architectures require independent native exact-candidate evidence.
 
 ## Live OpenAI OAuth results
 
@@ -57,8 +57,17 @@ Current workflow controls:
 - Sealed command plans use a fixed trusted command path rather than inheriting arbitrary user `PATH`; approved development commands follow the contained-command policy.
 - The built-in `clangd` recipe is default-off and requires exact global opt-in; it uses only an already-installed, identity-checked executable. It is the sole automatic LSP recipe; every other server requires explicit configuration.
 
-## Linux release closure boundary
+## Historical Linux static package boundary
 
-The pinned `utils` revision is `ce73eaf`; Carlo's MIT relicensing commit is `adee705`. AVA's qualified x86_64/x64 release uses the MIT-licensed Carlo-owned `utils` paths and defines `MIT_LICENSE_ONLY`, which makes accidental inclusion of the guarded BSD `FunctionView.h` and `threading/MpscQueue.h` fail compilation. This is not a claim that every `utils` path has one license: the AArch64 `yield` branch in `cpu_relax.h` remains attributed to Long Wong and is not qualified pending provenance or replacement.
+The pinned `utils` revision was `ce73eaf`; Carlo's MIT relicensing commit was `adee705`. The x86_64 static package/provenance gate used the MIT-licensed Carlo-owned `utils` paths and defined `MIT_LICENSE_ONLY`, which makes accidental inclusion of the guarded BSD `FunctionView.h` and `threading/MpscQueue.h` fail compilation. This is not a claim that every `utils` path has one license: the AArch64 `yield` branch in `cpu_relax.h` remains attributed to Long Wong and is not qualified pending provenance or replacement.
 
-`scripts/package-linux.sh --require-release-qualified` requires a clean source-built x86_64 artifact, matching initialized gitlinks, expected license evidence, and allowlisted host ELF dependencies. The packaged `THIRD_PARTY_NOTICES.md` and `PROVENANCE.json` state the boundary. Supplied-binary packaging remains available but is explicitly unqualified.
+`scripts/package-linux.sh --require-release-qualified` requires a clean native source build, matching initialized gitlinks, expected license evidence, architecture agreement, and allowlisted host ELF dependencies. The packaged `THIRD_PARTY_NOTICES.md` and `PROVENANCE.json` state that static boundary. The flag/field do not prove full CTest, native CI, terminal gates, exact-byte retention, or publication; supplied-binary packaging remains statically unqualified.
+
+### 2026-08-17 replacement state
+
+The 2026-07-23 evidence above remains the dated record for the prior pin. The
+current `utils` pin is `5ed11a1763eb982efcbc4d8407433010a8a317be` and contains
+Carlo's MIT-licensed AArch64 CPU-relaxation implementation. That closes the
+source/license issue and permits static package-gate evaluation for native x64
+and AArch64; it does not supply exact-candidate native release evidence. The
+2026-08-23 frozen first-publication cut therefore remains Linux x64 only.

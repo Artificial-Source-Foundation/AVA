@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25...4.3.4)
+cmake_minimum_required(VERSION 3.27...4.3.4)
 
 project(ava
   VERSION 1.0.0
@@ -142,8 +142,8 @@ endfunction()
 
 function(ava_apply_sanitizers target)
   if(OptionEnableAvaSanitizers AND NOT MSVC)
-    target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-    target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+    target_link_options(${target} PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=undefined)
   endif()
 endfunction()
 
@@ -176,6 +176,15 @@ if(AVA_ENABLE_TSAN AND NOT MSVC)
   add_link_options(-fsanitize=thread)
 endif()
 
+# ai-utils probes x86 BMI2 by compiling and running GCC x86 builtins. Those
+# builtins do not exist on non-x86 targets, where a failed probe must mean
+# "unsupported" rather than aborting configuration.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _ava_system_processor)
+if(NOT _ava_system_processor MATCHES "^(x86_64|amd64|i[3-6]86)$")
+  set(CW_BMI2_SUPPORT 0 CACHE INTERNAL "BMI2 is unavailable on non-x86 targets" FORCE)
+endif()
+unset(_ava_system_processor)
+
 # Declare aicxx submodules.
 include(AICxxSubmodules)
 
@@ -189,6 +198,10 @@ endif()
 set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL "List of OBJECT libaries that this project uses.")
 
 add_subdirectory(src)
+# ava_terminal predates the shared AVA target helpers and does not apply the
+# sanitizer policy in its own subdirectory. Instrument it centrally so the
+# canonical sanitizer build covers every first-party production object.
+ava_apply_sanitizers(ava_terminal)
 add_subdirectory(enchantum)
 
 install(
@@ -276,11 +289,6 @@ install(
 install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/product/mvp-coverage-ledger.md"
   DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/product"
-  COMPONENT ava
-)
-install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/plans/tui-pi-feature-expansion-plan.md"
-  DESTINATION "${CMAKE_INSTALL_DOCDIR}/docs/plans"
   COMPONENT ava
 )
 install(

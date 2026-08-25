@@ -21,7 +21,7 @@ Usage: scripts/package-linux.sh [--binary ABS] [--fake-provider ABS] [--output-d
 Without --binary, configure a fresh private Release build tree and build ava plus the fake-provider helper.
 With --binary, snapshot that executable once and stage it only when its exact version matches this checkout.
 A supplied --fake-provider is likewise snapshotted once before model smoke.
---require-release-qualified accepts only a clean source-built x86_64 artifact with approved provenance.
+--require-release-qualified enforces the implemented static source/gitlink/license/version/native-architecture/dynamic-dependency/package gates for a clean native source-built x86_64/AArch64 artifact; it does not prove CTest, CI, retention, or publication.
 If --output-dir is omitted, a new private unpredictable directory is created.
 Python 3 is required for provenance, packaging-time link verification, and secure publication.
 EOF
@@ -136,7 +136,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 if [[ -z $binary ]]; then
-  # A qualification build must not inherit artifacts or configuration from a
+  # A static package-qualification build must not inherit artifacts or configuration from a
   # developer tree. Keep the Release tree private with the package transaction.
   release_build="$work_root/release-build"
   cmake --preset release -S "$repo_root" -B "$release_build" \
@@ -186,23 +186,25 @@ if [[ $version != "$project_version" ]]; then
   exit 1
 fi
 
-case "$(uname -m)" in
-  x86_64|amd64) arch=x64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  armv7l|armv7) arch=armv7 ;;
-  ppc64le) arch=ppc64le ;;
-  riscv64) arch=riscv64 ;;
+host_machine=$(uname -m)
+host_machine=$(printf '%s' "$host_machine" | tr '[:upper:]' '[:lower:]')
+case "$host_machine" in
+  x86_64|amd64) host_architecture=x86_64 ;;
+  aarch64|arm64) host_architecture=aarch64 ;;
   *)
-    arch=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
-    if [[ -z $arch ]]; then
+    host_architecture=$(printf '%s' "$host_machine" | sed 's/[^a-z0-9._-]/-/g')
+    if [[ -z $host_architecture ]]; then
       echo "error: unable to normalize host architecture" >&2
       exit 1
+    fi
+    if [[ $host_architecture != [a-z0-9]* ]]; then
+      host_architecture="unknown-$host_architecture"
     fi
     ;;
 esac
 
-package_name="ava-${version}-linux-${arch}"
-stage="$work_root/stage/$package_name"
+neutral_stage="$work_root/neutral-stage"
+stage="$neutral_stage"
 doc_root="$stage/share/doc/ava"
 doc_sources=(
   docs/core/usage.md
@@ -236,7 +238,6 @@ doc_sources=(
   docs/interop/evidence/README.md
   docs/interop/evidence/zed-1.9.0-2026-07-14.md
   docs/product/mvp-coverage-ledger.md
-  docs/plans/tui-pi-feature-expansion-plan.md
   docs/schema/theme.schema.json
 )
 
@@ -264,12 +265,39 @@ provenance_command=(
   --binary "$binary"
   --binary-version "$version"
   --build-mode "$build_mode"
+  --host-architecture "$host_architecture"
   --output "$doc_root/PROVENANCE.json"
 )
 if [[ $require_release_qualified == true ]]; then
   provenance_command+=(--qualification-mode --require-release-qualified)
 fi
 "${provenance_command[@]}"
+
+arch=$(python3 - "$doc_root/PROVENANCE.json" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+try:
+    provenance = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit(f"error: unable to read staged provenance architecture: {error}")
+architecture = provenance.get("architecture")
+if not isinstance(architecture, str) or not architecture:
+    raise SystemExit("error: staged provenance does not contain a detected ELF architecture")
+labels = {"x86_64": "x64", "aarch64": "arm64"}
+label = labels.get(architecture, architecture)
+if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", label) is None:
+    raise SystemExit(f"error: staged provenance contains an unsafe ELF architecture: {architecture!r}")
+print(label)
+PY
+)
+package_name="ava-${version}-linux-${arch}"
+mkdir -m 0700 -- "$work_root/stage"
+stage="$work_root/stage/$package_name"
+mv -- "$neutral_stage" "$stage"
+doc_root="$stage/share/doc/ava"
 
 expected_files=(bin/ava share/doc/ava/README.md share/doc/ava/LICENSE share/doc/ava/THIRD_PARTY_NOTICES.md share/doc/ava/PROVENANCE.json)
 for source in "${doc_sources[@]}"; do
@@ -284,9 +312,9 @@ if [[ ${staged_files[*]} != "${sorted_expected[*]}" ]]; then
   exit 1
 fi
 if [[ $require_release_qualified == true ]]; then
-  echo "release qualification: qualified"
+  echo "static package/provenance qualification: passed (full release qualification requires the release ledger)"
 else
-  echo "release qualification: see share/doc/ava/PROVENANCE.json (accepted-binary artifacts are unqualified)"
+  echo "static package/provenance qualification: see share/doc/ava/PROVENANCE.json (accepted-binary artifacts are unqualified)"
 fi
 if find "$stage" -type l -print -quit | grep -q .; then
   echo "error: staged package contains a symlink" >&2

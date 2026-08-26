@@ -142,7 +142,7 @@ int Context::get_wch()
 
 ColorPair Context::create_color_pair(Color foreground, Color background)
 {
-  bool const direct_color = COLORS == 16777216;
+  bool const direct_color = COLORS == 0x1000000;
   int fallback_foreground_index = COLOR_WHITE;
   int fallback_background_index = COLOR_BLACK;
   if (!default_colors_enabled_ && !direct_color)

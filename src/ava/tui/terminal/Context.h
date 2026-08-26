@@ -30,8 +30,8 @@ class Context final
 
   Rendition const& default_rendition() const { return default_rendition_; }
 
-  // Return a ColorPair for `foreground` and `background`, using exact RGB on direct-color terminals and nearest palette
-  // colors otherwise.
+  // Return a ColorPair for `foreground` and `background`, using exact RGB on direct-color terminals and nearest palette colors
+  // otherwise.
   //
   // The terminal must support colors and have room for another color pair. The default terminal color is preserved on both paths.
   ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair

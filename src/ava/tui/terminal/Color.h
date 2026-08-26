@@ -14,7 +14,7 @@ namespace ava::tui::terminal {
 // Unfortunately, it depends on the terminal how such a color is displayed,
 // as well as any Attributes that are in effect of course.
 //
-// On direct-color terminals (where COLORS is 16777216) the rgb_ value will be
+// On direct-color terminals (where COLORS is 2^24) the rgb_ value will be
 // used as index, and the values 1 through 7 have a special meaning (COLOR_RED
 // through COLOR_WHITE).
 //

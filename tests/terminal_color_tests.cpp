@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "terminal/ColorPalette.h"
 #include "terminal/Context.h"
 #include "tests/support/test_harness.h"
 
@@ -9,6 +10,24 @@
 namespace terminal = ava::tui::terminal;
 
 namespace {
+
+// Verify known CIELAB endpoints and exact 8-bit sRGB round trips through the forward and inverse conversions.
+void test_srgb_cielab_round_trip()
+{
+  expect(terminal::ColorPalette::lab_to_rgb({0.0, 0.0, 0.0}).as_int() == 0x000000, "CIELAB black must convert to sRGB black");
+  expect(terminal::ColorPalette::lab_to_rgb({100.0, 0.0, 0.0}).as_int() == 0xffffff, "CIELAB D65 white must convert to sRGB white");
+  expect(terminal::ColorPalette::lab_to_rgb({53.2371155954293, 80.0882453236802, 67.1996262211358}).as_int() == 0xff0000,
+         "the reference CIELAB red must convert to sRGB red");
+
+  constexpr std::array<int, 11> colors = {0x000000, 0xffffff, 0xff0000, 0x00ff00, 0x0000ff, 0x808080, 0x301838, 0xa8e050, 0x102850, 0xe8c8f0, 0x50d8a8};
+  for (int const packed_rgb : colors)
+  {
+    terminal::Color const original{static_cast<uint32_t>(packed_rgb)};
+    terminal::Color const round_trip = terminal::ColorPalette::lab_to_rgb(terminal::ColorPalette::rgb_to_lab(original));
+    expect(round_trip.as_int() == original.as_int(),
+           "sRGB color " + std::to_string(packed_rgb) + " must survive an RGB-to-CIELAB-to-RGB round trip, got " + std::to_string(round_trip.as_int()));
+  }
+}
 
 // Read all bytes emitted to `file`, rewinding it first and leaving it at end-of-file.
 //
@@ -65,5 +84,6 @@ void test_xterm_indexed_colors_use_standard_palette()
 
 void run_terminal_color_tests()
 {
+  test_srgb_cielab_round_trip();
   test_xterm_indexed_colors_use_standard_palette();
 }

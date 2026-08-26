@@ -6,7 +6,9 @@ target_sources(ava_terminal
   PRIVATE
     "BasicScreen.cxx"
     "BasicWindow.cxx"
+    "CIEDE2000.cxx"
     "ComplexChar.cxx"
+    "ColorPalette.cxx"
     "Context.cxx"
     "GraphemeRun.cxx"
     "GraphemeSpan.cxx"

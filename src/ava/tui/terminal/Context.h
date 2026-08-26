@@ -7,8 +7,11 @@
 #include "ComplexChar.h"
 
 #include <vector>
+#include <memory>
 
 namespace ava::tui::terminal {
+
+class ColorPalette;
 
 // Context
 //
@@ -23,6 +26,7 @@ class Context final
   Rendition default_rendition_;                                         // The rendition to use for text that doesn't have any defined of its own.
   bool default_colors_enabled_ = false;                                 // Whether -1 selects the terminal's default colors.
   std::vector<ColorPair> color_pairs_;                                  // All registered foreground/background color pairs so far.
+  std::unique_ptr<ColorPalette> color_palette_;                         // The live color palette of stdscr if the terminal isn't direct-color.
 
  public:
   Context(FILE* outfd = nullptr, FILE* infd = nullptr);

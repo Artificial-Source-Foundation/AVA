@@ -1,6 +1,8 @@
 #include "sys.h"
 #include "Context.h"
+#include "ColorPalette.h"
 
+#include <array>
 #include <clocale>
 #include <cstdint>
 #include <cstdlib>
@@ -143,6 +145,14 @@ Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
   // the wrefresh(stdscr) that get_wch performs before blocking for input.
   // After this, application windows own all staging; never write through stdscr.
   stdscr_.refresh();
+
+  if (use_stdscr)
+  {
+    bool const direct_color = COLORS == 0x1000000;
+    if (!direct_color)
+      // Probe the terminal for its color palette using OSC 4.
+      color_palette_ = ColorPalette::create(*this);
+  }
 }
 
 Context::~Context()

@@ -28,6 +28,41 @@ int nearest_indexed_color(Color color)
   std::int64_t nearest_distance = std::numeric_limits<std::int64_t>::max();
   int nearest_index = -1;
 
+  auto const consider = [&](int color_index, int red, int green, int blue) {
+    std::int64_t const red_delta = static_cast<std::int64_t>(red) - requested_red;
+    std::int64_t const green_delta = static_cast<std::int64_t>(green) - requested_green;
+    std::int64_t const blue_delta = static_cast<std::int64_t>(blue) - requested_blue;
+    std::int64_t const distance = red_delta * red_delta + green_delta * green_delta + blue_delta * blue_delta;
+    if (distance < nearest_distance)
+    {
+      nearest_distance = distance;
+      nearest_index = color_index;
+    }
+  };
+
+  if (COLORS == 256)
+  {
+    // The extended xterm palette is standardized across xterm-compatible 256-color terminals. Do not use color_content here:
+    // ncurses cannot query a terminal's palette and, with xterm's mutable-color terminfo entry, reports repeated basic colors
+    // rather than the terminal's actual color cube. Likewise, do not reprogram the palette: TERM can name xterm-256color while
+    // the actual emulator (for example Konsole) does not implement xterm's palette-changing control sequence.
+    constexpr std::array<int, 6> cube_levels{0, 95, 135, 175, 215, 255};
+    for (int red = 0; red != 6; ++red)
+    {
+      for (int green = 0; green != 6; ++green)
+      {
+        for (int blue = 0; blue != 6; ++blue)
+          consider(16 + 36 * red + 6 * green + blue, cube_levels[red], cube_levels[green], cube_levels[blue]);
+      }
+    }
+    for (int gray = 0; gray != 24; ++gray)
+    {
+      int const level = 8 + 10 * gray;
+      consider(232 + gray, level, level, level);
+    }
+    return nearest_index;
+  }
+
   for (int color_index = 0; color_index < COLORS; ++color_index)
   {
     int red;
@@ -36,15 +71,7 @@ int nearest_indexed_color(Color color)
     if (::extended_color_content(color_index, &red, &green, &blue) == ERR)
       continue;
 
-    std::int64_t const red_delta = static_cast<std::int64_t>(red) * 255 - static_cast<std::int64_t>(requested_red) * 1000;
-    std::int64_t const green_delta = static_cast<std::int64_t>(green) * 255 - static_cast<std::int64_t>(requested_green) * 1000;
-    std::int64_t const blue_delta = static_cast<std::int64_t>(blue) * 255 - static_cast<std::int64_t>(requested_blue) * 1000;
-    std::int64_t const distance = red_delta * red_delta + green_delta * green_delta + blue_delta * blue_delta;
-    if (distance < nearest_distance)
-    {
-      nearest_distance = distance;
-      nearest_index = color_index;
-    }
+    consider(color_index, (red * 255 + 500) / 1000, (green * 255 + 500) / 1000, (blue * 255 + 500) / 1000);
   }
 
   // A color-capable terminal must expose at least one readable palette entry; initialize Context only after start_color succeeds.
@@ -153,8 +180,7 @@ ColorPair Context::create_color_pair(Color foreground, Color background)
   int const foreground_index = terminal_color_index(foreground, direct_color, default_colors_enabled_, fallback_foreground_index);
   int const background_index = terminal_color_index(background, direct_color, default_colors_enabled_, fallback_background_index);
 
-  // On a direct-color terminal an RGB value is itself the color index. Indexed terminals instead use the nearest color from
-  // the palette reported by ncurses; neither path needs to modify the terminal's palette with init_extended_color.
+  // On a direct-color terminal an RGB value is itself the color index. Indexed terminals instead use their nearest palette color.
   int const color_pair_index = static_cast<int>(color_pairs_.size()) + 1;
   int const status = ::init_extended_pair(color_pair_index, foreground_index, background_index);
   // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep

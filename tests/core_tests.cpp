@@ -64,6 +64,7 @@ void run_mermaid_render_coordinator_tests();
 void run_permission_rules_tests();
 void run_tui_composer_tests();
 void run_terminal_horizontal_layout_tests();
+void run_terminal_color_tests();
 void run_terminal_paragraph_tests();
 void run_terminal_window_tests();
 void run_run_observer_tests();
@@ -127,6 +128,7 @@ constexpr std::array kTestSuites{
     TestSuite{"permission_rules", run_permission_rules_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"terminal_horizontal_layout", run_terminal_horizontal_layout_tests},
+    TestSuite{"terminal_color", run_terminal_color_tests},
     TestSuite{"terminal_paragraph", run_terminal_paragraph_tests},
     TestSuite{"terminal_window", run_terminal_window_tests},
     TestSuite{"run_observer", run_run_observer_tests},

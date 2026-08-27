@@ -1,6 +1,6 @@
 #include "sys.h"
-#include "Context.h"
 #include "ColorPalette.h"
+#include "Context.h"
 
 #include <array>
 #include <clocale>
@@ -93,7 +93,7 @@ int terminal_color_index(Color color, bool direct_color, bool default_colors_ena
 
 } // namespace
 
-Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
+Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdout : outfd), default_rendition_(ColorPair{{}, 0})
 {
   setlocale(LC_ALL, "");
 
@@ -172,9 +172,18 @@ uint32_t Context::cols() const
 
 int Context::get_wch()
 {
-  wint_t wch;
-  ::get_wch(&wch);
-  return wch;
+  std::optional<int> const input = try_get_wch();
+  // Call blocking get_wch only while stdscr has no timeout and terminal input remains available; use try_get_wch for fallible reads.
+  ASSERT(input.has_value());
+  return input.value_or(0);
+}
+
+std::optional<int> Context::try_get_wch()
+{
+  wint_t wch = 0;
+  if (::get_wch(&wch) == ERR)
+    return std::nullopt;
+  return static_cast<int>(wch);
 }
 
 ColorPair Context::create_color_pair(Color foreground, Color background)

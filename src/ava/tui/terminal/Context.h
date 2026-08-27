@@ -6,8 +6,9 @@
 #include "ColorPair.h"
 #include "ComplexChar.h"
 
-#include <vector>
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace ava::tui::terminal {
 
@@ -20,9 +21,12 @@ class ColorPalette;
 //
 class Context final
 {
+  friend class ColorPalette;
+
  private:
   BasicScreen first_screen_;                                            // Owns the screen iff `outfd` and `infd` are passed to the constructor.
   BasicWindow stdscr_;                                                  // The entire surface of the current terminal screen.
+  FILE* output_file_;                                                   // Non-owning stream connected to the terminal emulator.
   Rendition default_rendition_;                                         // The rendition to use for text that doesn't have any defined of its own.
   bool default_colors_enabled_ = false;                                 // Whether -1 selects the terminal's default colors.
   std::vector<ColorPair> color_pairs_;                                  // All registered foreground/background color pairs so far.
@@ -51,6 +55,8 @@ class Context final
   Dimension size() const { return {rows(), cols()}; }
 
   int get_wch();                                                        // get_wch
+  // Return the next input value, or no value when the configured stdscr timeout expires or input fails.
+  std::optional<int> try_get_wch();                                     // get_wch
   // Synchronize the virtual screen with the physical screen.
   void doupdate();                                                      // doupdate
 

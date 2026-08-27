@@ -12,86 +12,6 @@
 #include "private_convert.h"
 
 namespace ava::tui::terminal {
-namespace {
-
-// Return the terminal's nearest available indexed color for the concrete RGB `color`.
-//
-// RGB distances are compared without rounding by scaling the 8-bit requested components by 1000 and the ncurses
-// components by 255. Ties select the lower terminal color index for deterministic behavior.
-int nearest_indexed_color(Color color)
-{
-  int const rgb = color.as_int();
-  // Pass a concrete RGB color; handle the default-color sentinel before requesting a nearest palette entry.
-  ASSERT(rgb >= 0);
-
-  int const requested_red = (rgb >> 16) & 0xff;
-  int const requested_green = (rgb >> 8) & 0xff;
-  int const requested_blue = rgb & 0xff;
-  std::int64_t nearest_distance = std::numeric_limits<std::int64_t>::max();
-  int nearest_index = -1;
-
-  auto const consider = [&](int color_index, int red, int green, int blue) {
-    std::int64_t const red_delta = static_cast<std::int64_t>(red) - requested_red;
-    std::int64_t const green_delta = static_cast<std::int64_t>(green) - requested_green;
-    std::int64_t const blue_delta = static_cast<std::int64_t>(blue) - requested_blue;
-    std::int64_t const distance = red_delta * red_delta + green_delta * green_delta + blue_delta * blue_delta;
-    if (distance < nearest_distance)
-    {
-      nearest_distance = distance;
-      nearest_index = color_index;
-    }
-  };
-
-  if (COLORS == 256)
-  {
-    // The extended xterm palette is standardized across xterm-compatible 256-color terminals. Do not use color_content here:
-    // ncurses cannot query a terminal's palette and, with xterm's mutable-color terminfo entry, reports repeated basic colors
-    // rather than the terminal's actual color cube. Likewise, do not reprogram the palette: TERM can name xterm-256color while
-    // the actual emulator (for example Konsole) does not implement xterm's palette-changing control sequence.
-    constexpr std::array<int, 6> cube_levels{0, 95, 135, 175, 215, 255};
-    for (int red = 0; red != 6; ++red)
-    {
-      for (int green = 0; green != 6; ++green)
-      {
-        for (int blue = 0; blue != 6; ++blue)
-          consider(16 + 36 * red + 6 * green + blue, cube_levels[red], cube_levels[green], cube_levels[blue]);
-      }
-    }
-    for (int gray = 0; gray != 24; ++gray)
-    {
-      int const level = 8 + 10 * gray;
-      consider(232 + gray, level, level, level);
-    }
-    return nearest_index;
-  }
-
-  for (int color_index = 0; color_index < COLORS; ++color_index)
-  {
-    int red;
-    int green;
-    int blue;
-    if (::extended_color_content(color_index, &red, &green, &blue) == ERR)
-      continue;
-
-    consider(color_index, (red * 255 + 500) / 1000, (green * 255 + 500) / 1000, (blue * 255 + 500) / 1000);
-  }
-
-  // A color-capable terminal must expose at least one readable palette entry; initialize Context only after start_color succeeds.
-  ASSERT(nearest_index >= 0);
-  return nearest_index;
-}
-
-// Convert `color` to a terminal color index, using `fallback_default_index` when -1 default colors are unsupported.
-//
-// Direct-color terminals use RGB values as indices. Other terminals select their nearest existing palette entry.
-int terminal_color_index(Color color, bool direct_color, bool default_colors_enabled, int fallback_default_index)
-{
-  if (color.is_default())
-    return default_colors_enabled ? -1 : fallback_default_index;
-  return direct_color ? color.as_int() : nearest_indexed_color(color);
-}
-
-} // namespace
 
 Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdout : outfd), default_rendition_(ColorPair{{}, 0})
 {
@@ -103,21 +23,19 @@ Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdo
   ::use_env(TRUE);
   ::use_tioctl(TRUE);
 
-  bool use_stdscr = outfd == nullptr && infd == nullptr;
+  // Use initscr or newterm?
+  bool use_initscr = outfd == nullptr && infd == nullptr;
 
-  if (use_stdscr)
-  {
+  if (use_initscr)
     initscr();
-    stdscr_.init_as_stdscr();
-  }
   else
   {
     BasicScreen first_screen(nullptr, outfd, infd);
     first_screen_ = std::move(first_screen);
-    // newterm created a screen-specific stdscr just as initscr does; wrap it so Context initialization and callers can use
-    // the same BasicWindow interface with either constructor mode.
-    stdscr_.init_as_stdscr();
   }
+
+  // Initialize the stdsrc_ handle.
+  stdscr_.init_as_stdscr();
 
   wchar_t fill[] = L" ";
 
@@ -128,9 +46,6 @@ Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdo
     // number -1 in init_pair/init_extended_pair means the terminal's default
     // foreground or background color instead of an RGB/direct-color index.
     default_colors_enabled_ = ::use_default_colors() == OK;
-    Color foreground_color{0xffffff};
-    Color background_color{};
-    default_rendition_ = Rendition{create_color_pair(foreground_color, background_color)};
   }
 
   cbreak();
@@ -146,17 +61,19 @@ Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdo
   // After this, application windows own all staging; never write through stdscr.
   stdscr_.refresh();
 
-  if (use_stdscr)
-  {
-    bool const direct_color = COLORS == 0x1000000;
-    if (!direct_color)
-      // Probe the terminal for its color palette using OSC 4.
-      color_palette_ = ColorPalette::create(*this, COLORS);
-  }
+  // If this isn't a direct-color terminal, probe its color palette using OSC 4.
+  if (COLORS < 0x1000000)
+    color_palette_ = ColorPalette::create(*this);
+
+  // Initialize default_rendition_ after creating the color_palette_ (if any).
+  if (has_colors())
+    default_rendition_ = Rendition{create_color_pair({}, {})};
 }
 
 Context::~Context()
 {
+  // Restore mutable palette entries before endwin returns terminal presentation to the invoking process.
+  color_palette_.reset();
   endwin();
 }
 
@@ -170,34 +87,69 @@ uint32_t Context::cols() const
   return COLS;
 }
 
-int Context::get_wch()
+int Context::colors() const
 {
-  std::optional<int> const input = try_get_wch();
-  // Call blocking get_wch only while stdscr has no timeout and terminal input remains available; use try_get_wch for fallible reads.
-  ASSERT(input.has_value());
-  return input.value_or(0);
+  return COLORS;
 }
 
-std::optional<int> Context::try_get_wch()
+//static
+bool Context::have_direct_color()
+{
+  return COLORS == 0x1000000;
+}
+
+int Context::get_wch() const
+{
+  wint_t wch = 0;
+  int res = ::get_wch(&wch);
+  // Call blocking get_wch only while stdscr has no timeout and terminal input remains available; use try_get_wch for fallible reads.
+  ASSERT(res != ERR);
+  return static_cast<int>(wch);
+}
+
+//static
+int Context::try_get_wch()
 {
   wint_t wch = 0;
   if (::get_wch(&wch) == ERR)
-    return std::nullopt;
+    return -1;
   return static_cast<int>(wch);
+}
+
+// Convert `color` to a terminal color index.
+//
+// Direct-color terminals use RGB values as indices. Other terminals reuse or program an exact palette entry when possible, then fall
+// back to their nearest current entry.
+int Context::terminal_color_index(Color color)
+{
+  bool const direct_color = COLORS == 0x1000000;
+  if (color.is_default())
+    return -1;
+  // Paranoia check: on a non-direct-color terminal we should always have a color_palette_.
+  ASSERT(direct_color || color_palette_);
+  return direct_color ? color.as_int() : color_palette_->nearest_indexed_color(color);
 }
 
 ColorPair Context::create_color_pair(Color foreground, Color background)
 {
-  bool const direct_color = COLORS == 0x1000000;
-  int fallback_foreground_index = COLOR_WHITE;
-  int fallback_background_index = COLOR_BLACK;
-  if (!default_colors_enabled_ && !direct_color)
+  int foreground_index = terminal_color_index(foreground);
+  int background_index = terminal_color_index(background);
+  // terminal_color_index returns -1 for "default color"s.
+  // Replace that with a "random" white or black if default colors are not supported by this terminal.
+  if (!default_colors_enabled_)
   {
-    fallback_foreground_index = nearest_indexed_color(Color{0xffffff});
-    fallback_background_index = nearest_indexed_color(Color{0x000000});
+    // Assume a dark theme for now.
+    if (foreground_index == -1)
+      foreground_index = COLOR_WHITE;
+    if (background_index == -1)
+      background_index = COLOR_BLACK;
   }
-  int const foreground_index = terminal_color_index(foreground, direct_color, default_colors_enabled_, fallback_foreground_index);
-  int const background_index = terminal_color_index(background, direct_color, default_colors_enabled_, fallback_background_index);
+
+  if (color_palette_)
+  {
+    color_palette_->reserve_index(foreground_index);
+    color_palette_->reserve_index(background_index);
+  }
 
   // On a direct-color terminal an RGB value is itself the color index. Indexed terminals instead use their nearest palette color.
   int const color_pair_index = static_cast<int>(color_pairs_.size()) + 1;
@@ -205,15 +157,21 @@ ColorPair Context::create_color_pair(Color foreground, Color background)
   // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep
   // the number of created pairs within the terminal limit and pass valid Color values.
   ASSERT(status == OK);
-  color_pairs_.push_back(ConvertToColorPair{color_pair_index});
 
-  // This function should push the new ColorPair to the end of colors_pairs_.
+  color_pairs_.push_back(ConvertToColorPair{color_pair_index});
   return color_pairs_.back();
 }
 
-bool Context::has_colors()
+bool Context::has_colors() const
 {
   return ::has_colors();
+}
+
+bool Context::can_change_colors() const
+{
+  // Do not call this function if we don't have a color palette; for example when a direct-color terminal is being used (COLORS == 0x1000000).
+  ASSERT(color_palette_);
+  return color_palette_->last_mutable_palette_index() > 0;
 }
 
 } // namespace ava::tui::terminal

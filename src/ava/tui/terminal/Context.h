@@ -38,8 +38,8 @@ class Context final
 
   Rendition const& default_rendition() const { return default_rendition_; }
 
-  // Return a ColorPair for `foreground` and `background`, using exact RGB on direct-color terminals and nearest palette colors
-  // otherwise.
+  // Return a ColorPair for `foreground` and `background`, using exact RGB on direct-color terminals and exact or nearest palette
+  // colors otherwise. Mutable indexed palettes are programmed on demand when no exact entry exists.
   //
   // The terminal must support colors and have room for another color pair. The default terminal color is preserved on both paths.
   ColorPair create_color_pair(Color foreground, Color background);      // init_extended_pair
@@ -52,17 +52,29 @@ class Context final
 
   uint32_t rows() const;                                                // LINES
   uint32_t cols() const;                                                // COLS
+  int colors() const;                                                   // COLORS
   Dimension size() const { return {rows(), cols()}; }
 
-  int get_wch();                                                        // get_wch
-  // Return the next input value, or no value when the configured stdscr timeout expires or input fails.
-  std::optional<int> try_get_wch();                                     // get_wch
+  // Convenience accessor that tests if COLORS equals 0x1000000.
+  static bool have_direct_color();                                      // COLORS
+
+  // Return the next input value; blocks if there is no input.
+  int get_wch() const;                                                  // get_wch
+
   // Synchronize the virtual screen with the physical screen.
   void doupdate();                                                      // doupdate
 
-  bool has_colors();                                                    // has_colors
+  bool has_colors() const;                                              // has_colors
+  bool can_change_colors() const;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
+
+ private:
+  // Return the next input value, or -1 when the configured stdscr timeout expires or input fails.
+  static int try_get_wch();                                             // get_wch
+
+  // Convert `color` to a direct color or stable palette index. Called by create_color_pair.
+  int terminal_color_index(Color color);
 };
 
 } // namespace ava::tui::terminal

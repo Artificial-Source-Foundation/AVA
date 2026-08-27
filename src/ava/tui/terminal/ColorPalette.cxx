@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ColorPalette.h"
 #include "Context.h"
+#include "utils/at_scope_end.h"
 #include "utils/log2.h"
 
 #include <algorithm>
@@ -13,6 +14,10 @@
 #include <string>
 #include <string_view>
 #include "debug.h"
+
+#ifdef CWDEBUG
+#include <libcwd/buf2str.h>
+#endif
 
 namespace ava::tui::terminal {
 namespace {
@@ -260,9 +265,14 @@ std::optional<Color> ColorPalette::probe_color(Context& context, int color_index
 }
 
 // Emit a range of indexed-color queries together and collect their replies without waiting between individual colors.
+//
+// The indexes if the returned std::vector equal the terminal palette index minus `first_color_index`.
+//
 //static
 std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_index, int number_of_colors)
 {
+  DoutEntering(dc::terminal, "ColorPalette::probe_colors(" << context << ", " << first_color_index << ", " << number_of_colors << ")");
+
   if (context.output_file_ == nullptr)
     return {};
 
@@ -270,17 +280,23 @@ std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_
   if (queries.empty() || std::fwrite(queries.data(), 1, queries.size(), context.output_file_) != queries.size() || std::fflush(context.output_file_) != 0)
     return {};
 
-  std::vector<Color> colors(static_cast<std::size_t>(number_of_colors));
-  std::vector<bool> seen(static_cast<std::size_t>(number_of_colors), false);
+  Dout(dc::terminal|continued_cf, "Received from terminal: \"");
+#ifdef CWDEBUG
+  auto&& finish_debug_output = at_scope_end([]{ Dout(dc::finish, "\"."); });
+#endif
+
+  std::vector<Color> colors(number_of_colors);
+  std::vector<bool> seen(number_of_colors, false);
   int colors_received = 0;
   std::string response_bytes;
-  std::size_t const maximum_response_bytes = static_cast<std::size_t>(number_of_colors) * maximum_osc4_response_bytes;
+  std::size_t const maximum_response_bytes = number_of_colors * maximum_osc4_response_bytes;
   while (response_bytes.size() < maximum_response_bytes)
   {
-    std::optional<int> const input = context.try_get_wch();
-    if (!input || *input < 0 || *input > 0xff)
+    int const input = context.try_get_wch();
+    Dout(dc::continued, libcwd::char2str(input));
+    if (input < 0 || input > 0xff)
       return {};
-    response_bytes.push_back(static_cast<char>(*input));
+    response_bytes.push_back(static_cast<char>(input));
 
     std::size_t const seven_bit_start = response_bytes.find("\x1b]4;");
     std::string const eight_bit_prefix{
@@ -301,10 +317,9 @@ std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_
     std::optional<std::pair<int, Color>> const entry = parse_osc4_response(std::string_view(response_bytes).substr(start, *past_end - start));
     if (!entry || entry->first < first_color_index)
       return {};
-    int const integer_offset = entry->first - first_color_index;
-    if (integer_offset >= number_of_colors)
+    int const offset = entry->first - first_color_index;
+    if (offset >= number_of_colors)
       return {};
-    std::size_t const offset = static_cast<std::size_t>(integer_offset);
     if (seen[offset])
       return {};
     seen[offset] = true;
@@ -324,11 +339,11 @@ std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_
 // Each mutability test temporarily assigns the complement of the live color at the prefix's final index, reads it back, and restores
 // the original color. Failed assignments do not prevent larger candidate prefixes from being tested.
 //static
-std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_of_colors)
+std::unique_ptr<ColorPalette> ColorPalette::create(Context& context)
 {
   DoutEntering(dc::notice, "ColorPalette::create(" << context << ")");
 
-  if (number_of_colors <= 0 || context.output_file_ == nullptr)
+  if (context.output_file_ == nullptr)
     return {};
 
   // Temporarily undo some of the initialization of `default_window_initialization`.
@@ -338,13 +353,14 @@ std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_
   int const delay_ms = context.stdscr().getdelay();
   context.stdscr().timeout(palette_probe_timeout_ms);
 
-  std::vector<Color> const colors = probe_colors(context, 0, number_of_colors);
+  unsigned int const number_of_colors = context.colors();
+  std::vector<Color> colors = probe_colors(context, 0, number_of_colors);
 
   int last_mutable_palette_index = 0;
   bool restoration_failed = false;
   if (!colors.empty())
   {
-    for (int n = 3; n <= utils::log2(static_cast<unsigned int>(number_of_colors)); ++n)
+    for (int n = 3; n <= utils::log2(number_of_colors); ++n)
     {
       int const prefix_size = 1 << n;
       int const color_index = prefix_size - 1;
@@ -384,7 +400,97 @@ std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_
   for (Color color : colors)
     palette.push_back(rgb_to_lab(color));
 
-  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(palette), last_mutable_palette_index));
+  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(palette), std::move(colors), last_mutable_palette_index, context.output_file_));
+}
+
+// Restore reprogrammed entries in reverse allocation.
+ColorPalette::~ColorPalette()
+{
+  for (auto restoration = restorations_.rbegin(); restoration != restorations_.rend(); ++restoration)
+  {
+    std::string const assignment = osc4_set_color(restoration->first, restoration->second);
+    if (!assignment.empty())
+      static_cast<void>(std::fwrite(assignment.data(), 1, assignment.size(), output_file_));
+  }
+  if (!restorations_.empty())
+    static_cast<void>(std::fflush(output_file_));
+}
+
+// Reserve a mutable entry that has become observable through an ncurses color pair.
+void ColorPalette::reserve_index(int color_index)
+{
+  if (color_index >= 0 && color_index < last_mutable_palette_index_)
+    reserved_mutable_indices_[static_cast<std::size_t>(color_index)] = true;
+}
+
+// Return an exact indexed color, allocating a mutable entry before accepting an approximate match.
+//
+// Mutable entries are allocated from high to low to preserve conventional low-numbered ANSI colors as long as possible.
+// RGB distances for the fallback path are calculated with the CIEDE2000 color-difference formula.
+int ColorPalette::nearest_indexed_color(Color color)
+{
+  // Pass a concrete RGB color; handle the default-color sentinel before requesting a nearest palette entry.
+  ASSERT(!color.is_default());
+
+  CIEDE2000::LAB const lab_color = rgb_to_lab(color);
+
+  for (int index = 0; index < colors_.size(); ++index)
+  {
+    if (colors_[static_cast<std::size_t>(index)].as_int() == color.as_int())
+    {
+      reserve_index(index);
+      return index;
+    }
+  }
+
+  for (int index = last_mutable_palette_index_ - 1; index >= 0; --index)
+  {
+    if (reserved_mutable_indices_[index])
+      continue;
+
+    Color const original = colors_[index];
+    std::string const assignment = osc4_set_color(index, color);
+    if (!assignment.empty() && std::fwrite(assignment.data(), 1, assignment.size(), output_file_) == assignment.size() && std::fflush(output_file_) == 0)
+    {
+      restorations_.emplace_back(index, original);
+      colors_[index] = color;
+      palette_[index] = lab_color;
+      reserve_index(index);
+      return index;
+    }
+
+    // A complete write followed by a failed flush may still reach the terminal; restore this entry defensively and do not retry it.
+    std::string const restoration = osc4_set_color(index, original);
+    if (!restoration.empty())
+    {
+      static_cast<void>(std::fwrite(restoration.data(), 1, restoration.size(), output_file_));
+      static_cast<void>(std::fflush(output_file_));
+    }
+    reserve_index(index);
+    break;
+  }
+
+  int nearest_index = -1;
+
+  // Find nearest color palette index, which corresponds to the index of palette_.
+  double min_delta_E = std::numeric_limits<double>::max();
+  for (int index = 0; index < palette_.size(); ++index)
+  {
+    CIEDE2000::LAB const& lab_palette = palette_[index];
+    double const delta_E = CIEDE2000::CIEDE2000(lab_palette, lab_color);
+    if (delta_E < min_delta_E)
+    {
+      min_delta_E = delta_E;
+      nearest_index = index;
+    }
+  }
+
+  Dout(dc::terminal, "The color " << color << " has as nearest index " << nearest_index << " with a deltaE of " << min_delta_E);
+
+  // A color-capable terminal must expose at least one readable palette entry; initialize Context only after start_color succeeds.
+  ASSERT(nearest_index >= 0);
+  reserve_index(nearest_index);
+  return nearest_index;
 }
 
 } // namespace ava::tui::terminal

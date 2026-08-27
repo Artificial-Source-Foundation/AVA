@@ -12,6 +12,7 @@
 #include "terminal/Rendition.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
+#include "support/terminal_test_support.h"
 
 #include <array>
 #include <clocale>
@@ -182,6 +183,9 @@ void test_pad_generate_comment_example()
   }
 
   ScopedEnvVar term_guard("TERM", "xterm-256color");
+  // This will be read by the terminal::Context constructor.
+  write_OSC4_reply(input, 256);
+  std::rewind(input);
   terminal::Context terminal_context(output, input);
 
   bool const color_support = terminal_context.has_colors();

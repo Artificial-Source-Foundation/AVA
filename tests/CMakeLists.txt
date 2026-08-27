@@ -24,7 +24,10 @@ target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_test_support)
 ava_apply_sanitizers(ava_test_support)
 
-add_library(ava_tui_test_support "support/tui_test_support.cpp")
+add_library(ava_tui_test_support
+  "support/tui_test_support.cpp"
+  "support/terminal_test_support.cpp"
+)
 target_link_libraries(ava_tui_test_support PRIVATE ava_test_support)
 target_include_directories(ava_tui_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_tui_test_support)

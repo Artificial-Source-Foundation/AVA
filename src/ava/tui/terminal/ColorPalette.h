@@ -4,6 +4,7 @@
 #include "Color.h"
 #include "ava/debug/print_members_on.h"
 
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -18,20 +19,34 @@ struct ColorPaletteTestAccess;
 
 class ColorPalette
 {
+  friend class Context;
   friend struct ColorPaletteTestAccess;
 
  private:
-  std::vector<CIEDE2000::LAB> palette_;         // Live color palette as CIELAB values.
+  std::vector<CIEDE2000::LAB> palette_;         // Live color palette as CIELAB values. The index corresponds to the palette index.
   int last_mutable_palette_index_;              // Exclusive upper bound of the palette prefix assumed to be mutable, or zero.
+  FILE* output_file_;                           // Non-owning terminal output stream used to program and restore mutable entries.
+  std::vector<Color> colors_;                   // Exact live sRGB values corresponding to palette_.
+  std::vector<bool> reserved_mutable_indices_;  // Mutable entries already returned to a color pair and therefore immutable for this Context.
+  std::vector<std::pair<int, Color>> restorations_; // Original colors of entries reprogrammed by this instance.
 
  private:
-  // Construct a ColorPalette from an r-value reference to LAB values and the exclusive `last_mutable_palette_index` bound.
-  // Called from ColorPalette::create.
-  ColorPalette(std::vector<CIEDE2000::LAB>&& palette, int last_mutable_palette_index)
-      : palette_(std::move(palette)), last_mutable_palette_index_(last_mutable_palette_index)
+  // Construct a ColorPalette from the live `colors`, their LAB `palette`, the mutable-prefix bound, and `output_file`.
+  // Called from ColorPalette::create; the output stream must outlive this object.
+  ColorPalette(std::vector<CIEDE2000::LAB>&& palette, std::vector<Color>&& colors, int last_mutable_palette_index, FILE* output_file)
+      : palette_(std::move(palette)),
+        last_mutable_palette_index_(last_mutable_palette_index),
+        output_file_(output_file),
+        colors_(std::move(colors)),
+        reserved_mutable_indices_(static_cast<std::size_t>(last_mutable_palette_index), false)
   {
     DoutEntering(dc::terminal, "ColorPalette::ColorPalette(" << palette_ << ", " << last_mutable_palette_index << ")");
   }
+
+  // Mark `color_index` unavailable for later reprogramming when it belongs to the mutable prefix.
+  //
+  // Context uses this for default-color fallback indices that bypass nearest_indexed_color.
+  void reserve_index(int color_index);
 
   // Build one OSC 4 query for `color_index`.
   static std::string osc4_query(int color_index);
@@ -58,6 +73,11 @@ class ColorPalette
   static std::vector<Color> probe_colors(Context& context, int first_color_index, int number_of_colors);
 
  public:
+  // Restore every palette entry reprogrammed by this object.
+  //
+  // Restoration is best-effort because destructors cannot report terminal output failures.
+  ~ColorPalette();
+
   // Convert the concrete packed-sRGB `rgb` color to D65-relative CIELAB.
   //
   // The terminal-default Color has no concrete RGB value and must not be passed.
@@ -72,7 +92,13 @@ class ColorPalette
   //
   // Returns null when output fails, the terminal does not reply before the bounded timeout, or any palette response is malformed,
   // duplicated, missing, or out of range. The probe temporarily disables keypad decoding and restores stdscr's prior timeout.
-  static std::unique_ptr<ColorPalette> create(Context& context, int number_of_colors);
+  static std::unique_ptr<ColorPalette> create(Context& context);
+
+  // Return an index displaying the concrete `color`, reusing an exact match or programming an unused mutable entry when possible.
+  //
+  // Returned mutable indices remain reserved so later calls cannot alter colors already referenced by ncurses color pairs. Falls back
+  // to the nearest current palette entry when no mutable entry remains or programming the terminal fails.
+  int nearest_indexed_color(Color color);
 
   // Accessor.
   std::vector<CIEDE2000::LAB> const& palette() const { return palette_; }

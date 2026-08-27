@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ColorPalette.h"
 #include "Context.h"
+#include "utils/log2.h"
 
 #include <algorithm>
 #include <array>
@@ -178,6 +179,22 @@ std::string ColorPalette::osc4_queries(int first_color_index, int number_of_colo
   return queries;
 }
 
+// Build one independently terminated OSC 4 palette assignment using two hexadecimal digits per sRGB channel.
+//static
+std::string ColorPalette::osc4_set_color(int color_index, Color color)
+{
+  if (color_index < 0 || color.is_default())
+    return {};
+
+  int const rgb = color.as_int();
+  std::array<char, 64> command;
+  int const length =
+      std::snprintf(command.data(), command.size(), "\x1b]4;%d;rgb:%02x/%02x/%02x\x1b\\", color_index, (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+  if (length < 0 || static_cast<std::size_t>(length) >= command.size())
+    return {};
+  return {command.data(), static_cast<std::size_t>(length)};
+}
+
 // Parse one xterm-compatible OSC 4 response, accepting BEL and seven- or eight-bit string terminators.
 //static
 std::optional<std::pair<int, Color>> ColorPalette::parse_osc4_response(std::string_view response)
@@ -302,7 +319,10 @@ std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_
   return {};
 }
 
-// Probe the terminal output stream and collect a complete, ordered CIELAB palette without relying on ncurses' synthetic color table.
+// Probe the terminal output stream, collect its complete CIELAB palette, and test power-of-two palette prefixes for mutability.
+//
+// Each mutability test temporarily assigns the complement of the live color at the prefix's final index, reads it back, and restores
+// the original color. Failed assignments do not prevent larger candidate prefixes from being tested.
 //static
 std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_of_colors)
 {
@@ -319,7 +339,44 @@ std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_
   context.stdscr().timeout(palette_probe_timeout_ms);
 
   std::vector<Color> const colors = probe_colors(context, 0, number_of_colors);
-  if (colors.empty())
+
+  int last_mutable_palette_index = 0;
+  bool restoration_failed = false;
+  if (!colors.empty())
+  {
+    for (int n = 3; n <= utils::log2(static_cast<unsigned int>(number_of_colors)); ++n)
+    {
+      int const prefix_size = 1 << n;
+      int const color_index = prefix_size - 1;
+      Color const original = colors[static_cast<std::size_t>(color_index)];
+      Color const replacement{static_cast<std::uint32_t>(original.as_int() ^ 0xffffff)};
+      std::string const assignment = osc4_set_color(color_index, replacement);
+      bool const assignment_written = !assignment.empty() && std::fwrite(assignment.data(), 1, assignment.size(), context.output_file_) == assignment.size() &&
+                                      std::fflush(context.output_file_) == 0;
+      if (!assignment_written)
+        continue;
+
+      std::optional<Color> const read_back = probe_color(context, color_index);
+      if (read_back && read_back->as_int() == replacement.as_int())
+        last_mutable_palette_index = prefix_size;
+
+      // Restore after every emitted test assignment: a missing or mismatched reply does not prove that the terminal ignored it.
+      std::string const restoration = osc4_set_color(color_index, original);
+      if (restoration.empty() || std::fwrite(restoration.data(), 1, restoration.size(), context.output_file_) != restoration.size() ||
+          std::fflush(context.output_file_) != 0)
+      {
+        restoration_failed = true;
+        break;
+      }
+    }
+  }
+
+  // Restore initial initialization.
+  context.stdscr().timeout(delay_ms);
+  if (is_keypad)
+    context.stdscr().keypad(true);
+
+  if (colors.empty() || restoration_failed)
     return {};
 
   std::vector<CIEDE2000::LAB> palette;
@@ -327,12 +384,7 @@ std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_
   for (Color color : colors)
     palette.push_back(rgb_to_lab(color));
 
-  // Restore initial initialization.
-  context.stdscr().timeout(delay_ms);
-  if (is_keypad)
-    context.stdscr().keypad(true);
-
-  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(palette)));
+  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(palette), last_mutable_palette_index));
 }
 
 } // namespace ava::tui::terminal

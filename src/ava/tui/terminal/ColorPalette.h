@@ -22,16 +22,25 @@ class ColorPalette
 
  private:
   std::vector<CIEDE2000::LAB> palette_;         // Live color palette as CIELAB values.
+  int last_mutable_palette_index_;              // Exclusive upper bound of the palette prefix assumed to be mutable, or zero.
 
  private:
-  // Construct a ColorPalette from an r-value reference to a vector with LAB values. Called from ColorPalette::create.
-  ColorPalette(std::vector<CIEDE2000::LAB>&& palette) : palette_(std::move(palette)) { }
+  // Construct a ColorPalette from an r-value reference to LAB values and the exclusive `last_mutable_palette_index` bound.
+  // Called from ColorPalette::create.
+  ColorPalette(std::vector<CIEDE2000::LAB>&& palette, int last_mutable_palette_index)
+      : palette_(std::move(palette)), last_mutable_palette_index_(last_mutable_palette_index)
+  {
+    DoutEntering(dc::terminal, "ColorPalette::ColorPalette(" << palette_ << ", " << last_mutable_palette_index << ")");
+  }
 
   // Build one OSC 4 query for `color_index`.
   static std::string osc4_query(int color_index);
 
   // Build `number_of_colors` consecutive OSC 4 queries starting at `first_color_index`.
   static std::string osc4_queries(int first_color_index, int number_of_colors);
+
+  // Build one OSC 4 command that assigns the concrete sRGB `color` to `color_index`.
+  static std::string osc4_set_color(int color_index, Color color);
 
   // Parse one complete OSC 4 `response` into its palette index and concrete sRGB color.
   static std::optional<std::pair<int, Color>> parse_osc4_response(std::string_view response);
@@ -67,6 +76,11 @@ class ColorPalette
 
   // Accessor.
   std::vector<CIEDE2000::LAB> const& palette() const { return palette_; }
+
+  // Return the exclusive upper bound of the palette prefix that callers may assume is mutable.
+  //
+  // Zero means that no tested palette prefix was mutable.
+  int last_mutable_palette_index() const { return last_mutable_palette_index_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

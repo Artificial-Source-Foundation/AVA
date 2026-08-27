@@ -357,7 +357,7 @@ class BasicWindow
   // https://invisible-island.net/ncurses/man/curs_pad.3x.html
 
   // Create a pad subwindow of `size` with top-left position `pos` relative to this pad.
-  BasicWindow subpad(Dimension size, Position pos);                          // subpad
+  BasicWindow subpad(Dimension size, Position pos);                     // subpad
   // Refresh a pad rectangle starting at `pad_pos` into a screen rectangle.
   void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size); // prefresh
   // Stage a pad rectangle starting at `pad_pos` into a screen rectangle without updating the terminal.
@@ -389,6 +389,11 @@ class BasicWindow
   // Return a non-owning wrapper for this BasicWindow's parent, or null when it has no parent.
   // Commented out because this requires a central registry of BasicWindow objects that we don't have (yet).
 // std::optional<BasicWindow> getparent() const;                              // wgetparent
+
+  void keypad(bool bf);                                                 // keypad
+  void nodelay(bool bf);                                                // nodelay
+  void notimeout(bool bf);                                              // notimeout
+  void timeout(int delay_ms);                                           // wtimeout
 
   //----------------------------------------------------------------------------------------------------------
   // Support for writing wide characters with a given rendition, while keeping track of the current rendition.
@@ -426,7 +431,12 @@ class BasicWindow
       attr_set(original_rendition);
   }
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
+#endif
+
+  // We have a custom print_on.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 } // namespace ava::tui::terminal

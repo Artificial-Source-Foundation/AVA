@@ -63,6 +63,8 @@ struct BasicWindow::Handle
  private:
   void default_window_initialization()
   {
+    DoutEntering(dc::terminal, "BasicWindow::Handle::default_window_initialization() [" << this << " with handle_ = " << handle_ << "]");
+
     int res;
     res = ::keypad(handle_, TRUE);
     // keypad returns ERR when the WINDOW handle is invalid; call default_window_initialization only from an Impl constructor holding a live ncurses window.
@@ -1085,6 +1087,59 @@ struct BasicWindow::Handle
     // wgetscrreg stores the top and bottom row numbers of the window's scrolling region.
     return ::wgetscrreg(handle_, &region.top, &region.bottom);
   }
+
+  int keypad(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_inopts.3x.html
+    //
+    // keypad enables recognition of a terminal's function keys.
+    return ::keypad(handle_, bf);
+  }
+
+  int nodelay(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_inopts.3x.html
+    //
+    // nodelay configures the input character reading function to be non-blocking for window handle_.
+    // If no input is ready, the reading function returns ERR. If disabled (bf is FALSE), the reading
+    // function does not return until it has input.
+    return ::nodelay(handle_, bf);
+  }
+
+  int notimeout(bool bf)
+  {
+    // https://invisible-island.net/ncurses/man/curs_inopts.3x.html
+    //
+    // When keypad has been called on a window and the input character reading
+    // function reads an ambiguous prefix character (typically ESC) from it,
+    // ncurses sets a timer while waiting for the next character. If the timer
+    // elapses, ncurses interprets the prefix as an explicit press of the key
+    // corresponding thereto, such as Escape for ESC.
+    return ::notimeout(handle_, bf);
+  }
+
+  void timeout(int delay)
+  {
+    // https://invisible-island.net/ncurses/man/curs_inopts.3x.html
+    //
+    // wtimeout configures whether a curses input character reading function
+    // called  on window win uses blocking or non-blocking reads.
+    ::wtimeout(handle_, delay);
+  }
+
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const
+  {
+    os << '{';
+    print_members(os, "");
+    os << '}';
+  }
+
+  void print_members(std::ostream& os, char const* prefix) const
+  {
+    os << prefix << "handle_:" << handle_;
+  }
+#endif
 };
 
 BasicWindow::BasicWindow(Dimension size, Position pos) : impl_(std::make_unique<Handle>(size, pos))
@@ -1882,6 +1937,32 @@ ScrollRegion BasicWindow::getscrreg() const
   return region;
 }
 
+void BasicWindow::keypad(bool bf)
+{
+  int res = impl_->keypad(bf);
+  // Paranoia check: keypad should always succeed unless ncurses wasn't initialized yet.
+  ASSERT(res != ERR);
+}
+
+void BasicWindow::nodelay(bool bf)
+{
+  int res = impl_->nodelay(bf);
+  // Paranoia check: nodelay should always succeed unless ncurses wasn't initialized yet.
+  ASSERT(res != ERR);
+}
+
+void BasicWindow::notimeout(bool bf)
+{
+  int res = impl_->notimeout(bf);
+  // Paranoia check: notimeout should always succeed unless ncurses wasn't initialized yet.
+  ASSERT(res != ERR);
+}
+
+void BasicWindow::timeout(int delay_ms)
+{
+  impl_->timeout(delay_ms);
+}
+
 void BasicWindow::addspaces(columns_t n, Rendition const& rendition)
 {
   DoutEntering(dc::terminal, "BasicWindow::addspaces(" << n << ", " << rendition << ")");
@@ -1905,5 +1986,14 @@ void BasicWindow::addspaces(columns_t n, Rendition const& rendition)
     break;
   }
 }
+
+#ifdef CWDEBUG
+void BasicWindow::print_on(std::ostream& os) const
+{
+  os << '{';
+  impl_->print_members(os, "impl_->");
+  os << '}';
+}
+#endif
 
 } // namespace ava::tui::terminal

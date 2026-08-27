@@ -201,7 +201,6 @@ int main()
       // pads are deliberately not refreshed as a side effect of input operations.
       pads[0].basic_window().get_wch(key);
 
-      Dout(dc::notice, "key = " << key);
       if (key == 'q')
         return EXIT_SUCCESS;
 
@@ -225,7 +224,6 @@ int main()
         if ((++count % 5) == 0)
         {
           first_row = std::clamp(first_row + (saw_scroll_down ? 1 : -1), 0, max_first_row);
-          Dout(dc::notice, "first_row = " << first_row);
           break;
         }
       }

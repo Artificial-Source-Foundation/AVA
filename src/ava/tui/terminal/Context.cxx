@@ -151,7 +151,7 @@ Context::Context(FILE* outfd, FILE* infd) : default_rendition_(ColorPair{{}, 0})
     bool const direct_color = COLORS == 0x1000000;
     if (!direct_color)
       // Probe the terminal for its color palette using OSC 4.
-      color_palette_ = ColorPalette::create(*this);
+      color_palette_ = ColorPalette::create(*this, COLORS);
   }
 }
 

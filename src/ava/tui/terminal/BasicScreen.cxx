@@ -50,5 +50,4 @@ void BasicScreen::use_as_term()
   impl_->use_as_term();
 }
 
-
 } // namespace ava::tui::terminal

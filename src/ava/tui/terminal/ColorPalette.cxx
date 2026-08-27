@@ -116,11 +116,41 @@ Color ColorPalette::lab_to_rgb(CIEDE2000::LAB const& lab)
 }
 
 //static
-std::unique_ptr<ColorPalette> ColorPalette::create(Context& context)
+std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_of_colors)
 {
   DoutEntering(dc::notice, "ColorPalette::create(" << context << ")");
 
   auto color_palette = std::make_unique<ColorPalette>();
+
+  // Temporarily undo some of the initialization of `default_window_initialization`.
+
+  // Make sure ncurses passes all esc sequences through without delay.
+  bool const is_keypad = context.stdscr().is_keypad();
+  if (is_keypad)
+    context.stdscr().keypad(false);
+
+  // Set a delay of 50 milliseconds because a terminals that do not support OSC 4 might simply not reply at all.
+  int const delay_ms = context.stdscr().getdelay();
+  context.stdscr().timeout(50);
+
+  for (int color_index = 0; color_index < number_of_colors; ++color_index)
+  {
+    // This doesn't work... how to write these OSC 4 escape sequences to the terminal?
+    std::cout << "\e[4;" << color_index << ";?\e\\" << std::flush;
+  }
+
+  for (;;)
+  {
+    int wc = context.get_wch();         // This times out after 50 ms if there is nothing to read and then returns 0.
+    if (wc == 0)
+      break;
+    Dout(dc::notice, "wc = " << wc);
+  }
+
+  // Restore initial initialization.
+  context.stdscr().timeout(delay_ms);
+  if (is_keypad)
+    context.stdscr().keypad(true);
 
   return std::move(color_palette);
 }

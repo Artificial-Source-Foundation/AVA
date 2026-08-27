@@ -27,16 +27,26 @@ class ColorPalette
   // Construct a ColorPalette from an r-value reference to a vector with LAB values. Called from ColorPalette::create.
   ColorPalette(std::vector<CIEDE2000::LAB>&& palette) : palette_(std::move(palette)) { }
 
-  // Build OSC 4 queries for palette indices in `[first_index, past_last_index)`.
-  static std::string osc4_queries(int first_index, int past_last_index);
+  // Build one OSC 4 query for `color_index`.
+  static std::string osc4_query(int color_index);
+
+  // Build `number_of_colors` consecutive OSC 4 queries starting at `first_color_index`.
+  static std::string osc4_queries(int first_color_index, int number_of_colors);
 
   // Parse one complete OSC 4 `response` into its palette index and concrete sRGB color.
   static std::optional<std::pair<int, Color>> parse_osc4_response(std::string_view response);
 
-  // Parse `responses` and return exactly `number_of_colors` CIELAB entries ordered by palette index.
+  // Probe and return the live sRGB Color at `color_index` through the terminal streams owned by `context`.
   //
-  // Unrelated bytes are ignored. Missing, duplicate, out-of-range, or malformed OSC 4 responses fail the complete probe.
-  static std::optional<std::vector<CIEDE2000::LAB>> parse_osc4_responses(std::string_view responses, int number_of_colors);
+  // stdscr must have a bounded input timeout and keypad decoding disabled. Returns no value on output failure, timeout, malformed
+  // response, an unexpected response index, non-byte input, or an oversized response.
+  static std::optional<Color> probe_color(Context& context, int color_index);
+
+  // Probe and return `number_of_colors` consecutive live sRGB colors starting at `first_color_index`.
+  //
+  // All queries are emitted in one write and replies may arrive in any order. stdscr has the same preconditions and failures as
+  // probe_color; success returns colors ordered by palette index.
+  static std::vector<Color> probe_colors(Context& context, int first_color_index, int number_of_colors);
 
  public:
   // Convert the concrete packed-sRGB `rgb` color to D65-relative CIELAB.

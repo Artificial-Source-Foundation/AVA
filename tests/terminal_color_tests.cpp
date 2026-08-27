@@ -18,11 +18,13 @@ namespace ava::tui::terminal {
 // Expose ColorPalette's pure OSC 4 seams to focused tests without widening the production API.
 struct ColorPaletteTestAccess
 {
-  static std::string queries(int first_index, int past_last_index) { return ColorPalette::osc4_queries(first_index, past_last_index); }
+  static std::string query(int color_index) { return ColorPalette::osc4_query(color_index); }
+  static std::string queries(int first_color_index, int number_of_colors) { return ColorPalette::osc4_queries(first_color_index, number_of_colors); }
   static std::optional<std::pair<int, Color>> parse_response(std::string_view response) { return ColorPalette::parse_osc4_response(response); }
-  static std::optional<std::vector<CIEDE2000::LAB>> parse_responses(std::string_view responses, int number_of_colors)
+  static std::optional<Color> probe(Context& context, int color_index) { return ColorPalette::probe_color(context, color_index); }
+  static std::vector<Color> probe(Context& context, int first_color_index, int number_of_colors)
   {
-    return ColorPalette::parse_osc4_responses(responses, number_of_colors);
+    return ColorPalette::probe_colors(context, first_color_index, number_of_colors);
   }
 };
 
@@ -52,8 +54,10 @@ void test_srgb_cielab_round_trip()
 void test_osc4_palette_protocol()
 {
   using Access = terminal::ColorPaletteTestAccess;
-  expect(Access::queries(0, 2) == std::string("\x1b]4;0;?\x1b\\\x1b]4;1;?\x1b\\"),
-         "OSC 4 palette queries must use the OSC introducer and terminate each requested index with ST");
+  expect(Access::query(224) == std::string("\x1b]4;224;?\x1b\\"),
+         "an indexed OSC 4 palette query must use the passed index, the OSC introducer, and an ST terminator");
+  expect(Access::queries(224, 3) == std::string("\x1b]4;224;?\x1b\\\x1b]4;225;?\x1b\\\x1b]4;226;?\x1b\\"),
+         "a batched OSC 4 palette query must emit consecutive independently terminated indices in one string");
 
   auto const red = Access::parse_response("\x1b]4;7;rgb:ffff/0000/0000\x1b\\");
   expect(red && red->first == 7 && red->second.as_int() == 0xff0000, "OSC 4 must parse a four-digit red response terminated by ST");
@@ -67,12 +71,7 @@ void test_osc4_palette_protocol()
          "short OSC 4 channels must expand one hex digit and retain the most significant two digits of longer values");
   expect(!Access::parse_response("\x1b[4;3;rgb:00/ff/00\x1b\\"), "a CSI sequence must not be accepted as an OSC 4 palette response");
 
-  std::string const out_of_order = std::string("ignored") + "\x1b]4;1;rgb:0000/0000/ffff\x1b\\" + "input" + "\x1b]4;0;rgb:ffff/0000/0000\a";
-  auto const palette = Access::parse_responses(out_of_order, 2);
-  expect(palette && palette->size() == 2 && terminal::ColorPalette::lab_to_rgb((*palette)[0]).as_int() == 0xff0000 &&
-             terminal::ColorPalette::lab_to_rgb((*palette)[1]).as_int() == 0x0000ff,
-         "OSC 4 responses must produce an index-ordered CIELAB palette while ignoring unrelated bytes");
-  expect(!Access::parse_responses("\x1b]4;0;rgb:ffff/0000/0000\a", 2), "an incomplete OSC 4 palette must fail instead of returning partial colors");
+  expect(!Access::parse_response("\x1b]4;0;rgb:ffff/0000/0000"), "an unterminated OSC 4 response must fail instead of returning a partial color");
 }
 
 // Read all bytes emitted to `file`, rewinding it first and leaving it at end-of-file.
@@ -109,6 +108,8 @@ void test_xterm_indexed_colors_use_standard_palette()
   {
     ScopedEnvVar term_guard("TERM", "xterm-256color");
     terminal::Context terminal_context(output, input);
+    expect(!terminal::ColorPaletteTestAccess::probe(terminal_context, 224), "a single-index probe with no OSC 4 reply must return no Color");
+    expect(terminal::ColorPaletteTestAccess::probe(terminal_context, 224, 3).empty(), "a batched probe with no OSC 4 replies must return no colors");
     expect(!terminal::ColorPalette::create(terminal_context, 16), "an input stream with no OSC 4 replies must produce no live ColorPalette");
     terminal::ColorPair const pair = terminal_context.create_color_pair({0xa8e050}, {0x102850});
     terminal::BasicWindow window({2, 2}, {0, 0});
@@ -119,6 +120,7 @@ void test_xterm_indexed_colors_use_standard_palette()
 
   std::fflush(output);
   std::string const emitted = read_all(output);
+  expect(emitted.find("\x1b]4;224;?\x1b\\") != std::string::npos, "the single-index probe must emit an OSC 4 query for its passed index");
   expect(emitted.find("38;5;149") != std::string::npos, "xterm-256color must map green 0xa8e050 to nearby green cube entry 149");
   expect(emitted.find("48;5;17") != std::string::npos, "xterm-256color must map blue 0x102850 to nearby blue cube entry 17");
   expect(emitted.find(";rgb:") == std::string::npos, "indexed-color rendering must not attempt to reprogram an emulator's palette");

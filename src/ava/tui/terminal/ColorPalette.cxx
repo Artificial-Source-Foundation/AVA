@@ -13,10 +13,6 @@
 #include <string_view>
 #include "debug.h"
 
-#ifdef CWDEBUG
-#include <libcwd/buf2str.h>
-#endif
-
 namespace ava::tui::terminal {
 namespace {
 
@@ -43,7 +39,7 @@ static constexpr std::array<double, 3> d65_white_point = []() {
 
 static constexpr double cielab_delta = 6.0 / 29.0;
 static constexpr int palette_probe_timeout_ms = 100;
-static constexpr std::size_t maximum_osc4_response_bytes_per_color = 96;
+static constexpr std::size_t maximum_osc4_response_bytes = 96;
 
 // Parse a one-to-four-digit hexadecimal channel and reduce it to one sRGB byte.
 //
@@ -159,20 +155,26 @@ Color ColorPalette::lab_to_rgb(CIEDE2000::LAB const& lab)
   return Color{(channels[0] << 16) | (channels[1] << 8) | channels[2]};
 }
 
-// Build independently terminated OSC 4 palette queries so terminals may reply to each index separately.
+// Build one independently terminated OSC 4 palette query for the requested index.
 //static
-std::string ColorPalette::osc4_queries(int first_index, int past_last_index)
+std::string ColorPalette::osc4_query(int color_index)
 {
-  if (first_index < 0 || past_last_index < first_index)
+  if (color_index < 0)
+    return {};
+
+  return "\x1b]4;" + std::to_string(color_index) + ";?\x1b\\";
+}
+
+// Build one output string containing a consecutive range of independently terminated OSC 4 palette queries.
+//static
+std::string ColorPalette::osc4_queries(int first_color_index, int number_of_colors)
+{
+  if (first_color_index < 0 || number_of_colors <= 0 || first_color_index > std::numeric_limits<int>::max() - (number_of_colors - 1))
     return {};
 
   std::string queries;
-  for (int color_index = first_index; color_index < past_last_index; ++color_index)
-  {
-    queries += "\x1b]4;";
-    queries += std::to_string(color_index);
-    queries += ";?\x1b\\";
-  }
+  for (int offset = 0; offset < number_of_colors; ++offset)
+    queries += osc4_query(first_color_index + offset);
   return queries;
 }
 
@@ -230,46 +232,74 @@ std::optional<std::pair<int, Color>> ColorPalette::parse_osc4_response(std::stri
   return std::pair{color_index, Color{(channels[0] << 16) | (channels[1] << 8) | channels[2]}};
 }
 
-// Extract and validate a complete live palette from a byte stream that may also contain unrelated startup input.
+// Probe one indexed color through the shared batched implementation.
 //static
-std::optional<std::vector<CIEDE2000::LAB>> ColorPalette::parse_osc4_responses(std::string_view responses, int number_of_colors)
+std::optional<Color> ColorPalette::probe_color(Context& context, int color_index)
 {
-  DoutEntering(dc::terminal, "ColorPalette::parse_osc4_responses(" << buf2str(responses.data(), responses.size()) << ", " << number_of_colors << ")");
-
-  if (number_of_colors <= 0)
+  std::vector<Color> colors = probe_colors(context, color_index, 1);
+  if (colors.empty())
     return std::nullopt;
+  return colors.front();
+}
 
-  std::vector<CIEDE2000::LAB> palette(static_cast<std::size_t>(number_of_colors));
+// Emit a range of indexed-color queries together and collect their replies without waiting between individual colors.
+//static
+std::vector<Color> ColorPalette::probe_colors(Context& context, int first_color_index, int number_of_colors)
+{
+  if (context.output_file_ == nullptr)
+    return {};
+
+  std::string const queries = osc4_queries(first_color_index, number_of_colors);
+  if (queries.empty() || std::fwrite(queries.data(), 1, queries.size(), context.output_file_) != queries.size() || std::fflush(context.output_file_) != 0)
+    return {};
+
+  std::vector<Color> colors(static_cast<std::size_t>(number_of_colors));
   std::vector<bool> seen(static_cast<std::size_t>(number_of_colors), false);
-  std::size_t search_from = 0;
-  while (search_from < responses.size())
+  int colors_received = 0;
+  std::string response_bytes;
+  std::size_t const maximum_response_bytes = static_cast<std::size_t>(number_of_colors) * maximum_osc4_response_bytes;
+  while (response_bytes.size() < maximum_response_bytes)
   {
-    std::size_t const seven_bit_start = responses.find("\x1b]4;", search_from);
+    std::optional<int> const input = context.try_get_wch();
+    if (!input || *input < 0 || *input > 0xff)
+      return {};
+    response_bytes.push_back(static_cast<char>(*input));
+
+    std::size_t const seven_bit_start = response_bytes.find("\x1b]4;");
     std::string const eight_bit_prefix{
         "\x9d"
         "4;",
         3};
-    std::size_t const eight_bit_start = responses.find(eight_bit_prefix, search_from);
+    std::size_t const eight_bit_start = response_bytes.find(eight_bit_prefix);
     std::size_t start = seven_bit_start;
     if (start == std::string_view::npos || (eight_bit_start != std::string_view::npos && eight_bit_start < start))
       start = eight_bit_start;
     if (start == std::string_view::npos)
-      break;
+      continue;
 
-    std::optional<std::size_t> const past_end = osc_response_end(responses, start + 3);
+    std::optional<std::size_t> const past_end = osc_response_end(response_bytes, start + 3);
     if (!past_end)
-      return std::nullopt;
-    std::optional<std::pair<int, Color>> const entry = parse_osc4_response(responses.substr(start, *past_end - start));
-    if (!entry || entry->first >= number_of_colors || seen[static_cast<std::size_t>(entry->first)])
-      return std::nullopt;
-    seen[static_cast<std::size_t>(entry->first)] = true;
-    palette[static_cast<std::size_t>(entry->first)] = rgb_to_lab(entry->second);
-    search_from = *past_end;
+      continue;
+
+    std::optional<std::pair<int, Color>> const entry = parse_osc4_response(std::string_view(response_bytes).substr(start, *past_end - start));
+    if (!entry || entry->first < first_color_index)
+      return {};
+    int const integer_offset = entry->first - first_color_index;
+    if (integer_offset >= number_of_colors)
+      return {};
+    std::size_t const offset = static_cast<std::size_t>(integer_offset);
+    if (seen[offset])
+      return {};
+    seen[offset] = true;
+    colors[offset] = entry->second;
+    ++colors_received;
+    if (colors_received == number_of_colors)
+      return colors;
+
+    response_bytes.erase(0, *past_end);
   }
 
-  if (std::ranges::find(seen, false) != seen.end())
-    return std::nullopt;
-  return palette;
+  return {};
 }
 
 // Probe the terminal output stream and collect a complete, ordered CIELAB palette without relying on ncurses' synthetic color table.
@@ -288,44 +318,21 @@ std::unique_ptr<ColorPalette> ColorPalette::create(Context& context, int number_
   int const delay_ms = context.stdscr().getdelay();
   context.stdscr().timeout(palette_probe_timeout_ms);
 
-  std::string responses;
-  std::size_t const maximum_response_bytes = static_cast<std::size_t>(number_of_colors) * maximum_osc4_response_bytes_per_color;
-  auto const write_queries = [&](int first_index, int past_last_index) {
-    std::string const queries = osc4_queries(first_index, past_last_index);
-    return std::fwrite(queries.data(), 1, queries.size(), context.output_file_) == queries.size() && std::fflush(context.output_file_) == 0;
-  };
-  auto const read_replies_until_timeout = [&]() {
-    while (responses.size() <= maximum_response_bytes)
-    {
-      std::optional<int> const input = context.try_get_wch();
-      if (!input)
-        return true;
-      if (*input < 0 || *input > std::numeric_limits<unsigned char>::max())
-        return false;
-      responses.push_back(static_cast<char>(*input));
-    }
-    return false;
-  };
+  std::vector<Color> const colors = probe_colors(context, 0, number_of_colors);
+  if (colors.empty())
+    return {};
 
-  // Probe index zero first so a terminal without OSC 4 query support incurs one timeout rather than a large burst of unanswered queries.
-  bool probe_succeeded = write_queries(0, 1) && read_replies_until_timeout() && parse_osc4_responses(responses, 1).has_value();
-  if (probe_succeeded && number_of_colors > 1)
-    probe_succeeded = write_queries(1, number_of_colors) && read_replies_until_timeout();
+  std::vector<CIEDE2000::LAB> palette;
+  palette.reserve(number_of_colors);
+  for (Color color : colors)
+    palette.push_back(rgb_to_lab(color));
 
   // Restore initial initialization.
   context.stdscr().timeout(delay_ms);
   if (is_keypad)
     context.stdscr().keypad(true);
 
-  if (!probe_succeeded)
-    return {};
-
-  std::optional<std::vector<CIEDE2000::LAB>> palette = parse_osc4_responses(responses, number_of_colors);
-
-  if (!palette)
-    return {};
-
-  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(*palette)));
+  return std::unique_ptr<ColorPalette>(new ColorPalette(std::move(palette)));
 }
 
 } // namespace ava::tui::terminal

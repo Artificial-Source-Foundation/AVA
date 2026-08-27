@@ -35,7 +35,3 @@ use `AVA_DEBUG_PRINT_MEMBERS_ON` in a struct/class that is in an anonymous names
   such `ASSERT` with a comment describing the invariant and why it must hold.
   The comment may begin with `// Paranoia check:` to emphasize that the
   assertion is believed to be impossible to trigger in correct code.
-- Verify the placement rule with `python3 scripts/verify-assert-comments.py .`
-  from the repository root; the focused CTests are
-  `ava_tests.assert_comments_checker` and `ava_tests.assert_comments_source`.
-  See `docs/development/cpp-safety-rules.md` for the full assertion policy.

@@ -7,7 +7,7 @@
 
 namespace ava::tui::terminal {
 
-// class Pad
+// class ParagraphPad
 //
 // Represents an ncurses pad: an off-screen terminal buffer that is not restricted
 // by the screen size and that is shown on the screen by refreshing explicit
@@ -17,14 +17,14 @@ namespace ava::tui::terminal {
 // create or update the underlying ncurses pad; call generate() to (re)create it
 // from the current content.
 //
-class Pad
+class ParagraphPad
 {
  private:
   std::vector<std::unique_ptr<Paragraph>> paragraphs_;  // The Paragraph's that make up the content of this pad, in order.
   std::optional<BasicWindow> pad_;                      // The ncurses pad created by the last generate() call, if any.
 
  public:
-  Pad() = default;
+  ParagraphPad() = default;
 
   // Append `paragraph` to the end of the content of this pad.
   void append(std::unique_ptr<Paragraph>&& paragraph)

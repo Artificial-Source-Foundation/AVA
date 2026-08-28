@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "GraphemeRun.h"
-#include "Pad.h"
+#include "ParagraphPad.h"
 #include "utils/macros.h"
 
 #include <vector>
@@ -8,7 +8,7 @@
 
 namespace ava::tui::terminal {
 
-void Pad::generate(columns_t columns)
+void ParagraphPad::generate(columns_t columns)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
@@ -49,21 +49,21 @@ void Pad::generate(columns_t columns)
   }
 }
 
-void Pad::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+void ParagraphPad::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());
   pad_->prefresh(pad_pos, screen_pos, screen_size);
 }
 
-Dimension Pad::dimension() const
+Dimension ParagraphPad::dimension() const
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());
   return pad_->getmaxyx();
 }
 
-BasicWindow& Pad::basic_window()
+BasicWindow& ParagraphPad::basic_window()
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());

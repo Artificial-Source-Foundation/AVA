@@ -1,7 +1,5 @@
 #! /bin/bash
 
-# Optional helper for initializing pinned submodules and printing build guidance.
-
 if test -f .git; then
   echo "Error: don't run $0 inside a submodule. Run it from the parent project's directory."
   exit 1
@@ -14,24 +12,24 @@ fi
 
 if test -d .git; then
   # Take care of git submodule related stuff.
+  MAINTAINER_HASH=dcc3e4640e3ff4769e3cee4a2ab8e5eb
   # If this was a clone without --recursive, fix that fact.
   if test ! -e cmake/aicxx/scripts/real_maintainer.sh; then
-    if ! git submodule update --init --checkout --recursive; then
-      echo "Error: could not initialize AVA's pinned submodules."
-      exit 1
-    fi
+    git submodule update --init --recursive
   fi
   # If new git submodules were added by someone else, get them.
   if git submodule status --recursive | grep '^-' >/dev/null; then
-    if ! git submodule update --init --checkout --recursive; then
-      echo "Error: could not initialize AVA's pinned submodules."
-      exit 1
-    fi
+    git submodule update --init --recursive
   fi
-  if git submodule status --recursive | grep -E '^[+U]' >/dev/null; then
-    echo "Error: a submodule is checked out at a revision other than AVA's pinned commit."
-    echo "Run: git submodule update --init --checkout --recursive"
-    exit 1
+  # Update autogen.sh and cmake/aicxx itself if we are the real maintainer.
+  if test -f cmake/aicxx/scripts/real_maintainer.sh; then
+    cmake/aicxx/scripts/real_maintainer.sh $MAINTAINER_HASH
+    RET=$?
+    # A return value of 2 means we need to continue below.
+    # Otherwise, abort/stop returning that value.
+    if test $RET -ne 2; then
+      exit $RET
+    fi
   fi
 else
   if test ! -e cmake/aicxx/scripts/real_maintainer.sh; then

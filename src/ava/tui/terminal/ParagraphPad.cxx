@@ -8,7 +8,7 @@
 
 namespace ava::tui::terminal {
 
-void ParagraphPad::generate(columns_t columns)
+void ParagraphPad::generate(columns_t columns, bool blank_line_between_paragraphs)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
@@ -17,15 +17,15 @@ void ParagraphPad::generate(columns_t columns)
   // consecutive Paragraph's) determines the height of the ncurses pad, which must be known when
   // the pad is created. The wrapped rows only contain views into the TextSpan's of the Paragraph's,
   // so keeping them around until the end is cheap apart from the wide characters and meta data.
-  std::vector<std::vector<GraphemeSpan>> wrapped_paragraphs;
+  std::vector<GraphemeBlock> wrapped_paragraphs;
   wrapped_paragraphs.reserve(paragraphs_.size());
   uint32_t pad_height = 0;
   for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
   {
-    wrapped_paragraphs.push_back(paragraph->create_grapheme_spans(columns));
+    wrapped_paragraphs.emplace_back(paragraph->create_grapheme_block(columns));
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.back().size());
   }
-  if (wrapped_paragraphs.size() > 1)
+  if (blank_line_between_paragraphs && wrapped_paragraphs.size() > 1)
     pad_height += static_cast<uint32_t>(wrapped_paragraphs.size() - 1);
 
   // (Re)create the ncurses pad; the assignment destroys the previously generated pad, if any.
@@ -34,9 +34,9 @@ void ParagraphPad::generate(columns_t columns)
   // Write all wrapped rows into the new pad.
   auto paragraph_iter = paragraphs_.begin();
   uint32_t row = 0;
-  for (std::vector<GraphemeSpan> const& rows : wrapped_paragraphs)
+  for (GraphemeBlock const& block : wrapped_paragraphs)
   {
-    for (GraphemeSpan const& grapheme_span : rows)
+    for (GraphemeSpan const& grapheme_span : block)
     {
       // Paranoia check: all GraphemeSpan's were constructed by passing `columns`.
       ASSERT(grapheme_span.max_columns() == columns);
@@ -44,7 +44,8 @@ void ParagraphPad::generate(columns_t columns)
       grapheme_span.write_to(*pad_, (*paragraph_iter)->default_rendition());
       ++row;
     }
-    ++row;               // Leave one blank row between consecutive Paragraph's.
+    if (blank_line_between_paragraphs)
+      ++row;            // Leave one blank row between consecutive Paragraph's.
     ++paragraph_iter;
   }
 }

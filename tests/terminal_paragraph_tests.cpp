@@ -60,13 +60,15 @@ struct ExpectedRow
   std::vector<ExpectedRun> grapheme_runs;
 };
 
+using ExpectedRows = utils::Vector<ExpectedRow, terminal::GraphemeBlockIndex>;
+
 // The expected result of Paragraph::wrap(9) for the comment example, row by row.
 //
 // Note which span the white-space-only runs belong to: the " " of row 6 and of row 11 are leading white-space of
 // the following plain TextSpan, while the " " of row 15 is leading white-space of the styled TextSpan " ZZZ".
-std::vector<ExpectedRow> const& expected_wrapped_rows()
+ExpectedRows const& expected_wrapped_rows()
 {
-  static std::vector<ExpectedRow> const rows{
+  static ExpectedRows const rows{
       ExpectedRow{9, {{L"AAAAAAAAA", true}}},
       ExpectedRow{8, {{L"AA ", true}, {L" bbb ", false}}},
       ExpectedRow{8, {{L"ccc ddd ", false}}},
@@ -92,29 +94,29 @@ void test_paragraph_wrap_comment_example()
 {
   auto paragraph = make_comment_paragraph(terminal::Rendition{terminal::ColorPair{}});
 
-  std::vector<terminal::GraphemeSpan> rows = paragraph->create_grapheme_spans(9);
+  terminal::GraphemeBlock rows = paragraph->create_grapheme_block(9);
 
-  std::vector<ExpectedRow> const& expected = expected_wrapped_rows();
+  ExpectedRows const& expected = expected_wrapped_rows();
   expect(rows.size() == expected.size(),
          "wrap(9) of the comment example must produce " + std::to_string(expected.size()) + " rows, got " + std::to_string(rows.size()));
 
   std::wstring concatenated;
-  for (std::size_t row = 0; row < rows.size() && row < expected.size(); ++row)
+  for (auto row = rows.ibegin(); row != rows.iend() && row != expected.iend(); ++row)
   {
     std::vector<terminal::GraphemeRun> const& grapheme_runs = rows[row].grapheme_runs();
 
-    expect(rows[row].columns() == expected[row].columns, "row " + std::to_string(row) + " must occupy " + std::to_string(expected[row].columns) +
+    expect(rows[row].columns() == expected[row].columns, "row " + utils::to_string(row) + " must occupy " + std::to_string(expected[row].columns) +
                                                              " terminal columns, got " + std::to_string(rows[row].columns()));
-    expect(grapheme_runs.size() == expected[row].grapheme_runs.size(), "row " + std::to_string(row) + " must contain " +
+    expect(grapheme_runs.size() == expected[row].grapheme_runs.size(), "row " + utils::to_string(row) + " must contain " +
                                                                            std::to_string(expected[row].grapheme_runs.size()) + " GraphemeRun's, got " +
                                                                            std::to_string(grapheme_runs.size()));
 
     for (std::size_t run = 0; run < grapheme_runs.size() && run < expected[row].grapheme_runs.size(); ++run)
     {
       expect(grapheme_runs[run].str() == expected[row].grapheme_runs[run].text,
-             "row " + std::to_string(row) + " run " + std::to_string(run) + " must cover the expected text");
+             "row " + utils::to_string(row) + " run " + std::to_string(run) + " must cover the expected text");
       expect(grapheme_runs[run].text_span()->use_default_rendition() != expected[row].grapheme_runs[run].styled,
-             "row " + std::to_string(row) + " run " + std::to_string(run) + " must be a view into " +
+             "row " + utils::to_string(row) + " run " + std::to_string(run) + " must be a view into " +
                  (expected[row].grapheme_runs[run].styled ? "a StyledTextSpan" : "a TextSpan using the Paragraph default rendition"));
       concatenated += grapheme_runs[run].str();
     }
@@ -238,7 +240,7 @@ void test_pad_generate_comment_example()
           right_aligned->append(terminal::TextSpan::create(u8" "));
       }
 
-      std::vector<terminal::GraphemeSpan> right_aligned_rows = right_aligned->create_grapheme_spans(6);
+      terminal::GraphemeBlock right_aligned_rows = right_aligned->create_grapheme_block(6);
       expect(right_aligned_rows.size() == 1 && right_aligned_rows.front().columns() == 2 + trailing_spaces &&
                  right_aligned_rows.front().columns_excluding_trailing_whitespace() == 2,
              "a GraphemeSpan must distinguish total columns from its width through the last non-space grapheme");
@@ -329,19 +331,19 @@ void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t colu
   paragraph->append(terminal::TextSpan::create(text));
   paragraph->initialize_cached_natural_width();
 
-  std::vector<terminal::GraphemeSpan> const rows = paragraph->create_grapheme_spans(columns);
+  terminal::GraphemeBlock const rows = paragraph->create_grapheme_block(columns);
   expect(!rows.empty(), std::string{name} + " must produce at least one wrapped row");
   if (!rows.empty())
     expect(rows.front().columns() == expected_first_row_columns, std::string{name} + " first row must occupy " + std::to_string(expected_first_row_columns) +
                                                                      " columns, got " + std::to_string(rows.front().columns()));
 
-  for (std::size_t row = 0; row < rows.size(); ++row)
+  for (auto row = rows.ibegin(); row != rows.iend(); ++row)
   {
     for (terminal::GraphemeRun const& grapheme_run : rows[row].grapheme_runs())
     {
       auto const& metadata = grapheme_run.metadata();
       expect(metadata.empty() || !metadata.front().combining,
-             std::string{name} + " row " + std::to_string(row) + " must not begin a GraphemeRun inside a compact grapheme cluster");
+             std::string{name} + " row " + utils::to_string(row) + " must not begin a GraphemeRun inside a compact grapheme cluster");
     }
   }
 }

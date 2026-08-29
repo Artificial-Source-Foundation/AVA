@@ -378,8 +378,9 @@ void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Renditi
   // You can't write an empty HorizontalLayout. Use the `append` member function to fill it.
   ASSERT(number_of_items > 0);
 
-  std::vector<std::vector<GraphemeSpan>> paragraph_grapheme_spans;
-  std::size_t max_paragraph_rows = 0;
+  std::vector<GraphemeBlock> paragraph_grapheme_blocks;
+  GraphemeBlockIndex max_paragraph_rows;
+  max_paragraph_rows.set_to_zero();
   basic_window.move(pos);
 
   // Write the top lines of all items.
@@ -389,9 +390,9 @@ void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Renditi
     // Paragraph's need special treatment.
     if (Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_item))
     {
-      paragraph_grapheme_spans.emplace_back(paragraph->create_grapheme_spans());
-      max_paragraph_rows = std::max(max_paragraph_rows, paragraph_grapheme_spans.back().size());
-      paragraph_grapheme_spans.back().front().write_to(basic_window, paragraph->default_rendition());
+      paragraph_grapheme_blocks.emplace_back(paragraph->create_grapheme_block());
+      max_paragraph_rows = std::max(max_paragraph_rows, paragraph_grapheme_blocks.back().iend());
+      paragraph_grapheme_blocks.back().front().write_to(basic_window, paragraph->default_rendition());
     }
     // The rest is assumed to exist of only a single grapheme run.
     else
@@ -399,7 +400,8 @@ void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Renditi
   }
 
   // Write the remaining lines if any.
-  for (std::size_t row = 1; row < max_paragraph_rows; ++row)
+  constexpr std::size_t first_remaining_row = 1;
+  for (GraphemeBlockIndex row{first_remaining_row}; row < max_paragraph_rows; ++row)
   {
     pos.advance_row();
     basic_window.move(pos);
@@ -408,9 +410,9 @@ void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Renditi
     {
       LayoutItem const* layout_item = layout_items_[i].get();
       Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_item);
-      if (paragraph && row < paragraph_grapheme_spans[paragraph_index].size())
+      if (paragraph && row < paragraph_grapheme_blocks[paragraph_index].iend())
       {
-        paragraph_grapheme_spans[paragraph_index][row].write_to(basic_window, paragraph->default_rendition());
+        paragraph_grapheme_blocks[paragraph_index][row].write_to(basic_window, paragraph->default_rendition());
         ++paragraph_index;
       }
       else

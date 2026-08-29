@@ -59,12 +59,12 @@ namespace ava::tui::terminal {
 // Note how all GraphemeRun's in this list are views into the existing TextSpan's of the Paragraph.
 // The catenation of all GraphemeRun's gives again the original string.
 //
-std::vector<GraphemeSpan> Paragraph::create_grapheme_spans(columns_t columns) const
+GraphemeBlock Paragraph::create_grapheme_block(columns_t columns) const
 {
   // The algorithm requires at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
 
-  std::vector<GraphemeSpan> grapheme_spans;
+  GraphemeBlock grapheme_block;
   GraphemeSpan grapheme_span{columns, horizontal_alignment()};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
@@ -77,7 +77,7 @@ std::vector<GraphemeSpan> Paragraph::create_grapheme_spans(columns_t columns) co
       GraphemeRun remainder = grapheme_span.append(std::move(grapheme_run));
       if (remainder.empty())
         break;
-      grapheme_spans.emplace_back(std::move(grapheme_span));
+      grapheme_block.emplace_back(std::move(grapheme_span));
       // Note: the grapheme_span is now in the same state as it was immediately after the above construction.
 
       grapheme_run = std::move(remainder);
@@ -85,9 +85,15 @@ std::vector<GraphemeSpan> Paragraph::create_grapheme_spans(columns_t columns) co
   }
 
   if (!grapheme_span.grapheme_runs().empty())
-    grapheme_spans.emplace_back(std::move(grapheme_span));
+    grapheme_block.emplace_back(std::move(grapheme_span));
 
-  return grapheme_spans;
+  // There must be at least one GraphemeSpan in a GraphemeBlock, otherwise we don't know its width.
+  // If this assert fires then this function shouldn't have been called (fix the caller).
+  ASSERT(!grapheme_block.empty());
+  // The width of the GraphemeBlock is expected to be `columns`.
+  ASSERT(grapheme_block.front().max_columns() == columns);
+
+  return grapheme_block;
 }
 
 } // namespace ava::tui::terminal

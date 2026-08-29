@@ -189,7 +189,7 @@ void test_mixed_width_text_span_rendering()
   {
     auto paragraph = terminal::Paragraph::create({.alignment = terminal::HorizontalAlignment::right});
     paragraph->append(terminal::TextSpan::create(u8"αβ😀  🚀εζηθ"));
-    std::vector<terminal::GraphemeSpan> rows = paragraph->create_grapheme_spans(7);
+    terminal::GraphemeBlock rows = paragraph->create_grapheme_block(7);
     expect(!rows.empty(), "right-aligned mixed-width Paragraph must produce at least one GraphemeSpan");
     if (!rows.empty())
     {

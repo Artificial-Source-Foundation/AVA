@@ -3,10 +3,37 @@
 #include "LayoutItem.h"
 #include "TextSpan.h"
 #include "GraphemeSpan.h"
+#include "utils/Vector.h"
 #include <vector>
 #include <memory>
 
 namespace ava::tui::terminal {
+
+// GraphemeBlock
+//
+// A list of one or more GraphemeSpan's of the same width (GraphemeSpan::max_columns())
+// Any GraphemeBlock must exist of at least one GraphemeSpan (otherwise the width is unknown).
+//
+//           GraphemeBlock::front().max_columns()
+//   ┊◄-----------------------------------------------►┊
+//   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━┯━━┓
+//   ┃  GraphemeSpan 0                         ╎ WS │🯟🯝┃
+//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━┯━┷━━╉───────┐
+//   ┃  GraphemeSpan 1                            ╎ whitespace │
+//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━━━━━┯━┷━━━━╉───────┘
+//   ┃  GraphemeSpan 2                 ╎   WS   │🯟🯝🯟🯝🯟🯝┃
+//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━━━━━━━┷┯━━━━━┫
+//   ┃  GraphemeSpan 3                           ╎  WS ┃
+//   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━━━━┛
+//                   ^
+//           GraphemeBlockIndex (the index into a GraphemeBlock, giving a GraphemeSpan).
+//
+struct GraphemeBlockCategory
+{
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+using GraphemeBlockIndex = utils::VectorIndex<GraphemeBlockCategory>;
+using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex>;
 
 class Paragraph : public LayoutItem
 {
@@ -51,8 +78,8 @@ class Paragraph : public LayoutItem
   Rendition const& default_rendition() const { return default_rendition_; }
 
   // Wrap this Paragraph to `columns` terminal columns, returning the GraphemeSpans corresponding to that width.
-  std::vector<GraphemeSpan> create_grapheme_spans(columns_t columns) const;
-  std::vector<GraphemeSpan> create_grapheme_spans() const { return create_grapheme_spans(assigned_width().columns()); }
+  GraphemeBlock create_grapheme_block(columns_t columns) const;
+  GraphemeBlock create_grapheme_block() const { return create_grapheme_block(assigned_width().columns()); }
 
   void write_to(BasicWindow& UNUSED_ARG(basic_window), Rendition const& UNUSED_ARG(default_rendition)) const override
   {

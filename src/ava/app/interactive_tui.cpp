@@ -499,6 +499,26 @@ int run_tui(ShellState state)
                                  context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch,
                                  std::move(plugin_ui_capability));
             }();
+            LineResult local_command_presentation;
+            LineResult conversation_presentation;
+            bool has_local_command_presentation = false;
+            std::vector<std::string> ordinary_turn_request_ids;
+            auto capture_request_presentation = [&](std::string_view line, std::string const& request_id, LineResult const& request_result) {
+              if (request_result.ordinary_turn_committed)
+              {
+                ordinary_turn_request_ids.push_back(request_id);
+                conversation_presentation.output.insert(conversation_presentation.output.end(), request_result.output.begin(), request_result.output.end());
+                conversation_presentation.tool_timeline.insert(conversation_presentation.tool_timeline.end(), request_result.tool_timeline.begin(),
+                                                               request_result.tool_timeline.end());
+                return;
+              }
+              if (!line.starts_with('/') && !line.starts_with('!'))
+                return;
+              has_local_command_presentation = true;
+              local_command_presentation.output.insert(local_command_presentation.output.end(), request_result.output.begin(), request_result.output.end());
+              local_command_presentation.tool_timeline.insert(local_command_presentation.tool_timeline.end(), request_result.tool_timeline.begin(),
+                                                              request_result.tool_timeline.end());
+            };
             if (is_display_settings_command(submitted))
             {
               if (auto loaded = ava::app::load_tui_display_settings(invocation_paths); loaded)
@@ -511,12 +531,16 @@ int run_tui(ShellState state)
               if (auto watched = refresh_display_watch_state(); !watched)
                 add_output(line_result, watched.error().format());
             }
+            capture_request_presentation(submitted, context.request_id, line_result);
             auto const session_changed = run_queued_follow_ups_until_session_transition(
                 line_result, workspace_catalog_reload, session_id_before, context,
                 [&unlocked_session]() { return ava::app::runtime::session_ts::rat(unlocked_session)->store.session_id(); },
                 [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
-                  return handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                     context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch, nullptr);
+                  auto follow_up_result =
+                      handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
+                                  context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch, nullptr);
+                  capture_request_presentation(follow_up.message, follow_up.request_id, follow_up_result);
+                  return follow_up_result;
                 });
             bool const workspace_changed = workspace_catalog_reload || workspace_catalog_changed(line_result);
             if (workspace_changed)
@@ -552,10 +576,20 @@ int run_tui(ShellState state)
             else if (!workspace_changed)
               application_catalog.refresh_values(unlocked_session, hotkeys);
             auto const context_source_count = ava::app::runtime::session_ts::rat(unlocked_session)->context_sources().size();
+            std::optional<ava::tui::TuiLocalCommandResult> local_command_result;
+            if (has_local_command_presentation)
+            {
+              local_command_result = ava::tui::TuiLocalCommandResult{.output = std::move(local_command_presentation.output),
+                                                                     .tool_timeline = tui_tool_timeline(local_command_presentation.tool_timeline)};
+            }
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .ordinary_turn_committed = line_result.ordinary_turn_committed,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
+                                             .ordinary_turn_request_ids = std::move(ordinary_turn_request_ids),
+                                             .local_command_result = std::move(local_command_result),
+                                             .conversation_output = std::move(conversation_presentation.output),
+                                             .conversation_tool_timeline = tui_tool_timeline(conversation_presentation.tool_timeline),
                                              .context_source_count = context_source_count,
                                              .state_snapshot = state_snapshot({})};
           },

@@ -281,21 +281,6 @@ std::string latest_assistant_copy_status(LatestAssistantCopyResult result)
   return "clipboard copy failed";
 }
 
-std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
-{
-  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
-  {
-    if (!item->tool)
-      continue;
-    if (!detail::tool_card_matches_copy_query(*item->tool, query))
-      continue;
-    auto text = detail::tool_card_copy_text(*item->tool);
-    if (!text.empty())
-      return text;
-  }
-  return std::nullopt;
-}
-
 std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript)
 {
   std::vector<std::pair<std::string, bool>> overrides;
@@ -380,21 +365,6 @@ void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& o
   }
 }
 
-std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
-{
-  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
-  {
-    if (!item->tool)
-      continue;
-    if (!detail::tool_card_matches_copy_query(*item->tool, query))
-      continue;
-    auto text = detail::tool_card_diff_copy_text(*item->tool);
-    if (!text.empty())
-      return text;
-  }
-  return std::nullopt;
-}
-
 std::string diff_transcript_text(std::string_view title, std::string_view diff)
 {
   auto text = std::string(title);
@@ -404,19 +374,6 @@ std::string diff_transcript_text(std::string_view title, std::string_view diff)
     text += '\n';
   text += "```";
   return text;
-}
-
-std::optional<std::string> latest_permission_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query)
-{
-  for (auto item = transcript.rbegin(); item != transcript.rend(); ++item)
-  {
-    if (!item->tool)
-      continue;
-    auto text = detail::tool_card_permission_copy_text(*item->tool, query);
-    if (!text.empty())
-      return text;
-  }
-  return std::nullopt;
 }
 
 std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answer)

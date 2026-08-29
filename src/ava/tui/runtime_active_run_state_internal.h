@@ -16,6 +16,14 @@
 
 namespace ava::tui {
 
+struct RuntimeRequestEventState final
+{
+  std::string request_id;
+  TuiEventState event_state;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct RuntimeActiveRunState final
 {
   RuntimeActiveRunState(std::string submitted_in, bool is_command_submission_in, bool supports_active_queue_in);
@@ -29,11 +37,18 @@ struct RuntimeActiveRunState final
   bool const supports_active_queue;
   bool command_events_released = false;
   bool event_projection_pending = false;
+  std::string initial_request_id;
+  std::vector<std::string> ordinary_turn_request_ids;
   std::vector<TranscriptItem> submitted_transcript;
   std::size_t turn_snapshot_leading_evictions = 0;
   std::vector<ava::session::ImageAttachmentRef> submit_image_attachments;
   RuntimeEventQueue event_queue;
+  // Aggregate authority owns prompts/sidebar/status. Command transcript
+  // projection is separately request-segmented and authorized only at result.
   TuiEventState event_state;
+  TuiEventState initial_command_event_state;
+  TuiEventState unattributed_local_event_state;
+  std::vector<RuntimeRequestEventState> request_event_states;
   std::atomic_bool run_cancel_requested{false};
   bool close_after_submit = false;
   std::optional<TuiActiveRunQueues> active_queues;

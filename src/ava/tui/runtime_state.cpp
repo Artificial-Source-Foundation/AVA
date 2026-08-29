@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_draft_internal.h"
 #include "ava/tui/runtime_render_internal.h"
@@ -30,6 +31,7 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
                             .image_width_cells = options.image_width_cells,
                             .cursor = options.cursor,
                             .startup_overview = options.startup_overview};
+  seed_tui_tool_index(snapshot);
   snapshot.mermaid_config_epoch = options.mermaid_render.config_epoch;
   snapshot.mermaid_enabled = options.mermaid_render.enabled;
   snapshot.active_run_hint = runtime_views::active_run_hint_for(options.key_bindings);
@@ -240,7 +242,9 @@ bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions
     snapshot.transcript.clear();
     ++snapshot.transcript_generation;
     snapshot.command_output.reset();
-    snapshot.local_tool_history.clear();
+    snapshot.tool_index.clear();
+    snapshot.evicted_tool_index_identities.clear();
+    snapshot.next_tool_index_sequence = 0;
     snapshot.queued_messages.clear();
     snapshot.permission_prompt.reset();
     snapshot.question_prompt.reset();

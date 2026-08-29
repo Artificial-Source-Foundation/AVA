@@ -634,9 +634,13 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = e2e_tool_body(request_index, target_path)};
   }
-  if (scenario == "compact" || scenario == "compact-delayed")
+  if (scenario == "compact" || scenario == "compact-delayed" || scenario == "compact-follow-up")
   {
-    return ProviderResponse{.body = request_index == 0 ? text_body("before compact") : text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
+    if (request_index == 0)
+      return ProviderResponse{.body = text_body("before compact")};
+    if (request_index == 1)
+      return ProviderResponse{.body = text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
+    return ProviderResponse{.body = text_body("after compact queued answer")};
   }
   if (scenario == "markdown-links")
   {
@@ -669,6 +673,7 @@ int main(int argc, char** argv)
       : scenario == "branch-summary"           ? 12
       : scenario == "text-three"               ? 3
       : scenario == "text-three-delayed-third" ? 4
+      : scenario == "compact-follow-up"        ? 3
       : scenario == "streaming-scroll"         ? 2
       : scenario == "end-to-end-workflow"      ? 6
       : scenario == "read-tool-twice"          ? 4
@@ -744,9 +749,9 @@ int main(int argc, char** argv)
     }
     if (scenario == "subagent-workspace" && request_index > 0 && !wait_for_streaming_marker(target_path, "release-live"))
       return 1;
-    auto const delay_this_request = scenario == "compact-delayed"            ? request_index == 1
-                                    : scenario == "text-three-delayed-third" ? request_index == 2
-                                                                             : request_index == 0;
+    auto const delay_this_request = scenario == "compact-delayed" || scenario == "compact-follow-up" ? request_index == 1
+                                    : scenario == "text-three-delayed-third"                         ? request_index == 2
+                                                                                                     : request_index == 0;
     if (delay_this_request)
       std::this_thread::sleep_for(delay);
 

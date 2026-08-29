@@ -73,6 +73,10 @@ struct TuiEventState
 };
 
 void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& event, ava::event::EventEnvelopeContext const& context = {});
+// Returns the exact tool card touched by a lifecycle RuntimeEvent after that
+// event has been applied. Non-tool/provider-audit events return no projection.
+[[nodiscard]] std::optional<ToolTimelineItem> runtime_event_tool_projection(TuiEventState const& state, ava::event::RuntimeEvent const& event,
+                                                                            ava::event::EventEnvelopeContext const& context = {});
 void apply_control_event_envelope(TuiEventState& state, ava::event::EventEnvelope const& envelope);
 void apply_subagent_launch_notification(TuiEventState& state, ava::agent::SubagentLaunchNotification const& notification);
 

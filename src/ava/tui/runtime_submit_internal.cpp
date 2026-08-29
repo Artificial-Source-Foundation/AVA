@@ -39,9 +39,6 @@ using runtime_commands::stash_command_argument;
 using runtime_commands::tool_command_argument;
 using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::diff_transcript_text;
-using runtime_transcript::latest_permission_copy_text;
-using runtime_transcript::latest_tool_copy_text;
-using runtime_transcript::latest_tool_diff_copy_text;
 using runtime_transcript::push_history;
 using runtime_views::compact_path_leaf;
 
@@ -425,16 +422,17 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto tool_query = tool_command_argument(submitted))
     {
       push_history(input_history, submitted);
-      auto const tool_index = navigation_.toggle_matching_tool_details(*tool_query);
-      if (tool_index)
+      auto const indexed_tool = latest_matching_indexed_tool(snapshot, *tool_query);
+      auto const transcript_index = indexed_tool ? indexed_provider_tool_transcript_index(snapshot, *indexed_tool) : std::nullopt;
+      if (transcript_index && navigation_.toggle_tool_details_at(*transcript_index))
       {
-        auto const& tool = *snapshot.transcript[*tool_index].tool;
+        auto const& tool = *snapshot.transcript[*transcript_index].tool;
         snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
                           std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
       }
-      else if (auto local_tool = latest_matching_local_tool(snapshot, *tool_query))
+      else if (indexed_tool)
       {
-        open_command_output(snapshot, submitted, {}, {*local_tool});
+        open_command_output(snapshot, submitted, {}, {indexed_tool->tool});
       }
       else
       {
@@ -451,7 +449,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto diff_query = diff_command_argument(submitted))
     {
       push_history(input_history, submitted);
-      auto diff_text = latest_tool_diff_copy_text(transcript_with_local_tools(snapshot), *diff_query);
+      auto diff_text = latest_indexed_tool_diff_copy_text(snapshot, *diff_query);
       if (diff_text)
       {
         auto const title = diff_query->empty() ? std::string_view("Latest tool diff:") : std::string_view("Matching tool diff:");
@@ -482,7 +480,6 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         }
         return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
-      auto const copy_items = transcript_with_local_tools(snapshot);
       std::optional<std::string> copy_text;
       std::string copied_status;
       std::string missing_status;
@@ -498,19 +495,19 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       else if (target.name == "tool" || target.name == "tools")
       {
-        copy_text = latest_tool_copy_text(copy_items, target.query);
+        copy_text = latest_indexed_tool_copy_text(snapshot, target.query);
         copied_status = target.query.empty() ? "latest tool details copy request sent" : "matching tool details copy request sent";
         missing_status = target.query.empty() ? "no tool details to copy" : "no matching tool details to copy";
       }
       else if (target.name == "diff" || target.name == "diffs")
       {
-        copy_text = latest_tool_diff_copy_text(copy_items, target.query);
+        copy_text = latest_indexed_tool_diff_copy_text(snapshot, target.query);
         copied_status = target.query.empty() ? "latest tool diff copy request sent" : "matching tool diff copy request sent";
         missing_status = target.query.empty() ? "no tool diff to copy" : "no matching tool diff to copy";
       }
       else if (target.name == "permission" || target.name == "permissions")
       {
-        copy_text = latest_permission_copy_text(copy_items, target.query);
+        copy_text = latest_indexed_permission_copy_text(snapshot, target.query);
         copied_status = target.query.empty() ? "latest permission details copy request sent" : "matching permission details copy request sent";
         missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
       }

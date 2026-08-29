@@ -19,7 +19,39 @@ namespace {
 constexpr std::size_t kMaxCommandOutputBlocks = 32;
 constexpr std::size_t kMaxCommandOutputBytes = 256 * 1024;
 constexpr std::size_t kMaxCommandOutputTools = 32;
-constexpr std::size_t kMaxLocalToolHistory = 50;
+
+std::string tool_index_identity(ToolTimelineItem const& tool)
+{
+  if (!tool.call_id.empty())
+    return "call\n" + tool.call_id;
+  if (!tool.request_id.empty())
+    return "request\n" + tool.request_id;
+  if (!tool.correlation_id.empty())
+    return "correlation\n" + tool.correlation_id;
+  return {};
+}
+
+bool tool_index_identity_was_evicted(ComposerSnapshot const& snapshot, std::string const& identity)
+{
+  return !identity.empty() && std::ranges::find(snapshot.evicted_tool_index_identities, identity) != snapshot.evicted_tool_index_identities.end();
+}
+
+void remember_evicted_tool_identity(ComposerSnapshot& snapshot, ToolTimelineItem const& tool)
+{
+  auto identity = tool_index_identity(tool);
+  if (identity.empty())
+    return;
+  auto existing = std::ranges::find(snapshot.evicted_tool_index_identities, identity);
+  if (existing != snapshot.evicted_tool_index_identities.end())
+    snapshot.evicted_tool_index_identities.erase(existing);
+  snapshot.evicted_tool_index_identities.push_back(std::move(identity));
+  if (snapshot.evicted_tool_index_identities.size() > kMaxTuiToolIndexItems)
+  {
+    snapshot.evicted_tool_index_identities.erase(
+        snapshot.evicted_tool_index_identities.begin(),
+        snapshot.evicted_tool_index_identities.begin() + static_cast<std::ptrdiff_t>(snapshot.evicted_tool_index_identities.size() - kMaxTuiToolIndexItems));
+  }
+}
 
 std::size_t utf8_prefix_size(std::string_view text, std::size_t max_bytes) noexcept
 {
@@ -123,13 +155,24 @@ TuiSubmissionProjectionPolicy tui_submission_projection_policy(bool is_command_s
 
 TuiSubmissionSettlement settle_tui_submission(std::vector<TranscriptItem> const& submitted_transcript, TuiEventState const& buffered_event_state,
                                               std::string_view submitted, bool is_command_submission, bool ordinary_turn_committed,
-                                              std::vector<std::string> output, std::vector<ToolTimelineItem> tools, bool canceled)
+                                              std::vector<std::string> output, std::vector<ToolTimelineItem> tools, bool canceled, bool present_command_output)
 {
   auto settlement = TuiSubmissionSettlement{
       .policy = tui_submission_projection_policy(is_command_submission, ordinary_turn_committed), .transcript = {}, .command_output = {}, .command_tools = {}};
+  settlement.policy.present_command_output = settlement.policy.present_command_output || present_command_output;
   if (settlement.policy.preserve_transcript)
   {
     settlement.transcript = submitted_transcript;
+  }
+  else
+  {
+    settlement.transcript = event_state_transcript_snapshot(buffered_event_state, PendingTextProjection::Unparsed);
+    if (is_command_submission)
+      remove_literal_command_invocation(settlement.transcript, submitted);
+  }
+
+  if (settlement.policy.present_command_output)
+  {
     if (output.empty() && buffered_event_state.run_status == TuiEventRunStatus::Error)
     {
       output.push_back(buffered_event_state.error_text.empty() ? std::string("local command failed") : buffered_event_state.error_text);
@@ -140,12 +183,7 @@ TuiSubmissionSettlement settle_tui_submission(std::vector<TranscriptItem> const&
       output.push_back("stopped by user");
     settlement.command_output = std::move(output);
     settlement.command_tools = std::move(tools);
-    return settlement;
   }
-
-  settlement.transcript = event_state_transcript_snapshot(buffered_event_state, PendingTextProjection::Unparsed);
-  if (is_command_submission)
-    remove_literal_command_invocation(settlement.transcript, submitted);
   return settlement;
 }
 
@@ -221,15 +259,12 @@ void settle_local_command_status(ComposerSnapshot& snapshot, std::string status)
 }
 
 void settle_local_command_completion(ComposerSnapshot& snapshot, std::string_view submitted, std::vector<std::string> output,
-                                     std::vector<ToolTimelineItem> tools)
+                                     std::vector<ToolTimelineItem> tools, bool record_tools)
 {
-  for (auto const& tool : tools)
-    snapshot.local_tool_history.push_back(tool);
-  if (snapshot.local_tool_history.size() > kMaxLocalToolHistory)
+  if (record_tools)
   {
-    snapshot.local_tool_history.erase(
-        snapshot.local_tool_history.begin(),
-        snapshot.local_tool_history.begin() + static_cast<std::ptrdiff_t>(snapshot.local_tool_history.size() - kMaxLocalToolHistory));
+    for (auto const& tool : tools)
+      record_tui_tool(snapshot, tool, TuiToolIndexOrigin::LocalCommand);
   }
   if (output.empty() && tools.empty())
   {
@@ -240,21 +275,111 @@ void settle_local_command_completion(ComposerSnapshot& snapshot, std::string_vie
   open_command_output(snapshot, submitted, std::move(output), std::move(tools));
 }
 
-std::vector<TranscriptItem> transcript_with_local_tools(ComposerSnapshot const& snapshot)
+void seed_tui_tool_index(ComposerSnapshot& snapshot)
 {
-  auto items = snapshot.transcript;
-  items.reserve(items.size() + snapshot.local_tool_history.size());
-  for (auto const& tool : snapshot.local_tool_history)
-    items.push_back(TranscriptItem{.tool = tool});
-  return items;
+  snapshot.tool_index.clear();
+  snapshot.evicted_tool_index_identities.clear();
+  snapshot.next_tool_index_sequence = 0;
+  for (auto const& item : snapshot.transcript)
+  {
+    if (item.tool)
+      record_tui_tool(snapshot, *item.tool, TuiToolIndexOrigin::Provider);
+  }
 }
 
-std::optional<ToolTimelineItem> latest_matching_local_tool(ComposerSnapshot const& snapshot, std::string_view query)
+void record_tui_tool(ComposerSnapshot& snapshot, ToolTimelineItem tool, TuiToolIndexOrigin origin)
 {
-  for (auto tool = snapshot.local_tool_history.rbegin(); tool != snapshot.local_tool_history.rend(); ++tool)
+  auto const identity = tool_index_identity(tool);
+  if (!identity.empty())
   {
-    if (detail::tool_card_matches_copy_query(*tool, query))
-      return *tool;
+    auto existing = std::ranges::find_if(snapshot.tool_index, [&](TuiToolIndexEntry const& entry) { return tool_index_identity(entry.tool) == identity; });
+    if (existing != snapshot.tool_index.end())
+    {
+      existing->tool = std::move(tool);
+      return;
+    }
+    if (tool_index_identity_was_evicted(snapshot, identity))
+      return;
+  }
+
+  snapshot.tool_index.push_back(TuiToolIndexEntry{.tool = std::move(tool), .origin = origin, .sequence = snapshot.next_tool_index_sequence++});
+  if (snapshot.tool_index.size() <= kMaxTuiToolIndexItems)
+    return;
+  auto const remove_count = snapshot.tool_index.size() - kMaxTuiToolIndexItems;
+  for (std::size_t index = 0; index < remove_count; ++index)
+    remember_evicted_tool_identity(snapshot, snapshot.tool_index[index].tool);
+  snapshot.tool_index.erase(snapshot.tool_index.begin(), snapshot.tool_index.begin() + static_cast<std::ptrdiff_t>(remove_count));
+}
+
+void update_indexed_tui_tool(ComposerSnapshot& snapshot, ToolTimelineItem const& tool)
+{
+  auto const identity = tool_index_identity(tool);
+  if (identity.empty())
+    return;
+  auto existing = std::ranges::find_if(snapshot.tool_index, [&](TuiToolIndexEntry const& entry) { return tool_index_identity(entry.tool) == identity; });
+  if (existing != snapshot.tool_index.end())
+    existing->tool = tool;
+}
+
+std::optional<TuiToolIndexEntry> latest_matching_indexed_tool(ComposerSnapshot const& snapshot, std::string_view query)
+{
+  for (auto entry = snapshot.tool_index.rbegin(); entry != snapshot.tool_index.rend(); ++entry)
+  {
+    if (detail::tool_card_matches_copy_query(entry->tool, query))
+      return *entry;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> indexed_provider_tool_transcript_index(ComposerSnapshot const& snapshot, TuiToolIndexEntry const& entry)
+{
+  if (entry.origin != TuiToolIndexOrigin::Provider)
+    return std::nullopt;
+  auto const identity = tool_index_identity(entry.tool);
+  if (identity.empty())
+    return std::nullopt;
+  for (std::size_t index = snapshot.transcript.size(); index > 0; --index)
+  {
+    auto const& item = snapshot.transcript[index - 1];
+    if (item.tool && tool_index_identity(*item.tool) == identity)
+      return index - 1;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_indexed_tool_copy_text(ComposerSnapshot const& snapshot, std::string_view query)
+{
+  for (auto entry = snapshot.tool_index.rbegin(); entry != snapshot.tool_index.rend(); ++entry)
+  {
+    if (!detail::tool_card_matches_copy_query(entry->tool, query))
+      continue;
+    auto text = detail::tool_card_copy_text(entry->tool);
+    if (!text.empty())
+      return text;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_indexed_tool_diff_copy_text(ComposerSnapshot const& snapshot, std::string_view query)
+{
+  for (auto entry = snapshot.tool_index.rbegin(); entry != snapshot.tool_index.rend(); ++entry)
+  {
+    if (!detail::tool_card_matches_copy_query(entry->tool, query))
+      continue;
+    auto text = detail::tool_card_diff_copy_text(entry->tool);
+    if (!text.empty())
+      return text;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> latest_indexed_permission_copy_text(ComposerSnapshot const& snapshot, std::string_view query)
+{
+  for (auto entry = snapshot.tool_index.rbegin(); entry != snapshot.tool_index.rend(); ++entry)
+  {
+    auto text = detail::tool_card_permission_copy_text(entry->tool, query);
+    if (!text.empty())
+      return text;
   }
   return std::nullopt;
 }

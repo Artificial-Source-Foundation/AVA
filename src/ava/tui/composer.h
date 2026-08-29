@@ -104,6 +104,21 @@ struct ToolTimelineItem
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+enum class TuiToolIndexOrigin
+{
+  Provider,
+  LocalCommand,
+};
+
+struct TuiToolIndexEntry
+{
+  ToolTimelineItem tool;
+  TuiToolIndexOrigin origin = TuiToolIndexOrigin::Provider;
+  std::uint64_t sequence = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TranscriptItem
 {
   std::string label = {};
@@ -618,9 +633,11 @@ struct ComposerSnapshot
   std::vector<TranscriptItem> transcript;
   std::size_t transcript_generation = 0;
   std::optional<CommandOutputView> command_output = std::nullopt;
-  // Bounded TUI-only history keeps local tool details available to /tool, /diff,
-  // and /copy without projecting a tool card into the conversation transcript.
-  std::vector<ToolTimelineItem> local_tool_history = {};
+  // One bounded sequence is the sole chronology authority for /tool, /diff,
+  // and /copy. Provider cards remain in transcript; local command tools do not.
+  std::vector<TuiToolIndexEntry> tool_index = {};
+  std::vector<std::string> evicted_tool_index_identities = {};
+  std::uint64_t next_tool_index_sequence = 0;
   // Immutable TUI-only presentation results. Semantic TranscriptItem text is
   // never rewritten; renderer lookup revalidates every fence before use.
   std::shared_ptr<detail::MermaidTranscriptProjection const> mermaid_projection = {};

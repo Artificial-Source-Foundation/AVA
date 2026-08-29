@@ -1178,6 +1178,30 @@ void upsert_provider_tool_call(TuiEventState& state, ava::event::ProviderPayload
   upsert_activity(state, existing->call_id, existing->item);
 }
 
+std::optional<ToolTimelineItem> pending_tool_projection(TuiEventState const& state, std::string_view backend_call_id, std::string_view effective_call_id)
+{
+  auto pending = std::ranges::find_if(state.pending_tools, [&](PendingToolItem const& item) {
+    if (!backend_call_id.empty())
+      return item.backend_call_id == backend_call_id;
+    return !effective_call_id.empty() && (item.call_id == effective_call_id || item.item.call_id == effective_call_id);
+  });
+  return pending == state.pending_tools.end() ? std::nullopt : std::optional<ToolTimelineItem>{pending->item};
+}
+
+std::optional<ToolTimelineItem> completed_tool_projection(TuiEventState const& state, std::string_view effective_call_id, std::string_view tool_name)
+{
+  for (auto item = state.transcript.rbegin(); item != state.transcript.rend(); ++item)
+  {
+    if (!item->tool)
+      continue;
+    if (!effective_call_id.empty() && item->tool->call_id == effective_call_id)
+      return item->tool;
+    if (effective_call_id.empty() && !tool_name.empty() && item->tool->name == tool_name)
+      return item->tool;
+  }
+  return std::nullopt;
+}
+
 void apply_provider_event(TuiEventState& state, ava::event::ProviderPayload const& payload, ava::event::EventEnvelopeContext const& context)
 {
   if (is_provider_tool_call_status(payload.status))
@@ -1469,6 +1493,37 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
         else
         {
           static_assert(std::same_as<Event, void>, "unhandled RuntimeEvent alternative");
+        }
+      },
+      event.payload());
+}
+
+std::optional<ToolTimelineItem> runtime_event_tool_projection(TuiEventState const& state, ava::event::RuntimeEvent const& event,
+                                                              ava::event::EventEnvelopeContext const& context)
+{
+  return std::visit(
+      [&]<typename Event>(Event const& typed_event) -> std::optional<ToolTimelineItem> {
+        auto const& payload = typed_event.payload;
+        if constexpr (std::same_as<Event, ava::event::ProviderEvent>)
+        {
+          if (!is_provider_tool_call_status(payload.status))
+            return std::nullopt;
+          auto const call_id = effective_provider_tool_call_id(payload, context);
+          return pending_tool_projection(state, payload.call_id, call_id);
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolStartEvent> || std::same_as<Event, ava::event::ToolProgressEvent>)
+        {
+          auto const call_id = effective_tool_call_id(payload, context);
+          return pending_tool_projection(state, payload.call_id, call_id);
+        }
+        else if constexpr (std::same_as<Event, ava::event::ToolResultEvent>)
+        {
+          auto const call_id = effective_tool_call_id(payload, context);
+          return completed_tool_projection(state, call_id, payload.tool);
+        }
+        else
+        {
+          return std::nullopt;
         }
       },
       event.payload());

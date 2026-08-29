@@ -63,7 +63,8 @@ struct TuiSubmissionSettlement
 [[nodiscard]] TuiSubmissionProjectionPolicy tui_submission_projection_policy(bool is_command_submission, bool ordinary_turn_committed) noexcept;
 [[nodiscard]] TuiSubmissionSettlement settle_tui_submission(std::vector<TranscriptItem> const& submitted_transcript, TuiEventState const& buffered_event_state,
                                                             std::string_view submitted, bool is_command_submission, bool ordinary_turn_committed,
-                                                            std::vector<std::string> output, std::vector<ToolTimelineItem> tools, bool canceled);
+                                                            std::vector<std::string> output, std::vector<ToolTimelineItem> tools, bool canceled,
+                                                            bool present_command_output = false);
 void remove_literal_command_invocation(std::vector<TranscriptItem>& items, std::string_view submitted);
 [[nodiscard]] std::string command_output_title_token(std::string_view submitted);
 [[nodiscard]] CommandOutputView make_command_output_view(std::string_view submitted, std::vector<std::string> const& output,
@@ -72,9 +73,17 @@ void open_command_output(ComposerSnapshot& snapshot, std::string_view submitted,
 void open_command_error(ComposerSnapshot& snapshot, std::string_view submitted, std::string error);
 void settle_local_command_status(ComposerSnapshot& snapshot, std::string status);
 void settle_local_command_completion(ComposerSnapshot& snapshot, std::string_view submitted, std::vector<std::string> output,
-                                     std::vector<ToolTimelineItem> tools = {});
-[[nodiscard]] std::vector<TranscriptItem> transcript_with_local_tools(ComposerSnapshot const& snapshot);
-[[nodiscard]] std::optional<ToolTimelineItem> latest_matching_local_tool(ComposerSnapshot const& snapshot, std::string_view query);
+                                     std::vector<ToolTimelineItem> tools = {}, bool record_tools = true);
+
+inline constexpr std::size_t kMaxTuiToolIndexItems = 50;
+void seed_tui_tool_index(ComposerSnapshot& snapshot);
+void record_tui_tool(ComposerSnapshot& snapshot, ToolTimelineItem tool, TuiToolIndexOrigin origin);
+void update_indexed_tui_tool(ComposerSnapshot& snapshot, ToolTimelineItem const& tool);
+[[nodiscard]] std::optional<TuiToolIndexEntry> latest_matching_indexed_tool(ComposerSnapshot const& snapshot, std::string_view query = {});
+[[nodiscard]] std::optional<std::size_t> indexed_provider_tool_transcript_index(ComposerSnapshot const& snapshot, TuiToolIndexEntry const& entry);
+[[nodiscard]] std::optional<std::string> latest_indexed_tool_copy_text(ComposerSnapshot const& snapshot, std::string_view query = {});
+[[nodiscard]] std::optional<std::string> latest_indexed_tool_diff_copy_text(ComposerSnapshot const& snapshot, std::string_view query = {});
+[[nodiscard]] std::optional<std::string> latest_indexed_permission_copy_text(ComposerSnapshot const& snapshot, std::string_view query = {});
 
 [[nodiscard]] CommandOutputGeometry command_output_geometry(std::size_t terminal_width, std::size_t terminal_height) noexcept;
 [[nodiscard]] std::size_t command_output_max_scroll_offset(CommandOutputView const& view, std::size_t width, std::size_t height,

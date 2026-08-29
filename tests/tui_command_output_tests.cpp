@@ -5,6 +5,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_internal.h"
 #include "ava/tui/event_state.h"
+#include "ava/tui/runtime_active_run_internal.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
@@ -177,19 +178,12 @@ void test_catalog_driven_local_command_transcript_invariant()
 
   ava::tui::ComposerSnapshot tool_output;
   tool_output.transcript = baseline;
-  auto tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "read", .result_summary = "read 4 lines"};
+  auto tool =
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "read", .result_summary = "read 4 lines", .call_id = "local-tool"};
   ava::tui::settle_local_command_completion(tool_output, "/read secret-file", {}, {tool});
-  expect(transcript_semantics(tool_output.transcript) == baseline_semantics && tool_output.command_output && tool_output.local_tool_history.size() == 1 &&
-             tool_output.command_output->tools.size() == 1,
-         "local tool timelines remain in bounded TUI-only command state rather than transcript tool cards");
-  for (std::size_t index = 1; index < 55; ++index)
-  {
-    tool.call_id = "local-tool-" + std::to_string(index);
-    ava::tui::settle_local_command_completion(tool_output, "/read private", {}, {tool});
-  }
-  expect(tool_output.local_tool_history.size() == 50 && tool_output.local_tool_history.front().call_id == "local-tool-5" &&
-             tool_output.local_tool_history.back().call_id == "local-tool-54",
-         "local command tool history retains only the latest fifty TUI-only tools");
+  expect(transcript_semantics(tool_output.transcript) == baseline_semantics && tool_output.command_output && tool_output.tool_index.size() == 1 &&
+             tool_output.tool_index.front().origin == ava::tui::TuiToolIndexOrigin::LocalCommand && tool_output.command_output->tools.size() == 1,
+         "local tool timelines remain in the TUI-only tool index rather than transcript tool cards");
 
   auto committed_policy = ava::tui::tui_submission_projection_policy(true, true);
   std::vector<ava::tui::TranscriptItem> dynamic_projection = {ava::tui::TranscriptItem{.label = "you", .text = "/dynamic private"},
@@ -204,6 +198,83 @@ void test_catalog_driven_local_command_transcript_invariant()
   auto normal_policy = ava::tui::tui_submission_projection_policy(false, true);
   expect(normal_policy.project_conversation && !normal_policy.preserve_transcript && !normal_policy.present_command_output,
          "ordinary prompts retain normal conversation projection");
+}
+
+void test_unified_tool_index_chronology()
+{
+  auto make_tool = [](std::string call_id, std::string result, std::string diff, ava::tui::ToolLifecycleState lifecycle) {
+    return ava::tui::ToolTimelineItem{
+        .status = lifecycle == ava::tui::ToolLifecycleState::Progress ? ava::tui::ToolTimelineStatus::Running : ava::tui::ToolTimelineStatus::Success,
+        .name = "same-name",
+        .result_summary = std::move(result),
+        .call_id = std::move(call_id),
+        .lifecycle = lifecycle,
+        .permissions = {ava::tui::ToolPermissionAuditItem{.decision = "allow", .reason = "indexed permission"}},
+        .diff = std::move(diff)};
+  };
+
+  auto provider_old = make_tool("provider-old", "provider old", "-provider-old\n+provider-old", ava::tui::ToolLifecycleState::Complete);
+  ava::tui::ComposerSnapshot provider_then_local;
+  provider_then_local.transcript = {ava::tui::TranscriptItem{.tool = provider_old}};
+  ava::tui::seed_tui_tool_index(provider_then_local);
+  auto local_new = make_tool("local-new", "local new", "-local-old\n+local-new", ava::tui::ToolLifecycleState::Complete);
+  ava::tui::settle_local_command_completion(provider_then_local, "/read private", {}, {local_new});
+  auto latest = ava::tui::latest_matching_indexed_tool(provider_then_local, "same-name");
+  auto copied = ava::tui::latest_indexed_tool_copy_text(provider_then_local, "same-name");
+  auto diff = ava::tui::latest_indexed_tool_diff_copy_text(provider_then_local, "same-name");
+  auto permission = ava::tui::latest_indexed_permission_copy_text(provider_then_local, "indexed permission");
+  expect(latest && latest->origin == ava::tui::TuiToolIndexOrigin::LocalCommand && latest->tool.call_id == "local-new" &&
+             !ava::tui::indexed_provider_tool_transcript_index(provider_then_local, *latest) && copied && copied->find("local new") != std::string::npos &&
+             diff == local_new.diff && permission && permission->find("indexed permission") != std::string::npos,
+         "provider-old/local-new chronology drives the shared tool display, copy, diff, and permission helpers");
+
+  ava::tui::ComposerSnapshot local_then_provider;
+  auto local_old = make_tool("local-old", "local old", "-local-old\n+local-old", ava::tui::ToolLifecycleState::Complete);
+  ava::tui::settle_local_command_completion(local_then_provider, "/read private", {}, {local_old});
+  auto provider_new = make_tool("provider-new", "provider new", "-provider-old\n+provider-new", ava::tui::ToolLifecycleState::Complete);
+  local_then_provider.transcript.push_back(ava::tui::TranscriptItem{.tool = provider_new});
+  ava::tui::record_tui_tool(local_then_provider, provider_new, ava::tui::TuiToolIndexOrigin::Provider);
+  latest = ava::tui::latest_matching_indexed_tool(local_then_provider, "same-name");
+  copied = ava::tui::latest_indexed_tool_copy_text(local_then_provider, "same-name");
+  diff = ava::tui::latest_indexed_tool_diff_copy_text(local_then_provider, "same-name");
+  expect(latest && latest->origin == ava::tui::TuiToolIndexOrigin::Provider && latest->tool.call_id == "provider-new" &&
+             ava::tui::indexed_provider_tool_transcript_index(local_then_provider, *latest) == std::optional<std::size_t>{0} && copied &&
+             copied->find("provider new") != std::string::npos && diff == provider_new.diff,
+         "local-old/provider-new chronology selects the genuine provider card through every shared helper");
+
+  ava::tui::ComposerSnapshot lifecycle;
+  auto started = make_tool("one-call", "started", {}, ava::tui::ToolLifecycleState::ExecutionStarted);
+  started.status = ava::tui::ToolTimelineStatus::Running;
+  ava::tui::record_tui_tool(lifecycle, started, ava::tui::TuiToolIndexOrigin::Provider);
+  auto const sequence = lifecycle.tool_index.front().sequence;
+  auto progressed = make_tool("one-call", "progress", {}, ava::tui::ToolLifecycleState::Progress);
+  ava::tui::record_tui_tool(lifecycle, progressed, ava::tui::TuiToolIndexOrigin::Provider);
+  expect(lifecycle.tool_index.size() == 1 && lifecycle.tool_index.front().sequence == sequence &&
+             lifecycle.tool_index.front().tool.lifecycle == ava::tui::ToolLifecycleState::Progress &&
+             lifecycle.tool_index.front().tool.result_summary == "progress",
+         "one tool call lifecycle updates in place without duplicating or changing its sequence");
+
+  ava::tui::ComposerSnapshot bounded;
+  for (std::size_t index = 0; index < ava::tui::kMaxTuiToolIndexItems + 5; ++index)
+  {
+    auto item = make_tool("bounded-" + std::to_string(index), "result " + std::to_string(index), {}, ava::tui::ToolLifecycleState::Complete);
+    ava::tui::record_tui_tool(bounded, std::move(item), ava::tui::TuiToolIndexOrigin::Provider);
+  }
+  auto evicted_update = make_tool("bounded-0", "must not return", {}, ava::tui::ToolLifecycleState::Progress);
+  ava::tui::record_tui_tool(bounded, std::move(evicted_update), ava::tui::TuiToolIndexOrigin::Provider);
+  expect(bounded.tool_index.size() == ava::tui::kMaxTuiToolIndexItems && bounded.tool_index.front().tool.call_id == "bounded-5" &&
+             bounded.tool_index.back().tool.call_id == "bounded-54" &&
+             std::ranges::none_of(bounded.tool_index, [](ava::tui::TuiToolIndexEntry const& entry) { return entry.tool.call_id == "bounded-0"; }),
+         "tool index bounds memory and does not re-add an evicted old lifecycle as newest");
+
+  ava::tui::ComposerSnapshot hydrated;
+  auto hydrated_first = make_tool("hydrated-first", "first", {}, ava::tui::ToolLifecycleState::Complete);
+  auto hydrated_second = make_tool("hydrated-second", "second", {}, ava::tui::ToolLifecycleState::Complete);
+  hydrated.transcript = {ava::tui::TranscriptItem{.tool = hydrated_first}, ava::tui::TranscriptItem{.tool = hydrated_second}};
+  ava::tui::seed_tui_tool_index(hydrated);
+  expect(hydrated.tool_index.size() == 2 && hydrated.tool_index.front().tool.call_id == "hydrated-first" &&
+             hydrated.tool_index.back().tool.call_id == "hydrated-second" && hydrated.tool_index.front().sequence < hydrated.tool_index.back().sequence,
+         "hydrated provider transcript tools seed the bounded index in transcript order");
 }
 
 void test_buffered_runtime_event_completion_settlement()
@@ -255,6 +326,45 @@ void test_buffered_runtime_event_completion_settlement()
              dynamic.transcript.back().text == "provider answer" &&
              std::ranges::none_of(dynamic.transcript, [](ava::tui::TranscriptItem const& item) { return item.label == "you" && item.text.starts_with('/'); }),
          "production completion settlement releases committed dynamic provider events and removes only the literal slash invocation");
+
+  ava::tui::TuiEventState compact_local_events;
+  auto compact_end = ava::event::CompactionPayload{};
+  compact_end.trigger = "manual";
+  compact_end.summary_bytes = 64;
+  ava::tui::apply_runtime_event(compact_local_events, ava::event::RuntimeEvent{{}, ava::event::CompactionEndEvent{.payload = std::move(compact_end)}});
+  auto leaked_local_tool = ava::event::ToolPayload{};
+  leaked_local_tool.call_id = "missing-id-local-tool";
+  leaked_local_tool.tool = "local-only";
+  leaked_local_tool.text = "LOCAL-TOOL-MUST-NOT-LEAK";
+  leaked_local_tool.status = "success";
+  ava::tui::apply_runtime_event(compact_local_events, ava::event::RuntimeEvent{{}, ava::event::ToolResultEvent{.payload = std::move(leaked_local_tool)}});
+  auto const local_event_transcript = ava::tui::event_state_transcript_snapshot(compact_local_events);
+
+  ava::tui::TuiEventState queued_conversation_events;
+  auto queued_user = ava::event::MessagePayload{};
+  queued_user.text = "genuine queued question";
+  ava::tui::apply_runtime_event(queued_conversation_events, ava::event::RuntimeEvent{{}, ava::event::UserMessageEvent{.payload = std::move(queued_user)}});
+  auto queued_answer = ava::event::MessagePayload{};
+  queued_answer.text = "genuine queued answer";
+  ava::tui::apply_runtime_event(queued_conversation_events,
+                                ava::event::RuntimeEvent{{}, ava::event::AssistantMessageEvent{.payload = std::move(queued_answer)}});
+  auto segmented =
+      ava::tui::settle_tui_submission(baseline, queued_conversation_events, "/compact private", true, true, {"compaction summary recorded"}, {}, false, true);
+  auto const authorized_ids = std::vector<std::string>{"request-follow-up"};
+  expect(!ava::tui::detail::command_event_request_has_conversation_authority(std::nullopt, authorized_ids) &&
+             !ava::tui::detail::command_event_request_has_conversation_authority(std::optional<std::string>{"request-compact"}, authorized_ids) &&
+             ava::tui::detail::command_event_request_has_conversation_authority(std::optional<std::string>{"request-follow-up"}, authorized_ids) &&
+             local_event_transcript.size() == 2 && local_event_transcript.front().label == "compaction" && local_event_transcript.back().tool &&
+             segmented.policy.project_conversation && segmented.policy.present_command_output && !segmented.policy.preserve_transcript &&
+             segmented.command_output == std::vector<std::string>{"compaction summary recorded"} && segmented.transcript.size() == 2 &&
+             segmented.transcript.front().text == "genuine queued question" && segmented.transcript.back().text == "genuine queued answer" &&
+             std::ranges::none_of(segmented.transcript,
+                                  [](ava::tui::TranscriptItem const& item) {
+                                    return item.label == "compaction" || item.tool || item.text.find("LOCAL-TOOL-MUST-NOT-LEAK") != std::string::npos ||
+                                           item.text.find("/compact") != std::string::npos ||
+                                           item.text.find("compaction summary recorded") != std::string::npos;
+                                  }),
+         "request-authorized compact settlement keeps initial/missing-id events local while projecting only the genuine queued conversation and modal output");
 }
 
 }  // namespace
@@ -264,5 +374,6 @@ void run_tui_command_output_tests()
   test_command_output_rendering_and_input();
   test_command_output_modal_precedence_and_hits();
   test_catalog_driven_local_command_transcript_invariant();
+  test_unified_tool_index_chronology();
   test_buffered_runtime_event_completion_settlement();
 }

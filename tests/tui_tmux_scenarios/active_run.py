@@ -8,6 +8,7 @@ import time
 
 from tui_smoke_helpers import (
     SmokeContext,
+    capture,
     save_evidence,
     send_keys,
     send_literal,
@@ -27,6 +28,69 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     tmux_exe = ctx.tmux
     root = ctx.root
     active_workspace = ctx.active_workspace
+
+    # A delayed provider-backed /compact remains an initial local command even
+    # when Alt+Enter queues a genuine ordinary follow-up under the same active run.
+    compact_session = ctx.session_name("compact-follow-up")
+    compact_provider = ctx.start_fake_provider("compact-follow-up", delay_ms=3000, scenario="compact-follow-up")
+    compact_request_log = compact_provider.request_log
+    compact_command = ctx.pane_command(
+        home=ctx.restore_home,
+        config=ctx.restore_config,
+        state=ctx.restore_state,
+        data=ctx.restore_data,
+        extra={
+            "COLORFGBG": "",
+            "NO_COLOR": "1",
+            "MOONSHOT_API_KEY": "test-key",
+            "MOONSHOT_BASE_URL": f"http://127.0.0.1:{compact_provider.port}",
+            "AVA_SESSION_TITLES": "off",
+        },
+    )
+    ctx.launch_ava(compact_session, workspace=ctx.restore_workspace, command=compact_command, width=82, height=24)
+    wait_for(tmux_exe, compact_session, r"Type a message|live session", "compact follow-up initial frame")
+    send_literal(tmux_exe, compact_session, "source before compact")
+    send_keys(tmux_exe, compact_session, "Enter")
+    _wait_for_normal_turn_request_count(compact_request_log, 1, "compact source provider request")
+    wait_for(tmux_exe, compact_session, r"before compact", "compact source completion", timeout=12.0)
+    send_literal(tmux_exe, compact_session, "/compact")
+    wait_for(tmux_exe, compact_session, r"│  /compact(?:\s|$)", "compact command draft")
+    send_keys(tmux_exe, compact_session, "Enter")
+    time.sleep(0.25)
+    if re.search(r"│  /compact(?:\s|$)", capture(tmux_exe, compact_session)):
+        send_keys(tmux_exe, compact_session, "Enter")
+    _wait_for_normal_turn_request_count(compact_request_log, 2, "delayed compact summary request")
+    send_literal(tmux_exe, compact_session, "queued after compact")
+    send_literal(tmux_exe, compact_session, "\x1b\r")
+    wait_for(tmux_exe, compact_session, r"follow-up queued", "compact ordinary follow-up queued")
+    compact_log = _wait_for_normal_turn_request_count(
+        compact_request_log, 3, "compact queued follow-up provider request", timeout=14.0
+    )
+    if "queued after compact" not in compact_log:
+        raise RuntimeError(f"queued compact follow-up did not reach the fake provider\nrequest log:\n{compact_log}")
+    compact_output = wait_for(
+        tmux_exe,
+        compact_session,
+        r"(?s)Command /compact.*compaction summary recorded",
+        "compact local output retained beside queued conversation",
+        timeout=14.0,
+    )
+    save_evidence(root, "active-run-compact-queued-output", compact_output)
+    send_keys(tmux_exe, compact_session, "Escape")
+    compact_closed = wait_for(
+        tmux_exe,
+        compact_session,
+        r"(?s)queued after compact.*after compact queued answer|after compact queued answer",
+        "compact queued conversation after local output close",
+    )
+    for forbidden in ("/compact", "compaction summary recorded", "compaction completed", "LOCAL-TOOL-MUST-NOT-LEAK"):
+        if forbidden in compact_closed:
+            raise RuntimeError(f"compact local activity remained in chat after output close ({forbidden!r})\nscreen:\n{compact_closed}")
+    save_evidence(root, "active-run-compact-queued-transcript", compact_closed)
+    send_keys(tmux_exe, compact_session, "C-d")
+    wait_for_session_exit(tmux_exe, compact_session)
+    tmux(tmux_exe, "kill-session", "-t", compact_session, check=False)
+
     active_workspace.joinpath("active-card.txt").write_text(
         "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
     )

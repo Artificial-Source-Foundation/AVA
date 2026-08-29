@@ -222,16 +222,17 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (auto const tool_query = tool_command_argument(submitted_command))
   {
     push_history(input_history, submitted_command);
-    auto const tool_index = navigation_.toggle_matching_tool_details(*tool_query);
-    if (tool_index)
+    auto const indexed_tool = latest_matching_indexed_tool(snapshot, *tool_query);
+    auto const transcript_index = indexed_tool ? indexed_provider_tool_transcript_index(snapshot, *indexed_tool) : std::nullopt;
+    if (transcript_index && navigation_.toggle_tool_details_at(*transcript_index))
     {
-      auto const& tool = *snapshot.transcript[*tool_index].tool;
+      auto const& tool = *snapshot.transcript[*transcript_index].tool;
       snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
                         std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
     }
-    else if (auto local_tool = latest_matching_local_tool(snapshot, *tool_query))
+    else if (indexed_tool)
     {
-      open_command_output(snapshot, submitted_command, {}, {*local_tool});
+      open_command_output(snapshot, submitted_command, {}, {indexed_tool->tool});
     }
     else
     {

@@ -499,25 +499,10 @@ int run_tui(ShellState state)
                                  context.take_steering_messages, std::move(context.image_attachments), context.request_id, context.on_subagent_launch,
                                  std::move(plugin_ui_capability));
             }();
-            LineResult local_command_presentation;
-            LineResult conversation_presentation;
-            bool has_local_command_presentation = false;
-            std::vector<std::string> ordinary_turn_request_ids;
+            TuiRequestPresentation request_presentation;
+            bool const initial_is_local_command = submitted.starts_with('/') || submitted.starts_with('!');
             auto capture_request_presentation = [&](std::string_view line, std::string const& request_id, LineResult const& request_result) {
-              if (request_result.ordinary_turn_committed)
-              {
-                ordinary_turn_request_ids.push_back(request_id);
-                conversation_presentation.output.insert(conversation_presentation.output.end(), request_result.output.begin(), request_result.output.end());
-                conversation_presentation.tool_timeline.insert(conversation_presentation.tool_timeline.end(), request_result.tool_timeline.begin(),
-                                                               request_result.tool_timeline.end());
-                return;
-              }
-              if (!line.starts_with('/') && !line.starts_with('!'))
-                return;
-              has_local_command_presentation = true;
-              local_command_presentation.output.insert(local_command_presentation.output.end(), request_result.output.begin(), request_result.output.end());
-              local_command_presentation.tool_timeline.insert(local_command_presentation.tool_timeline.end(), request_result.tool_timeline.begin(),
-                                                              request_result.tool_timeline.end());
+              capture_tui_request_presentation(request_presentation, initial_is_local_command, line, request_id, request_result);
             };
             if (is_display_settings_command(submitted))
             {
@@ -577,19 +562,19 @@ int run_tui(ShellState state)
               application_catalog.refresh_values(unlocked_session, hotkeys);
             auto const context_source_count = ava::app::runtime::session_ts::rat(unlocked_session)->context_sources().size();
             std::optional<ava::tui::TuiLocalCommandResult> local_command_result;
-            if (has_local_command_presentation)
+            if (request_presentation.has_local_command)
             {
-              local_command_result = ava::tui::TuiLocalCommandResult{.output = std::move(local_command_presentation.output),
-                                                                     .tool_timeline = tui_tool_timeline(local_command_presentation.tool_timeline)};
+              local_command_result = ava::tui::TuiLocalCommandResult{.output = std::move(request_presentation.local_command.output),
+                                                                     .tool_timeline = tui_tool_timeline(request_presentation.local_command.tool_timeline)};
             }
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
                                              .ordinary_turn_committed = line_result.ordinary_turn_committed,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
-                                             .ordinary_turn_request_ids = std::move(ordinary_turn_request_ids),
+                                             .ordinary_turn_request_ids = std::move(request_presentation.ordinary_turn_request_ids),
                                              .local_command_result = std::move(local_command_result),
-                                             .conversation_output = std::move(conversation_presentation.output),
-                                             .conversation_tool_timeline = tui_tool_timeline(conversation_presentation.tool_timeline),
+                                             .conversation_output = std::move(request_presentation.conversation.output),
+                                             .conversation_tool_timeline = tui_tool_timeline(request_presentation.conversation.tool_timeline),
                                              .context_source_count = context_source_count,
                                              .state_snapshot = state_snapshot({})};
           },

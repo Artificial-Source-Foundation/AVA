@@ -759,6 +759,25 @@ bool workspace_catalog_changed(LineResult const& result)
   });
 }
 
+void capture_tui_request_presentation(TuiRequestPresentation& presentation, bool initial_is_local_command, std::string_view request_line,
+                                      std::string const& request_id, LineResult const& request_result)
+{
+  if (request_result.ordinary_turn_committed)
+  {
+    presentation.ordinary_turn_request_ids.push_back(request_id);
+    presentation.conversation.output.insert(presentation.conversation.output.end(), request_result.output.begin(), request_result.output.end());
+    presentation.conversation.tool_timeline.insert(presentation.conversation.tool_timeline.end(), request_result.tool_timeline.begin(),
+                                                   request_result.tool_timeline.end());
+    return;
+  }
+  if (!initial_is_local_command && !request_line.starts_with('/') && !request_line.starts_with('!'))
+    return;
+  presentation.has_local_command = true;
+  presentation.local_command.output.insert(presentation.local_command.output.end(), request_result.output.begin(), request_result.output.end());
+  presentation.local_command.tool_timeline.insert(presentation.local_command.tool_timeline.end(), request_result.tool_timeline.begin(),
+                                                  request_result.tool_timeline.end());
+}
+
 bool workspace_catalog_reload_requested(std::string_view submitted)
 {
   auto const separator = submitted.find_first_of(" \t\r\n");

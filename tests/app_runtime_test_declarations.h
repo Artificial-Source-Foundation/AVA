@@ -43,6 +43,7 @@ void test_app_run_prompt_observation_shares_context_across_compaction_and_retry(
 void test_app_run_prompt_emits_tool_progress_and_session_spill();
 void test_app_first_run_auth_onboarding();
 void test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
+void test_tui_request_presentation_capture();
 void test_app_command_dispatcher();
 void test_startup_overview_snapshot_bounds_order_redaction();
 void test_startup_overview_bounded_lower_bound_counts();

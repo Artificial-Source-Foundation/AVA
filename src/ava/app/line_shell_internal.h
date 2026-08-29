@@ -52,6 +52,18 @@ struct LineResult
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TuiRequestPresentation
+{
+ public:
+  bool has_local_command = false;
+  LineResult local_command;
+  LineResult conversation;
+  std::vector<std::string> ordinary_turn_request_ids;
+
+  // TUI presentation can contain provider output and must not be debug-printed.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 inline constexpr std::size_t kLineShellMaxSubmittedBytes = 64 * 1024;
 inline constexpr std::size_t kLineShellMaxPromptAnswerBytes = 8 * 1024;
 
@@ -117,6 +129,10 @@ void append_status_line(std::string& target, std::string line);
 [[nodiscard]] bool workspace_catalog_reload_requested(std::string_view submitted);
 [[nodiscard]] bool is_display_settings_command(std::string_view line) noexcept;
 void add_output(LineResult& result, std::string text);
+// Request-segmented presentation is a TUI-only projection. An initial local
+// command owns uncommitted queued results without granting conversation authority.
+void capture_tui_request_presentation(TuiRequestPresentation& presentation, bool initial_is_local_command, std::string_view request_line,
+                                      std::string const& request_id, LineResult const& request_result);
 // Runs queued follow-ups only while the submit worker still owns the same
 // authoritative session. A transition keeps only that line's presentation
 // output/tool data while preserving aggregate control flags.

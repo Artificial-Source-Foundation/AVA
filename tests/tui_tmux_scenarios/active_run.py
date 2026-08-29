@@ -87,6 +87,53 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         if forbidden in compact_closed:
             raise RuntimeError(f"compact local activity remained in chat after output close ({forbidden!r})\nscreen:\n{compact_closed}")
     save_evidence(root, "active-run-compact-queued-transcript", compact_closed)
+
+    # Repeat in the same production path with a normal follow-up that fails
+    # before commit. Its actionable error remains local to the initial command
+    # modal and its request receives no conversation projection authority.
+    send_literal(tmux_exe, compact_session, "/compact")
+    wait_for(tmux_exe, compact_session, r"│  /compact(?:\s|$)", "failing compact command draft")
+    send_keys(tmux_exe, compact_session, "Enter")
+    time.sleep(0.25)
+    if re.search(r"│  /compact(?:\s|$)", capture(tmux_exe, compact_session)):
+        send_keys(tmux_exe, compact_session, "Enter")
+    _wait_for_normal_turn_request_count(compact_request_log, 4, "second delayed compact summary request")
+    send_literal(tmux_exe, compact_session, "queued compact failure")
+    send_literal(tmux_exe, compact_session, "\x1b\r")
+    wait_for(tmux_exe, compact_session, r"follow-up queued", "failing compact follow-up queued")
+    failed_compact_log = _wait_for_normal_turn_request_count(
+        compact_request_log, 5, "failing compact follow-up provider request", timeout=14.0
+    )
+    if "queued compact failure" not in failed_compact_log:
+        raise RuntimeError(f"failing compact follow-up did not reach the fake provider\nrequest log:\n{failed_compact_log}")
+    failed_compact_output = wait_for(
+        tmux_exe,
+        compact_session,
+        r"(?s)Command /compact.*compaction summary recorded.*Moonshot HTTP request failed with status 400",
+        "compact output retained beside actionable queued failure",
+        timeout=14.0,
+    )
+    save_evidence(root, "active-run-compact-queued-failure-output", failed_compact_output)
+    send_keys(tmux_exe, compact_session, "Escape")
+    failed_compact_closed = wait_for_absent(
+        tmux_exe,
+        compact_session,
+        r"Command /compact|Moonshot HTTP request failed with status 400",
+        "failing compact output closed",
+    )
+    for forbidden in (
+        "/compact",
+        "compaction summary recorded",
+        "compaction completed",
+        "LOCAL-TOOL-MUST-NOT-LEAK",
+        "queued compact failure",
+        "HTTP request failed with status 400",
+    ):
+        if forbidden in failed_compact_closed:
+            raise RuntimeError(
+                f"failed compact request gained chat projection authority ({forbidden!r})\nscreen:\n{failed_compact_closed}"
+            )
+    save_evidence(root, "active-run-compact-queued-failure-transcript", failed_compact_closed)
     send_keys(tmux_exe, compact_session, "C-d")
     wait_for_session_exit(tmux_exe, compact_session)
     tmux(tmux_exe, "kill-session", "-t", compact_session, check=False)

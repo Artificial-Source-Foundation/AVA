@@ -365,6 +365,20 @@ void test_buffered_runtime_event_completion_settlement()
                                            item.text.find("compaction summary recorded") != std::string::npos;
                                   }),
          "request-authorized compact settlement keeps initial/missing-id events local while projecting only the genuine queued conversation and modal output");
+
+  auto failed_follow_up = ava::tui::settle_tui_submission(baseline, ava::tui::TuiEventState{}, "/compact private", true, false,
+                                                          {"compaction summary recorded", "Moonshot HTTP request failed with status 400"}, {}, false, true);
+  auto const failed_authorized_ids = std::vector<std::string>{};
+  auto const failed_view = ava::tui::make_command_output_view("/compact private", failed_follow_up.command_output);
+  auto const failed_frame = ava::tui::render_command_output(failed_view, 72, 12);
+  expect(failed_follow_up.policy.preserve_transcript && !failed_follow_up.policy.project_conversation && failed_follow_up.policy.present_command_output &&
+             transcript_semantics(failed_follow_up.transcript) == transcript_semantics(baseline) &&
+             failed_follow_up.command_output == std::vector<std::string>{"compaction summary recorded", "Moonshot HTTP request failed with status 400"} &&
+             failed_view.blocks.size() == 2 && frame_contains(failed_frame, "compaction summary recorded") &&
+             frame_contains(failed_frame, "HTTP request failed with status 400") &&
+             !ava::tui::detail::command_event_request_has_conversation_authority(std::optional<std::string>{"request-failed"}, failed_authorized_ids),
+         "failed queued follow-up settlement keeps compact output and actionable failure as separate command-modal blocks without transcript or request "
+         "authority");
 }
 
 }  // namespace

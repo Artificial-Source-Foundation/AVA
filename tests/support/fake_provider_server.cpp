@@ -638,8 +638,12 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     if (request_index == 0)
       return ProviderResponse{.body = text_body("before compact")};
-    if (request_index == 1)
+    if (request_index == 1 || (scenario == "compact-follow-up" && request_index == 3))
       return ProviderResponse{.body = text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
+    if (scenario == "compact-follow-up" && request_index == 4)
+    {
+      return ProviderResponse{.status_code = 400, .reason = "Bad Request", .body = "{\"error\":{\"message\":\"queued follow-up rejected by fake provider\"}}"};
+    }
     return ProviderResponse{.body = text_body("after compact queued answer")};
   }
   if (scenario == "markdown-links")
@@ -673,7 +677,7 @@ int main(int argc, char** argv)
       : scenario == "branch-summary"           ? 12
       : scenario == "text-three"               ? 3
       : scenario == "text-three-delayed-third" ? 4
-      : scenario == "compact-follow-up"        ? 3
+      : scenario == "compact-follow-up"        ? 5
       : scenario == "streaming-scroll"         ? 2
       : scenario == "end-to-end-workflow"      ? 6
       : scenario == "read-tool-twice"          ? 4
@@ -749,9 +753,10 @@ int main(int argc, char** argv)
     }
     if (scenario == "subagent-workspace" && request_index > 0 && !wait_for_streaming_marker(target_path, "release-live"))
       return 1;
-    auto const delay_this_request = scenario == "compact-delayed" || scenario == "compact-follow-up" ? request_index == 1
-                                    : scenario == "text-three-delayed-third"                         ? request_index == 2
-                                                                                                     : request_index == 0;
+    auto const delay_this_request = scenario == "compact-follow-up"          ? request_index == 1 || request_index == 3
+                                    : scenario == "compact-delayed"          ? request_index == 1
+                                    : scenario == "text-three-delayed-third" ? request_index == 2
+                                                                             : request_index == 0;
     if (delay_this_request)
       std::this_thread::sleep_for(delay);
 

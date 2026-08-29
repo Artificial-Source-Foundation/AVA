@@ -146,15 +146,12 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "C-c")
     wait_for_absent(tmux_exe, session, r"undo word", "ctrl-minus undo draft clear")
 
-    send_literal(tmux_exe, session, "/help")
-    wait_for(tmux_exe, session, r"/help", "multiline scrollback seed draft")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(
-        tmux_exe,
-        session,
-        r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
-        "multiline scrollback seed output",
+    scroll_seed = "paste scenario transcript seed\n" + "\n".join(
+        f"PASTE SCROLLBACK LINE {index:02d}" for index in range(1, 31)
     )
+    send_literal(tmux_exe, session, f"\x1b[200~{scroll_seed}\x1b[201~")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, r"PASTE SCROLLBACK LINE 30", "ordinary multiline scrollback seed output")
     send_literal(tmux_exe, session, "\x1b[200~first\nsecond\x1b[201~")
     multiline_live = wait_for(tmux_exe, session, r"second", "multiline draft before transcript scroll")
     multiline_transcript_rows = tuple(multiline_live.splitlines()[:-4])
@@ -220,15 +217,6 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
     wait_for_absent(tmux_exe, session, r"alpha|beta", "draft clear before quit")
 
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/help")
-    wait_for(tmux_exe, session, r"/help", "help draft before mouse wheel scroll")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(
-        tmux_exe,
-        session,
-        r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down|models_clear_all|models_reorder_down",
-        "long help output before mouse wheel scroll",
-    )
     send_literal(tmux_exe, session, "draft stays while scrolling")
     transcript_live = wait_for(tmux_exe, session, r"draft stays while scrolling", "draft before transcript-only scrolling")
     transcript_live_rows = tuple(transcript_live.splitlines()[:-3])
@@ -296,11 +284,11 @@ def scenario_main_paste_scrollback_attach(ctx: SmokeContext) -> None:
     clipboard_image = wait_for(
         tmux_exe,
         session,
-        r"attached clipboard image.*clipboard image|clipboard image.*next prompt",
+        r"attached image clipboard image.*next pr|pasted clipboard image for next prompt",
         "Ctrl+V clipboard image pending row",
     )
     if (
-        "attached clipboard image" not in clipboard_image
+        "attached image clipboard image" not in clipboard_image
         or "clipboard image" not in clipboard_image
         or "preview text-only" not in clipboard_image
         or "next prompt" not in clipboard_image

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/runtime.h"
@@ -122,7 +123,7 @@ DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_s
     static_cast<void>(beep());
     {
       std::lock_guard<std::recursive_mutex> lock(renderer_.ui_mutex);
-      presentation_state_.snapshot.status = std::move(status);
+      settle_local_command_status(presentation_state_.snapshot, std::move(status));
     }
     // Failure path keeps last-good presentation and still paints the status when possible.
     return renderer_.render() ? DisplaySettingsReloadPollOutcome::Unchanged : DisplaySettingsReloadPollOutcome::TerminalFailure;
@@ -139,15 +140,7 @@ DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_s
     // startup DTO while preserving local filter/selection. Callers still rebase/reapply any
     // settings preview and paint exactly once afterward so the first frame is final.
     apply_runtime_state_snapshot_with_overview_sync(options_, presentation_state_, active_select_list_, std::move(state));
-    auto& snapshot = presentation_state_.snapshot;
-    // Idle (no modal) applied reloads still surface a transcript receipt before the caller renders.
-    // An open overview keeps select_list set, so this path stays quiet while expanded.
-    if (!snapshot.processing && !snapshot.permission_prompt && !snapshot.question_prompt && !snapshot.select_list)
-    {
-      runtime_transcript::push_transcript(snapshot, TranscriptItem{.label = "ava", .text = status});
-      renderer_.transcript_scroll_offset = 0;
-    }
-    snapshot.status = std::move(status);
+    settle_local_command_status(presentation_state_.snapshot, std::move(status));
   }
   return DisplaySettingsReloadPollOutcome::Applied;
 }
@@ -269,8 +262,7 @@ bool RuntimeActionController::suspend_to_background()
   return renderer_.render();
 }
 
-bool RuntimeActionController::queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
-                                                             std::string transcript_prefix)
+bool RuntimeActionController::queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status)
 {
   if (label.empty())
     label = imported.id;
@@ -282,10 +274,7 @@ bool RuntimeActionController::queue_pending_image_attachment(ava::session::Image
   auto const preview = attachment_preview(imported, image_capabilities, snapshot.show_images, options_.on_load_image_attachment);
   presentation_state_.pending_image_attachments.push_back(imported);
   snapshot.pending_attachments.push_back(PendingAttachmentItem{.label = label, .detail = detail, .preview = preview});
-  snapshot.status = std::move(status);
-  runtime_transcript::push_transcript(
-      snapshot, TranscriptItem{.label = "status", .text = transcript_prefix + ": " + label + " " + detail + "\nwill be sent with the next prompt"});
-  renderer_.transcript_scroll_offset = 0;
+  settle_local_command_status(snapshot, std::move(status));
   return renderer_.render();
 }
 
@@ -324,7 +313,7 @@ bool RuntimeActionController::paste_clipboard_image()
     static_cast<void>(beep());
     return renderer_.render();
   }
-  return queue_pending_image_attachment(**imported, "clipboard image", "pasted clipboard image for next prompt", "attached clipboard image");
+  return queue_pending_image_attachment(**imported, "clipboard image", "pasted clipboard image for next prompt");
 }
 
 bool RuntimeActionController::copy_latest_assistant_message()

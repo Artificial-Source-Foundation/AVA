@@ -6,12 +6,6 @@
 namespace ava::tui::runtime_commands {
 namespace {
 
-std::string_view first_ascii_token(std::string_view text)
-{
-  auto const end = text.find_first_of(" \t\r\n");
-  return text.substr(0, end == std::string_view::npos ? text.size() : end);
-}
-
 bool starts_with_command_submission(std::string_view submitted, std::string_view command)
 {
   while (!submitted.empty() && std::isspace(static_cast<unsigned char>(submitted.front())) != 0) submitted.remove_prefix(1);
@@ -34,21 +28,9 @@ bool is_compact_command(std::string_view line) noexcept
   return line == "/compact" || (line.starts_with("/compact") && line.size() > 8 && line[8] == ' ');
 }
 
-bool should_echo_slash_command(std::string_view submitted)
-{
-  auto const token = first_ascii_token(submitted);
-  return token != "/connect" && token != "/login";
-}
-
 bool shell_helper_submission(std::string_view submitted)
 {
   return submitted.starts_with('!');
-}
-
-bool should_show_slash_command_output_as_status(std::string_view submitted)
-{
-  auto const token = first_ascii_token(submitted);
-  return token == "/connect" || token == "/login";
 }
 
 bool exact_command(std::string_view submitted, std::string_view command)

@@ -106,6 +106,11 @@ def _main_session(ctx: SmokeContext) -> tuple[object, pathlib.Path, pathlib.Path
 
 
 def _finish_main(tmux_exe: object, session: str) -> None:
+    # Local command output is modal by design; close a final report before
+    # sending the ordinary idle exit key, but do not arm idle Escape handling.
+    if re.search(r"Command /|Command !", capture(tmux_exe, session)):
+        send_keys(tmux_exe, session, "Escape")
+        wait_for_absent(tmux_exe, session, r"Command /|Command !", "final local command output closed")
     send_keys(tmux_exe, session, "C-d")
     wait_for_session_exit(tmux_exe, session)
 

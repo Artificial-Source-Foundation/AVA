@@ -577,7 +577,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         r"(?s)project_trust=trusted project_resources=enabled.*append_system_prompt\s+project\s+APPEND_SYSTEM\.md",
         "trusted project append-system freshness",
     )
-    if "status=current" not in trusted_prompt_context:
+    if "status=current" not in re.sub(r"\s+", "", trusted_prompt_context):
         raise RuntimeError(f"/context did not report trusted append-system prompt freshness\nscreen:\n{trusted_prompt_context}")
 
     (ava_config / "keybinds.json").unlink(missing_ok=True)
@@ -689,6 +689,8 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(
             f"/keybindings reset did not remove the cursor-left override\ncontent:\n{reset_keybinds}"
         )
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"Command /keybindings", "keybindings reset output closed")
 
     send_keys(tmux_exe, session, "BTab")
     shift_tab_reasoning = wait_for(tmux_exe, session, r"reasoning set to low|reasoning low", "shift-tab reasoning cycle")
@@ -703,12 +705,12 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "/thinking")
     wait_for(tmux_exe, session, r"/thinking", "thinking command hide draft")
     send_keys(tmux_exe, session, "Enter")
-    thinking_hidden_command = wait_for(tmux_exe, session, r"thinking blocks are now hidden", "thinking command hides blocks")
-    if "thinking blocks are now hidden" not in thinking_hidden_command:
+    thinking_hidden_command = wait_for(tmux_exe, session, r"thinking hidden", "thinking command hides blocks")
+    if "thinking hidden" not in thinking_hidden_command:
         raise RuntimeError(f"/thinking no longer controls thinking-block visibility\nscreen:\n{thinking_hidden_command}")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/thinking")
     send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"thinking blocks are now visible", "thinking command restores visible blocks")
+    wait_for(tmux_exe, session, r"thinking visible", "thinking command restores visible blocks")
 
     _finish_main(tmux_exe, session)

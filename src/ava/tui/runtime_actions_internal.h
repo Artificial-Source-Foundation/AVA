@@ -34,8 +34,7 @@ class RuntimeActionController final
   bool clear_draft_for_interrupt();
   [[nodiscard]] bool open_external_editor();
   [[nodiscard]] bool suspend_to_background();
-  [[nodiscard]] bool queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
-                                                    std::string transcript_prefix);
+  [[nodiscard]] bool queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status);
   [[nodiscard]] bool paste_clipboard_image();
   [[nodiscard]] bool copy_latest_assistant_message();
   void cycle_reasoning();

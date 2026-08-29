@@ -27,21 +27,21 @@ from .common import (
 
 def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     tmux_exe, root, workspace, ava_config, env_prefix, session = _main_session(ctx)
-    # This scenario cannot rely on prior scenarios for transcript rows.
-    send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, "/help")
-    wait_for(tmux_exe, session, r"/help", "session-management scrollback seed draft")
-    send_keys(tmux_exe, session, "Enter")
-    wait_for(
-        tmux_exe,
-        session,
-        r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
-        "session-management deterministic scrollback seed output",
+    # This scenario cannot rely on prior scenarios for transcript rows. Seed
+    # ordinary conversation rather than using local /help output as chat.
+    scroll_seed = "session management transcript seed\n" + "\n".join(
+        f"SESSION SCROLLBACK LINE {index:02d}" for index in range(1, 31)
     )
-    send_keys(tmux_exe, session, "C-u")
+    send_literal(tmux_exe, session, f"\x1b[200~{scroll_seed}\x1b[201~")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, r"SESSION SCROLLBACK LINE 30", "session-management ordinary scrollback seed")
     send_literal(tmux_exe, session, "/name TUI smoke")
     send_keys(tmux_exe, session, "Enter")
-    session_live_tail = wait_for(tmux_exe, session, r"session name set: \"TUI smoke\"", "session name command")
+    name_output = wait_for(tmux_exe, session, r"(?s)Command /name.*session name set: \"TUI smoke\"", "session name command output")
+    if "/name TUI smoke" in name_output:
+        raise RuntimeError(f"session name invocation leaked into transcript\nscreen:\n{name_output}")
+    send_keys(tmux_exe, session, "Escape")
+    session_live_tail = wait_for_absent(tmux_exe, session, r"Command /name|session name set", "session name output closed")
     session_live_rows = tuple(session_live_tail.splitlines()[:-3])
     send_keys(tmux_exe, session, "Up")
     arrow_scrollback = wait_for_screen_state(
@@ -361,7 +361,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
 
     old_new_marker = "OLD-PRESENTATION-BEFORE-NEW-7E4C"
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, f"/clearance {old_new_marker}")
+    send_literal(tmux_exe, session, old_new_marker)
     send_keys(tmux_exe, session, "Enter")
     wait_for(tmux_exe, session, old_new_marker, "old transcript marker before /new")
     send_keys(tmux_exe, session, "C-u")
@@ -380,7 +380,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
 
     old_clear_marker = "OLD-PRESENTATION-BEFORE-CLEAR-9A2D"
     send_keys(tmux_exe, session, "C-u")
-    send_literal(tmux_exe, session, f"/clearance {old_clear_marker}")
+    send_literal(tmux_exe, session, old_clear_marker)
     send_keys(tmux_exe, session, "Enter")
     wait_for(tmux_exe, session, old_clear_marker, "old transcript marker before /clear")
     send_keys(tmux_exe, session, "C-u")

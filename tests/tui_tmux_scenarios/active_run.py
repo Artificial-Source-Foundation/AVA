@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import time
 
@@ -30,7 +31,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
     )
     active_session = ctx.session_name("active")
-    active_provider = ctx.start_fake_provider("active", delay_ms=12000, scenario="text-three-delayed-third")
+    active_provider = ctx.start_fake_provider("active", delay_ms=22000, scenario="text-three-delayed-third")
     active_request_log = active_provider.request_log
     active_env_prefix = ctx.fake_provider_command(
         active_provider,
@@ -69,12 +70,16 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, active_session, "/help")
     wait_for(tmux_exe, active_session, r"/help", "active-run scrollback seed draft")
     send_keys(tmux_exe, active_session, "Enter")
-    wait_for(
+    help_output = wait_for(
         tmux_exe,
         active_session,
-        r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
-        "active-run scrollback seed output",
+        r"(?s)Command /help.*Commands:",
+        "active-run help command-output seed",
     )
+    if "│  /help" in help_output:
+        raise RuntimeError(f"active-run /help rendered its invocation as chat\nscreen:\n{help_output}")
+    send_keys(tmux_exe, active_session, "Escape")
+    wait_for_absent(tmux_exe, active_session, r"Command /help", "active-run help output closed")
     send_literal(tmux_exe, active_session, "/write active-card.txt active card detail")
     send_keys(tmux_exe, active_session, "Enter")
     active_card_seed = wait_for(
@@ -88,9 +93,18 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         active_card_seed = wait_for(tmux_exe, active_session, r"wrote 18 bytes", "allowed active-run tool-card seed")
     if "wrote 18 bytes" not in active_card_seed:
         raise RuntimeError(f"active-run tool-card seed did not complete\nscreen:\n{active_card_seed}")
-    wait_for(tmux_exe, active_session, r"changed:.*active-card\.txt", "active-run Rich tool-card seed details")
+    active_write_output = wait_for(tmux_exe, active_session, r"changed:.*active-card\.txt", "active-run Rich local tool output details")
+    if "/write active-card.txt active card detail" in active_write_output:
+        raise RuntimeError(f"active-run local write arguments leaked into modal chrome\nscreen:\n{active_write_output}")
+    send_keys(tmux_exe, active_session, "Escape")
+    local_write_closed = wait_for_absent(tmux_exe, active_session, r"Command /write|changed:.*active-card\.txt", "active-run local write output closed")
+    if "active card detail" in local_write_closed:
+        raise RuntimeError(f"active-run local write tool card remained in transcript after closing output\nscreen:\n{local_write_closed}")
 
-    send_literal(tmux_exe, active_session, "tmux idle F5 assistant seed")
+    idle_seed = "tmux idle F5 assistant seed\n" + "\n".join(
+        f"ACTIVE TRANSCRIPT SEED {index:02d}" for index in range(1, 19)
+    )
+    send_literal(tmux_exe, active_session, f"\x1b[200~{idle_seed}\x1b[201~")
     send_keys(tmux_exe, active_session, "Enter")
     _wait_for_normal_turn_request_count(active_request_log, 1, "idle F5 assistant seed provider request")
     wait_for(tmux_exe, active_session, r"headless active prompt complete", "idle F5 assistant seed completion", timeout=14.0)
@@ -166,68 +180,71 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, active_session, "C-c")
     _assert_normal_turn_request_count_stays(active_request_log, 2, "active F5/F6 actions must not queue or submit drafts")
 
-    send_literal(tmux_exe, active_session, "/details compact")
-    wait_for(tmux_exe, active_session, r"/details compact", "active /details compact draft before submit")
+    # Active-run nonblocking local output must use the same modal and must not
+    # project its invocation or report into the still-streaming conversation.
+    send_literal(tmux_exe, active_session, "/jobs show missing-job")
     send_keys(tmux_exe, active_session, "Enter")
-    compact_active_card = wait_for_screen_state(
+    active_jobs_output = wait_for(
         tmux_exe,
         active_session,
-        lambda screen: "changed:" not in screen and "/details compact" not in screen,
-        "active /details compact local mutation",
+        r"(?s)Command /jobs.*(?:job|Job|No background)",
+        "active /jobs command-output modal",
     )
+    if "/jobs show missing-job" in active_jobs_output:
+        raise RuntimeError(f"active /jobs leaked its arguments into command output chrome\nscreen:\n{active_jobs_output}")
+    save_evidence(root, "active-run-local-command-output", active_jobs_output)
+    send_keys(tmux_exe, active_session, "Escape")
+    active_jobs_closed = wait_for_absent(tmux_exe, active_session, r"Command /jobs", "active /jobs output closed")
+    if "/jobs show missing-job" in active_jobs_closed:
+        raise RuntimeError(f"active /jobs invocation remained in transcript after closing output\nscreen:\n{active_jobs_closed}")
 
-    send_literal(tmux_exe, active_session, "/details rich")
-    send_keys(tmux_exe, active_session, "Enter")
-    rich_active_card = wait_for_screen_state(
-        tmux_exe,
-        active_session,
-        lambda screen: "changed:" in screen and "ACTIVE-OLD-LINE-25" not in screen and "/details rich" not in screen,
-        "active /details rich local mutation",
-    )
+    def set_active_details(mode: str) -> None:
+        command = f"/details {mode}"
+        send_literal(tmux_exe, active_session, command)
+        wait_for(tmux_exe, active_session, rf"│  {re.escape(command)}(?:\s|$)", f"active {command} draft before submit")
+        send_keys(tmux_exe, active_session, "Enter")
+        settled = wait_for_absent(tmux_exe, active_session, re.escape(command), f"active {command} transient status")
+        if command in settled:
+            raise RuntimeError(f"{command} remained in the active transcript\nscreen:\n{settled}")
 
-    send_literal(tmux_exe, active_session, "/details expanded")
-    send_keys(tmux_exe, active_session, "Enter")
-    expanded_active_card = wait_for_screen_state(
-        tmux_exe,
-        active_session,
-        lambda screen: "ACTIVE-OLD-LINE-25" in screen and "/details expanded" not in screen,
-        "active /details expanded local mutation",
-    )
+    def open_active_local_tool(command: str, pattern: str, label: str) -> str:
+        send_literal(tmux_exe, active_session, command)
+        send_keys(tmux_exe, active_session, "Enter")
+        screen = wait_for(tmux_exe, active_session, rf"(?s)Command /tool.*{pattern}", label)
+        if command in screen:
+            raise RuntimeError(f"{command} arguments leaked into active command-output chrome\nscreen:\n{screen}")
+        return screen
 
-    send_literal(tmux_exe, active_session, "/details compact")
-    send_keys(tmux_exe, active_session, "Enter")
-    wait_for_screen_state(
+    set_active_details("compact")
+    compact_active_card = open_active_local_tool("/tool write", r"write.*wrote 18 bytes", "active local tool history compact modal")
+    if "changed:" in compact_active_card or "ACTIVE-OLD-LINE-25" in compact_active_card:
+        raise RuntimeError(f"active compact local history unexpectedly rendered expanded details\nscreen:\n{compact_active_card}")
+    send_keys(tmux_exe, active_session, "Escape")
+    wait_for_absent(tmux_exe, active_session, r"Command /tool", "active compact local tool history closed")
+
+    set_active_details("rich")
+    rich_active_card = open_active_local_tool("/tools write", r"write.*changed:.*active-card\.txt", "active local tool history Rich alias modal")
+    if "ACTIVE-OLD-LINE-25" in rich_active_card:
+        raise RuntimeError(f"active Rich local history rendered expanded diff body\nscreen:\n{rich_active_card}")
+    send_keys(tmux_exe, active_session, "Escape")
+    wait_for_absent(tmux_exe, active_session, r"Command /tool", "active Rich local tool history closed")
+
+    set_active_details("expanded")
+    open_active_local_tool("/tool write", r"write.*changed:.*active-card\.txt", "active local tool history expanded modal")
+    send_keys(tmux_exe, active_session, "End")
+    expanded_active_card = wait_for(
         tmux_exe,
         active_session,
-        lambda screen: "changed:" not in screen and "/details compact" not in screen,
-        "active tool-card compact reset before per-card toggle",
+        r"ACTIVE-OLD-LINE-25",
+        "active expanded local tool history scrolled diff body",
     )
-    send_literal(tmux_exe, active_session, "/tools write")
-    send_keys(tmux_exe, active_session, "Enter")
-    per_card_expanded = wait_for_screen_state(
-        tmux_exe,
-        active_session,
-        lambda screen: "ACTIVE-OLD-LINE-25" in screen and "/tools write" not in screen,
-        "active /tools per-card expansion",
-    )
-    send_literal(tmux_exe, active_session, "/tool write")
-    send_keys(tmux_exe, active_session, "Enter")
-    per_card_collapsed = wait_for_screen_state(
-        tmux_exe,
-        active_session,
-        lambda screen: "changed:" not in screen and "/tool write" not in screen,
-        "active /tool per-card collapse",
-    )
-    send_literal(tmux_exe, active_session, "/details rich")
-    send_keys(tmux_exe, active_session, "Enter")
-    wait_for_screen_state(
-        tmux_exe,
-        active_session,
-        lambda screen: "changed:" in screen and "ACTIVE-OLD-LINE-25" not in screen and "/details rich" not in screen,
-        "active tool-card Rich restore",
-    )
-    _assert_normal_turn_request_count_stays(active_request_log, 2, "active local details commands must not reach the provider")
-    save_evidence(root, "active-run-local-tool-card-controls", per_card_expanded)
+    save_evidence(root, "active-run-local-tool-card-controls", expanded_active_card)
+    send_keys(tmux_exe, active_session, "Escape")
+    active_tool_closed = wait_for_absent(tmux_exe, active_session, r"Command /tool|ACTIVE-OLD-LINE-25", "active expanded local history closed")
+    if any(command in active_tool_closed for command in ("/details compact", "/details rich", "/details expanded", "/tool write", "/tools write")):
+        raise RuntimeError(f"active local detail commands or tool cards remained in transcript\nscreen:\n{active_tool_closed}")
+    set_active_details("rich")
+    _assert_normal_turn_request_count_stays(active_request_log, 2, "active local details/history commands must not reach the provider")
 
     send_literal(tmux_exe, active_session, "AGENTS")
     active_draft_hint = wait_for(tmux_exe, active_session, r"Esc stop|queue", "F3 active draft contextual hint")

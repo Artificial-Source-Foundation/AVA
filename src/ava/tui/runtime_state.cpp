@@ -239,6 +239,8 @@ bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions
 
     snapshot.transcript.clear();
     ++snapshot.transcript_generation;
+    snapshot.command_output.reset();
+    snapshot.local_tool_history.clear();
     snapshot.queued_messages.clear();
     snapshot.permission_prompt.reset();
     snapshot.question_prompt.reset();
@@ -254,6 +256,7 @@ bool apply_runtime_state_snapshot_with_presentation_transition(TuiRuntimeOptions
     snapshot.path_completion_force_active = false;
     snapshot.draft_scroll_offset = 0;
     snapshot.reasoning_feedback.reset();
+    snapshot.local_command_feedback.reset();
     // Expanded overview is process-local presentation; close on session switch.
     close_startup_overview_presentation(snapshot, active_select_list);
     if (snapshot.select_list)

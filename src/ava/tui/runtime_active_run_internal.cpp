@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/agent/question.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime_actions_internal.h"
 #include "ava/tui/runtime_active_run_internal.h"
@@ -105,8 +106,6 @@ RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(std::
 
 using runtime_commands::is_compact_command;
 using runtime_commands::shell_helper_submission;
-using runtime_commands::should_echo_slash_command;
-using runtime_commands::should_show_slash_command_output_as_status;
 using runtime_input::poll_curses_input;
 using runtime_transcript::apply_assistant_turn_meta;
 using runtime_transcript::assistant_meta_for_snapshot;
@@ -127,6 +126,8 @@ void RuntimeActiveRunState::discard_for_session_transition()
 {
   submitted_transcript.clear();
   turn_snapshot_leading_evictions = 0;
+  command_events_released = false;
+  event_projection_pending = false;
   event_queue.discard();
   event_state = {};
 }
@@ -230,8 +231,6 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
   auto& detached_sidebar_snapshot = renderer_.detached_sidebar_snapshot;
   auto& ui_mutex = renderer_.ui_mutex;
   auto events = event_queue.drain();
-  if (events.empty())
-    return RuntimeEventDrainResult::NoEvents;
   for (auto const& event : events)
   {
     std::visit(
@@ -246,7 +245,16 @@ RuntimeEventDrainResult RuntimeActiveRunController::drain_events(RuntimeActiveRu
         },
         event);
   }
+  if (!events.empty())
+    state.event_projection_pending = true;
+  if (state.is_command_submission && !state.command_events_released)
+    return events.empty() ? RuntimeEventDrainResult::NoEvents : RuntimeEventDrainResult::UpdatedNoRender;
+  if (!state.event_projection_pending)
+    return RuntimeEventDrainResult::NoEvents;
+  state.event_projection_pending = false;
   auto turn_transcript = event_state_transcript_snapshot(event_state, PendingTextProjection::Unparsed);
+  if (state.is_command_submission)
+    remove_literal_command_invocation(turn_transcript, state.submitted);
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     auto const preserve_viewport = transcript_scroll_offset > 0;
@@ -419,7 +427,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     };
   };
   auto& event_sink = state.event_sink;
-  event_sink = supports_active_queue ? runtime_event_queue_sink() : ava::event::RuntimeEventSink{};
+  // Command events are always collected, but remain projection-buffered until
+  // completion identifies whether a genuine ordinary turn was committed.
+  event_sink = runtime_event_queue_sink();
   prompt_coordinator_.set_audit_sink(event_sink);
   state.turn_started_at = std::chrono::steady_clock::now();
   auto const turn_started_at = state.turn_started_at;
@@ -429,12 +439,6 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   bool terminal_write_failed = false;
   ava::permissions::PermissionResolver permission_resolver;
   ava::agent::QuestionResolver question_resolver;
-  if (is_command_submission && should_echo_slash_command(submitted))
-  {
-    auto command_item = TranscriptItem{.label = "cmd", .text = submitted};
-    submitted_transcript.push_back(command_item);
-    push_transcript(snapshot, std::move(command_item));
-  }
   push_history(input_history, submitted);
   snapshot.status = is_command_submission ? "running command..." : "thinking...";
   snapshot.processing = true;
@@ -488,8 +492,9 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       return detail::PendingPromptServiceResult::Serviced;
     };
     auto plugin_host_modal_conflict = [&]() {
-      return snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
-             transcript_search_.is_open() || slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
+      return snapshot.permission_prompt || snapshot.question_prompt || snapshot.command_output || snapshot.select_list || snapshot.subagent_workspace ||
+             snapshot.sidebar_drawer_visible || transcript_search_.is_open() ||
+             slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands) ||
              file_reference_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references) ||
              path_completion_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.file_references, snapshot.path_completion_force_active);
     };
@@ -663,6 +668,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     // worker or applying an application/session transition.
     plugin_ui_.finish_submission(snapshot);
     result = submit_future.get();
+    state.command_events_released = !is_command_submission || result.ordinary_turn_committed;
     if (result.state_snapshot)
     {
       // Submit workers own ShellState. Apply their authoritative snapshot
@@ -703,11 +709,46 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
   if (terminal_signal_received())
     return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};
   auto const events_received = event_queue.received_any();
+  auto settlement = settle_tui_submission(submitted_transcript, event_state, submitted, is_command_submission, result.ordinary_turn_committed, result.output,
+                                          result.tool_timeline, run_cancel_requested.load());
+  if (settlement.policy.preserve_transcript && !session_changed)
+  {
+    // Local command event projection is withheld for the entire run. Restore the
+    // exact pre-submit sequence defensively so no independent receipt path can leak.
+    snapshot.transcript = settlement.transcript;
+    ++snapshot.transcript_generation;
+
+    if (!event_state.activity.empty())
+      sidebar.activity = event_state.activity;
+    if (!event_state.todos.empty())
+      sidebar.todos = event_state.todos;
+    for (auto const& file : event_state.modified_files)
+    {
+      auto const exists = std::ranges::any_of(sidebar.modified_files, [&](SidebarModifiedFile const& existing) { return existing.path == file.path; });
+      if (!exists)
+        sidebar.modified_files.push_back(file);
+    }
+    for (auto const& tool : result.tool_timeline)
+    {
+      for (auto const& path : tool.changed_paths)
+      {
+        auto const exists = std::ranges::any_of(sidebar.modified_files, [&](SidebarModifiedFile const& existing) { return existing.path == path; });
+        if (!exists)
+          sidebar.modified_files.push_back(SidebarModifiedFile{.path = path});
+      }
+    }
+    constexpr auto kMaxLocalCommandModifiedFiles = std::size_t{50};
+    if (sidebar.modified_files.size() > kMaxLocalCommandModifiedFiles)
+    {
+      sidebar.modified_files.erase(sidebar.modified_files.begin(),
+                                   sidebar.modified_files.begin() + static_cast<std::ptrdiff_t>(sidebar.modified_files.size() - kMaxLocalCommandModifiedFiles));
+    }
+  }
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     settle_turn_activity();
   }
-  if (!events_received)
+  if (settlement.policy.project_conversation && !events_received)
   {
     auto const turn_elapsed = std::chrono::steady_clock::now() - turn_started_at;
     auto const assistant_meta = assistant_meta_for_snapshot(snapshot, turn_elapsed);
@@ -729,7 +770,7 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       }
       auto const bounded_bash_output_is_in_card =
           std::ranges::any_of(result.tool_timeline, [](auto const& tool) { return tool.name == "bash" && tool.truncated && !tool.spill_path.empty(); });
-      if (!should_show_slash_command_output_as_status(submitted) && !bounded_bash_output_is_in_card)
+      if (!bounded_bash_output_is_in_card)
         item_index_shift += push_fallback_assistant_outputs(snapshot, result.output, assistant_meta);
     }
     auto const shifted_first_new_item = static_cast<std::ptrdiff_t>(transcript_size_before_fallback) + item_index_shift;
@@ -737,15 +778,19 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     transcript_search_.refresh_after_transcript_mutation(item_index_shift, std::min(changed_from_item_index, snapshot.transcript.size()));
     renderer_.note_live_transcript_selection_item_shift(item_index_shift);
   }
-  if (!events_received && !transcript_search_.is_open())
-    transcript_scroll_offset = 0;
-  auto const show_command_status =
-      !events_received && (!run_cancel_requested.load() || session_changed) && should_show_slash_command_output_as_status(submitted) && !result.output.empty();
-  snapshot.status = show_command_status ? result.output.back()
-                                        : (events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
-                                                              : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
-                                                                                                                      : "done")
-                                                           : (result.output.empty() ? "ok" : "done"));
+  if (settlement.policy.present_command_output)
+  {
+    settle_local_command_completion(snapshot, submitted, std::move(settlement.command_output), std::move(settlement.command_tools));
+  }
+  else
+  {
+    if (!events_received && !transcript_search_.is_open())
+      transcript_scroll_offset = 0;
+    snapshot.status = events_received ? (event_state.run_status == TuiEventRunStatus::Error      ? "error"
+                                         : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
+                                                                                                 : "done")
+                                      : (result.output.empty() ? "ok" : "done");
+  }
   snapshot.processing = false;
   if (result.context_source_count)
   {

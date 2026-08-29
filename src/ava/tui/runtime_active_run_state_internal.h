@@ -27,6 +27,8 @@ struct RuntimeActiveRunState final
   std::string submitted;
   bool const is_command_submission;
   bool const supports_active_queue;
+  bool command_events_released = false;
+  bool event_projection_pending = false;
   std::vector<TranscriptItem> submitted_transcript;
   std::size_t turn_snapshot_leading_evictions = 0;
   std::vector<ava::session::ImageAttachmentRef> submit_image_attachments;

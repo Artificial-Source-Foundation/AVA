@@ -553,6 +553,7 @@ int run_tui(ShellState state)
               application_catalog.refresh_values(unlocked_session, hotkeys);
             auto const context_source_count = ava::app::runtime::session_ts::rat(unlocked_session)->context_sources().size();
             return ava::tui::TuiSubmitResult{.quit = line_result.quit,
+                                             .ordinary_turn_committed = line_result.ordinary_turn_committed,
                                              .output = line_result.output,
                                              .tool_timeline = tui_tool_timeline(line_result.tool_timeline),
                                              .context_source_count = context_source_count,

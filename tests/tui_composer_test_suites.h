@@ -1,5 +1,6 @@
 #pragma once
 
+void run_tui_command_output_tests();
 void run_tui_terminal_image_tests();
 void run_tui_terminal_input_tests_part_1();
 void run_tui_permission_tests_part_1();

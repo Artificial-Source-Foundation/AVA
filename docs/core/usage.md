@@ -157,6 +157,8 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 
 ## Commands
 
+In the interactive TUI, slash commands and the `!`/`!!` shell helpers are local controls, not chat turns. Their invocation, output, errors, status events, and local tool cards never enter the conversation transcript or provider/session message content. Rich reports and errors open a centered, bounded command-output panel; use arrows, Page Up/Page Down, Home/End, or the mouse wheel to scroll and Enter, Esc, or Ctrl+C to close it. Short mutations and copy/toggle confirmations use the transient footer status. Dynamic prompt, skill, and MCP prompt commands keep the literal slash invocation local, but the genuine provider turn produced by a successful expansion renders as ordinary conversation.
+
 - `/help`: show commands and hotkeys
 - `/hotkeys` or `/keybindings`: show effective TUI keybindings and draft edits for selected actions
 - `/keybindings init [--force]`: create or explicitly replace a validated keybindings starter file
@@ -171,8 +173,8 @@ Interactive permission requests replace the composer with a quiet `! Permission 
 - `/mode`: toggle build/plan mode
 - `/search [query]`: open the TUI transcript finder over currently rendered message and tool-card items; matching is literal, ASCII case-insensitive, and exact for non-ASCII UTF-8. Enter jumps to the selected item and Esc restores the prior viewport.
 - `/details [compact|rich|expanded]` or Ctrl+O: select tool-card presentation; Rich is the default, and bare `/details` or Ctrl+O toggles Rich and Expanded
-- `/tool [query]`: show the latest or matching expanded tool card in the TUI transcript; `/tools` is an alias
-- `/diff [query]`: show the latest or matching unified tool diff in the TUI transcript
+- `/tool [query]`: toggle a matching provider tool card or show matching local-command tool details in the command-output panel; `/tools` is an alias
+- `/diff [query]`: show the latest or matching unified tool diff in the TUI command-output panel
 - `/copy [user|tool|diff|permission] [query]`: copy the latest assistant message, a selected public user turn, latest or matching tool-card details, latest or matching unified diff, or latest or matching permission audit details through the terminal clipboard path. Exact `/copy user` opens a searchable newest-first user-turn picker and re-reads the full turn text by stable entry id on Enter; any remaining text seeds the picker filter. Existing `tool`/`diff`/`permission` targets and their plural aliases are unchanged.
 - `/thinking`: toggle inline thinking block visibility in the TUI without changing provider reasoning mode. `/thinking details` expands or collapses the latest completed long thinking block (same as clicking its `Thinking:` header). Deterministic BetaTest coverage owns the bounded-thinking presentation path; the current fake-provider server does not emit reliable reasoning stream events for an end-to-end tmux scenario, so no paid live-provider smoke is claimed for this disclosure behavior.
 - `/attach <path>`: import a local PNG/JPEG/WebP/GIF image and send it with the next normal TUI prompt; `/image` is an alias, and Ctrl+V imports a supported clipboard image when `wl-paste` or `xclip` can read one

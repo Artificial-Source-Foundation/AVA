@@ -139,6 +139,9 @@ struct TuiRuntimeStateSnapshot
 struct TuiSubmitResult
 {
   bool quit = false;
+  // True only when backend handling committed a genuine provider conversation
+  // turn. Slash/shell invocation text remains local even when this is true.
+  bool ordinary_turn_committed = false;
   std::vector<std::string> output;
   std::vector<ToolTimelineItem> tool_timeline;
   std::optional<std::size_t> context_source_count = std::nullopt;

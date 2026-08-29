@@ -6,6 +6,7 @@ if(NOT CURSES_FOUND)
 endif()
 
 add_library(ava_tui
+  "command_output.cpp"
   "composer.cpp"
   "composer_diff.cpp"
   "composer_editor.cpp"

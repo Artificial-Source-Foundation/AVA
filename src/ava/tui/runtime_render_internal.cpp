@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/mermaid_projection.h"
 #include "ava/tui/runtime_render_internal.h"
 #include "ava/tui/terminal.h"
@@ -443,7 +444,8 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
                                                   transcript_layout_cache.compact_spacing == compact_spacing;
     auto const frozen_cache_compatible = presentation_settings_compatible && transcript_layout_cache.width == composer_canvas_layout(snapshot).content_width;
     auto const freeze_modal_transcript_layout =
-        ((snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout) || snapshot.subagent_workspace.has_value()) &&
+        (snapshot.command_output.has_value() || (snapshot.select_list.has_value() && snapshot.select_list->freeze_underlying_transcript_layout) ||
+         snapshot.subagent_workspace.has_value()) &&
         presentation_settings_compatible;
     // Detached freeze keeps a width-compatible cache across scheduled paints. Modal freeze keeps the
     // pre-modal underlying layout even when the active selector canvas width differs, and freezes the
@@ -454,6 +456,13 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     if (synchronized_detached_viewport)
       synchronize_detached_transcript_layout();
     snapshot.sidebar_drawer_scroll_offset = std::min(snapshot.sidebar_drawer_scroll_offset, sidebar_drawer_max_scroll_offset(snapshot));
+    if (snapshot.command_output)
+    {
+      auto const geometry = command_output_geometry(width, height);
+      snapshot.command_output->scroll_offset =
+          std::min(snapshot.command_output->scroll_offset,
+                   command_output_max_scroll_offset(*snapshot.command_output, geometry.width, geometry.height, snapshot.tool_presentation));
+    }
     draft_scroll_offset = std::min(draft_scroll_offset, draft_state.max_draft_scroll_offset(snapshot, height));
     snapshot.draft_scroll_offset = draft_scroll_offset;
     if (transcript_scroll_offset > 0 && !synchronized_detached_viewport && !freeze_detached_viewport)
@@ -475,8 +484,8 @@ bool RuntimeRenderer::render_full(bool freeze_transcript_layout)
     auto const completion_palette_visible = completion_cache.model && completion_cache.model->palette_visible;
     auto const slash_palette_is_visible =
         !snapshot.slash_palette_suppressed && slash_palette_visible(snapshot.input, snapshot.input_cursor, snapshot.slash_commands);
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.plugin_ui_modal || snapshot.select_list || snapshot.subagent_workspace ||
-        snapshot.sidebar_drawer_visible || slash_palette_is_visible || completion_palette_visible)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.command_output || snapshot.plugin_ui_modal || snapshot.select_list ||
+        snapshot.subagent_workspace || snapshot.sidebar_drawer_visible || slash_palette_is_visible || completion_palette_visible)
     {
       transcript_selection_.clear();
       pending_live_selection_item_index_shift_ = 0;
@@ -578,8 +587,8 @@ bool RuntimeRenderer::paint(FrameRenderKind kind, bool freeze_transcript_layout)
   {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     SignalBlockGuard block_signals;
-    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.select_list || snapshot.subagent_workspace || snapshot.sidebar_drawer_visible ||
-        !snapshot.processing)
+    if (snapshot.permission_prompt || snapshot.question_prompt || snapshot.command_output || snapshot.select_list || snapshot.subagent_workspace ||
+        snapshot.sidebar_drawer_visible || !snapshot.processing)
       return true;
     wrote = detail::draw_processing_footer_cached(snapshot, completion_cache, snapshot.file_references_generation, transcript_layout_cache,
                                                   snapshot.transcript_generation, screen_row_cache);

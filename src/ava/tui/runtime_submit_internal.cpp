@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/prompt_stash_internal.h"
@@ -36,14 +37,12 @@ using runtime_commands::ReloadTarget;
 using runtime_commands::search_command_argument;
 using runtime_commands::stash_command_argument;
 using runtime_commands::tool_command_argument;
-using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::diff_transcript_text;
 using runtime_transcript::latest_permission_copy_text;
 using runtime_transcript::latest_tool_copy_text;
 using runtime_transcript::latest_tool_diff_copy_text;
 using runtime_transcript::push_history;
-using runtime_transcript::push_transcript;
 using runtime_views::compact_path_leaf;
 
 RuntimeSubmitController::RuntimeSubmitController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state,
@@ -279,86 +278,48 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto reload_target = reload_command_argument(submitted))
     {
       push_history(input_history, submitted);
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
       auto const parsed_reload_target = reload_target_from_argument(*reload_target);
       if (!parsed_reload_target)
       {
-        snapshot.status = "invalid_argument: unsupported reload target\n  target: " + *reload_target + "\n  supported: keybindings, theme";
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
+        open_command_error(snapshot, submitted,
+                           "invalid_argument: unsupported reload target\n  target: " + *reload_target + "\n  supported: keybindings, theme");
         static_cast<void>(beep());
-        if (!renderer_.render())
-        {
-          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-        }
-        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
-      if (*parsed_reload_target == ReloadTarget::DisplaySettings)
+      else if (*parsed_reload_target == ReloadTarget::DisplaySettings)
       {
         if (!options_.on_reload_display_settings)
         {
-          snapshot.status = "display reload unavailable";
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-          transcript_scroll_offset = 0;
+          open_command_error(snapshot, submitted, "display reload unavailable");
           static_cast<void>(beep());
-          if (!renderer_.render())
-          {
-            return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-          }
-          return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
         }
-        auto reloaded = options_.on_reload_display_settings();
-        if (!reloaded)
+        else if (auto reloaded = options_.on_reload_display_settings())
         {
-          snapshot.status = reloaded.error().format();
-          push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-          transcript_scroll_offset = 0;
+          auto status = reloaded->status.empty() ? std::string("display theme reloaded") : reloaded->status;
+          presentation_state_.apply_runtime_state_snapshot(options_, std::move(*reloaded));
+          settle_local_command_status(snapshot, std::move(status));
+        }
+        else
+        {
+          open_command_error(snapshot, submitted, reloaded.error().format());
           static_cast<void>(beep());
-          if (!renderer_.render())
-          {
-            return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-          }
-          return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
         }
-        auto status = reloaded->status.empty() ? std::string("display theme reloaded") : reloaded->status;
-        presentation_state_.apply_runtime_state_snapshot(options_, std::move(*reloaded));
-        push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-        transcript_scroll_offset = 0;
-        if (!renderer_.render())
-        {
-          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-        }
-        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
-      if (!options_.on_reload_key_bindings)
+      else if (!options_.on_reload_key_bindings)
       {
-        snapshot.status = "reload unavailable";
-        push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-        transcript_scroll_offset = 0;
+        open_command_error(snapshot, submitted, "reload unavailable");
         static_cast<void>(beep());
-        if (!renderer_.render())
-        {
-          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-        }
-        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
-      auto reloaded = options_.on_reload_key_bindings();
-      if (!reloaded)
+      else if (auto reloaded = options_.on_reload_key_bindings())
       {
-        snapshot.status = reloaded.error().format();
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
-        static_cast<void>(beep());
-        if (!renderer_.render())
-        {
-          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
-        }
-        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+        options_.key_bindings = std::move(reloaded->key_bindings);
+        presentation_state_.apply_runtime_state_snapshot(options_, std::move(reloaded->state));
+        settle_local_command_status(snapshot, "keybindings reloaded");
       }
-      options_.key_bindings = std::move(reloaded->key_bindings);
-      presentation_state_.apply_runtime_state_snapshot(options_, std::move(reloaded->state));
-      push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-      transcript_scroll_offset = 0;
+      else
+      {
+        open_command_error(snapshot, submitted, reloaded.error().format());
+        static_cast<void>(beep());
+      }
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
@@ -423,12 +384,9 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto attach_target = attach_command_argument(submitted))
     {
       push_history(input_history, submitted);
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
       if (attach_target->empty())
       {
-        snapshot.status = "invalid_argument: usage: /attach <image-path>";
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
+        open_command_error(snapshot, submitted, "invalid_argument: usage: /attach <image-path>");
         static_cast<void>(beep());
         if (!renderer_.render())
         {
@@ -438,9 +396,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       if (!options_.on_attach_image)
       {
-        snapshot.status = "image attachment import unavailable";
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
+        open_command_error(snapshot, submitted, "image attachment import unavailable");
         static_cast<void>(beep());
         if (!renderer_.render())
         {
@@ -451,9 +407,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       auto imported = options_.on_attach_image(*attach_target);
       if (!imported)
       {
-        snapshot.status = imported.error().format();
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-        transcript_scroll_offset = 0;
+        open_command_error(snapshot, submitted, imported.error().format());
         static_cast<void>(beep());
         if (!renderer_.render())
         {
@@ -462,7 +416,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
       auto label = compact_path_leaf(*attach_target);
-      if (!action_controller_.queue_pending_image_attachment(*imported, std::move(label), "attached image for next prompt", "attached image"))
+      if (!action_controller_.queue_pending_image_attachment(*imported, std::move(label), "attached image for next prompt"))
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
       }
@@ -478,9 +432,14 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
                           std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
       }
+      else if (auto local_tool = latest_matching_local_tool(snapshot, *tool_query))
+      {
+        open_command_output(snapshot, submitted, {}, {*local_tool});
+      }
       else
       {
-        snapshot.status = tool_query->empty() ? "no tool details to show" : "no matching tool details to show";
+        auto const status = tool_query->empty() ? std::string("no tool details to show") : std::string("no matching tool details to show");
+        open_command_error(snapshot, submitted, status);
         static_cast<void>(beep());
       }
       if (!renderer_.render())
@@ -492,22 +451,17 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto diff_query = diff_command_argument(submitted))
     {
       push_history(input_history, submitted);
-      auto diff_text = latest_tool_diff_copy_text(snapshot.transcript, *diff_query);
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
+      auto diff_text = latest_tool_diff_copy_text(transcript_with_local_tools(snapshot), *diff_query);
       if (diff_text)
       {
         auto const title = diff_query->empty() ? std::string_view("Latest tool diff:") : std::string_view("Matching tool diff:");
-        push_transcript(snapshot,
-                        TranscriptItem{.label = "ava", .text = diff_transcript_text(title, *diff_text), .meta = assistant_meta_for_snapshot(snapshot)});
-        snapshot.status = diff_query->empty() ? "showing latest tool diff" : "showing matching tool diff";
+        open_command_output(snapshot, submitted, {diff_transcript_text(title, *diff_text)});
       }
       else
       {
-        snapshot.status = diff_query->empty() ? "no tool diff to show" : "no matching tool diff to show";
-        push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
+        open_command_error(snapshot, submitted, diff_query->empty() ? "no tool diff to show" : "no matching tool diff to show");
         static_cast<void>(beep());
       }
-      transcript_scroll_offset = 0;
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
@@ -528,6 +482,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         }
         return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
       }
+      auto const copy_items = transcript_with_local_tools(snapshot);
       std::optional<std::string> copy_text;
       std::string copied_status;
       std::string missing_status;
@@ -543,19 +498,19 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       else if (target.name == "tool" || target.name == "tools")
       {
-        copy_text = latest_tool_copy_text(snapshot.transcript, target.query);
+        copy_text = latest_tool_copy_text(copy_items, target.query);
         copied_status = target.query.empty() ? "latest tool details copy request sent" : "matching tool details copy request sent";
         missing_status = target.query.empty() ? "no tool details to copy" : "no matching tool details to copy";
       }
       else if (target.name == "diff" || target.name == "diffs")
       {
-        copy_text = latest_tool_diff_copy_text(snapshot.transcript, target.query);
+        copy_text = latest_tool_diff_copy_text(copy_items, target.query);
         copied_status = target.query.empty() ? "latest tool diff copy request sent" : "matching tool diff copy request sent";
         missing_status = target.query.empty() ? "no tool diff to copy" : "no matching tool diff to copy";
       }
       else if (target.name == "permission" || target.name == "permissions")
       {
-        copy_text = latest_permission_copy_text(snapshot.transcript, target.query);
+        copy_text = latest_permission_copy_text(copy_items, target.query);
         copied_status = target.query.empty() ? "latest permission details copy request sent" : "matching permission details copy request sent";
         missing_status = target.query.empty() ? "no permission details to copy" : "no matching permission details to copy";
       }
@@ -583,11 +538,15 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
           snapshot.status = copy_text ? "clipboard copy failed" : std::move(missing_status);
         }
       }
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-      push_transcript(snapshot, TranscriptItem{.label = copied ? "status" : "error", .text = snapshot.status});
-      transcript_scroll_offset = 0;
-      if (!copied)
+      if (copied)
+      {
+        settle_local_command_status(snapshot, snapshot.status);
+      }
+      else
+      {
+        open_command_error(snapshot, submitted, snapshot.status);
         static_cast<void>(beep());
+      }
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
@@ -605,12 +564,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
         snapshot.tool_presentation = ToolPresentation::Expanded;
       else
         snapshot.tool_presentation = snapshot.tool_presentation == ToolPresentation::Expanded ? ToolPresentation::Rich : ToolPresentation::Expanded;
-      push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-      push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                               .text = "tool details are now " + std::string(to_string(snapshot.tool_presentation)),
-                                               .meta = assistant_meta_for_snapshot(snapshot)});
-      snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
-      transcript_scroll_offset = 0;
+      settle_local_command_status(snapshot, "tool details " + std::string(to_string(snapshot.tool_presentation)));
       if (!renderer_.render())
       {
         return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
@@ -623,23 +577,13 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       if (submitted == "/thinking details")
       {
         auto const item_index = navigation_.toggle_latest_thinking_details();
-        // Snapshot expansion before cmd/status pushes: at kMaxTranscriptItems, push
-        // truncates the head and shifts indices, so a post-push bool read is stale.
-        std::optional<bool> expanded_after_toggle;
         if (item_index && *item_index < snapshot.transcript.size())
-          expanded_after_toggle = snapshot.transcript[*item_index].thinking_expanded;
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        if (expanded_after_toggle)
         {
-          push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                                   .text = *expanded_after_toggle ? "latest thinking details are now expanded"
-                                                                                  : "latest thinking details are now collapsed",
-                                                   .meta = assistant_meta_for_snapshot(snapshot)});
+          settle_local_command_status(
+              snapshot, snapshot.transcript[*item_index].thinking_expanded ? "latest thinking details expanded" : "latest thinking details collapsed");
         }
         else
         {
-          push_transcript(snapshot,
-                          TranscriptItem{.label = "ava", .text = "no completed long thinking block to expand", .meta = assistant_meta_for_snapshot(snapshot)});
           snapshot.status = "no completed long thinking block to expand";
           static_cast<void>(beep());
         }
@@ -647,10 +591,7 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       else
       {
         action_controller_.toggle_thinking_visibility();
-        push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted});
-        push_transcript(snapshot, TranscriptItem{.label = "ava",
-                                                 .text = snapshot.thinking_visible ? "thinking blocks are now visible" : "thinking blocks are now hidden",
-                                                 .meta = assistant_meta_for_snapshot(snapshot)});
+        settle_local_command_status(snapshot, snapshot.status);
       }
       if (!renderer_.render())
       {

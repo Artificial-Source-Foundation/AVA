@@ -129,7 +129,9 @@ def _submit(tmux: object, session: str, text: str, label: str) -> None:
 
 def _name_session(tmux: object, session: str, name: str) -> None:
     _submit(tmux, session, f"/name {name}", f"name {name}")
-    wait_for(tmux, session, rf'session name set: "{name}"', f"name {name} completion")
+    wait_for(tmux, session, rf'(?s)Command /name.*session name set: "{name}"', f"name {name} completion")
+    send_keys(tmux, session, "Escape")
+    wait_for_absent(tmux, session, r"Command /name", f"name {name} output closed")
 
 
 def _open_source_selector(tmux: object, session: str, source_name: str) -> str:

@@ -1532,7 +1532,7 @@ void test_tui_bounded_thinking_disclosure_render_and_toggle()
     }
   }
 
-  // BT-002: idle /thinking details must snapshot expansion before cmd/status pushes that cap-truncate.
+  // Idle /thinking details mutates only presentation state, even at the transcript cap.
   {
     ava::tui::ComposerSnapshot idle_snapshot;
     idle_snapshot.mode = "build";
@@ -1554,22 +1554,13 @@ void test_tui_bounded_thinking_disclosure_render_and_toggle()
     auto const item_index = ava::tui::toggle_latest_boundable_thinking(idle_snapshot.transcript, width, idle_snapshot.thinking_visible);
     expect(item_index && *item_index == ava::tui::kMaxTranscriptItems - 1 && idle_snapshot.transcript[*item_index].thinking_expanded,
            "toggle expands the latest boundable thinking at the pre-push index");
-    // Production must snapshot before any push_transcript: head eviction shifts indices.
-    auto const expanded_after_toggle = idle_snapshot.transcript[*item_index].thinking_expanded;
-    auto const cmd_shift = ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "cmd", .text = "/thinking details"});
-    expect(cmd_shift == -1 && idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && idle_snapshot.transcript.back().label == "cmd",
-           "cmd push at the cap drops the first item and appends the command row");
-    // Post-push re-read at the old index is the BT-002 hazard: it now points at the cmd row.
-    expect(idle_snapshot.transcript[*item_index].label == "cmd" && !idle_snapshot.transcript[*item_index].thinking_expanded,
-           "cap truncation shifts the toggled thinking index onto the new cmd row");
-    auto const shifted_thinking = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*item_index) + cmd_shift);
-    expect(shifted_thinking < idle_snapshot.transcript.size() && idle_snapshot.transcript[shifted_thinking].label == "thinking" &&
-               idle_snapshot.transcript[shifted_thinking].thinking_expanded == expanded_after_toggle && expanded_after_toggle,
-           "actual toggled thinking remains expanded after the cap shift");
-    std::string const confirmation = expanded_after_toggle ? "latest thinking details are now expanded" : "latest thinking details are now collapsed";
-    ava::tui::runtime_transcript::push_transcript(idle_snapshot, ava::tui::TranscriptItem{.label = "ava", .text = confirmation});
-    expect(confirmation == "latest thinking details are now expanded" && idle_snapshot.transcript.back().text == confirmation,
-           "visible idle /thinking details confirmation matches the actual toggled state after cap truncation");
+    idle_snapshot.status = idle_snapshot.transcript[*item_index].thinking_expanded ? "latest thinking details expanded" : "latest thinking details collapsed";
+    expect(
+        idle_snapshot.transcript.size() == ava::tui::kMaxTranscriptItems && idle_snapshot.transcript.back().label == "thinking" &&
+            idle_snapshot.transcript.back().thinking_expanded && idle_snapshot.status == "latest thinking details expanded" &&
+            std::ranges::none_of(idle_snapshot.transcript,
+                                 [](ava::tui::TranscriptItem const& item) { return item.label == "cmd" || item.text.starts_with("latest thinking details"); }),
+        "idle /thinking details leaves the capped transcript unchanged apart from the requested presentation toggle");
   }
 
   // Hit-test: Thinking header toggles only boundable completed items; tools still win first.

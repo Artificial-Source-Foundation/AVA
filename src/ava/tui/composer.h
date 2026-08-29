@@ -125,6 +125,19 @@ struct TranscriptItem
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+// TUI-only local command presentation. The title is a sanitized command token;
+// blocks and tools are bounded before storage and never enter session/provider content.
+struct CommandOutputView
+{
+  std::string title_token = {};
+  std::vector<std::string> blocks = {};
+  std::vector<ToolTimelineItem> tools = {};
+  std::size_t scroll_offset = 0;
+  bool truncated = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct SidebarActivityItem
 {
   std::string id = {};
@@ -592,6 +605,9 @@ struct ComposerSnapshot
   // One-action presentation feedback from a successful reasoning cycle. It is
   // neither persistent runtime status nor session/transcript content.
   std::optional<std::string> reasoning_feedback = std::nullopt;
+  // One-action local command confirmation. Presentation-only and cleared by
+  // the next user input; never session/provider/transcript content.
+  std::optional<std::string> local_command_feedback = std::nullopt;
   bool processing = false;
   ActiveRunHint active_run_hint = {};
   std::size_t spinner_frame = 0;
@@ -601,6 +617,10 @@ struct ComposerSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::size_t transcript_generation = 0;
+  std::optional<CommandOutputView> command_output = std::nullopt;
+  // Bounded TUI-only history keeps local tool details available to /tool, /diff,
+  // and /copy without projecting a tool card into the conversation transcript.
+  std::vector<ToolTimelineItem> local_tool_history = {};
   // Immutable TUI-only presentation results. Semantic TranscriptItem text is
   // never rewritten; renderer lookup revalidates every fence before use.
   std::shared_ptr<detail::MermaidTranscriptProjection const> mermaid_projection = {};

@@ -205,6 +205,10 @@ bool test_changed_session_snapshot_resets_presentation()
   presentation.snapshot.input_selection_end = 3;
   presentation.snapshot.transcript_selection_anchor_item = 0;
   presentation.snapshot.transcript_selection_focus_item = 1;
+  presentation.snapshot.command_output = ava::tui::CommandOutputView{.title_token = "/read", .blocks = {"old local output"}};
+  presentation.snapshot.local_command_feedback = "old local status";
+  presentation.snapshot.local_tool_history = {
+      ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "read", .call_id = "old-local-tool"}};
 
   ava::tui::RuntimeDraftState draft_state;
   draft_state.input_history = {"old session prompt"};
@@ -258,7 +262,8 @@ bool test_changed_session_snapshot_resets_presentation()
       !draft_state.history_index && draft_state.jump_mode == ava::tui::ComposerJumpMode::None && draft_state.draft_scroll_offset == 0 &&
       presentation.snapshot.input.empty() && presentation.snapshot.input_cursor == 0 && presentation.snapshot.input_selection_start == std::string::npos &&
       presentation.snapshot.input_selection_end == std::string::npos && presentation.snapshot.transcript_selection_anchor_item == std::string::npos &&
-      presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.sidebar_drawer_visible &&
+      presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.command_output &&
+      !presentation.snapshot.local_command_feedback && presentation.snapshot.local_tool_history.empty() && !presentation.snapshot.sidebar_drawer_visible &&
       presentation.snapshot.sidebar_drawer_scroll_offset == 0 && renderer.transcript_scroll_offset == 0 && renderer.detached_new_output_count == 0 &&
       !renderer.detached_sidebar_snapshot && !renderer.has_deferred_detached_transcript_update() && !renderer.transcript_layout_cache.valid &&
       !transcript_search.is_open() && active_select_list == ava::tui::ActiveSelectList::None;

@@ -323,7 +323,7 @@ def scenario_plugin_ui(ctx: SmokeContext) -> None:
     hostile = _approve_permissions_until(
         ctx,
         session,
-        r"/plugin run com\.example\.plugin-ui hostile \{\}.*plugin UI (?:capability is unavailable|request is malformed|request is invalid or unauthorized)",
+        r"(?s)Command /plugin.*plugin UI (?:capability is unavailable|request is malformed|request is invalid or unauthorized)",
         "hostile plugin UI containment error",
     )
     forbidden_hostile = ("HOSTILE_RAW_CANARY_0f31", "tmux-hostile", "\\u001b", "\\u009b", "\\u202e", "\\u0001", "\u202e", "\x9b")
@@ -342,5 +342,7 @@ def scenario_plugin_ui(ctx: SmokeContext) -> None:
     _assert_no_ui_persistence(ctx)
     save_evidence(ctx.root, "plugin-ui-cleanup", usable)
 
+    send_keys(ctx.tmux, session, "Escape")
+    wait_for_absent(ctx.tmux, session, r"Command /plugins", "plugin inspect command output closed")
     send_keys(ctx.tmux, session, "C-d")
     wait_for_session_exit(ctx.tmux, session)

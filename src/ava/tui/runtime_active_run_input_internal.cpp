@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
@@ -29,9 +30,7 @@ namespace ava::tui {
 using runtime_commands::search_command_argument;
 using runtime_commands::shell_helper_submission;
 using runtime_commands::tool_command_argument;
-using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::push_history;
-using runtime_transcript::push_transcript;
 
 bool RuntimeActiveRunController::is_action(InputEvent const& event, TuiAction action) const
 {
@@ -197,7 +196,7 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     transcript_scroll_offset = 0;
     detached_new_output_count = 0;
     detached_sidebar_snapshot.reset();
-    snapshot.status = "tool details " + std::string(to_string(snapshot.tool_presentation));
+    settle_local_command_status(snapshot, "tool details " + std::string(to_string(snapshot.tool_presentation)));
     return renderer_.request_render();
   }
   if (submitted_command == "/thinking" || submitted_command == "/thinking details")
@@ -230,6 +229,10 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
       snapshot.status = (tool_query->empty() ? "latest tool details " : "matching tool details ") +
                         std::string(to_string(detail::tool_card_presentation(tool, snapshot.tool_presentation)));
     }
+    else if (auto local_tool = latest_matching_local_tool(snapshot, *tool_query))
+    {
+      open_command_output(snapshot, submitted_command, {}, {*local_tool});
+    }
     else
     {
       snapshot.status = tool_query->empty() ? "no tool details to show" : "no matching tool details to show";
@@ -250,9 +253,7 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     return renderer_.request_render();
   }
   push_history(input_history, submitted_command);
-  push_transcript(snapshot, TranscriptItem{.label = "cmd", .text = submitted_command});
-  for (auto const& output : dispatch.output)
-    push_transcript(snapshot, TranscriptItem{.label = "ava", .text = output, .meta = assistant_meta_for_snapshot(snapshot)});
+  settle_local_command_completion(snapshot, submitted_command, dispatch.output);
   draft_state_.clear_selection();
   reset_composer_draft(draft);
   jump_mode = ComposerJumpMode::None;
@@ -263,7 +264,8 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   selected_slash_command_index = 0;
   slash_palette_suppressed = false;
   path_completion_force_active = false;
-  snapshot.status = dispatch.output.empty() ? "job command complete" : dispatch.output.back();
+  if (dispatch.output.empty())
+    snapshot.status = "job command complete";
   return renderer_.request_render();
 }
 
@@ -366,6 +368,7 @@ void RuntimeActiveRunController::insert_active_text(runtime_input::RuntimeInput 
   auto& slash_palette_suppressed = draft_state_.slash_palette_suppressed;
   auto& draft_scroll_offset = draft_state_.draft_scroll_offset;
   pending_escape_clear = false;
+  snapshot.local_command_feedback.reset();
   history_index.reset();
   draft_input.clear();
   selected_slash_command_index = 0;
@@ -406,6 +409,42 @@ std::optional<bool> RuntimeActiveRunController::handle_transcript_search_input(r
 
 bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
 {
+  auto& snapshot = presentation_state_.snapshot;
+  if (snapshot.command_output && !snapshot.permission_prompt && !snapshot.question_prompt)
+  {
+    if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)
+      renderer_.wheel_governor.reset();
+    if (active_input.resize)
+      return renderer_.render();
+    if ((active_input.event.key == Key::MouseWheelUp || active_input.event.key == Key::MouseWheelDown) &&
+        !runtime_wheel_input_accepted(renderer_.wheel_governor, active_input.event.key))
+    {
+      return true;
+    }
+    auto const geometry = command_output_geometry(snapshot.width, snapshot.height);
+    auto const output_input =
+        handle_command_output_input(*snapshot.command_output, active_input.event, geometry.width, geometry.height, snapshot.tool_presentation);
+    if (output_input.action == CommandOutputInputAction::Dismiss)
+    {
+      snapshot.command_output.reset();
+      snapshot.status = "command output closed";
+      return renderer_.request_render();
+    }
+    if (output_input.action == CommandOutputInputAction::Redraw)
+    {
+      snapshot.command_output->scroll_offset = output_input.scroll_offset;
+      return renderer_.request_render();
+    }
+    if (active_input.event.key == Key::Character || active_input.event.key == Key::Space || active_input.event.key == Key::CtrlU)
+    {
+      snapshot.command_output.reset();
+      snapshot.status.clear();
+    }
+    else
+    {
+      return true;
+    }
+  }
   if (subagent_workspace_.active())
   {
     if (active_input.event.key != Key::MouseWheelUp && active_input.event.key != Key::MouseWheelDown)

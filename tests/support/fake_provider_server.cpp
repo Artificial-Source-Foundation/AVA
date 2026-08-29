@@ -641,6 +641,8 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
     if (request_index == 1 || (scenario == "compact-follow-up" && request_index == 3))
       return ProviderResponse{.body = text_body("# Goal\nHeadless compact summary\n# Next Steps\nContinue.")};
     if (scenario == "compact-follow-up" && request_index == 4)
+      return ProviderResponse{.body = read_tool_body(target_path, "call_compact_failed_read")};
+    if (scenario == "compact-follow-up" && request_index == 5)
     {
       return ProviderResponse{.status_code = 400, .reason = "Bad Request", .body = "{\"error\":{\"message\":\"queued follow-up rejected by fake provider\"}}"};
     }
@@ -677,7 +679,7 @@ int main(int argc, char** argv)
       : scenario == "branch-summary"           ? 12
       : scenario == "text-three"               ? 3
       : scenario == "text-three-delayed-third" ? 4
-      : scenario == "compact-follow-up"        ? 5
+      : scenario == "compact-follow-up"        ? 6
       : scenario == "streaming-scroll"         ? 2
       : scenario == "end-to-end-workflow"      ? 6
       : scenario == "read-tool-twice"          ? 4

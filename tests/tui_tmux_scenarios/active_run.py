@@ -32,7 +32,12 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     # A delayed provider-backed /compact remains an initial local command even
     # when Alt+Enter queues a genuine ordinary follow-up under the same active run.
     compact_session = ctx.session_name("compact-follow-up")
-    compact_provider = ctx.start_fake_provider("compact-follow-up", delay_ms=3000, scenario="compact-follow-up")
+    compact_provider = ctx.start_fake_provider(
+        "compact-follow-up",
+        delay_ms=3000,
+        scenario="compact-follow-up",
+        target=ctx.restore_workspace / "AGENTS.md",
+    )
     compact_request_log = compact_provider.request_log
     compact_command = ctx.pane_command(
         home=ctx.restore_home,
@@ -102,15 +107,32 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, compact_session, "\x1b\r")
     wait_for(tmux_exe, compact_session, r"follow-up queued", "failing compact follow-up queued")
     failed_compact_log = _wait_for_normal_turn_request_count(
-        compact_request_log, 5, "failing compact follow-up provider request", timeout=14.0
+        compact_request_log, 5, "failing compact follow-up tool-call request", timeout=14.0
     )
     if "queued compact failure" not in failed_compact_log:
         raise RuntimeError(f"failing compact follow-up did not reach the fake provider\nrequest log:\n{failed_compact_log}")
+    permission_deadline = time.monotonic() + 10.0
+    while time.monotonic() < permission_deadline:
+        current_log = compact_request_log.read_text(encoding="utf-8")
+        if current_log.count("--- request ") >= 6:
+            break
+        current_screen = capture(tmux_exe, compact_session)
+        if "Permission required" in current_screen:
+            send_keys(tmux_exe, compact_session, "A")
+        time.sleep(0.1)
+    failed_continuation_log = _wait_for_normal_turn_request_count(
+        compact_request_log, 6, "failing compact follow-up provider continuation", timeout=14.0
+    )
+    if "restore tmux smoke context" not in failed_continuation_log:
+        raise RuntimeError(
+            "failing compact follow-up continuation did not contain completed tool output"
+            f"\nrequest log:\n{failed_continuation_log}"
+        )
     failed_compact_output = wait_for(
         tmux_exe,
         compact_session,
-        r"(?s)Command /compact.*compaction summary recorded.*Moonshot HTTP request failed with status 400",
-        "compact output retained beside actionable queued failure",
+        r"(?s)Command /compact.*compaction summary recorded.*Moonshot HTTP request failed with status 400.*read_file.*restore tmux smoke context",
+        "compact output retained beside actionable queued failure and completed tool",
         timeout=14.0,
     )
     save_evidence(root, "active-run-compact-queued-failure-output", failed_compact_output)
@@ -128,6 +150,8 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         "LOCAL-TOOL-MUST-NOT-LEAK",
         "queued compact failure",
         "HTTP request failed with status 400",
+        "read_file",
+        "restore tmux smoke context",
     ):
         if forbidden in failed_compact_closed:
             raise RuntimeError(

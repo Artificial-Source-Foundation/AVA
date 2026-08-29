@@ -109,6 +109,58 @@ bool command_event_request_has_conversation_authority(std::optional<std::string>
   return event_request_id && !event_request_id->empty() && std::ranges::find(ordinary_turn_request_ids, *event_request_id) != ordinary_turn_request_ids.end();
 }
 
+std::vector<ToolTimelineItem> merge_unauthorized_command_event_tools(RuntimeActiveRunState const& state, std::vector<ToolTimelineItem> tools)
+{
+  auto identity = [](ToolTimelineItem const& tool) {
+    if (!tool.call_id.empty())
+      return "call\n" + tool.call_id;
+    if (!tool.request_id.empty())
+      return "request\n" + tool.request_id;
+    if (!tool.correlation_id.empty())
+      return "correlation\n" + tool.correlation_id;
+    return std::string{};
+  };
+  auto merge = [&](ToolTimelineItem const& tool) {
+    auto const key = identity(tool);
+    if (!key.empty())
+    {
+      auto existing = std::ranges::find_if(tools, [&](ToolTimelineItem const& candidate) { return identity(candidate) == key; });
+      if (existing != tools.end())
+      {
+        *existing = tool;
+        return;
+      }
+    }
+    tools.push_back(tool);
+  };
+  auto settled = [](ToolTimelineItem const& tool) {
+    return tool.status != ToolTimelineStatus::Running &&
+           (tool.lifecycle == ToolLifecycleState::Complete || tool.lifecycle == ToolLifecycleState::Canceled || tool.lifecycle == ToolLifecycleState::Error);
+  };
+  auto collect = [&](TuiEventState const& event_state) {
+    for (auto const& item : event_state.transcript)
+    {
+      if (item.tool && settled(*item.tool))
+        merge(*item.tool);
+    }
+    for (auto const& pending : event_state.pending_tools)
+    {
+      if (settled(pending.item))
+        merge(pending.item);
+    }
+  };
+
+  if (!command_event_request_has_conversation_authority(std::optional<std::string>{state.initial_request_id}, state.ordinary_turn_request_ids))
+    collect(state.initial_command_event_state);
+  collect(state.unattributed_local_event_state);
+  for (auto const& request : state.request_event_states)
+  {
+    if (!command_event_request_has_conversation_authority(std::optional<std::string>{request.request_id}, state.ordinary_turn_request_ids))
+      collect(request.event_state);
+  }
+  return tools;
+}
+
 }  // namespace detail
 
 using runtime_commands::is_compact_command;
@@ -827,15 +879,26 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     }
     else
     {
-      if (result.local_command_result)
-      {
-        for (auto const& tool : result.local_command_result->tool_timeline)
-          record_tui_tool(snapshot, tool, TuiToolIndexOrigin::LocalCommand);
-      }
       if (drain_events(state) == RuntimeEventDrainResult::RenderFailed)
       {
         terminal_write_failed = true;
         render_failed = true;
+      }
+      if (is_command_submission)
+      {
+        auto local_tools = result.local_command_result ? result.local_command_result->tool_timeline : std::vector<ToolTimelineItem>{};
+        local_tools = detail::merge_unauthorized_command_event_tools(state, std::move(local_tools));
+        if (!local_tools.empty())
+        {
+          if (!result.local_command_result)
+            result.local_command_result = TuiLocalCommandResult{};
+          result.local_command_result->tool_timeline = std::move(local_tools);
+        }
+      }
+      if (result.local_command_result)
+      {
+        for (auto const& tool : result.local_command_result->tool_timeline)
+          record_tui_tool(snapshot, tool, TuiToolIndexOrigin::LocalCommand);
       }
     }
     prompt_coordinator.set_audit_sink(nullptr);

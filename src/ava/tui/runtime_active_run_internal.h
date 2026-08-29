@@ -90,6 +90,11 @@ enum class RetainedInputDispatchResult
 [[nodiscard]] bool command_event_request_has_conversation_authority(std::optional<std::string> const& event_request_id,
                                                                     std::span<std::string const> ordinary_turn_request_ids) noexcept;
 
+// Merges settled tools from command request event states that did not receive
+// ordinary-turn authority. Stable tool identities update in place so backend
+// timelines and RuntimeEvents cannot create duplicate local cards.
+[[nodiscard]] std::vector<ToolTimelineItem> merge_unauthorized_command_event_tools(RuntimeActiveRunState const& state, std::vector<ToolTimelineItem> tools);
+
 enum class ActiveRunCancelDisposition
 {
   ClearDraftSelection,

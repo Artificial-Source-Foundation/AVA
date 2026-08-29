@@ -286,11 +286,11 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
             f"streaming-scroll synchronized reverse wheel step {step + 1}",
             timeout=1.0,
         )
-        # Startup overview chrome may also mention the model label; only count footer/meta rows.
+        # Only the footer/meta row mentions the model label; no startup chrome reserves rows.
         metadata_count = sum(
             1
             for line in live_stream_screen.splitlines()
-            if "AVA TUI Fake" in line and "/overview" not in line and not (line.strip().startswith("build ·") and "trust " in line)
+            if "AVA TUI Fake" in line
         )
         if "STREAM COMPLETE" in live_stream_screen and metadata_count == 1:
             break

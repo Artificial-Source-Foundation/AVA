@@ -451,9 +451,12 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
             f"settings modal did not expose keybinding reload guidance when filtered\nscreen:\n{settings_reload_row}"
         )
     send_keys(tmux_exe, session, "Enter")
-    settings_reload = wait_for(tmux_exe, session, r"keybindings reloaded", "settings keybinding reload action")
-    if "keybindings reloaded" not in settings_reload:
-        raise RuntimeError(f"settings keybinding reload row did not reload live bindings\nscreen:\n{settings_reload}")
+    # Successful reloads add no chat receipt and return to the composer; success statuses
+    # never render in the alert-only status dock, so any visible confirmation text would
+    # be an administrative chat receipt.
+    settings_reload = wait_for_absent(tmux_exe, session, r"Settings ›", "settings keybinding reload action")
+    if "keybindings reloaded" in settings_reload:
+        raise RuntimeError(f"settings keybinding reload leaked an administrative chat receipt\nscreen:\n{settings_reload}")
 
     send_keys(tmux_exe, session, "C-u")
     open_settings_section(

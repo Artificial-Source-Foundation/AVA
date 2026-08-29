@@ -414,8 +414,6 @@ void refresh_completion_match_cache(CompletionMatchCache& cache, ComposerSnapsho
 // Shared transcript body geometry used by header hit-testing and rendered selection.
 struct TranscriptBodyScreenGeometry
 {
-  // Leading collapsed overview rows above the transcript body (0 when hidden).
-  std::size_t overview_height = 0;
   std::size_t transcript_height = 0;
   std::size_t content_width = 0;
   std::size_t canvas_left = 0;

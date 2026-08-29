@@ -428,7 +428,8 @@ void run_tui_transcript_selection_tests()
          "selection too large to copy status is visible in the terminal frame");
 
   auto scrolling_layout = ava::tui::detail::TranscriptLayout{};
-  for (std::size_t line = 0; line < 20; ++line) scrolling_layout.lines.push_back("line " + std::to_string(line));
+  for (std::size_t line = 0; line < 20; ++line)
+    scrolling_layout.lines.push_back("line " + std::to_string(line));
   scrolling_layout.block_boundaries = {0, 20};
   scrolling_layout.message_starts = {0};
   scrolling_layout.content_starts = {0};
@@ -450,31 +451,39 @@ void run_tui_transcript_selection_tests()
              early_tick == ava::tui::TranscriptSelectionMouseResult::Ignored && due_tick == ava::tui::TranscriptSelectionMouseResult::HandledNeedsRender,
          "transcript selection motion autoscrolls immediately and held-edge selection repeats at a deterministic 50 ms renderer cadence without a thread");
 
-  // Overview chrome: new presses stay excluded, but an owned drag treats overview rows as the upper autoscroll edge.
+  // No collapsed overview chrome reserves leading rows: the first screen row is an
+  // ordinary transcript row for presses and drag autoscroll alike.
   {
-    ava::tui::ComposerSnapshot overview_snapshot = snapshot;
-    overview_snapshot.width = 80;
-    overview_snapshot.height = 24;
-    overview_snapshot.startup_overview = ava::tui::StartupOverviewSnapshot{
+    auto top_row_layout = ava::tui::detail::TranscriptLayout{};
+    for (std::size_t line = 0; line < 40; ++line)
+      top_row_layout.lines.push_back("top row line " + std::to_string(line));
+    top_row_layout.block_boundaries = {0, 40};
+    top_row_layout.message_starts = {0};
+    top_row_layout.content_starts = {0};
+    top_row_layout.message_item_indices = {0};
+    ava::tui::ComposerSnapshot top_row_snapshot = snapshot;
+    top_row_snapshot.width = 80;
+    top_row_snapshot.height = 24;
+    top_row_snapshot.startup_overview = ava::tui::StartupOverviewSnapshot{
         .mode = "build",
         .compact_line = "build · /overview",
         .detail_line = "detail",
     };
-    overview_snapshot.transcript_scroll_offset = 0;
-    auto overview_cache = selection_cache(scrolling_layout, overview_snapshot.transcript_generation);
-    ava::tui::RuntimeTranscriptSelectionState overview_drag;
-    std::size_t overview_scroll = 0;
-    // Press on overview chrome must not start selection.
-    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+    top_row_snapshot.transcript_scroll_offset = 0;
+    auto top_row_cache = selection_cache(top_row_layout, top_row_snapshot.transcript_generation);
+    ava::tui::RuntimeTranscriptSelectionState top_row_drag;
+    std::size_t top_row_scroll = 0;
+    // A press on the first screen row starts transcript selection; no dead chrome zone remains.
+    static_cast<void>(handle(top_row_drag, mouse_event(ava::tui::Key::MouseLeftPress, 1, 2), top_row_snapshot, top_row_cache, &draft, top_row_scroll,
                              never_toggle, never_toggle));
-    expect(overview_drag.empty() && overview_scroll == 0, "overview chrome excludes new transcript selection presses");
-    // Press on the first transcript row (below 2 overview rows => screen row 3), then drag into overview row 1.
-    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftPress, 3, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+    expect(!top_row_drag.empty(), "first screen row is transcript, not reserved overview chrome");
+    // Dragging back to the first row still autoscrolls at the upper edge.
+    static_cast<void>(handle(top_row_drag, mouse_event(ava::tui::Key::MouseLeftPress, 3, 2), top_row_snapshot, top_row_cache, &draft, top_row_scroll,
                              never_toggle, never_toggle));
-    static_cast<void>(handle(overview_drag, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), overview_snapshot, overview_cache, &draft, overview_scroll,
+    static_cast<void>(handle(top_row_drag, mouse_event(ava::tui::Key::MouseLeftDrag, 1, 2), top_row_snapshot, top_row_cache, &draft, top_row_scroll,
                              never_toggle, never_toggle));
-    expect(overview_scroll == 1 && overview_drag.range(),
-           "transcript selection drag into overview chrome autoscrolls at the upper edge while retaining selection authority");
+    expect(top_row_scroll == 1 && top_row_drag.range(),
+           "transcript selection drag to the first row autoscrolls at the upper edge while retaining selection authority");
   }
 
   auto remapped_layout = header_layout;

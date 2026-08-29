@@ -51,11 +51,13 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, persisted_theme_session, "light")
     wait_for(tmux_exe, persisted_theme_session, r"Search\s{2}light", "persisted-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
+    # Successful settings actions add no chat receipts; synchronize on the refreshed
+    # current-row state inside the still-open Theme section.
     applied_theme = wait_for(
-        tmux_exe, persisted_theme_session, r"Stored TUI theme light", "settings theme selection applied"
+        tmux_exe, persisted_theme_session, r"Light[^\n]*current", "settings theme selection applied"
     )
-    if "Stored TUI theme light" not in applied_theme:
-        raise RuntimeError(f"settings modal did not apply the light theme row\nscreen:\n{applied_theme}")
+    if "Stored TUI theme" in applied_theme:
+        raise RuntimeError(f"settings modal leaked a theme receipt\nscreen:\n{applied_theme}")
     if not display_config.exists() or '"theme": "light"' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"settings theme selection did not write display.json\npath:\n{display_config}")
     tmux(tmux_exe, "kill-session", "-t", persisted_theme_session, check=False)
@@ -97,10 +99,10 @@ def scenario_theme_persisted(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, persisted_theme_session, r"Search\s{2}ocean", "custom-theme filtered theme row")
     send_keys(tmux_exe, persisted_theme_session, "Enter")
     applied_custom_theme = wait_for(
-        tmux_exe, persisted_theme_session, r"Stored TUI theme ocean", "settings custom theme selection applied"
+        tmux_exe, persisted_theme_session, r"ocean[^\n]*current", "settings custom theme selection applied"
     )
-    if "Stored TUI theme ocean" not in applied_custom_theme:
-        raise RuntimeError(f"settings modal did not apply the custom theme row\nscreen:\n{applied_custom_theme}")
+    if "Stored TUI theme" in applied_custom_theme:
+        raise RuntimeError(f"settings modal leaked a custom theme receipt\nscreen:\n{applied_custom_theme}")
     if '"theme": "ocean"' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"settings custom theme selection did not write display.json\npath:\n{display_config}")
     display_config.write_text('{\n  "theme": "plain"\n}\n', encoding="utf-8")

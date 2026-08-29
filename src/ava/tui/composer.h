@@ -771,12 +771,6 @@ struct PluginUiSurfaceGeometry
 [[nodiscard]] PluginUiSurfaceGeometry plugin_ui_surface_geometry(ComposerSnapshot const& snapshot, TuiPluginUiKind kind);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
-// Process-local collapsed startup overview chrome. Height policy: 2 rows at >=12,
-// 1 row at 8-11, hidden below 8. Shared by render and mouse hit-testing. Footer unchanged.
-[[nodiscard]] std::size_t startup_overview_collapsed_row_count(ComposerSnapshot const& snapshot) noexcept;
-[[nodiscard]] std::vector<std::string> render_startup_overview_collapsed_lines(ComposerSnapshot const& snapshot, std::size_t width);
-// True when (row,column) lands on the collapsed overview card in the main canvas.
-[[nodiscard]] bool startup_overview_card_contains_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);

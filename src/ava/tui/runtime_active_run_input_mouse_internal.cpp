@@ -35,11 +35,6 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_mou
     auto const begins_click = active_event.key == Key::MouseLeftPress || active_event.key == Key::MouseLeftClick;
     if (begins_click)
     {
-      if (startup_overview_card_contains_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
-      {
-        renderer_.clear_transcript_selection();
-        return to_input_handling(action_controller_.toggle_startup_overview());
-      }
       if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, active_event.mouse_row, active_event.mouse_column))
       {
         renderer_.clear_transcript_selection();

@@ -1011,8 +1011,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (!options.on_reload_key_bindings)
           {
             snapshot.status = "reload unavailable";
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
             static_cast<void>(beep());
           }
           else
@@ -1021,17 +1019,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (!reloaded)
             {
               snapshot.status = reloaded.error().format();
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
               static_cast<void>(beep());
             }
             else
             {
               options.key_bindings = std::move(reloaded->key_bindings);
               snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+              // Success feedback stays on the transient status surface from the applied DTO.
               apply_runtime_state_snapshot(std::move(reloaded->state));
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
           }
         }
@@ -1085,22 +1080,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
             begin_settings_preview_baseline();
             if (settings_nav.in_display())
             {
-              // Remain in the presentation section with refreshed authoritative rows after a successful confirm.
-              // Push a transcript receipt too: the centered modal can cover the status alert dock.
+              // Remain in the presentation section with refreshed authoritative rows after a
+              // successful confirm. Feedback stays on the transient status surface; local
+              // settings actions never append chat/transcript items.
               auto const receipt = status.empty() ? std::string("display setting saved") : status;
               rebuild_settings_view(settings_nav.section, current_query, current_selected);
               snapshot.status = receipt;
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = receipt, .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
             else
             {
               close_settings();
-              if (!status.empty())
-              {
-                push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-                transcript_scroll_offset = 0;
-              }
             }
           }
           else
@@ -1524,8 +1513,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (!options.on_reload_key_bindings)
           {
             snapshot.status = "reload unavailable";
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
             static_cast<void>(beep());
           }
           else
@@ -1534,17 +1521,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (!reloaded)
             {
               snapshot.status = reloaded.error().format();
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
               static_cast<void>(beep());
             }
             else
             {
               options.key_bindings = std::move(reloaded->key_bindings);
               snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+              // Success feedback stays on the transient status surface from the applied DTO.
               apply_runtime_state_snapshot(std::move(reloaded->state));
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
           }
         }
@@ -1644,13 +1628,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           auto selected = options.on_settings_selected(selected_value);
           if (selected)
           {
-            auto status = selected->status;
+            // Success feedback stays on the transient status surface from the applied DTO.
             apply_runtime_state_snapshot(std::move(*selected));
-            if (!status.empty())
-            {
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
-            }
           }
           else
           {
@@ -2160,18 +2139,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       bool palette_claimed = false;
       if (begins_click)
       {
-        if (startup_overview_card_contains_screen_position(snapshot, event.mouse_row, event.mouse_column))
-        {
-          renderer.clear_transcript_selection();
-          draft_state.clear_selection();
-          if (!toggle_startup_overview())
-          {
-            terminal_write_failed = true;
-            break;
-          }
-          palette_claimed = true;
-        }
-        else if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
         {
           renderer.clear_transcript_selection();
           draft_state.clear_selection();

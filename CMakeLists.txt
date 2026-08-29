@@ -198,10 +198,6 @@ endif()
 set(AICXX_OBJECTS_LIST ${AICXX_OBJECTS_LIST} enchantum::enchantum CACHE INTERNAL "List of OBJECT libaries that this project uses.")
 
 add_subdirectory(src)
-# ava_terminal predates the shared AVA target helpers and does not apply the
-# sanitizer policy in its own subdirectory. Instrument it centrally so the
-# canonical sanitizer build covers every first-party production object.
-ava_apply_sanitizers(ava_terminal)
 add_subdirectory(enchantum)
 
 install(

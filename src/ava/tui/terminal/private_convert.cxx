@@ -63,7 +63,6 @@ cchar_t convert_to_cchar(ComplexChar const& complex_char)
 ComplexChar convert_to_ComplexChar(cchar_t const& cchar)
 {
   using GraphemeCluster = ava::tui::terminal::GraphemeCluster;
-  using ColorPair = ava::tui::terminal::ColorPair;
 
   attr_t attributes = A_NORMAL;
   NCURSES_PAIRS_T color_pair = 0;
@@ -71,7 +70,7 @@ ComplexChar convert_to_ComplexChar(cchar_t const& cchar)
   // We can not write directly into the Storage of result.cell_character() because the grapheme_cluster
   // returned by getcchar is null-terminated, even if it contains CCHARW_MAX non-zero characters!
   std::array<wchar_t, CCHARW_MAX + 1> grapheme_cluster_plus_one;
-  int const status = ::getcchar(&cchar, grapheme_cluster_plus_one.data(), &attributes, &color_pair, &extended_color_pair);
+  [[maybe_unused]] int const status = ::getcchar(&cchar, grapheme_cluster_plus_one.data(), &attributes, &color_pair, &extended_color_pair);
   // getcchar returns ERR when cchar is not a wide complex character; call convert_to_ComplexChar only with a valid
   // cchar_t initialized by ncurses (for example via setcchar, convert_to_cchar, win_wch, or win_wchstr), using the
   // CCHARW_MAX + 1 buffer above.

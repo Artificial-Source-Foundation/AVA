@@ -386,7 +386,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Workspace",
-        r"Settings › Workspace|Project trust|Trust project",
+        r"Settings › Workspace|Trust project",
         "workspace section before trust action",
     )
     send_literal(tmux_exe, session, "Trust project")
@@ -408,14 +408,15 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         trust_disk = trust_file.read_text(encoding="utf-8") if trust_file.exists() else ""
     if '"trusted":true' not in trust_disk:
         raise RuntimeError(f"trust action did not persist the trusted decision\npath:\n{trust_file}")
+    # The Workspace modal header carries the path-free trust summary; synchronize on it.
     open_settings_section(
         tmux_exe,
         session,
         "Workspace",
-        r"Settings › Workspace|Project trust",
+        r"Settings › Workspace|Trust project",
         "workspace section after trust action",
     )
-    trust_row = wait_for(tmux_exe, session, r"Project trust[^\n]*trusted", "trust row refreshed to trusted")
+    trust_row = wait_for(tmux_exe, session, r"trust trusted · enabled", "trust summary refreshed to trusted")
     save_evidence(root, "nested-settings-trust-row-refreshed", trust_row)
     close_settings(tmux_exe, session, "closed after trust row refresh")
     send_keys(tmux_exe, session, "C-u")

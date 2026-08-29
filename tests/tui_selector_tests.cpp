@@ -779,19 +779,20 @@ void run_tui_selector_tests()
          "model and input sections lead with actionable selectors and use concise rows");
 
   expect(
-      settings_workspace.title == "Settings › Workspace" &&
-          labels(settings_workspace) == std::vector<std::string>({"Sessions", "Project trust", "Trust project", "Deny project", "Clear trust decision"}) &&
-          settings_workspace.items[0].value == "settings:draft.sessions" && settings_workspace.items[1].value == "settings:trust.status" &&
+      settings_workspace.title == "Settings › Workspace" && settings_workspace.subtitle == "trust trusted · enabled · 3 protected" &&
+          labels(settings_workspace) == std::vector<std::string>({"Sessions", "Trust project", "Deny project", "Clear trust decision"}) &&
+          settings_workspace.items[0].value == "settings:draft.sessions" && settings_workspace.items[1].value == "settings:trust.project" &&
           std::ranges::none_of(settings_workspace.items,
                                [](ava::tui::SelectListItemView const& item) {
-                                 return item.label == "Current directory" || item.label == "Git branch" || item.label == "Token status" ||
-                                        item.label == "Context sources" || item.label == "Protected resources";
+                                 return item.label == "Project trust" || item.label == "Current directory" || item.label == "Git branch" ||
+                                        item.label == "Token status" || item.label == "Context sources" || item.label == "Protected resources";
                                }) &&
           settings_tools.title == "Settings › Tools" &&
           labels(settings_tools) == std::vector<std::string>({"Tool details", "Permissions", "Plugins", "MCP", "Jobs"}) &&
           settings_tools.items[0].value == "settings:draft.tools" && settings_tools.items[0].description == "rich" &&
           std::ranges::none_of(settings_root.items, [](ava::tui::SelectListItemView const& item) { return item.label == "Privacy" || item.label == "About"; }),
-      "workspace contains only session/trust preferences and tools owns tool visibility and extension routes");
+      "workspace shows the path-free trust summary in the modal subtitle with only session/trust mutation rows, and tools owns tool visibility and extension "
+      "routes");
 
   {
     auto root_filter = settings_root;

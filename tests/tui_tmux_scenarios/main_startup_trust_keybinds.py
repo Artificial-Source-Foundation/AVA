@@ -288,49 +288,28 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Workspace",
-        r"Settings › Workspace|Project trust|Trust project",
+        r"Settings › Workspace|Trust project",
         "settings sessions section for trust rows",
     )
+    # The Workspace modal header carries the path-free trust summary directly; rows are
+    # mutations only. Detailed diagnostics stay with explicit /trust status below.
+    if not re.search(r"trust unknown · skipped · 3 protected", capture(tmux_exe, session)):
+        raise RuntimeError(
+            f"settings modal did not show the workspace trust summary\nscreen:\n{capture(tmux_exe, session)}"
+        )
     send_literal(tmux_exe, session, "trust")
     settings_trust_rows = wait_for(
         tmux_exe, session, r"Search\s{2}trust", "settings trust filtered rows"
     )
     if (
-        "Project trust" not in settings_trust_rows
-        or "Trust project" not in settings_trust_rows
+        "Trust project" not in settings_trust_rows
         or "Deny project" not in settings_trust_rows
+        or "Clear trust decision" not in settings_trust_rows
     ):
         raise RuntimeError(
-            f"settings modal did not expose project trust status and actions\nscreen:\n{settings_trust_rows}"
+            f"settings modal did not expose project trust mutation rows\nscreen:\n{settings_trust_rows}"
         )
     close_settings(tmux_exe, session, "settings modal closed after trust rows")
-
-    open_settings_section(
-        tmux_exe,
-        session,
-        "Workspace",
-        r"Settings › Workspace|Project trust",
-        "settings sessions section before trust status action",
-    )
-    send_literal(tmux_exe, session, "project trust")
-    settings_trust_status_row = wait_for(
-        tmux_exe, session, r"Search\s{2}project trust", "settings trust status filtered row"
-    )
-    if "Project trust" not in settings_trust_status_row:
-        raise RuntimeError(
-            f"settings modal did not expose the trust status action when filtered\nscreen:\n{settings_trust_status_row}"
-        )
-    send_keys(tmux_exe, session, "Enter")
-    settings_trust_status = wait_for(
-        tmux_exe,
-        session,
-        r"(?s)Project trust:.*decision=unknown.*project_resources=skipped.*protected_resources=3",
-        "settings trust status action output",
-    )
-    if "prompt_commands" not in settings_trust_status or "system_prompt" not in settings_trust_status:
-        raise RuntimeError(
-            f"settings trust status action did not render protected-resource diagnostics\nscreen:\n{settings_trust_status}"
-        )
 
     open_settings_section(
         tmux_exe,

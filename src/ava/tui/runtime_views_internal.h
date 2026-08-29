@@ -47,7 +47,6 @@ inline constexpr std::string_view kSettingsImageWidthPrefix = "settings:image-wi
 inline constexpr std::string_view kSettingsCursorStylePrefix = "settings:cursor.style.";
 inline constexpr std::string_view kSettingsCursorBlink = "settings:cursor.blink";
 inline constexpr std::string_view kSettingsCursorSteady = "settings:cursor.steady";
-inline constexpr std::string_view kSettingsTrustStatus = "settings:trust.status";
 inline constexpr std::string_view kSettingsTrustProject = "settings:trust.project";
 inline constexpr std::string_view kSettingsTrustDeny = "settings:trust.deny";
 inline constexpr std::string_view kSettingsTrustClear = "settings:trust.clear";

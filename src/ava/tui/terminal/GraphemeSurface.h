@@ -1,0 +1,49 @@
+#pragma once
+
+#include "GraphemeBlockRow.h"
+
+namespace ava::tui::terminal {
+
+// class GraphemeSurface
+//
+// A complete two-dimensional result ready to be written to a BasicWindow.
+// The (required) size of window or pad can be obtained with `dimension`.
+//
+class GraphemeSurface
+{
+ private:
+  std::vector<GraphemeBlockRow> blocks_rows_;
+  uint32_t height_{};                           // The height of the surface, in terminal rows.
+  columns_t width_{};                           // The width of the surface, in terminal columns.
+
+ public:
+  // Construct an empty GraphemeSurface pre-allocating a capacity of `reserve_blocks` GraphemeBlockRow's.
+  GraphemeSurface(std::size_t reserve_blocks)
+  {
+    blocks_rows_.reserve(reserve_blocks);
+  }
+
+  void append(GraphemeBlockRow&& block_row)
+  {
+    // The width of each added block row must be the same.
+    ASSERT(width_ == 0 || width_ == block_row.width());
+    height_ += block_row.height();
+    width_ = block_row.width();
+    Dout(dc::always, "width_ is now " << width_ << " [" << this << "]");
+    blocks_rows_.emplace_back(std::move(block_row));
+  }
+
+  // Accessors
+
+  std::vector<GraphemeBlockRow> const& blocks_rows() const { return blocks_rows_; }
+  uint32_t height() const { return height_; }
+  columns_t width() const { return width_; }
+
+  // Convenience accessors.
+  Dimension dimension() const { return {height_, width_}; }
+  uint32_t number_of_blocks_rows() const { return static_cast<uint32_t>(blocks_rows_.size()); }
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+} // namespace ava::tui::terminal

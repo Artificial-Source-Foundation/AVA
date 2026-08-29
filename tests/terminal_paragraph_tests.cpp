@@ -204,7 +204,7 @@ void test_pad_generate_comment_example()
     std::array<ExpectedPadRow, 16> const& expected = expected_pad_rows();
 
     expect(pad.dimension().width() == 9 && pad.dimension().height() == expected.size(),
-           "Pad::generate(9) must create a 9 x 16 pad, got " + std::to_string(pad.dimension().width()) + " x " + std::to_string(pad.dimension().height()));
+           "ParagraphPad::generate(9) must create a 16 x 9 pad, got " + std::to_string(pad.dimension().height()) + " x " + std::to_string(pad.dimension().width()));
 
     std::array<terminal::ComplexChar, 9> cells;
     for (std::size_t row = 0; row < expected.size(); ++row)

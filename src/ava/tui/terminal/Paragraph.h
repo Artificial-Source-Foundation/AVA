@@ -35,6 +35,15 @@ struct GraphemeBlockCategory
 using GraphemeBlockIndex = utils::VectorIndex<GraphemeBlockCategory>;
 using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex>;
 
+inline uint32_t height_of(GraphemeBlock const& block) { return static_cast<uint32_t>(block.size()); }
+inline columns_t width_of(GraphemeBlock const& block) { return block.front().max_columns(); }
+
+// class Paragraph
+//
+// A Paragraph exists of a series of TextSpan's.
+//
+// It can be converted into a GraphemeBlock of a given width in terminal columns, auto-wrapped to multiple lines if necessary.
+//
 class Paragraph : public LayoutItem
 {
  private:

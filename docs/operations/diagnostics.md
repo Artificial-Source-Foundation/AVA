@@ -2,7 +2,7 @@
 
 AVA separates two diagnostic layers:
 
-- Carlo Wood's `libcwd` channels provide rich local developer debugging in builds configured with libcwd. They are controlled by the existing libcwd build/runtime configuration and are not support artifacts.
+- Carlo Wood's `libcwd` channels provide rich local developer debugging in builds configured with libcwd. Their output is off by default even in those builds; operators opt in with `AVA_DEBUG_OUTPUT=1` (and `AVA_NO_DEBUG_OUTPUT` suppresses it again). They are otherwise controlled by the existing libcwd build/runtime configuration and are not support artifacts.
 - `ava doctor`, `--trace`, last-failure state, and support exports are release-safe, typed diagnostics. They do not consume libcwd output or arbitrary formatted errors.
 
 ## Passive Doctor

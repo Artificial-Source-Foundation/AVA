@@ -63,7 +63,8 @@ Defaults, OAuth details, custom-provider rules, and implemented-provider boundar
 
 | Variable | Meaning |
 | --- | --- |
-| `AVA_NO_DEBUG_OUTPUT` | Suppresses libcwd debug initialization unless `AVA_DEBUG_OUTPUT_DIR` is explicitly nonempty. Used by tests and useful to silence developer debug output. |
+| `AVA_DEBUG_OUTPUT` | Set to `1` to opt an ordinary process into libcwd developer diagnostics in libcwd-enabled builds; libcwd output is off by default even there. `AVA_NO_DEBUG_OUTPUT` wins when both are set. |
+| `AVA_NO_DEBUG_OUTPUT` | Hard suppression of libcwd debug initialization; wins over `AVA_DEBUG_OUTPUT`. Only a validated private test output stream (nonempty `AVA_DEBUG_OUTPUT_DIR` under a test identity) overrides it. Used by tests and useful to silence developer debug output. |
 | `AVA_DEBUG_OUTPUT_DIR` | Absolute directory for libcwd debug output. Empty does not opt in; a relative path is rejected. |
 | `LIBCWD_NO_STARTUP_MSGS` | libcwd compatibility switch used to suppress its startup message. |
 | `LIBCWD_RCFILE_NAME`, `LIBCWD_RCFILE_OVERRIDE_NAME` | libcwd configuration inputs, not AVA product settings. |

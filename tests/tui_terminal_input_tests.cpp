@@ -395,6 +395,56 @@ void run_tui_terminal_input_tests_part_1()
           ava::tui::terminal_escape_sequence_key("[200~") == ava::tui::Key::Unknown,
       "terminal escape parser maps complete modified Enter CSI forms without treating partial keys or paste markers as "
       "text");
+  expect(ava::tui::terminal_escape_sequence_key("[1;1:1A") == ava::tui::Key::ArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;1:1B") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:2C") == ava::tui::Key::ArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;1:2D") == ava::tui::Key::ArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;2:1A") == ava::tui::Key::ShiftArrowUp &&
+             ava::tui::terminal_escape_sequence_key("[1;3:2B") == ava::tui::Key::AltArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;5:1D") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[1;6:2C") == ava::tui::Key::ShiftCtrlArrowRight &&
+             ava::tui::terminal_escape_sequence_key("[1;129:1B") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:3A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;2:3B") == ava::tui::Key::Unknown && ava::tui::terminal_escape_sequence_should_discard("[1;1:3A"),
+         "terminal escape parser decodes Kitty special-CSI arrow press and repeat events with modifiers while consuming releases");
+  expect(
+      ava::tui::terminal_escape_sequence_key("[1;1:1H") == ava::tui::Key::Home && ava::tui::terminal_escape_sequence_key("[1;1:2F") == ava::tui::Key::End &&
+          ava::tui::terminal_escape_sequence_key("[1;5:1H") == ava::tui::Key::CtrlHome &&
+          ava::tui::terminal_escape_sequence_key("[1;6:2F") == ava::tui::Key::ShiftCtrlEnd &&
+          ava::tui::terminal_escape_sequence_key("[1;1:3H") == ava::tui::Key::Unknown &&
+          ava::tui::terminal_escape_sequence_key("[7;1:1~") == ava::tui::Key::Home && ava::tui::terminal_escape_sequence_key("[8;1:2~") == ava::tui::Key::End &&
+          ava::tui::terminal_escape_sequence_key("[5;1:1~") == ava::tui::Key::PageUp &&
+          ava::tui::terminal_escape_sequence_key("[6;1:2~") == ava::tui::Key::PageDown &&
+          ava::tui::terminal_escape_sequence_key("[2;1:1~") == ava::tui::Key::Insert &&
+          ava::tui::terminal_escape_sequence_key("[3;2:2~") == ava::tui::Key::ShiftDelete &&
+          ava::tui::terminal_escape_sequence_key("[5;1:3~") == ava::tui::Key::Unknown &&
+          ava::tui::terminal_escape_sequence_key("[1;1:1P") == ava::tui::Key::F1 && ava::tui::terminal_escape_sequence_key("[1;1:2S") == ava::tui::Key::F4 &&
+          ava::tui::terminal_escape_sequence_key("[15;1:1~") == ava::tui::Key::F5 && ava::tui::terminal_escape_sequence_key("[24;1:2~") == ava::tui::Key::F12 &&
+          ava::tui::terminal_escape_sequence_key("[1;1:3P") == ava::tui::Key::Unknown &&
+          ava::tui::terminal_escape_sequence_key("[15;1:3~") == ava::tui::Key::Unknown && ava::tui::terminal_escape_sequence_should_discard("[5;1:3~"),
+      "terminal escape parser applies Kitty event suffixes to Home, End, tilde special keys, and function keys");
+  expect(ava::tui::terminal_escape_sequence_key("[1;1:A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:0A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:4A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;:1A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;0:1A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1:1A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:1xA") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:1;2A") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[5;1:~") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[5;1:0~") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[5;1:9~") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:Q") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:4Q") == ava::tui::Key::Unknown &&
+             ava::tui::terminal_escape_sequence_key("[1;1:1xQ") == ava::tui::Key::Unknown,
+         "terminal escape parser fails closed on malformed Kitty special-CSI modifiers, event types, and trailing fields");
+  expect(ava::tui::terminal_escape_sequence_key("[A") == ava::tui::Key::ArrowUp && ava::tui::terminal_escape_sequence_key("OB") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;5D") == ava::tui::Key::CtrlArrowLeft &&
+             ava::tui::terminal_escape_sequence_key("[H") == ava::tui::Key::Home && ava::tui::terminal_escape_sequence_key("OF") == ava::tui::Key::End &&
+             ava::tui::terminal_escape_sequence_key("[5~") == ava::tui::Key::PageUp && ava::tui::terminal_escape_sequence_key("[24~") == ava::tui::Key::F12 &&
+             ava::tui::terminal_escape_sequence_key("[57420;1:2u") == ava::tui::Key::ArrowDown &&
+             ava::tui::terminal_escape_sequence_key("[1;129B") == ava::tui::Key::ArrowDown,
+         "terminal escape parser retains legacy CSI, SS3, modified, CSI-u, and tmux-compatible lock-modifier forms");
   expect(ava::tui::terminal_escape_sequence_key("[1;129B") == ava::tui::Key::ArrowDown &&
              ava::tui::terminal_escape_sequence_key("[1;193A") == ava::tui::Key::ArrowUp &&
              ava::tui::terminal_escape_sequence_key("[1;130A") == ava::tui::Key::ShiftArrowUp &&

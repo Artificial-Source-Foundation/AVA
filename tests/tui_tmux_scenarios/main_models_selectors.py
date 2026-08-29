@@ -93,6 +93,45 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
             f"before:\n{command_model_selector}\nafter:\n{resized_model_selector}"
         )
     selected_row = resized_selected_row
+    ghostty_event_origin = selected_modal_identity(selected_row)
+    send_literal(tmux_exe, session, "\x1b[1;1:1B")
+    ghostty_press_row, ghostty_press_screen = wait_for_selected_modal_change(
+        tmux_exe, session, selected_row, "Ghostty Kitty event-form Down press"
+    )
+    ghostty_press_identity = selected_modal_identity(ghostty_press_row)
+    send_literal(tmux_exe, session, "\x1b[1;1:1A")
+    ghostty_up_row, ghostty_up_screen = wait_for_selected_modal_change(
+        tmux_exe, session, ghostty_press_row, "Ghostty Kitty event-form Up press"
+    )
+    if selected_modal_identity(ghostty_up_row) != ghostty_event_origin:
+        raise RuntimeError(
+            "raw Ghostty Kitty event-form Down/Up did not restore the original model selection\n"
+            f"origin:\n{resized_model_selector}\ndown:\n{ghostty_press_screen}\nup:\n{ghostty_up_screen}"
+        )
+    send_literal(tmux_exe, session, "\x1b[1;1:2B")
+    ghostty_repeat_row, ghostty_repeat_screen = wait_for_selected_modal_change(
+        tmux_exe, session, ghostty_up_row, "Ghostty Kitty event-form Down repeat"
+    )
+    if selected_modal_identity(ghostty_repeat_row) != ghostty_press_identity:
+        raise RuntimeError(
+            "raw Ghostty Kitty event-form repeat did not decode as the underlying Down key\n"
+            f"press:\n{ghostty_press_screen}\nrepeat:\n{ghostty_repeat_screen}"
+        )
+    send_literal(tmux_exe, session, "\x1b[1;1:3B/")
+    wait_for(tmux_exe, session, r"filter\s+/", "Ghostty Kitty release queue synchronization")
+    send_keys(tmux_exe, session, "BSpace")
+    ghostty_release_screen = wait_for(
+        tmux_exe, session, r"filter\s+Search models", "Ghostty Kitty release synchronization cleared"
+    )
+    ghostty_release_row = selected_modal_row(ghostty_release_screen)
+    if not ghostty_release_row or selected_modal_identity(ghostty_release_row) != ghostty_press_identity:
+        raise RuntimeError(
+            "raw Ghostty Kitty event-form release caused duplicate model navigation\n"
+            f"before release:\n{ghostty_repeat_screen}\nafter release:\n{ghostty_release_screen}"
+        )
+    selected_row = ghostty_release_row
+    selected_rows.add(selected_modal_identity(selected_row))
+    save_evidence(root, "model-selector-ghostty-event-arrows", ghostty_release_screen)
     send_keys(tmux_exe, session, "Down")
     selected_row, _ = wait_for_selected_modal_change(
         tmux_exe, session, selected_row, "tmux Down arrow model navigation"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -24,21 +25,15 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
-SCHEMA_VERSION = "ava.backend-benchmark.v1"
-SENSITIVE_ENVIRONMENT_NAME = re.compile(
-    r"(?:API[_-]?KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|PASSWD|NETRC|SSH_AUTH|"
-    r"OPENAI|ANTHROPIC|GEMINI|GOOGLE_AI|AZURE|AWS_|BEDROCK|VERTEX|COHERE|"
-    r"MISTRAL|GROQ|HUGGINGFACE|HF_TOKEN|GITHUB_TOKEN|GITLAB_TOKEN|CLOUDFLARE)",
-    re.IGNORECASE,
-)
-NETWORK_ENVIRONMENT_NAME = re.compile(r"(?:^|_)(?:HTTP|HTTPS|ALL|NO)_PROXY$", re.IGNORECASE)
+SCHEMA_VERSION = "ava.backend-benchmark.v2"
+TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 EXPECTED_RESULT_IDS = (
     "cold_startup",
     "warm_startup",
     "idle_rss",
     "builtin_noop_dispatch",
     "native_file_read_dispatch",
-    "native_registry_schema_selection",
+    "native_registry_lookup",
     "plugin_first_call",
     "plugin_repeated_calls",
     "unused_plugin_manifests_100",
@@ -108,6 +103,8 @@ def resolve_file(path: Path, description: str, executable: bool = False) -> Path
 
 def validate_arguments(args: argparse.Namespace) -> None:
     args.ava = resolve_file(args.ava, "--ava", executable=True)
+    if args.suite == "smoke" and args.benchmark_helper is None:
+        raise ValueError("--suite smoke requires an executable --benchmark-helper")
     if args.benchmark_helper is not None:
         args.benchmark_helper = resolve_file(args.benchmark_helper, "--benchmark-helper", executable=True)
     if args.fake_provider is not None:
@@ -124,37 +121,25 @@ def validate_arguments(args: argparse.Namespace) -> None:
 
 
 def isolated_environment(home: Path) -> dict[str, str]:
-    replaced = {
-        "HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_CACHE_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-        "TMPDIR",
-        "TERM",
-        "COLORTERM",
+    """Return the complete allowlisted environment for benchmark children."""
+    return {
+        "PATH": TRUSTED_PATH,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_CACHE_HOME": str(home / ".cache"),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "XDG_STATE_HOME": str(home / ".local" / "state"),
+        "TMPDIR": str(home / "tmp"),
+        "TERM": "dumb",
+        "NO_COLOR": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "AVA_BENCHMARK_OFFLINE": "1",
+        "AVA_NO_DEBUG_OUTPUT": "1",
+        "LIBCWD_NO_STARTUP_MSGS": "1",
+        "AVA_SESSION_TITLES": "off",
     }
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in replaced
-        and not SENSITIVE_ENVIRONMENT_NAME.search(key)
-        and not NETWORK_ENVIRONMENT_NAME.search(key)
-    }
-    environment.update(
-        {
-            "HOME": str(home),
-            "XDG_CONFIG_HOME": str(home / ".config"),
-            "XDG_CACHE_HOME": str(home / ".cache"),
-            "XDG_DATA_HOME": str(home / ".local" / "share"),
-            "XDG_STATE_HOME": str(home / ".local" / "state"),
-            "TMPDIR": str(home / "tmp"),
-            "TERM": "dumb",
-            "NO_COLOR": "1",
-            "AVA_BENCHMARK_OFFLINE": "1",
-        }
-    )
-    return environment
 
 
 def percentile_95(values: Sequence[float]) -> float:
@@ -288,10 +273,29 @@ def run_helper(
             raise RuntimeError(f"benchmark helper {result_id} failed ({completed.returncode}): {completed.stderr[-2000:]}")
         try:
             payload = json.loads(completed.stdout)
-            value = float(payload["value"])
-            current_unit = str(payload["unit"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except json.JSONDecodeError as error:
             raise RuntimeError(f"benchmark helper {result_id} emitted invalid JSON: {completed.stdout[-1000:]}") from error
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"benchmark helper {result_id} emitted a non-object JSON payload")
+        helper_status = payload.get("status", "measured")
+        if helper_status == "unsupported":
+            reason = payload.get("reason")
+            reason_code = payload.get("reason_code")
+            if not isinstance(reason, str) or not reason or not isinstance(reason_code, str) or not reason_code:
+                raise RuntimeError(f"benchmark helper {result_id} emitted an invalid unsupported result")
+            result = unsupported(result_id, family, reason, reason_code)
+            result["exact_command"] = command
+            result["details"] = payload.get("details", {})
+            return result
+        if helper_status != "measured":
+            raise RuntimeError(f"benchmark helper {result_id} emitted unknown status: {helper_status}")
+        try:
+            value = float(payload["value"])
+            current_unit = payload["unit"]
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"benchmark helper {result_id} emitted invalid measurement JSON: {completed.stdout[-1000:]}") from error
+        if not isinstance(current_unit, str) or not current_unit:
+            raise RuntimeError(f"benchmark helper {result_id} emitted an invalid unit")
         if unit is not None and unit != current_unit:
             raise RuntimeError(f"benchmark helper {result_id} changed units")
         unit = current_unit
@@ -303,8 +307,32 @@ def run_helper(
                 "details": payload.get("details", {}),
             }
         )
-    assert unit is not None
+    if unit is None or not samples:
+        raise RuntimeError(f"benchmark helper {result_id} produced no measured samples")
     return measured_result(result_id, family, status, unit, samples, command, note)
+
+
+def idle_memory_samples(runs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for index, run in enumerate(runs):
+        raw_snapshots = run.get("samples")
+        if not isinstance(raw_snapshots, list) or not raw_snapshots:
+            raise RuntimeError(f"idle memory run {index + 1} has no raw snapshots")
+        try:
+            maximum_rss_kib = max(float(snapshot["rss_kib"]) for snapshot in raw_snapshots)
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"idle memory run {index + 1} has an invalid RSS snapshot") from error
+        samples.append(
+            {
+                "run": index + 1,
+                "value": maximum_rss_kib,
+                "details": {
+                    "rss_aggregation": "maximum_observed_snapshot",
+                    "raw_memory_helper_run": run,
+                },
+            }
+        )
+    return samples
 
 
 def run_idle_memory(args: argparse.Namespace, root: Path, project: Path) -> dict[str, Any]:
@@ -335,26 +363,26 @@ def run_idle_memory(args: argparse.Namespace, root: Path, project: Path) -> dict
     if completed.returncode != 0:
         raise RuntimeError(f"idle memory helper failed ({completed.returncode}): {completed.stderr[-2000:]}")
     payload = json.loads(output.read_text(encoding="utf-8"))
-    runs = payload["apps"]["ava"]["runs"]
-    samples = [
-        {
-            "run": index + 1,
-            "value": float(run["summary"]["rss_kib"]),
-            "processes": float(run["summary"]["processes"]),
-            "pss_kib": float(run["summary"]["pss_kib"]),
-            "uss_kib": float(run["summary"]["uss_kib"]),
-        }
-        for index, run in enumerate(runs)
-    ]
-    return measured_result(
+    try:
+        runs = payload["apps"]["ava"]["runs"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError("idle memory helper output lacks AVA runs") from error
+    if not isinstance(runs, list):
+        raise RuntimeError("idle memory helper AVA runs must be an array")
+    result = measured_result(
         "idle_rss",
         "memory",
         "measured",
         "KiB",
-        samples,
+        idle_memory_samples(runs),
         command,
-        "Linux process-tree RSS from the existing procfs/PTY memory seam; includes AVA descendants.",
+        "Maximum observed Linux process-tree RSS snapshot per run from the procfs/PTY seam; includes AVA descendants.",
     )
+    result["details"] = {
+        "per_run_value": "maximum rss_kib across that run's raw /proc snapshots",
+        "raw_memory_helper_output": payload,
+    }
+    return result
 
 
 def not_selected(result_id: str, family: str, suite: str, closest: str | None = None) -> dict[str, Any]:
@@ -382,9 +410,97 @@ def git_identity(repository: Path) -> dict[str, Any]:
         return completed.stdout.strip()
 
     commit = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}")
     status = git("status", "--porcelain", "--untracked-files=normal")
     dirty = status not in ("", "unknown")
-    return {"commit": commit, "dirty": dirty, "commit_with_state": f"{commit}{'-dirty' if dirty else ''}"}
+    return {
+        "repository": str(repository.resolve()),
+        "commit": commit,
+        "tree": tree,
+        "dirty": dirty,
+        "commit_with_state": f"{commit}{'-dirty' if dirty else ''}",
+    }
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def file_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve()
+    before = resolved.stat()
+    sha256 = sha256_file(resolved)
+    after = resolved.stat()
+    if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
+        raise RuntimeError(f"artifact changed while hashing: {resolved}")
+    return {
+        "path": str(resolved),
+        "size_bytes": before.st_size,
+        "sha256": sha256,
+        "mtime_ns": before.st_mtime_ns,
+        "executable": os.access(resolved, os.X_OK),
+    }
+
+
+def executable_version_identity(binary: Path, root: Path, project: Path) -> dict[str, Any]:
+    command = [str(binary), "--version"]
+    home = root / "version-probe"
+    prepare_home(home)
+    try:
+        _, completed = run_process(command, project, isolated_environment(home), 5.0)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {
+            "status": "unavailable",
+            "exact_command": command,
+            "error": type(error).__name__,
+        }
+    return {
+        "status": "recorded",
+        "exact_command": command,
+        "return_code": completed.returncode,
+        "stdout": completed.stdout[:4096].strip(),
+        "stderr": completed.stderr[:4096].strip(),
+    }
+
+
+def artifact_inventory(args: argparse.Namespace, repository: Path, root: Path, project: Path) -> dict[str, Any]:
+    ava = file_identity(args.ava)
+    ava["version_probe"] = executable_version_identity(args.ava, root, project)
+
+    manifest_path = args.sample_plugin / "plugin.json"
+    entrypoint_path = args.sample_plugin / "plugin.sh"
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest_payload, dict):
+        raise RuntimeError("sample plugin manifest must be a JSON object")
+    entrypoint = manifest_payload.get("entrypoint")
+    if not isinstance(entrypoint, dict):
+        raise RuntimeError("sample plugin manifest lacks entrypoint identity")
+
+    return {
+        "ava": ava,
+        "benchmark_helper": file_identity(args.benchmark_helper) if args.benchmark_helper is not None else None,
+        "fake_provider": file_identity(args.fake_provider) if args.fake_provider is not None else None,
+        "memory_helper": file_identity(args.memory_helper),
+        "sample_plugin": {
+            "root": str(args.sample_plugin),
+            "manifest": file_identity(manifest_path),
+            "entrypoint": file_identity(entrypoint_path),
+            "manifest_identity": {
+                "schema_version": manifest_payload.get("schema_version"),
+                "id": manifest_payload.get("id"),
+                "name": manifest_payload.get("name"),
+                "version": manifest_payload.get("version"),
+                "api_version": manifest_payload.get("api_version"),
+                "entrypoint_command": entrypoint.get("command"),
+                "entrypoint_args": entrypoint.get("args"),
+            },
+        },
+        "benchmark_script": file_identity(repository / "scripts" / "benchmark-backend.py"),
+    }
 
 
 def total_ram_bytes() -> int | None:
@@ -412,38 +528,136 @@ def cpu_model() -> str:
 
 
 def find_cmake_cache(binary: Path) -> Path | None:
-    for parent in (binary.parent, *binary.parents):
+    for parent in binary.resolve().parents:
         candidate = parent / "CMakeCache.txt"
         if candidate.is_file():
             return candidate
     return None
 
 
-def build_metadata(binary: Path) -> dict[str, Any]:
-    cache = find_cmake_cache(binary)
-    metadata: dict[str, Any] = {"cmake_cache": str(cache) if cache else None, "build_type": "unknown", "compiler": "unknown"}
-    if cache is None:
-        return metadata
+def read_cmake_cache(cache: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
         if line.startswith("//") or line.startswith("#") or "=" not in line:
             continue
         key_and_type, value = line.split("=", 1)
-        key = key_and_type.split(":", 1)[0]
-        if key in ("CMAKE_BUILD_TYPE", "CMAKE_CXX_COMPILER"):
-            values[key] = value
-    metadata["build_type"] = values.get("CMAKE_BUILD_TYPE", "unknown")
-    compiler = values.get("CMAKE_CXX_COMPILER")
-    if compiler:
-        metadata["compiler"] = compiler
+        values[key_and_type.split(":", 1)[0]] = value
+    return values
+
+
+def cmake_boolean(values: dict[str, str], names: Sequence[str]) -> bool | None:
+    for name in names:
+        value = values.get(name, "").upper()
+        if value in ("1", "ON", "TRUE", "YES", "Y"):
+            return True
+        if value in ("0", "OFF", "FALSE", "NO", "N"):
+            return False
+    return None
+
+
+def generated_compiler_identity(build_directory: Path) -> tuple[str, str]:
+    candidates = sorted((build_directory / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
+    if not candidates:
+        return "unknown", "unknown"
+    text = candidates[-1].read_text(encoding="utf-8", errors="replace")
+    compiler_id = re.search(r'^set\(CMAKE_CXX_COMPILER_ID "([^"]*)"\)', text, re.MULTILINE)
+    compiler_version = re.search(r'^set\(CMAKE_CXX_COMPILER_VERSION "([^"]*)"\)', text, re.MULTILINE)
+    return (
+        compiler_id.group(1) if compiler_id else "unknown",
+        compiler_version.group(1) if compiler_version else "unknown",
+    )
+
+
+def build_metadata(binary: Path, repository: Path) -> dict[str, Any]:
+    cache = find_cmake_cache(binary)
+    values = read_cmake_cache(cache) if cache is not None else {}
+    source_root = values.get("CMAKE_HOME_DIRECTORY")
+    compiler_path = values.get("CMAKE_CXX_COMPILER", "unknown")
+    compiler_id, configured_compiler_version = (
+        generated_compiler_identity(cache.parent) if cache is not None else ("unknown", "unknown")
+    )
+    compiler_version_output = "unknown"
+    if compiler_path != "unknown":
         try:
             completed = subprocess.run(
-                [compiler, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=5, check=False
+                [compiler_path, "--version"],
+                env={"PATH": TRUSTED_PATH, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=5,
+                check=False,
             )
-            metadata["compiler_version"] = completed.stdout.splitlines()[0] if completed.stdout else "unknown"
-        except OSError:
-            metadata["compiler_version"] = "unavailable"
-    return metadata
+            compiler_version_output = completed.stdout.splitlines()[0] if completed.stdout else "unknown"
+        except (OSError, subprocess.TimeoutExpired):
+            compiler_version_output = "unavailable"
+
+    flag_names = (
+        "AVA_ENABLE_SANITIZERS",
+        "EnableAvaSanitizers",
+        "OptionEnableAvaSanitizers",
+        "AVA_ENABLE_TSAN",
+        "EnableDebug",
+        "OptionEnableDebug",
+        "EnableLibcwd",
+        "OptionEnableLibcwd",
+    )
+    cmake_flags = {name: values[name] for name in flag_names if name in values}
+    cxx_flags = {
+        name: value
+        for name, value in values.items()
+        if (name == "CMAKE_CXX_FLAGS" or name.startswith("CMAKE_CXX_FLAGS_")) and not name.endswith("-ADVANCED")
+    }
+
+    resolved_binary = binary.resolve()
+    resolved_repository = repository.resolve()
+    resolved_source = Path(source_root).resolve() if source_root else None
+    binary_in_build_tree: bool | None = None
+    binary_not_older_than_cache: bool | None = None
+    cache_mtime_ns: int | None = None
+    if cache is not None:
+        try:
+            resolved_binary.relative_to(cache.parent.resolve())
+            binary_in_build_tree = True
+        except ValueError:
+            binary_in_build_tree = False
+        cache_mtime_ns = cache.stat().st_mtime_ns
+        binary_not_older_than_cache = resolved_binary.stat().st_mtime_ns >= cache_mtime_ns
+
+    provenance = {
+        "assessment": "best_effort_unverified",
+        "statement": (
+            "The nearest CMake cache, source-root match, and mtimes are recorded as best-effort provenance only. "
+            "They do not verify build freshness or claim that the executable embeds or was produced from the recorded Git commit."
+        ),
+        "cmake_source_root_matches_recorded_source": resolved_source == resolved_repository if resolved_source is not None else None,
+        "binary_is_within_cmake_build_tree": binary_in_build_tree,
+        "binary_mtime_ns": resolved_binary.stat().st_mtime_ns,
+        "cmake_cache_mtime_ns": cache_mtime_ns,
+        "binary_not_older_than_cmake_cache": binary_not_older_than_cache,
+        "git_commit_embedding_verified": False,
+    }
+
+    return {
+        "cmake_cache": str(cache) if cache is not None else None,
+        "cmake_source_root": source_root,
+        "build_type": values.get("CMAKE_BUILD_TYPE", "unknown"),
+        "compiler": {
+            "path": compiler_path,
+            "id": compiler_id,
+            "configured_version": configured_compiler_version,
+            "version_output": compiler_version_output,
+        },
+        "features": {
+            "sanitizers": cmake_boolean(values, ("OptionEnableAvaSanitizers", "AVA_ENABLE_SANITIZERS", "EnableAvaSanitizers")),
+            "tsan": cmake_boolean(values, ("AVA_ENABLE_TSAN",)),
+            "debug": cmake_boolean(values, ("OptionEnableDebug", "EnableDebug")),
+            "libcwd": cmake_boolean(values, ("OptionEnableLibcwd", "EnableLibcwd")),
+        },
+        "cmake_flags": cmake_flags,
+        "cxx_flags": cxx_flags,
+        "provenance": provenance,
+    }
 
 
 def smoke_checks(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -454,6 +668,10 @@ def smoke_checks(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         statistics_value = by_id[result_id].get("statistics")
         return float(statistics_value["maximum"]) if statistics_value else None
 
+    def measured(result_id: str) -> bool:
+        result = by_id[result_id]
+        return result.get("status") == "measured" and bool(result.get("samples"))
+
     def add(name: str, passed: bool, ceiling: str) -> None:
         checks.append({"name": name, "passed": passed, "ceiling": ceiling})
 
@@ -461,8 +679,22 @@ def smoke_checks(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     add("startup_not_catastrophic", startup is not None and startup < 30_000_000_000, "< 30 seconds")
     rss = maximum("idle_rss")
     add("idle_rss_not_catastrophic", rss is None or rss < 4 * 1024 * 1024, "< 4 GiB when supported")
+
+    add("native_dispatch_exercised", measured("native_file_read_dispatch"), "helper-backed dispatch measurement required")
+    add(
+        "cancellation_acknowledgement_exercised",
+        measured("cancellation_acknowledgement"),
+        "helper-backed cancellation measurement required",
+    )
+    add("session_open_exercised", measured("session_open_1000"), "helper-backed session-open measurement required")
+    add("repeated_memory_exercised", measured("repeated_call_memory"), "helper-backed repeated-memory measurement required")
+
     growth = maximum("repeated_call_memory")
-    add("repeated_memory_not_catastrophic", growth is None or growth < 512 * 1024, "< 512 MiB peak RSS growth")
+    add(
+        "repeated_memory_not_catastrophic",
+        measured("repeated_call_memory") and growth is not None and growth < 512 * 1024,
+        "< 512 MiB current-RSS delta (or labeled platform fallback)",
+    )
     helper_wall_times = [
         float(sample["wall_time_ns"])
         for result in results
@@ -471,46 +703,114 @@ def smoke_checks(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
     add(
         "helper_timing_not_catastrophic",
-        not helper_wall_times or max(helper_wall_times) < 30_000_000_000,
+        bool(helper_wall_times) and max(helper_wall_times) < 30_000_000_000,
         "each helper repetition < 30 seconds",
     )
     cleanup = by_id["child_cleanup"]
-    cleanup_ok = cleanup["status"] == "unsupported" or (
-        cleanup["status"] == "measured"
-        and all(sample.get("details", {}).get("children_after") == 0 for sample in cleanup["samples"])
+    cleanup_ok = measured("child_cleanup") and all(
+        sample.get("details", {}).get("children_after") == 0 for sample in cleanup["samples"]
     )
-    add("plugin_children_reaped", cleanup_ok, "zero waitable children when helper is supplied")
+    add("plugin_children_reaped", cleanup_ok, "helper-backed cleanup leaves zero waitable children")
     manifests = by_id["unused_plugin_manifests_100"]
-    manifest_ok = manifests["status"] == "unsupported" or (
-        manifests["status"] == "measured"
-        and all(
-            sample.get("details", {}).get("children_before") == 0 and sample.get("details", {}).get("children_after") == 0
-            for sample in manifests["samples"]
-        )
+    manifest_ok = measured("unused_plugin_manifests_100") and all(
+        sample.get("details", {}).get("children_before") == 0 and sample.get("details", {}).get("children_after") == 0
+        for sample in manifests["samples"]
     )
-    add("manifest_discovery_starts_no_children", manifest_ok, "zero children before and after discovery")
+    add("manifest_discovery_starts_no_children", manifest_ok, "helper-backed discovery starts zero children")
     return checks
+
+
+def validate_file_identity(identity: Any, label: str) -> None:
+    if not isinstance(identity, dict):
+        raise ValueError(f"benchmark artifact {label} must be an object")
+    for key in ("path", "size_bytes", "sha256", "mtime_ns", "executable"):
+        if key not in identity:
+            raise ValueError(f"benchmark artifact {label} lacks {key}")
+    if not isinstance(identity["path"], str) or not identity["path"]:
+        raise ValueError(f"benchmark artifact {label} has an invalid path")
+    if not isinstance(identity["size_bytes"], int) or identity["size_bytes"] < 0:
+        raise ValueError(f"benchmark artifact {label} has an invalid size")
+    if not isinstance(identity["mtime_ns"], int) or not isinstance(identity["executable"], bool):
+        raise ValueError(f"benchmark artifact {label} has invalid file metadata")
+    sha256 = identity["sha256"]
+    if not isinstance(sha256, str) or len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
+        raise ValueError(f"benchmark artifact {label} has an invalid SHA-256")
 
 
 def validate_document(document: dict[str, Any]) -> None:
     if document.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unexpected benchmark schema version")
-    required_top_level = ("generated_at_utc", "git", "host", "build", "binary", "parameters", "results", "checks")
+    required_top_level = ("generated_at_utc", "git", "host", "build", "artifacts", "parameters", "results", "checks")
     for key in required_top_level:
         if key not in document:
             raise ValueError(f"benchmark document lacks {key}")
-    for key in ("commit", "dirty", "commit_with_state"):
+    for key in ("repository", "commit", "tree", "dirty", "commit_with_state"):
         if key not in document["git"]:
             raise ValueError(f"benchmark git identity lacks {key}")
     for key in ("os", "kernel", "cpu", "ram_bytes"):
         if key not in document["host"]:
             raise ValueError(f"benchmark host identity lacks {key}")
-    for key in ("build_type", "compiler"):
-        if key not in document["build"]:
+
+    build = document["build"]
+    for key in ("cmake_cache", "cmake_source_root", "build_type", "compiler", "features", "cmake_flags", "cxx_flags", "provenance"):
+        if key not in build:
             raise ValueError(f"benchmark build identity lacks {key}")
-    for key in ("path", "size_bytes"):
-        if key not in document["binary"]:
-            raise ValueError(f"benchmark binary identity lacks {key}")
+    for key in ("path", "id", "configured_version", "version_output"):
+        if key not in build["compiler"]:
+            raise ValueError(f"benchmark compiler identity lacks {key}")
+    for key in ("sanitizers", "tsan", "debug", "libcwd"):
+        if key not in build["features"]:
+            raise ValueError(f"benchmark build features lack {key}")
+    for key in (
+        "assessment",
+        "statement",
+        "cmake_source_root_matches_recorded_source",
+        "binary_is_within_cmake_build_tree",
+        "binary_mtime_ns",
+        "cmake_cache_mtime_ns",
+        "binary_not_older_than_cmake_cache",
+        "git_commit_embedding_verified",
+    ):
+        if key not in build["provenance"]:
+            raise ValueError(f"benchmark provenance lacks {key}")
+    if build["provenance"]["git_commit_embedding_verified"] is not False:
+        raise ValueError("benchmark provenance must not claim verified Git commit embedding")
+
+    artifacts = document["artifacts"]
+    if not isinstance(artifacts, dict):
+        raise ValueError("benchmark artifacts must be an object")
+    for key in ("ava", "benchmark_helper", "fake_provider", "memory_helper", "sample_plugin", "benchmark_script"):
+        if key not in artifacts:
+            raise ValueError(f"benchmark artifacts lack {key}")
+    for key in ("ava", "memory_helper", "benchmark_script"):
+        validate_file_identity(artifacts[key], key)
+    if not isinstance(artifacts["ava"].get("version_probe"), dict):
+        raise ValueError("benchmark AVA identity lacks version_probe")
+    for key in ("benchmark_helper", "fake_provider"):
+        if artifacts[key] is not None:
+            validate_file_identity(artifacts[key], key)
+    if document["parameters"].get("suite") == "smoke" and artifacts["benchmark_helper"] is None:
+        raise ValueError("smoke benchmark artifact identity lacks benchmark_helper")
+    sample_plugin = artifacts["sample_plugin"]
+    if not isinstance(sample_plugin, dict):
+        raise ValueError("benchmark sample plugin identity must be an object")
+    for key in ("root", "manifest", "entrypoint", "manifest_identity"):
+        if key not in sample_plugin:
+            raise ValueError(f"benchmark sample plugin identity lacks {key}")
+    validate_file_identity(sample_plugin["manifest"], "sample_plugin.manifest")
+    validate_file_identity(sample_plugin["entrypoint"], "sample_plugin.entrypoint")
+    manifest_identity = sample_plugin["manifest_identity"]
+    if not isinstance(manifest_identity, dict):
+        raise ValueError("benchmark sample plugin manifest identity must be an object")
+    for key in ("schema_version", "id", "name", "version", "api_version", "entrypoint_command", "entrypoint_args"):
+        if key not in manifest_identity:
+            raise ValueError(f"benchmark sample plugin manifest identity lacks {key}")
+    for key in ("id", "name", "version", "api_version", "entrypoint_command"):
+        if not isinstance(manifest_identity[key], str) or not manifest_identity[key]:
+            raise ValueError(f"benchmark sample plugin manifest identity has invalid {key}")
+    if not isinstance(manifest_identity["entrypoint_args"], list):
+        raise ValueError("benchmark sample plugin manifest identity has invalid entrypoint_args")
+
     for key in ("suite", "runs", "exact_command", "clock", "environment"):
         if key not in document["parameters"]:
             raise ValueError(f"benchmark parameters lack {key}")
@@ -528,11 +828,44 @@ def validate_document(document: dict[str, Any]) -> None:
         if result["status"] in ("measured", "current_one_shot"):
             if not result["samples"] or not isinstance(result["statistics"], dict):
                 raise ValueError(f"measured result has no samples: {result['id']}")
+            if not isinstance(result.get("unit"), str) or not result["unit"]:
+                raise ValueError(f"measured result lacks unit: {result['id']}")
             for key in ("median", "p95", "maximum"):
                 if key not in result["statistics"]:
                     raise ValueError(f"measured result lacks {key}: {result['id']}")
-        elif result["status"] != "unsupported":
+        elif result["status"] == "unsupported":
+            if not isinstance(result.get("reason"), str) or not isinstance(result.get("reason_code"), str):
+                raise ValueError(f"unsupported result lacks reason identity: {result['id']}")
+        else:
             raise ValueError(f"unknown result status: {result['status']}")
+
+    idle_rss = results[EXPECTED_RESULT_IDS.index("idle_rss")]
+    if idle_rss["status"] == "measured":
+        if not isinstance(idle_rss.get("details", {}).get("raw_memory_helper_output"), dict):
+            raise ValueError("idle RSS result lacks raw memory-helper output")
+        for sample in idle_rss["samples"]:
+            details = sample.get("details", {})
+            raw_run = details.get("raw_memory_helper_run")
+            if details.get("rss_aggregation") != "maximum_observed_snapshot" or not isinstance(raw_run, dict):
+                raise ValueError("idle RSS sample lacks raw snapshot details")
+            snapshots = raw_run.get("samples")
+            if not isinstance(snapshots, list) or not snapshots:
+                raise ValueError("idle RSS sample lacks raw snapshots")
+            expected = max(float(snapshot["rss_kib"]) for snapshot in snapshots)
+            if float(sample["value"]) != expected:
+                raise ValueError("idle RSS sample is not the maximum observed snapshot")
+
+    native_registry = results[EXPECTED_RESULT_IDS.index("native_registry_lookup")]
+    if native_registry["status"] == "measured":
+        if native_registry["unit"] != "ns_per_lookup":
+            raise ValueError("native registry lookup has an invalid unit")
+        for sample in native_registry["samples"]:
+            details = sample.get("details", {})
+            if not isinstance(details.get("target"), str) or not isinstance(details.get("entry_count"), int):
+                raise ValueError("native registry lookup lacks target identity")
+
+    if not isinstance(document["checks"], list):
+        raise ValueError("benchmark checks must be an array")
 
 
 def markdown_report(document: dict[str, Any]) -> str:
@@ -542,7 +875,8 @@ def markdown_report(document: dict[str, Any]) -> str:
         f"Generated: `{document['generated_at_utc']}`  ",
         f"Suite: `{document['parameters']['suite']}` with `{document['parameters']['runs']}` measured repetition(s)  ",
         f"Git: `{document['git']['commit_with_state']}`  ",
-        f"Binary: `{document['binary']['path']}` (`{document['binary']['size_bytes']}` bytes)",
+        f"AVA: `{document['artifacts']['ava']['path']}` (`{document['artifacts']['ava']['size_bytes']}` bytes; "
+        f"SHA-256 `{document['artifacts']['ava']['sha256']}`)",
         "",
         "> Results are machine/build-specific observations, not portable performance claims.",
         "",
@@ -603,7 +937,16 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             run_helper(args, root, project, "native_file_read_dispatch", "dispatch", "file-dispatch", ["--iterations", str(file_iterations)])
         )
         results.append(
-            run_helper(args, root, project, "native_registry_schema_selection", "registry", "native-registry", ["--iterations", str(file_iterations)])
+            run_helper(
+                args,
+                root,
+                project,
+                "native_registry_lookup",
+                "registry",
+                "native-registry",
+                ["--iterations", str(file_iterations)],
+                note="Exact lookup of the final current built-in registry entry; registry construction is outside the timed interval.",
+            )
         )
         plugin_note = (
             "The current application path starts and shuts down a plugin process for each call; this is not persistent warm-worker performance."
@@ -661,7 +1004,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                         "catalog",
                         "catalog",
                         ["--entries", str(count)],
-                        note="Current full schema materialization plus linear ToolRegistry selection; not a selective router.",
+                        note=(
+                            "Composite timed boundary: synthetic registry construction, full schema materialization, and final-entry linear lookup; "
+                            "not a selective router."
+                        ),
                     )
                 )
         if args.suite == "smoke":
@@ -698,7 +1044,19 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         )
         memory_calls = 1000 if args.suite == "smoke" else 10000
         results.append(
-            run_helper(args, root, project, "repeated_call_memory", "memory", "repeated-memory", ["--iterations", str(memory_calls)])
+            run_helper(
+                args,
+                root,
+                project,
+                "repeated_call_memory",
+                "memory",
+                "repeated-memory",
+                ["--iterations", str(memory_calls)],
+                note=(
+                    "Narrow direct-call memory seam: Linux current-RSS delta with peak high-water details; macOS uses an explicitly labeled "
+                    "peak high-water fallback. This is not product-wide memory-stability evidence."
+                ),
+            )
         )
         results.append(
             unsupported(
@@ -710,7 +1068,6 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             )
         )
 
-        binary_stat = args.ava.stat()
         document: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -725,21 +1082,25 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "ram_bytes": total_ram_bytes(),
                 "python": platform.python_version(),
             },
-            "build": build_metadata(args.ava),
-            "binary": {"path": str(args.ava), "size_bytes": binary_stat.st_size},
+            "build": build_metadata(args.ava, repository),
+            "artifacts": artifact_inventory(args, repository, root, project),
             "parameters": {
                 "suite": args.suite,
                 "runs": args.runs,
                 "exact_command": list(sys.argv),
                 "benchmark_helper": str(args.benchmark_helper) if args.benchmark_helper else None,
                 "fake_provider": str(args.fake_provider) if args.fake_provider else None,
+                "memory_helper": str(args.memory_helper),
                 "sample_plugin": str(args.sample_plugin),
-                "environment": "isolated HOME/XDG/TMPDIR; credential/proxy variables removed; AVA offline",
+                "environment": (
+                    "fixed allowlist: trusted PATH, C.UTF-8 locale, isolated HOME/XDG/TMPDIR, dumb terminal/no color, "
+                    "offline/debug/session-title controls; no host variables inherited"
+                ),
                 "clock": "time.monotonic_ns / C++ steady_clock",
             },
             "results": results,
         }
-        document["checks"] = smoke_checks(results)
+        document["checks"] = smoke_checks(results) if args.suite == "smoke" else []
         validate_document(document)
         return document
     finally:

@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import importlib.util
+import io
 import os
 import pathlib
 import sys
@@ -39,43 +42,211 @@ class BenchmarkHarnessTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["--ava", "ava", "--suite", "smoke", "--runs", "0", "--output", "out.json"])
 
-    def test_environment_is_isolated_and_scrubbed(self) -> None:
+    def parse_minimal_arguments(self, suite: str, output: pathlib.Path):
+        return self.module.build_parser().parse_args(
+            [
+                "--ava",
+                sys.executable,
+                "--suite",
+                suite,
+                "--runs",
+                "1",
+                "--output",
+                str(output),
+            ]
+        )
+
+    def test_smoke_without_benchmark_helper_fails_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / "out.json"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                status = self.module.main(
+                    [
+                        "--ava",
+                        sys.executable,
+                        "--suite",
+                        "smoke",
+                        "--runs",
+                        "1",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertFalse(output.exists())
+        self.assertEqual(status, 2)
+        self.assertIn("--suite smoke requires an executable --benchmark-helper", stderr.getvalue())
+
+    def test_smoke_rejects_non_executable_helper_but_baseline_may_omit_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            helper = root / "helper"
+            helper.write_text("not executable\n", encoding="utf-8")
+            smoke = self.parse_minimal_arguments("smoke", root / "smoke.json")
+            smoke.benchmark_helper = helper
+            with self.assertRaisesRegex(ValueError, "not executable"):
+                self.module.validate_arguments(smoke)
+
+            baseline = self.parse_minimal_arguments("baseline", root / "baseline.json")
+            self.module.validate_arguments(baseline)
+            self.assertIsNone(baseline.benchmark_helper)
+
+    def test_environment_is_a_fixed_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             home = pathlib.Path(temporary) / "home"
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "AVA_SELF_TEST_KEEP": "yes",
-                    "OPENAI_API_KEY": "must-not-leak",
-                    "MY_PASSWORD": "must-not-leak",
-                    "HTTPS_PROXY": "http://network.invalid",
-                    "HOME": "/not/the/test/home",
-                },
-                clear=True,
-            ):
+            inherited = {
+                "AVA_SELF_TEST_KEEP": "must-not-survive",
+                "OPENAI_API_KEY": "must-not-leak",
+                "MY_PASSWORD": "must-not-leak",
+                "HTTPS_PROXY": "http://network.invalid",
+                "DATABASE_URL": "postgres://credential.invalid/db",
+                "DOCKER_AUTH_CONFIG": "must-not-leak",
+                "GIT_ASKPASS": "/host/askpass",
+                "SSH_ASKPASS": "/host/ssh-askpass",
+                "KRB5CCNAME": "/host/krb5cc",
+                "LD_PRELOAD": "/host/injected.so",
+                "PYTHONPATH": "/host/python",
+                "ARBITRARY_PROVIDER_BASE_URL": "https://provider.invalid",
+                "HOME": "/not/the/test/home",
+            }
+            with mock.patch.dict(os.environ, inherited, clear=True):
                 environment = self.module.isolated_environment(home)
-        self.assertEqual(environment["AVA_SELF_TEST_KEEP"], "yes")
-        self.assertEqual(environment["HOME"], str(home))
-        self.assertEqual(environment["TMPDIR"], str(home / "tmp"))
-        self.assertEqual(environment["AVA_BENCHMARK_OFFLINE"], "1")
-        self.assertNotIn("OPENAI_API_KEY", environment)
-        self.assertNotIn("MY_PASSWORD", environment)
-        self.assertNotIn("HTTPS_PROXY", environment)
+
+        self.assertEqual(
+            environment,
+            {
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "HOME": str(home),
+                "XDG_CONFIG_HOME": str(home / ".config"),
+                "XDG_CACHE_HOME": str(home / ".cache"),
+                "XDG_DATA_HOME": str(home / ".local" / "share"),
+                "XDG_STATE_HOME": str(home / ".local" / "state"),
+                "TMPDIR": str(home / "tmp"),
+                "TERM": "dumb",
+                "NO_COLOR": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+                "AVA_BENCHMARK_OFFLINE": "1",
+                "AVA_NO_DEBUG_OUTPUT": "1",
+                "LIBCWD_NO_STARTUP_MSGS": "1",
+                "AVA_SESSION_TITLES": "off",
+            },
+        )
+        for name in inherited:
+            if name != "HOME":
+                self.assertNotIn(name, environment)
+
+    def test_idle_memory_uses_run_maximum_and_retains_raw_snapshots(self) -> None:
+        runs = [
+            {
+                "summary": {"rss_kib": 20.0},
+                "samples": [
+                    {"rss_kib": 12, "pss_kib": 7, "process_names": ["ava"]},
+                    {"rss_kib": 42, "pss_kib": 8, "process_names": ["ava", "child"]},
+                    {"rss_kib": 30, "pss_kib": 9, "process_names": ["ava"]},
+                ],
+                "captured_output_bytes": 3,
+            }
+        ]
+        samples = self.module.idle_memory_samples(runs)
+        self.assertEqual(samples[0]["value"], 42.0)
+        self.assertEqual(samples[0]["details"]["rss_aggregation"], "maximum_observed_snapshot")
+        self.assertEqual(samples[0]["details"]["raw_memory_helper_run"], runs[0])
+
+    def test_run_helper_rejects_zero_runtime_samples_without_assert(self) -> None:
+        args = argparse.Namespace(
+            benchmark_helper=pathlib.Path(sys.executable),
+            runs=0,
+            suite="baseline",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "produced no measured samples"):
+                self.module.run_helper(args, root, project, "result", "family", "case", [])
+
+    def artifact(self, path: str = "/test/artifact"):
+        return {
+            "path": path,
+            "size_bytes": 1,
+            "sha256": "0" * 64,
+            "mtime_ns": 1,
+            "executable": True,
+        }
 
     def valid_document(self):
+        ava = self.artifact("/test/ava")
+        ava["version_probe"] = {
+            "status": "recorded",
+            "exact_command": ["/test/ava", "--version"],
+            "return_code": 0,
+            "stdout": "ava test",
+            "stderr": "",
+        }
         return {
             "schema_version": self.module.SCHEMA_VERSION,
             "generated_at_utc": "2026-01-01T00:00:00+00:00",
-            "git": {"commit": "abc", "dirty": False, "commit_with_state": "abc"},
+            "git": {
+                "repository": "/test/source",
+                "commit": "a" * 40,
+                "tree": "b" * 40,
+                "dirty": False,
+                "commit_with_state": "a" * 40,
+            },
             "host": {"os": "test", "kernel": "test", "cpu": "test", "ram_bytes": 1},
-            "build": {"build_type": "test", "compiler": "test"},
-            "binary": {"path": "/test/ava", "size_bytes": 1},
+            "build": {
+                "cmake_cache": "/test/build/CMakeCache.txt",
+                "cmake_source_root": "/test/source",
+                "build_type": "Release",
+                "compiler": {
+                    "path": "/usr/bin/c++",
+                    "id": "Test",
+                    "configured_version": "1.0",
+                    "version_output": "Test 1.0",
+                },
+                "features": {"sanitizers": False, "tsan": False, "debug": False, "libcwd": False},
+                "cmake_flags": {},
+                "cxx_flags": {},
+                "provenance": {
+                    "assessment": "best_effort_unverified",
+                    "statement": "No commit embedding claim.",
+                    "cmake_source_root_matches_recorded_source": True,
+                    "binary_is_within_cmake_build_tree": True,
+                    "binary_mtime_ns": 2,
+                    "cmake_cache_mtime_ns": 1,
+                    "binary_not_older_than_cmake_cache": True,
+                    "git_commit_embedding_verified": False,
+                },
+            },
+            "artifacts": {
+                "ava": ava,
+                "benchmark_helper": self.artifact("/test/helper"),
+                "fake_provider": self.artifact("/test/fake-provider"),
+                "memory_helper": self.artifact("/test/memory.py"),
+                "sample_plugin": {
+                    "root": "/test/plugin",
+                    "manifest": self.artifact("/test/plugin/plugin.json"),
+                    "entrypoint": self.artifact("/test/plugin/plugin.sh"),
+                    "manifest_identity": {
+                        "schema_version": 1,
+                        "id": "test.plugin",
+                        "name": "Test",
+                        "version": "1.0",
+                        "api_version": "test.v1",
+                        "entrypoint_command": "/bin/sh",
+                        "entrypoint_args": ["plugin.sh"],
+                    },
+                },
+                "benchmark_script": self.artifact("/test/benchmark.py"),
+            },
             "parameters": {
                 "suite": "smoke",
                 "runs": 1,
                 "exact_command": ["benchmark"],
                 "clock": "monotonic",
-                "environment": "isolated",
+                "environment": "fixed allowlist",
             },
             "results": [
                 self.module.unsupported(result_id, "self-test", "not measured", "self_test")
@@ -84,15 +255,67 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "checks": [],
         }
 
-    def test_schema_requires_every_family_and_machine_identity(self) -> None:
+    def test_file_identity_hashes_bytes_with_python_stdlib(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "artifact"
+            path.write_bytes(b"abc")
+            identity = self.module.file_identity(path)
+        self.assertEqual(identity["size_bytes"], 3)
+        self.assertEqual(identity["sha256"], hashlib.sha256(b"abc").hexdigest())
+
+    def test_schema_requires_every_family_and_source_build_identity(self) -> None:
         document = self.valid_document()
         self.module.validate_document(document)
+
         document["results"] = document["results"][:-1]
         with self.assertRaisesRegex(ValueError, "missing"):
             self.module.validate_document(document)
+
         document = self.valid_document()
         del document["host"]
         with self.assertRaisesRegex(ValueError, "lacks host"):
+            self.module.validate_document(document)
+
+        document = self.valid_document()
+        del document["git"]["tree"]
+        with self.assertRaisesRegex(ValueError, "git identity lacks tree"):
+            self.module.validate_document(document)
+
+        document = self.valid_document()
+        del document["build"]["cmake_source_root"]
+        with self.assertRaisesRegex(ValueError, "build identity lacks cmake_source_root"):
+            self.module.validate_document(document)
+
+    def test_schema_requires_artifact_hashes_and_plugin_entrypoint_identity(self) -> None:
+        document = self.valid_document()
+        del document["artifacts"]["memory_helper"]["sha256"]
+        with self.assertRaisesRegex(ValueError, "memory_helper lacks sha256"):
+            self.module.validate_document(document)
+
+        document = self.valid_document()
+        del document["artifacts"]["sample_plugin"]["entrypoint"]
+        with self.assertRaisesRegex(ValueError, "sample plugin identity lacks entrypoint"):
+            self.module.validate_document(document)
+
+        document = self.valid_document()
+        document["artifacts"]["benchmark_helper"] = None
+        with self.assertRaisesRegex(ValueError, "smoke benchmark artifact identity lacks benchmark_helper"):
+            self.module.validate_document(document)
+
+    def test_schema_requires_real_native_registry_lookup_identity(self) -> None:
+        document = self.valid_document()
+        index = self.module.EXPECTED_RESULT_IDS.index("native_registry_lookup")
+        document["results"][index] = self.module.measured_result(
+            "native_registry_lookup",
+            "registry",
+            "measured",
+            "ns_per_lookup",
+            [{"value": 1.0, "details": {"target": "question", "entry_count": 20}}],
+            ["helper"],
+        )
+        self.module.validate_document(document)
+        document["results"][index]["unit"] = "invalid_unit"
+        with self.assertRaisesRegex(ValueError, "invalid unit"):
             self.module.validate_document(document)
 
     def test_measured_schema_rejects_missing_statistics(self) -> None:
@@ -101,12 +324,29 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "id": self.module.EXPECTED_RESULT_IDS[0],
             "family": "self-test",
             "status": "measured",
+            "unit": "ns",
             "repetitions": 1,
             "samples": [{"value": 1.0}],
             "statistics": None,
         }
         with self.assertRaisesRegex(ValueError, "no samples"):
             self.module.validate_document(document)
+
+    def test_required_smoke_seams_fail_when_unsupported(self) -> None:
+        results = [
+            self.module.unsupported(result_id, "self-test", "not measured", "self_test")
+            for result_id in self.module.EXPECTED_RESULT_IDS
+        ]
+        checks = {check["name"]: check["passed"] for check in self.module.smoke_checks(results)}
+        for name in (
+            "native_dispatch_exercised",
+            "cancellation_acknowledgement_exercised",
+            "session_open_exercised",
+            "repeated_memory_exercised",
+            "plugin_children_reaped",
+            "manifest_discovery_starts_no_children",
+        ):
+            self.assertFalse(checks[name], name)
 
 
 def main() -> int:

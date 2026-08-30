@@ -8,11 +8,13 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -112,6 +114,11 @@ void emit(double value, std::string_view unit, std::string_view details_json = "
   std::cout << "{\"value\":" << value << ",\"unit\":\"" << unit << "\",\"details\":" << details_json << "}\n";
 }
 
+[[maybe_unused]] void emit_unsupported(std::string_view reason_code, std::string_view reason, std::string_view details_json = "{}")
+{
+  std::cout << "{\"status\":\"unsupported\",\"reason_code\":\"" << reason_code << "\",\"reason\":\"" << reason << "\",\"details\":" << details_json << "}\n";
+}
+
 ava::agent::RegisteredTool make_noop_tool(std::size_t index)
 {
   auto const name = "bench_" + std::to_string(index);
@@ -191,26 +198,37 @@ void benchmark_file_dispatch(Options const& options, bool canceled)
 
 void benchmark_native_registry(Options const& options)
 {
-  ava::tools::ToolContext const context;
+  auto const& registry = ava::agent::builtin_tool_registry();
+  auto const entries = registry.entries();
+  if (entries.empty())
+    fail("native registry returned no entries");
+  std::string const target(entries.back().metadata.name);
+  auto const* expected = &entries.back();
+
   auto const started = Clock::now();
-  std::size_t schema_count = 0;
+  std::size_t matches = 0;
   for (std::size_t index = 0; index < options.iterations; ++index)
-    schema_count += ava::agent::ToolDispatcher::tool_schemas_json(context).size();
-  if (schema_count == 0)
-    fail("native registry returned no schemas");
-  emit(elapsed_nanoseconds(started) / static_cast<double>(options.iterations), "ns_per_selection", "{\"total_schemas\":" + std::to_string(schema_count) + "}");
+    matches += registry.find(target) == expected ? 1U : 0U;
+  auto const elapsed = elapsed_nanoseconds(started);
+  if (matches != options.iterations)
+    fail("native registry failed exact lookup of its final entry");
+  emit(elapsed / static_cast<double>(options.iterations), "ns_per_lookup",
+       "{\"lookups\":" + std::to_string(options.iterations) + ",\"target\":\"" + target + "\",\"entry_count\":" + std::to_string(entries.size()) + "}");
 }
 
 void benchmark_catalog(Options const& options)
 {
+  auto const target = "bench_" + std::to_string(options.entries - 1);
   auto const started = Clock::now();
   auto registry = make_registry(options.entries);
   auto const schemas = registry.tool_schemas_json(ava::tools::ToolContext{});
-  auto const* selected = registry.find("bench_" + std::to_string(options.entries - 1));
+  auto const* selected = registry.find(target);
+  auto const elapsed = elapsed_nanoseconds(started);
   if (schemas.size() != options.entries || selected == nullptr)
     fail("catalog schema materialization or linear selection failed");
-  emit(elapsed_nanoseconds(started), "ns",
-       "{\"entries\":" + std::to_string(options.entries) + ",\"schemas\":" + std::to_string(schemas.size()) + ",\"selection\":\"current_linear_registry\"}");
+  emit(elapsed, "ns_per_composite",
+       "{\"entries\":" + std::to_string(options.entries) + ",\"schemas\":" + std::to_string(schemas.size()) + ",\"lookup_target\":\"" + target +
+           "\",\"timed_boundary\":\"registry_construction_plus_full_schema_materialization_plus_last_entry_lookup\"}");
 }
 
 std::vector<ava::session::SessionEntry> session_entries(std::size_t records)
@@ -380,6 +398,7 @@ void benchmark_manifest_discovery(Options const& options)
   emit(elapsed_nanoseconds(started), "ns", "{\"manifests\":" + std::to_string(options.entries) + ",\"children_before\":0,\"children_after\":0}");
 }
 
+#if defined(__linux__) || defined(__APPLE__)
 long peak_rss_kib()
 {
   struct rusage usage{};
@@ -391,21 +410,81 @@ long peak_rss_kib()
   return usage.ru_maxrss;
 #endif
 }
+#endif
+
+#if defined(__linux__)
+struct CurrentResidentRss
+{
+  double kib = 0.0;
+  long page_size_bytes = 0;
+};
+
+std::optional<CurrentResidentRss> current_resident_rss()
+{
+  std::ifstream statm("/proc/self/statm");
+  std::uint64_t total_pages = 0;
+  std::uint64_t resident_pages = 0;
+  if (!(statm >> total_pages >> resident_pages))
+    return std::nullopt;
+  static_cast<void>(total_pages);
+  auto const page_size = sysconf(_SC_PAGESIZE);
+  if (page_size <= 0 || resident_pages > std::numeric_limits<std::uint64_t>::max() / static_cast<std::uint64_t>(page_size))
+    return std::nullopt;
+  auto const resident_bytes = resident_pages * static_cast<std::uint64_t>(page_size);
+  return CurrentResidentRss{.kib = static_cast<double>(resident_bytes) / 1024.0, .page_size_bytes = page_size};
+}
+#endif
 
 void benchmark_repeated_memory(Options const& options)
 {
+#if !defined(__linux__) && !defined(__APPLE__)
+  emit_unsupported("resident_rss_platform_unsupported", "Repeated-call resident RSS is implemented only for Linux, with a macOS peak high-water fallback.",
+                   "{\"calls\":" + std::to_string(options.iterations) + "}");
+#else
   auto registry = make_registry(1);
   auto const* tool = registry.find("bench_0");
+  if (tool == nullptr)
+    fail("benchmark no-op tool was not registered");
   ava::tools::ToolContext const context;
   ava::agent::ToolDispatchServices const services;
   ava::agent::ProviderToolCall const call{.id = "bench", .name = "bench_0", .arguments_json = "{}"};
-  auto const before = peak_rss_kib();
+#if defined(__linux__)
+  auto const current_before = current_resident_rss();
+  if (!current_before)
+  {
+    emit_unsupported("procfs_statm_unavailable", "Current resident RSS requires readable Linux /proc/self/statm and a valid page size.",
+                     "{\"calls\":" + std::to_string(options.iterations) + "}");
+    return;
+  }
+  auto const peak_before = peak_rss_kib();
   for (std::size_t index = 0; index < options.iterations; ++index)
     static_cast<void>(tool->executor(context, services, call));
-  auto const after = peak_rss_kib();
-  emit(static_cast<double>(after - before), "peak_rss_growth_kib",
-       "{\"calls\":" + std::to_string(options.iterations) + ",\"peak_before_kib\":" + std::to_string(before) + ",\"peak_after_kib\":" + std::to_string(after) +
-           "}");
+  auto const current_after = current_resident_rss();
+  auto const peak_after = peak_rss_kib();
+  if (!current_after)
+  {
+    emit_unsupported("procfs_statm_unavailable", "Current resident RSS requires readable Linux /proc/self/statm and a valid page size.",
+                     "{\"calls\":" + std::to_string(options.iterations) + "}");
+    return;
+  }
+  emit(current_after->kib - current_before->kib, "current_rss_delta_kib",
+       "{\"calls\":" + std::to_string(options.iterations) +
+           ",\"measurement\":\"current_resident_rss_after_minus_before\",\"current_rss_source\":\"/proc/self/statm\",\"page_size_bytes\":" +
+           std::to_string(current_before->page_size_bytes) + ",\"current_before_kib\":" + std::to_string(current_before->kib) +
+           ",\"current_after_kib\":" + std::to_string(current_after->kib) + ",\"peak_high_water_before_kib\":" + std::to_string(peak_before) +
+           ",\"peak_high_water_after_kib\":" + std::to_string(peak_after) + ",\"peak_high_water_delta_kib\":" + std::to_string(peak_after - peak_before) +
+           ",\"platform_fallback\":false}");
+#else
+  auto const peak_before = peak_rss_kib();
+  for (std::size_t index = 0; index < options.iterations; ++index)
+    static_cast<void>(tool->executor(context, services, call));
+  auto const peak_after = peak_rss_kib();
+  emit(static_cast<double>(peak_after - peak_before), "peak_rss_high_water_delta_kib",
+       "{\"calls\":" + std::to_string(options.iterations) + ",\"measurement\":\"peak_rss_high_water_after_minus_before\",\"peak_high_water_before_kib\":" +
+           std::to_string(peak_before) + ",\"peak_high_water_after_kib\":" + std::to_string(peak_after) +
+           ",\"peak_high_water_delta_kib\":" + std::to_string(peak_after - peak_before) + ",\"platform_fallback\":true}");
+#endif
+#endif
 }
 }  // namespace
 

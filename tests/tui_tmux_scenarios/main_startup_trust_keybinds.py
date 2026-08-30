@@ -505,7 +505,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     wait_for_absent(tmux_exe, session, r"› /context|> /context", "context palette dismissed")
     send_keys(tmux_exe, session, "Enter")
     context_freshness = wait_for(
-        tmux_exe, session, r"(?s)Context freshness:.*context_sources=1", "context freshness command"
+        tmux_exe, session, r"(?s)Context freshness:.*context_sources=1.*Enter/Esc close", "context freshness command"
     )
     context_freshness_section = context_freshness.rsplit("Context freshness:", 1)[-1]
     if (
@@ -564,7 +564,8 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         r"(?s)project_trust=trusted project_resources=enabled.*prompt_command\s+project\s+trust-smoke",
         "trusted project prompt command freshness",
     )
-    if "status=current" not in trusted_context or "context_sources=2" not in trusted_context:
+    trusted_context_compact = re.sub(r"\s+", "", trusted_context)
+    if "status=current" not in trusted_context_compact or "context_sources=2" not in trusted_context_compact:
         raise RuntimeError(f"/context did not retain trusted instruction-source diagnostics\nscreen:\n{trusted_context}")
 
     send_keys(tmux_exe, session, "C-u")

@@ -29,11 +29,11 @@ recorded commands have passed.
 | M0.2 | Reproducible startup, RSS, dispatch, plugin, catalog, session, cancellation, cleanup, and memory harness | Performance Engineer | completed | `scripts/benchmark-backend.py`; `tests/backend_benchmark_helper.cpp`; `tests/backend_benchmark_test.py`; `tests/CMakeLists.txt`; `docs/development/backend-benchmarking.md` | Release and BetaTest `ava_benchmark.harness_self_test` + `ava_benchmark.smoke`; five-run baseline schema v2 | `8fab13fe`, `971327fb` | Machine-cold startup, persistent-worker warmth, selective routing, and indexed sessions remain explicitly unsupported before their owning milestones |
 | M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | completed | `docs/engineering/performance-baseline.md`; `docs/engineering/backend-performance-baseline-2026-08-30.json` | Release baseline, 5 runs, exact artifacts/hashes/source/build/host identity, raw RSS snapshots, median/p95/max | `6999441f` | Same-host 20% investigation trigger is non-gating; provenance is best-effort and cold-cache control unavailable |
 | M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | completed | `tests/CMakeLists.txt`; harness smoke checks | Default CTest registration; Release and BetaTest smoke pass; helper omission has a negative test | `8fab13fe`, `971327fb` | Coarse catastrophic ceilings intentionally do not gate microbenchmark deltas |
-| M1.1 | Define process ownership identifiers and supervisor API | Process Lifecycle Architect + coordinator | active | ADR/API plan pending | Architecture, security, and dependency-boundary investigation active | pending | Cross-subsystem ownership compatibility |
-| M1.2 | Implement cross-platform process groups/tree cleanup | Process Lifecycle Engineer | active | design pending | POSIX race/threat analysis active; Windows support boundary under review | pending | Windows Job Objects and POSIX race handling |
-| M1.3 | Migrate every process-spawning subsystem | Process Lifecycle Engineer + subsystem owners | not started | pending | pending | Browser/editor and specialized sealed-bash paths need compatible migration |
-| M1.4 | Add bounded, secret-safe process diagnostics | Process Lifecycle Engineer | not started | pending | pending | Diagnostic cardinality and redaction |
-| M1.5 | Add leak, cancellation, timeout, descendant, and shutdown tests | Process Test Engineer | active | fixture/test plan pending | Existing fake/process seam inventory active | pending | Platform-specific coverage |
+| M1.1 | Define process ownership identifiers and supervisor API | Process Lifecycle Architect + coordinator | completed | [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md) | Accepted ADR; source Markdown links, documentation structure, and textual diff checks passed | pending | Implementation evidence remains in M1.2–M1.5 |
+| M1.2 | Implement managed Linux/POSIX process groups and tree cleanup; retain the future Windows contract without a support claim | Process Lifecycle Engineer | active | Design: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md) | Reservation/gate/group/reap contract accepted; implementation and platform tests active | pending | `setsid` escape and unkillable-process limits are explicit; Windows Job Objects remain deferred |
+| M1.3 | Migrate every process-spawning subsystem | Process Lifecycle Engineer + subsystem owners | not started | Migration matrix: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#api-and-authority-contract) | Five-wave migration and compatibility plan accepted; implementation evidence pending | pending | Browser/editor and secure bash/Mermaid adoption require dedicated migration tests |
+| M1.4 | Add bounded, secret-safe process diagnostics | Process Lifecycle Engineer | not started | Diagnostic contract: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#diagnostics-output-and-deadline-ownership) | Closed content-free schema and bounds accepted; implementation evidence pending | pending | Trace adaptation must preserve aliases and aggregate-only support export |
+| M1.5 | Add leak, cancellation, timeout, descendant, and shutdown tests | Process Test Engineer | active | Verification plan: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#migration-and-verification) | Exact-reap, descendant, environment-canary, PTY, platform, and benchmark plan accepted; fixtures/tests active | pending | POSIX CI and PTY coverage remain required; Windows tests follow future support |
 | M2.1 | Document and compatibility-test existing plugin protocol | Plugin Runtime Engineer | not started | pending | pending | Legacy protocol ambiguity |
 | M2.2 | Implement lazy, persistent, scoped plugin worker manager | Plugin Runtime Engineer | not started | pending | pending | Concurrency, restart, and trust-scope isolation |
 | M2.3 | Preserve one-shot plugin compatibility | Plugin Runtime Engineer | not started | pending | pending | Legacy behavior parity |
@@ -87,8 +87,9 @@ recorded commands have passed.
 ## Review finding ledger
 
 The integrated M0 review used the default reviewer on the complete mapping, harness,
-and baseline delta. Findings keep stable IDs and one of: `open`, `fixed`, `rejected`,
-or `deferred`.
+and baseline delta. M1 planning findings record accepted design gates; `fixed` means the
+design blocker is resolved, not that implementation is complete. Findings keep stable
+IDs and one of: `open`, `fixed`, `rejected`, or `deferred`.
 
 | Finding | Milestone | Status | Evidence / resolution |
 |---|---|---|---|
@@ -100,6 +101,9 @@ or `deferred`.
 | M0-R6 | M0 | fixed | Native registry timing now performs exact lookup of the final built-in and emits `ns_per_lookup`; catalog timing is labeled composite. |
 | M0-R7 | M0 | fixed | M0 rows now identify final files, tests, benchmark evidence, commits, and calibrated residual risks. |
 | M0-D1 | M0 | fixed | A full-suite-only `ESRCH` was traced to `/proc/<pid>/stat` disappearing between open and read in `parallel_test_runner_test.py`; the test now accepts only `ENOENT`/`ESRCH` as successful process disappearance. The focused test passed 100 consecutive runs and the full suite passed afterward. |
+| M1-GATE-001 | M1 | fixed | [Managed-group lifecycle and platform scope](process-supervisor-adr.md#m1-gate-001) are accepted: strong Linux/POSIX managed-group cleanup, explicit escape/non-guarantees, and no current Windows support claim. |
+| M1-GATE-002 | M1 | fixed | [Composition and adoption authority](process-supervisor-adr.md#m1-gate-002) are accepted: application-scoped injection, reservation-before-fork, gated common spawn/secure adoption, sole reap authority, and zero dependency exceptions. |
+| M1-GATE-003 | M1 | fixed | [Exceptional-family and privacy policy](process-supervisor-adr.md#m1-gate-003) is accepted: exact environments, private content-free diagnostics, editor terminal handoff, direct browser supervision, and required canary/PTTY tests. |
 
 ## M0 validation evidence
 
@@ -123,7 +127,7 @@ or `deferred`.
 | Milestone | Commit | Scope |
 |---|---|---|
 | M0 | `3d4349ef`, `8fab13fe`, `971327fb`, `6999441f` | Current-state map, benchmark harness/smoke, review fixes, baseline evidence, and reliability-test fix |
-| M1 | pending | Unified process supervisor |
+| M1 | pending | Accepted process-supervisor ADR; implementation and migration evidence pending |
 | M2 | pending | Persistent plugin workers |
 | M3 | pending | Selective tool catalog and router |
 | M4 | pending | Bounded sessions, index, payloads, receipts |

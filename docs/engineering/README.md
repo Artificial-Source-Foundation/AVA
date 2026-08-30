@@ -9,6 +9,8 @@ replacement for current architecture or policy.
   program ledger and its acceptance-evidence record.
 - [Backend current state](backend-current-state.md): M0.1 ownership, process,
   tool-call, session, cancellation, and memory-retention inventory.
+- [Process supervisor ADR](process-supervisor-adr.md): accepted M1 ownership,
+  lifecycle, platform, environment, migration, and verification contract.
 - [Backend performance baseline](performance-baseline.md): M0.3 measured results,
   calibrated regression policy, and unsupported-result disclosures.
 - [Backend performance baseline JSON](backend-performance-baseline-2026-08-30.json):

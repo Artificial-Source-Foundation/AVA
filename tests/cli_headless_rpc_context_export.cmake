@@ -24,11 +24,13 @@ endif()
 
 get_filename_component(TEST_ROOT "${AVA_CLI_TEST_ROOT}" ABSOLUTE)
 set(WORKSPACE "${TEST_ROOT}/workspace")
+set(CURRENT_DIR "${WORKSPACE}/nested")
 set(INPUT_FILE "${TEST_ROOT}/rpc-input.jsonl")
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
-file(MAKE_DIRECTORY "${WORKSPACE}" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
+file(MAKE_DIRECTORY "${CURRENT_DIR}" "${TEST_ROOT}/home" "${TEST_ROOT}/config" "${TEST_ROOT}/state" "${TEST_ROOT}/data")
 file(REAL_PATH "${WORKSPACE}" REAL_WORKSPACE)
+file(REAL_PATH "${CURRENT_DIR}" REAL_CURRENT_DIR)
 file(WRITE "${WORKSPACE}/AGENTS.md" "# Headless Context\n\ncontext export smoke marker\n")
 file(WRITE "${INPUT_FILE}"
      "{\"id\":\"state\",\"type\":\"get_state\",\"protocol_version\":1}\n"
@@ -42,7 +44,7 @@ execute_process(
           "XDG_STATE_HOME=${TEST_ROOT}/state"
           "XDG_DATA_HOME=${TEST_ROOT}/data"
           "NO_COLOR=1"
-          "${AVA_EXE}" --rpc
+          "${AVA_EXE}" --cwd nested --rpc
   WORKING_DIRECTORY "${WORKSPACE}"
   INPUT_FILE "${INPUT_FILE}"
   OUTPUT_VARIABLE AVA_OUTPUT
@@ -59,6 +61,7 @@ foreach(NEEDLE
         "\"id\":\"state\""
         "\"success\":true"
         "\"workspace_dir\":\"${REAL_WORKSPACE}\""
+        "\"current_dir\":\"${REAL_CURRENT_DIR}\""
         "\"context_source_count\":1"
         "\"context_sources\":["
         "\"source_type\":\"workspace\""

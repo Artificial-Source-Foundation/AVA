@@ -55,6 +55,7 @@ void print_help()
   std::cout << "  ava --fork <id>\n";
   std::cout << "  ava --name <name>\n";
   std::cout << "  ava --session-dir <dir>\n";
+  std::cout << "  ava --cwd <path>\n";
   std::cout << "  ava --no-session\n";
   std::cout << "  ava --offline\n";
   std::cout << "  ava --trace  # write a private bounded production trace\n";
@@ -81,7 +82,7 @@ bool stdout_is_tty()
 bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
-         arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
+         arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" || arg == "--cwd" ||
          arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" ||
          arg == "--append-system-prompt" || arg == "--line-shell" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" ||
          arg == "--output" || arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
@@ -168,6 +169,20 @@ void prepend_file_arguments_to_prompt(std::optional<std::string>& prompt, std::v
     combined += *prompt;
   }
   prompt = std::move(combined);
+}
+
+// Compare the normalized logical string forms of `path` and `root` without resolving symlinks.
+//
+// Returns true when `path` equals `root` or is below it at a path-component boundary.
+bool logical_path_is_within(std::filesystem::path const& path, std::filesystem::path const& root)
+{
+  auto const path_text = path.lexically_normal().string();
+  auto const root_text = root.lexically_normal().string();
+  if (path_text == root_text)
+    return true;
+  if (root_text == "/")
+    return path_text.starts_with('/');
+  return path_text.size() > root_text.size() && path_text.starts_with(root_text) && path_text[root_text.size()] == '/';
 }
 
 std::string_view exit_status_text(int status, bool sessionless)
@@ -290,6 +305,7 @@ int run(int argc, char** argv)
   std::optional<std::string> fork_session_id;
   std::optional<std::string> initial_session_name;
   std::optional<std::filesystem::path> session_dir;
+  std::optional<std::filesystem::path> requested_current_dir;
   bool continue_last_session = false;
   bool sessionless = false;
   bool offline = false;
@@ -643,6 +659,15 @@ int run(int argc, char** argv)
       session_dir = std::filesystem::path(argv[++index]);
       continue;
     }
+    if (arg == "--cwd")
+    {
+      if (index + 1 >= argc || is_cli_option(argv[index + 1]))
+      {
+        return fatal_error(2, "--cwd requires a path");
+      }
+      requested_current_dir = std::filesystem::path(argv[++index]);
+      continue;
+    }
     if (arg == "--continue" || arg == "--resume" || arg == "-c" || arg == "-r")
     {
       continue_last_session = true;
@@ -761,14 +786,6 @@ int run(int argc, char** argv)
     runtime_paths.sessions_dir = resolved_session_dir.lexically_normal();
   }
 
-  auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(runtime_paths, trace_requested);
-  if (!diagnostics)
-  {
-    if (trace_requested)
-      return fatal_error(1, "trace startup failed: private diagnostics storage is unavailable.");
-    return fatal_error(1, "runtime diagnostics startup failed.");
-  }
-
   ava::app::runtime::OpenContext open_context;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
@@ -778,6 +795,23 @@ int run(int argc, char** argv)
   }
   open_context.workspace_dir = std::move(*cwd);
   open_context.current_dir = open_context.workspace_dir;
+  if (requested_current_dir)
+  {
+    auto const candidate = requested_current_dir->is_absolute() ? requested_current_dir->lexically_normal()
+                                                                : (open_context.workspace_dir / *requested_current_dir).lexically_normal();
+    if (!logical_path_is_within(candidate, open_context.workspace_dir))
+      return fatal_error(2, "--cwd must be equal to or inside the workspace directory");
+    open_context.current_dir = candidate;
+  }
+
+  auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(runtime_paths, trace_requested);
+  if (!diagnostics)
+  {
+    if (trace_requested)
+      return fatal_error(1, "trace startup failed: private diagnostics storage is unavailable.");
+    return fatal_error(1, "runtime diagnostics startup failed.");
+  }
+
   open_context.mode = mode;
   open_context.tool_visibility = std::move(tool_visibility);
   open_context.paths = runtime_paths;

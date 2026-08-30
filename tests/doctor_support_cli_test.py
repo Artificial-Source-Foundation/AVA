@@ -329,6 +329,11 @@ def test_usage_and_required_failure(ava: Path, root: Path) -> None:
         assert completed.stdout == ""
         assert completed.stderr.startswith(f"Usage: {ava} ")
 
+    outside_cwd = run(ava, ["--cwd", f"{workspace}-sibling", "--rpc"], env, workspace)
+    assert outside_cwd.returncode == 2
+    assert outside_cwd.stdout == ""
+    assert outside_cwd.stderr == f"{ava}: --cwd must be equal to or inside the workspace directory\n"
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()

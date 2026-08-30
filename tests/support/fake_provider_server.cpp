@@ -1,9 +1,12 @@
+#include "process_gate.h"
 #include "test_timeout.h"
 
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <arpa/inet.h>
@@ -22,6 +26,8 @@
 #include <unistd.h>
 
 namespace {
+
+constexpr char process_gate_fd_environment[] = "AVA_TEST_CONTROL_FD";
 
 class Fd
 {
@@ -59,10 +65,29 @@ std::string errno_text()
   return std::strerror(errno);
 }
 
+// Adopt the optional harness control descriptor supplied to this directly launched fixture.
+//
+// The environment communicates only the inherited descriptor number. Absence leaves standalone fake-provider launches
+// unchanged; malformed values fail before the provider publishes its listening port.
+std::optional<ava::test::ProcessGateSet> process_gates_from_environment()
+{
+  char const* value = std::getenv(process_gate_fd_environment);
+  if (value == nullptr || *value == '\0')
+    return std::nullopt;
+  int descriptor = -1;
+  char const* end = value + std::strlen(value);
+  auto const [parsed_end, error] = std::from_chars(value, end, descriptor);
+  if (error != std::errc{} || parsed_end != end || descriptor < 0)
+    throw std::runtime_error(std::string(process_gate_fd_environment) + " must contain a nonnegative inherited descriptor");
+  return ava::test::ProcessGateSet(descriptor);
+}
+
 std::string_view trim_ascii(std::string_view text)
 {
-  while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
-  while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) text.remove_suffix(1);
+  while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+    text.remove_prefix(1);
+  while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r'))
+    text.remove_suffix(1);
   return text;
 }
 
@@ -674,6 +699,16 @@ int main(int argc, char** argv)
   auto const delay = std::chrono::milliseconds(std::stoi(argv[3]));
   std::string const scenario = argc == 6 ? argv[4] : "text";
   std::string const target_path = argc == 6 ? argv[5] : "";
+  std::optional<ava::test::ProcessGateSet> process_gates;
+  try
+  {
+    process_gates = process_gates_from_environment();
+  }
+  catch (std::exception const& error)
+  {
+    std::cerr << error.what() << '\n';
+    return 2;
+  }
   int const request_count =
       scenario == "http-error"                 ? 3
       : scenario == "branch-summary"           ? 12
@@ -747,6 +782,9 @@ int main(int argc, char** argv)
       std::ofstream file(request_log, std::ios::binary | std::ios::app);
       file << "--- request " << (request_index + 1) << " ---\n" << request << '\n';
     }
+    // Publish request receipt without requiring the harness to be waiting yet; gate N corresponds to zero-based request N.
+    if (process_gates)
+      process_gates->open(static_cast<std::size_t>(request_index));
     if (scenario == "streaming-scroll" && request_index == 0)
     {
       if (!send_streaming_scroll_response(client.get(), request, delay, target_path))

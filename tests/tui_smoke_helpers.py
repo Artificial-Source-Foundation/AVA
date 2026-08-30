@@ -23,6 +23,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
+from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
+from test_timing_trace import timed_operation, timing_poll
+
 
 SKIP = 77
 # Footer value emitted by AVA's active-context meter: a known model-window
@@ -100,6 +103,7 @@ class TmuxClient:
             )
         return result
 
+    @timed_operation("cleanup", label_argument=None, default_label="tmux server cleanup")
     def close(self) -> None:
         self.run(["kill-server"], check=False)
 
@@ -129,11 +133,13 @@ def pane_current_command(tmux_client: TmuxClient, session: str) -> str:
     return tmux(tmux_client, "display-message", "-p", "-t", session, "#{pane_current_command}").stdout.strip()
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for(tmux_client: TmuxClient, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
     compiled = re.compile(pattern)
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -144,6 +150,7 @@ def wait_for(tmux_client: TmuxClient, session: str, pattern: str, label: str, ti
     raise RuntimeError(f"timed out waiting for {label}; expected /{pattern}/\nlast screen:\n{last}")
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_count(
     tmux_client: TmuxClient, session: str, pattern: str, expected_count: int, label: str, timeout: float = 8.0
 ) -> str:
@@ -151,6 +158,7 @@ def wait_for_count(
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -163,11 +171,13 @@ def wait_for_count(
     )
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_absent(tmux_client: TmuxClient, session: str, pattern: str, label: str, timeout: float = 8.0) -> str:
     compiled = re.compile(pattern)
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -178,6 +188,7 @@ def wait_for_absent(tmux_client: TmuxClient, session: str, pattern: str, label: 
     raise RuntimeError(f"timed out waiting for {label}; still matched /{pattern}/\nlast screen:\n{last}")
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_screen_change(
     tmux_client: TmuxClient, session: str, previous: str, label: str, timeout: float = 8.0
 ) -> str:
@@ -186,6 +197,7 @@ def wait_for_screen_change(
     deadline = time.monotonic() + timeout
     last = previous
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -196,6 +208,7 @@ def wait_for_screen_change(
     raise RuntimeError(f"timed out waiting for {label}; screen did not change\nlast screen:\n{last}")
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_screen_state(
     tmux_client: TmuxClient,
     session: str,
@@ -208,6 +221,7 @@ def wait_for_screen_state(
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -218,6 +232,7 @@ def wait_for_screen_state(
     raise RuntimeError(f"timed out waiting for {label}\nlast screen:\n{last}")
 
 
+@timed_operation("observation", label_argument="label")
 def assert_screen_absent_for(
     tmux_client: TmuxClient, session: str, pattern: str, label: str, duration: float = 0.4
 ) -> str:
@@ -227,6 +242,7 @@ def assert_screen_absent_for(
     deadline = time.monotonic() + duration
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -237,6 +253,7 @@ def assert_screen_absent_for(
     return last
 
 
+@timed_operation("observation", label_argument="label")
 def assert_screen_present_for(
     tmux_client: TmuxClient, session: str, pattern: str, label: str, duration: float = 0.4
 ) -> str:
@@ -246,6 +263,7 @@ def assert_screen_present_for(
     deadline = time.monotonic() + duration
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast screen:\n{last}")
@@ -260,12 +278,14 @@ def pane_cursor_position(tmux_client: TmuxClient, session: str) -> str:
     return tmux(tmux_client, "display-message", "-p", "-t", session, "#{cursor_x},#{cursor_y}").stdout.strip()
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_cursor_change(
     tmux_client: TmuxClient, session: str, previous: str, label: str, timeout: float = 8.0
 ) -> str:
     deadline = time.monotonic() + timeout
     last = previous
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast cursor position: {last}")
@@ -277,6 +297,7 @@ def wait_for_cursor_change(
     raise RuntimeError(f"timed out waiting for {label}; cursor remained at {last}\nscreen:\n{screen}")
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_pane_command(
     tmux_client: TmuxClient, session: str, pattern: str, label: str, timeout: float = 8.0
 ) -> str:
@@ -284,6 +305,7 @@ def wait_for_pane_command(
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         status = tmux(tmux_client, "has-session", "-t", session, check=False)
         if status.returncode != 0:
             raise RuntimeError(f"tmux session exited before {label}\nlast pane command:\n{last}")
@@ -315,6 +337,7 @@ def selected_modal_identity(row: str) -> str:
     return re.sub(r"^›\s+(?:[●✓]\s+)?", "", row)
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_selected_modal_change(
     tmux_client: TmuxClient, session: str, previous: str, label: str, timeout: float = 8.0
 ) -> tuple[str, str]:
@@ -322,6 +345,7 @@ def wait_for_selected_modal_change(
     last_screen = ""
     last_row = ""
     while time.monotonic() < deadline:
+        timing_poll()
         last_screen = capture(tmux_client, session)
         last_row = selected_modal_row(last_screen)
         if last_row and last_row != previous:
@@ -333,9 +357,11 @@ def wait_for_selected_modal_change(
     )
 
 
+@timed_operation("wait", label_argument=None, default_label="tmux session exit")
 def wait_for_session_exit(tmux_client: TmuxClient, session: str, timeout: float = 8.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        timing_poll()
         if tmux(tmux_client, "has-session", "-t", session, check=False).returncode != 0:
             return
         time.sleep(0.1)
@@ -343,10 +369,12 @@ def wait_for_session_exit(tmux_client: TmuxClient, session: str, timeout: float 
     raise RuntimeError(f"tmux session did not exit\nscreen:\n{screen}")
 
 
+@timed_operation("provider_wait", label_argument="label")
 def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, timeout: float = 8.0) -> str:
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         if path.exists():
             last = path.read_text(encoding="utf-8", errors="replace")
             if last.count("--- request ") >= expected_count:
@@ -357,11 +385,13 @@ def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, 
     )
 
 
+@timed_operation("wait", label_argument="label")
 def wait_for_json_file(path: pathlib.Path, predicate: Callable[[object], bool], label: str, timeout: float = 8.0) -> str:
     deadline = time.monotonic() + timeout
     last = ""
     last_error = "file does not exist"
     while time.monotonic() < deadline:
+        timing_poll()
         if path.exists():
             last = path.read_text(encoding="utf-8", errors="replace")
             try:
@@ -375,10 +405,12 @@ def wait_for_json_file(path: pathlib.Path, predicate: Callable[[object], bool], 
     raise RuntimeError(f"timed out waiting for {label}; {last_error}\nlast content:\n{last}")
 
 
+@timed_operation("observation", label_argument="label")
 def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: str, duration: float = 1.2) -> str:
     deadline = time.monotonic() + duration
     last = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     while time.monotonic() < deadline:
+        timing_poll()
         if path.exists():
             last = path.read_text(encoding="utf-8", errors="replace")
         count = last.count("--- request ")
@@ -392,6 +424,13 @@ def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: s
 
 @dataclass
 class FakeProvider:
+    """Own one fake-provider process and its harness-side control gates.
+
+    The provider opens gate N after recording zero-based HTTP request N. Tests
+    may also open gates in the reverse direction for scenario-specific barriers;
+    stopping the provider closes the control endpoint after process cleanup.
+    """
+
     root: pathlib.Path
     name: str
     process: subprocess.Popen[str]
@@ -399,6 +438,7 @@ class FakeProvider:
     request_log: pathlib.Path
     stdout_path: pathlib.Path
     stderr_path: pathlib.Path
+    gates: ProcessGateSet
     _stdout: object
     _stderr: object
 
@@ -406,6 +446,7 @@ class FakeProvider:
     def port(self) -> str:
         return self.port_file.read_text(encoding="utf-8").strip()
 
+    @timed_operation("cleanup", label_argument="name", default_label="fake provider cleanup")
     def stop(self) -> None:
         if self.process.poll() is None:
             try:
@@ -427,6 +468,7 @@ class FakeProvider:
             self._stdout.close()
         if not self._stderr.closed:
             self._stderr.close()
+        self.gates.close()
 
 
 @dataclass
@@ -463,6 +505,7 @@ class SmokeContext:
     _providers: list[FakeProvider] = field(default_factory=list, init=False)
     _closed: bool = field(default=False, init=False)
 
+    @timed_operation("setup", label_argument=None, default_label="smoke context setup")
     def __post_init__(self) -> None:
         try:
             self._prepare_root()
@@ -705,6 +748,7 @@ class SmokeContext:
             },
         )
 
+    @timed_operation("setup", label_argument="session", default_label="AVA tmux launch")
     def launch_ava(
         self,
         session: str,
@@ -729,6 +773,7 @@ class SmokeContext:
             command,
         )
 
+    @timed_operation("setup", label_argument="name", default_label="fake provider startup")
     def start_fake_provider(
         self,
         name: str,
@@ -737,6 +782,14 @@ class SmokeContext:
         scenario: str = "text-three",
         target: str | pathlib.Path = "",
     ) -> FakeProvider:
+        """Launch an isolated provider with one inherited process-gate endpoint.
+
+        ``name`` selects private fixture artifacts, ``delay_ms`` and ``scenario``
+        configure responses, and ``target`` supplies an optional fixture path.
+        The returned owner exposes persistent bidirectional gates and guarantees
+        that only the child retains its endpoint after ``Popen`` succeeds.
+        """
+
         port_file = self.root / f"{name}-provider.port"
         request_log = self.root / f"{name}-provider-requests.log"
         stdout_path = self.root / f"{name}-provider.out"
@@ -745,15 +798,37 @@ class SmokeContext:
         request_log.unlink(missing_ok=True)
         stdout = stdout_path.open("w", encoding="utf-8")
         stderr = stderr_path.open("w", encoding="utf-8")
-        process = subprocess.Popen(
-            [str(self.fake_provider_exe), str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
-            stdout=stdout,
-            stderr=stderr,
-            env=self._environment,
-            start_new_session=True,
-            text=True,
+        gate_pair = create_process_gate_pair()
+        provider_environment = self._environment.copy()
+        provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
+        try:
+            process = subprocess.Popen(
+                [str(self.fake_provider_exe), str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
+                stdout=stdout,
+                stderr=stderr,
+                env=provider_environment,
+                pass_fds=(gate_pair.child_fd,),
+                start_new_session=True,
+                text=True,
+            )
+        except BaseException:
+            gate_pair.close()
+            stdout.close()
+            stderr.close()
+            raise
+        gate_pair.close_child_endpoint()
+        provider = FakeProvider(
+            self.root,
+            name,
+            process,
+            port_file,
+            request_log,
+            stdout_path,
+            stderr_path,
+            gate_pair.gates,
+            stdout,
+            stderr,
         )
-        provider = FakeProvider(self.root, name, process, port_file, request_log, stdout_path, stderr_path, stdout, stderr)
         self._providers.append(provider)
         deadline = time.monotonic() + 8.0
         while not port_file.exists():
@@ -790,6 +865,7 @@ class SmokeContext:
             extra["NO_COLOR"] = "1"
         return self.pane_command(home=home, config=config, state=state, data=data, extra=extra)
 
+    @timed_operation("cleanup", label_argument=None, default_label="smoke context cleanup")
     def close(self) -> None:
         if self._closed:
             return

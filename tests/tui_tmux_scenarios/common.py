@@ -7,6 +7,8 @@ import pathlib
 import re
 import time
 
+from test_timing_trace import timed_operation, timing_poll
+
 from tui_smoke_helpers import (
     SmokeContext,
     capture,
@@ -56,10 +58,12 @@ def _request_count_diagnostic(request_log: str) -> str:
     return f"normal conversation turns={turns}; total provider requests={total}"
 
 
+@timed_operation("provider_wait", label_argument="label")
 def _wait_for_normal_turn_request_count(path: pathlib.Path, expected_count: int, label: str, timeout: float = 8.0) -> str:
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
+        timing_poll()
         if path.exists():
             last = path.read_text(encoding="utf-8", errors="replace")
             turns, _ = _request_counts(last)
@@ -72,10 +76,12 @@ def _wait_for_normal_turn_request_count(path: pathlib.Path, expected_count: int,
     )
 
 
+@timed_operation("observation", label_argument="label")
 def _assert_normal_turn_request_count_stays(path: pathlib.Path, expected_count: int, label: str, duration: float = 1.2) -> str:
     deadline = time.monotonic() + duration
     last = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     while time.monotonic() < deadline:
+        timing_poll()
         if path.exists():
             last = path.read_text(encoding="utf-8", errors="replace")
         turns, _ = _request_counts(last)

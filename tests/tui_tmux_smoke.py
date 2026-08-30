@@ -10,6 +10,7 @@ import shutil
 import signal
 import sys
 
+from test_timing_trace import configure_test_timing, timing_span
 from tui_smoke_helpers import SKIP, SmokeContext, enabled
 from tui_tmux_scenarios import SCENARIOS, SCENARIO_HANDLERS
 
@@ -42,6 +43,8 @@ def main() -> int:
     if not fake_mermaid_helper_exe.exists():
         raise RuntimeError(f"fake Mermaid helper executable does not exist: {fake_mermaid_helper_exe}")
 
+    timing_trace = configure_test_timing(f"ava_tui.tmux_smoke_{args.scenario}")
+    timing_outcome = "failure"
     context: SmokeContext | None = None
 
     def stop_scenario(signum: int, _frame: object) -> None:
@@ -58,20 +61,24 @@ def main() -> int:
         signal.alarm(50)
 
     try:
-        context = SmokeContext(
-            scenario=args.scenario,
-            root=pathlib.Path(args.root),
-            ava_exe=ava_exe,
-            fake_provider_exe=fake_provider_exe,
-            fake_mermaid_helper_exe=fake_mermaid_helper_exe,
-            tmux_exe=tmux_exe,
-        )
-        SCENARIO_HANDLERS[args.scenario](context)
+        with timing_span("scenario", "smoke scenario"):
+            context = SmokeContext(
+                scenario=args.scenario,
+                root=pathlib.Path(args.root),
+                ava_exe=ava_exe,
+                fake_provider_exe=fake_provider_exe,
+                fake_mermaid_helper_exe=fake_mermaid_helper_exe,
+                tmux_exe=tmux_exe,
+            )
+            SCENARIO_HANDLERS[args.scenario](context)
+        timing_outcome = "success"
     finally:
         if hasattr(signal, "SIGALRM"):
             signal.alarm(0)
         if context is not None:
             context.close()
+        if timing_trace is not None:
+            timing_trace.close(timing_outcome)
     return 0
 
 

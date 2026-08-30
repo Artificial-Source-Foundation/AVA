@@ -53,7 +53,18 @@ ava_apply_debugging(ava_fake_mermaid_helper)
 ava_apply_warnings(ava_fake_mermaid_helper)
 ava_apply_sanitizers(ava_fake_mermaid_helper)
 
+add_library(ava_process_gate_test_support "support/process_gate.cpp")
+target_include_directories(ava_process_gate_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/support)
+ava_apply_warnings(ava_process_gate_test_support)
+ava_apply_sanitizers(ava_process_gate_test_support)
+
+add_executable(ava_process_gate_peer "support/process_gate_peer.cpp")
+target_link_libraries(ava_process_gate_peer PRIVATE ava_process_gate_test_support)
+ava_apply_warnings(ava_process_gate_peer)
+ava_apply_sanitizers(ava_process_gate_peer)
+
 add_executable(ava_fake_provider_server "support/fake_provider_server.cpp")
+target_link_libraries(ava_fake_provider_server PRIVATE ava_process_gate_test_support)
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
@@ -593,6 +604,19 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
 endif()
 if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME ava_tests.process_gate
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/process_gate_test.py
+            --peer $<TARGET_FILE:ava_process_gate_peer>)
+  set_tests_properties(ava_tests.process_gate PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.test_timing_trace
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_timing_trace_test.py)
+  set_tests_properties(ava_tests.test_timing_trace PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
   add_test(
     NAME ava_debug.generate_print_members
     COMMAND ${Python3_EXECUTABLE}

@@ -39,6 +39,23 @@ LIBCWD_NO_STARTUP_MSGS=1 AVA_NO_DEBUG_OUTPUT=1 \
 
 Treat these logs as private diagnostic artifacts because enabled channels may contain process or test details.
 
+## Per-Test Python Harness Timing Traces
+
+Set `AVA_TEST_TIMING_DIR` to an absolute directory to diagnose time spent inside the Python tmux smoke harness without writing timing output to AVA, tmux panes, stdout, or stderr. Unset or empty disables tracing, and a relative path is rejected. The harness creates an absent directory with mode 0700, rejects a final symlink, and opens each trace as a private mode-0600 file. Existing directory permissions are not changed.
+
+Each enabled test invocation writes a separate JSONL file named from CTest's sanitized `AVA_TEST_NAME`, the harness PID, and a random run ID, for example `ava_tui.tmux_smoke_active_run.12345.<run-id>.timing.jsonl`. The PID and run ID prevent parallel or repeated invocations from overwriting one another. If the harness is run outside CTest, its scenario-derived test name is used instead. Records use monotonic elapsed times and include begin/end events, duration, outcome, and polling count for scenario setup and cleanup, tmux state waits, fake-provider request waits, and bounded negative-observation windows. Every record is flushed immediately, so an interrupted run retains its last started or completed phase. Exception messages, terminal captures, regular expressions, provider requests, and filesystem paths are not recorded.
+
+For one scenario:
+
+```sh
+mkdir -p build/test-timings
+chmod 700 build/test-timings
+AVA_TUI_TMUX_SMOKE=1 AVA_TEST_TIMING_DIR="$PWD/build/test-timings" \
+  scripts/run-tests.sh --build-dir build -R '^ava_tui\.tmux_smoke_active_run$' --output-on-failure
+```
+
+Use a distinct or empty timing directory when comparing runs, or group records by their `run_id`. The trace measures harness-visible phases; it does not enable libcwd output and has no chronological merge contract with files under `AVA_DEBUG_OUTPUT_DIR`. Instrument AVA itself only when these harness records expose unexplained time between an input or provider event and the corresponding observable state.
+
 ## Release Package and Provenance Checks
 
 Focused release provenance/package tests are offline and deterministic:

@@ -87,6 +87,7 @@ These variables are supported by the named repository scripts; they are not AVA 
 | --- | --- |
 | `AVA_CMAKE_COMMAND` | `scripts/build.sh`: CMake executable/wrapper; defaults to `cmake`. Primarily a runner test seam. |
 | `AVA_CTEST_COMMAND` | `scripts/run-tests.sh`: CTest executable/wrapper; defaults to `ctest`. Primarily a runner test seam. |
+| `AVA_TEST_TIMING_DIR` | Python tmux smoke harness: absolute directory for opt-in per-invocation JSONL timing traces. Empty or unset disables tracing; a relative path is rejected. The harness writes directly to private mode-0600 files and does not send timing records through AVA, tmux panes, stdout, or stderr. See [testing](../operations/testing.md#per-test-python-harness-timing-traces). |
 | `AVA_LIVE_PROVIDER_SMOKE` | Explicit opt-in gate for credentialed live-provider CTests, dogfood scripts, and `live-provider-matrix.sh`; use `1`. No live provider runs by default. |
 | `AVA_EXE` | `live-model-dogfood.sh`, `live-coding-dogfood.sh`, and `live-provider-matrix.sh`: AVA executable path. The dogfood scripts default to `./build/ava`; the matrix derives it from its build directory unless set. |
 | `AVA_BUILD_DIR` | `live-provider-matrix.sh`: configured build tree, default `build`; used to derive executables for matrix targets. |

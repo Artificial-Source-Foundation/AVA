@@ -169,6 +169,7 @@ def main() -> int:
                 }
             )
             base_env.pop("AVA_DEBUG_OUTPUT_DIR", None)
+            base_env.pop("AVA_DEBUG_OUTPUT", None)
 
             default_result = run(ava, ["core_mode"], base_env, root)
             require(default_result.returncode == 0, f"default run failed: {default_result.stderr}")

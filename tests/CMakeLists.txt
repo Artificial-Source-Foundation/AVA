@@ -48,6 +48,11 @@ target_link_libraries(ava_fake_mcp_server PRIVATE ${AVA_BACKEND_LIBRARIES})
 ava_apply_warnings(ava_fake_mcp_server)
 ava_apply_sanitizers(ava_fake_mcp_server)
 
+add_executable(ava_fake_process_child "support/fake_process_child.cpp")
+ava_apply_debugging(ava_fake_process_child)
+ava_apply_warnings(ava_fake_process_child)
+ava_apply_sanitizers(ava_fake_process_child)
+
 add_executable(ava_fake_mermaid_helper "support/fake_mermaid_helper.cpp")
 ava_apply_debugging(ava_fake_mermaid_helper)
 ava_apply_warnings(ava_fake_mermaid_helper)
@@ -172,6 +177,8 @@ set(AVA_TESTS_SOURCES
   "permission_rules_tests.cpp"
   "plugin_tests.cpp"
   "plugin_ui_tests.cpp"
+  "process_supervisor_tests.cpp"
+  "process_supervisor_posix_tests.cpp"
   "provider_anthropic_tests.cpp"
   "provider_gemini_tests.cpp"
   "provider_live_smoke_tests.cpp"
@@ -237,9 +244,10 @@ endif()
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
-add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_mermaid_helper ava_fake_provider_server)
+add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_mermaid_helper ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
+target_compile_definitions(ava_tests PRIVATE AVA_FAKE_PROCESS_CHILD_PATH="$<TARGET_FILE:ava_fake_process_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MERMAID_HELPER_PATH="$<TARGET_FILE:ava_fake_mermaid_helper>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
@@ -292,6 +300,8 @@ set(AVA_TEST_SUITES
   lsp
   plugin
   plugin_ui
+  process_supervisor
+  process_supervisor_posix
   mcp
   mermaid_render
   permission_rules
@@ -317,6 +327,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
     ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(ava_tests.process_supervisor_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;offline")
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)
 

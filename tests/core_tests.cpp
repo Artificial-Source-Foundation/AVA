@@ -59,6 +59,8 @@ void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
 void run_plugin_ui_tests();
+void run_process_supervisor_tests();
+void run_process_supervisor_posix_tests();
 void run_mcp_tests();
 void run_mermaid_render_coordinator_tests();
 void run_permission_rules_tests();
@@ -123,6 +125,8 @@ constexpr std::array kTestSuites{
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"plugin_ui", run_plugin_ui_tests},
+    TestSuite{"process_supervisor", run_process_supervisor_tests},
+    TestSuite{"process_supervisor_posix", run_process_supervisor_posix_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"mermaid_render", run_mermaid_render_coordinator_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},

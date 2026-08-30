@@ -157,6 +157,8 @@ def main() -> int:
             private_file(override_rcfile, "channels_on = notice runtime\n")
 
             base_env = os.environ.copy()
+            # Keep routing cases hermetic when the invoking developer has globally opted into debug output.
+            base_env.pop("AVA_DEBUG_OUTPUT", None)
             base_env.update(
                 {
                     "LIBCWD_RCFILE_NAME": str(base_rcfile),

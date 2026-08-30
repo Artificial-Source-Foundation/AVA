@@ -8,12 +8,12 @@ recorded commands have passed.
 
 - Implementation branch: `backend-modernization`
 - Starting commit: `c94ac8631419`
-- Started: 2026-08-06
+- Started: 2026-08-30
 - Coordinator: principal implementation agent
 - Working-tree note: the branch was created while unrelated, pre-existing changes were
-  present under `docs/core/`, `src/ava/agent/`, `src/ava/app/`, and existing tests. Those
-  changes are not owned by this project and must not be overwritten or included in its
-  milestone commits.
+  present under `docs/core/`, `src/ava/agent/`, `src/ava/app/`, and existing tests.
+  Those changes were preserved separately on `primary-agent-selection`; they are not
+  owned by this project and are not included in its milestone commits.
 - Dependency policy: no new production dependency without the review required by the
   project brief.
 
@@ -25,7 +25,7 @@ recorded commands have passed.
 
 | Task | Description | Owner | Status | Files changed | Tests / benchmark evidence | Commit | Remaining risks |
 |---|---|---|---|---|---|---|---|
-| M0.1 | Map backend ownership, process sites, lifecycles, cancellation, and retained data | Architecture Cartographer + coordinator | active | `docs/engineering/backend-current-state.md` (planned) | Repository inventory pending | pending | Dirty parent tree must be kept separate |
+| M0.1 | Map backend ownership, process sites, lifecycles, cancellation, and retained data | Architecture Cartographer + coordinator | completed | `docs/engineering/backend-current-state.md` | Static inventory plus source-link and structure checks | `3d4349ef` | Re-verify if excluded concurrent work is later integrated |
 | M0.2 | Reproducible startup, RSS, dispatch, plugin, catalog, session, cancellation, cleanup, and memory harness | Performance Engineer | active | benchmark sources/docs pending | Baseline commands pending | pending | Stable cross-platform RSS/timing collection |
 | M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | active | `docs/engineering/performance-baseline.md` (planned) | JSON/CSV evidence pending | pending | Host variability; no claims before measurement |
 | M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | not started | pending | CI smoke pending | pending | Avoid noisy blocking thresholds |

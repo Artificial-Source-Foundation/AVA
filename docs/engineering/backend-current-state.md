@@ -9,10 +9,10 @@ sections describe the code as it exists at the starting commit.
 - **Starting commit:** `c94ac8631419` (full: `c94ac863141975806bbab52e950a2f2499108b65`).
   The inventory below was taken from the committed tree at that commit plus the
   ledger-only commit `78ca9a06` (`docs: start backend modernization ledger`), which
-  touches no source files. The main checkout of branch `backend-modernization` carries
-  unrelated pre-existing dirty changes under `docs/core/`, `src/ava/agent/`, and
-  `src/ava/app/` (see the ledger's working-tree note); those changes are **not**
-  reflected here. This document maps the clean committed tree only.
+  touches no source files. The branch was created while unrelated working-tree changes
+  existed under `docs/core/`, `src/ava/agent/`, and `src/ava/app/`; those changes were
+  preserved separately and are **not** reflected here. This document maps the clean
+  committed tree only.
 - **Method:** static source reading of the prompt path, every process-spawning
   subsystem, the session storage stack, and the cancellation/shutdown wiring. No
   benchmarks, RSS measurements, or runtime tracing were performed; every claim is
@@ -239,8 +239,11 @@ implementation in `session_store_append.cpp` / `session_store_authority.cpp`):
   ([src/ava/session/session_store_read.cpp](../../src/ava/session/session_store_read.cpp))
   perform a full lease-bound snapshot (`pread` on the owned lease duplicate; persistent
   reads never reopen by pathname) and materialize a `std::vector<SessionEntry>`.
-  Default runtime policy bounds: 8 MiB file, 1 MiB line, 16384 entries
-  (`SessionReadLimits`); legacy frontends use `legacy_unbounded_session_read_limits()`.
+  `SessionReadLimits` supplies bounded defaults (8 MiB file, 1 MiB line, 16384
+  entries), but normal CLI/TUI/RPC `OpenContext` leaves the override unset and
+  `SessionReadAuthority` therefore uses `legacy_unbounded_session_read_limits()` for
+  file and entry counts while retaining hard line and JSON-depth bounds. Strict
+  adapters can opt into the bounded policy explicitly.
 - Full materializations happen on every provider turn (`build_messages` in
   [src/ava/agent/message_builder.cpp](../../src/ava/agent/message_builder.cpp) calls
   `read_authority.load()`), twice per runtime compaction
@@ -497,14 +500,13 @@ they define what later milestones must preserve or explicitly migrate.
   workload is unmeasured.
 - **Unknown: Windows viability of the process layer** — all spawn sites are POSIX;
   there is no Windows process implementation in the mapped tree.
-- **Working-tree divergence**: the main `backend-modernization` checkout contains
-  unrelated dirty changes under `docs/core/`, `src/ava/agent/`, and `src/ava/app/`
-  (per the ledger). This map reflects the committed tree at `c94ac8631419`; any
-  symbol that the dirty changes rename or move will need re-verification when those
-  changes land.
+- **Excluded concurrent work**: the initial checkout contained unrelated changes under
+  `docs/core/`, `src/ava/agent/`, and `src/ava/app/`; they were preserved separately
+  and are not part of this branch. This map reflects the committed tree at
+  `c94ac8631419`; it must be re-verified if that separate work is later integrated.
 - **Not exhaustively traced:** ACP peer threads
   ([src/ava/app/acp/peer.cpp](../../src/ava/app/acp/peer.cpp) owns raw `std::thread`
   writer/deadline threads) and plugin UI protocol forwarding were identified but not
   deep-mapped; they are frontend-side and do not spawn processes.
 - Line numbers are intentionally absent; all references are file + symbol and were
-  verified against the mapped tree on 2026-08-06.
+  verified against the mapped tree on 2026-08-30.

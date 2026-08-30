@@ -388,7 +388,8 @@ BasePromptMetadata base_prompt_metadata(ava::config::PromptSelection const& prom
 
 ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths const& paths, ava::config::ModelInfo const& model, ava::agent::Mode mode,
                                                          std::filesystem::path const& workspace_dir, std::filesystem::path const& current_dir,
-                                                         bool include_project_resources, PromptOverrides const& prompt_overrides)
+                                                         bool include_project_resources, PromptOverrides const& prompt_overrides,
+                                                         std::optional<ava::agent::SubagentDefinition> const& selected_primary_agent)
 {
   auto const resource_policy = make_extension_resource_policy(paths, workspace_dir, include_project_resources);
   auto prompt = ava::config::select_prompt(paths, model, mode);
@@ -478,6 +479,13 @@ ava::core::Result<PromptState> load_runtime_prompt_state(ava::config::XdgPaths c
       if (!(*append_resource)->text.empty())
         system_prompt += "\n\n" + (*append_resource)->text;
     }
+  }
+
+  if (selected_primary_agent)
+  {
+    system_prompt += "\n\n# Selected Primary Agent Instructions\nAgent: " + selected_primary_agent->name;
+    if (!selected_primary_agent->system_prompt.empty())
+      system_prompt += "\n\n" + selected_primary_agent->system_prompt;
   }
 
   add_prompt_command_freshness_sources(freshness_sources, paths, workspace_dir, include_project_resources);

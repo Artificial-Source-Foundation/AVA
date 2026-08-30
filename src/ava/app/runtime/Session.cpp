@@ -424,8 +424,25 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
     reasoning = latest_persisted_reasoning(*loaded_entries, model);
 
   auto project_trust = load_project_trust_state(context.paths, workspace_dir);
+  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
+  if (context.requested_primary_agent)
+  {
+    auto global_agent_dirs = ava::agent::default_global_subagent_dirs();
+    if (global_agent_dirs.size() >= 2)
+    {
+      global_agent_dirs[0] = context.paths.ava_config_dir / "agents";
+      global_agent_dirs[1] = context.paths.ava_config_dir / "agent";
+    }
+    auto loaded_agents = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir,
+                                                                                    .global_agent_dirs = std::move(global_agent_dirs),
+                                                                                    .include_project_agents = project_resources_trusted(project_trust)});
+    auto resolved = ava::agent::resolve_primary_agent(loaded_agents, *context.requested_primary_agent);
+    if (!resolved)
+      return std::unexpected(std::move(resolved.error()));
+    selected_primary_agent = std::move(*resolved);
+  }
   auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_resources_trusted(project_trust),
-                                                context.prompt_overrides);
+                                                context.prompt_overrides, selected_primary_agent);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
 
@@ -564,9 +581,15 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
     title_coordinator = std::move(*created_coordinator);
   }
 
+  auto effective_tool_visibility = context.tool_visibility;
+  if (selected_primary_agent && selected_primary_agent->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
+    effective_tool_visibility = ava::agent::narrow_tool_visibility_to_read_only(std::move(effective_tool_visibility));
+
   InvocationInputs invocation_inputs{.workspace_dir = workspace_dir,
                                      .current_dir = current_dir,
-                                     .tool_visibility = context.tool_visibility,
+                                     .requested_tool_visibility = context.tool_visibility,
+                                     .tool_visibility = std::move(effective_tool_visibility),
+                                     .selected_primary_agent = std::move(selected_primary_agent),
                                      .paths = context.paths,
                                      .sessionless = sessionless,
                                      .is_offline_ = context.offline,
@@ -806,7 +829,8 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.workspace_dir = workspace_dir();
   context.current_dir = current_dir();
   context.mode = mode();
-  context.tool_visibility = tool_visibility();
+  context.tool_visibility = invocation_inputs().requested_tool_visibility;
+  context.requested_primary_agent = selected_primary_agent() ? std::optional<std::string>(selected_primary_agent()->name) : std::nullopt;
   context.paths = paths();
   context.offline = is_offline();
   context.additional_writable_dirs = additional_writable_dirs();
@@ -908,8 +932,8 @@ ava::core::Result<bool> Session::switch_model(ava::config::ModelInfo model)
   if (this->model().provider_id == model.provider_id && this->model().model_id == model.model_id)
     return false;
 
-  auto prompt_state =
-      load_runtime_prompt_state(paths(), model, mode(), workspace_dir(), current_dir(), project_resources_trusted(project_trust()), prompt_overrides());
+  auto prompt_state = load_runtime_prompt_state(paths(), model, mode(), workspace_dir(), current_dir(), project_resources_trusted(project_trust()),
+                                                prompt_overrides(), selected_primary_agent());
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
 

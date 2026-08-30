@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace ava::core {
@@ -41,6 +42,8 @@ struct OpenContext
   std::filesystem::path current_dir;
   ava::agent::Mode mode = ava::agent::Mode::Build;
   ava::agent::ToolVisibilityOptions tool_visibility;
+  // Invocation-local configured primary agent name. Resolved after project trust is loaded.
+  std::optional<std::string> requested_primary_agent = std::nullopt;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   bool offline = false;
 

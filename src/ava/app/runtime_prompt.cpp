@@ -49,6 +49,7 @@ ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::ses
   std::filesystem::path current_dir;
   bool include_project_resources;
   runtime::PromptOverrides prompt_overrides;
+  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
   {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
     paths = session_r->paths();
@@ -57,8 +58,10 @@ ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::ses
     current_dir = session_r->current_dir();
     include_project_resources = project_resources_trusted(session_r->project_trust());
     prompt_overrides = session_r->prompt_overrides();
+    selected_primary_agent = session_r->selected_primary_agent();
   }
-  return runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, include_project_resources, prompt_overrides);
+  return runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, include_project_resources, prompt_overrides,
+                                            selected_primary_agent);
 }
 
 ava::core::Error offline_provider_error(std::string_view action)

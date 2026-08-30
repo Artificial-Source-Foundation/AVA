@@ -58,7 +58,7 @@ void print_help()
   std::cout << "  ava --no-session\n";
   std::cout << "  ava --offline\n";
   std::cout << "  ava --trace  # write a private bounded production trace\n";
-  std::cout << "  ava [--system-prompt text] [--append-system-prompt text]\n";
+  std::cout << "  ava [--agent name] [--system-prompt text] [--append-system-prompt text]\n";
   std::cout << "  ava [--tools list] [--exclude-tools list] [--no-builtin-tools|--no-tools]\n";
   std::cout << "  ava --print [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava -p [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
@@ -82,7 +82,7 @@ bool is_cli_option(std::string_view arg)
 {
   return arg == "--help" || arg == "-h" || arg == "--version" || arg == "--mode" || arg == "--session" || arg == "--session-id" || arg == "--continue" ||
          arg == "--resume" || arg == "-c" || arg == "-r" || arg == "--fork" || arg == "--name" || arg == "-n" || arg == "--session-dir" ||
-         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--system-prompt" ||
+         arg == "--no-session" || arg == "--offline" || arg == "--trace" || arg == "--thinking" || arg == "--agent" || arg == "--system-prompt" ||
          arg == "--append-system-prompt" || arg == "--line-shell" || arg == "--print" || arg == "-p" || arg == "--rpc" || arg == "--acp" || arg == "--json" ||
          arg == "--output" || arg == "--allow" || arg == "--allow-tool" || arg == "--tools" || arg == "-t" || arg == "--exclude-tools" || arg == "-xt" ||
          arg == "--no-builtin-tools" || arg == "-nbt" || arg == "--no-tools" || arg == "-nt";
@@ -299,6 +299,7 @@ int run(int argc, char** argv)
   ava::app::runtime::PromptOverrides prompt_overrides;
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
   ava::agent::ToolVisibilityOptions tool_visibility;
+  std::optional<std::string> requested_primary_agent;
   std::optional<std::string> initial_reasoning_level;
 
   auto const paths = ava::config::xdg_paths();
@@ -496,6 +497,21 @@ int run(int argc, char** argv)
     if (arg == "--line-shell")
     {
       line_shell = true;
+      continue;
+    }
+    if (arg == "--agent")
+    {
+      if (requested_primary_agent)
+      {
+        std::cerr << "--agent may be specified only once\n";
+        return 2;
+      }
+      if (index + 1 >= argc || is_cli_option(argv[index + 1]))
+      {
+        std::cerr << "--agent requires one agent name\n";
+        return 2;
+      }
+      requested_primary_agent = argv[++index];
       continue;
     }
     if (arg == "--print" || arg == "-p")
@@ -799,6 +815,7 @@ int run(int argc, char** argv)
   open_context.current_dir = open_context.workspace_dir;
   open_context.mode = mode;
   open_context.tool_visibility = std::move(tool_visibility);
+  open_context.requested_primary_agent = std::move(requested_primary_agent);
   open_context.paths = runtime_paths;
   open_context.prompt_overrides = std::move(prompt_overrides);
   open_context.offline = offline;

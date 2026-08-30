@@ -26,6 +26,7 @@ ava --session-dir ./ava-sessions
 ava --no-session
 ava --offline
 ava --thinking high
+ava --agent reviewer "review this repo"
 ava --print "summarize this repo"
 ava --rpc
 ava --acp
@@ -248,6 +249,7 @@ ava --session-dir ./tmp-sessions --print "use an isolated session directory"
 ava @README.md "summarize this file"
 ava -p "@docs/notes with spaces.md" "summarize this file"
 ava --print "summarize this repo"
+ava --print --agent reviewer "review this repo"
 printf 'summarize this repo\n' | ava --print
 ava --print "summarize this repo" --json
 ava --mode json "summarize this repo"
@@ -255,6 +257,10 @@ ava --tools read_file,grep "inspect files safely"
 ava --tools read,grep,find,ls "inspect files with Pi-style names"
 ava --no-tools --tools read_file "read only the file I name"
 ```
+
+`--agent <name>` selects one configured `mode: primary` or `mode: all` definition for this invocation. It works with the interactive TUI, `--line-shell`, `--print`, and CLI `--rpc`; ACP is standalone and rejects it. The option must appear at most once and requires one name. Selection is not written to session turns or persisted as a user preference.
+
+The resolved definition and effective tool policy remain fixed for the active runtime session, including model switches, `/reload`, and trust-prompt reloads. Session navigation/replacement carries the name and resolves it for the newly opened session. Therefore configuration or trust changes that should alter selected-agent identity or policy require a new or replaced session; there is no live picker or switching command.
 
 Bare prompt text uses the same one-shot path as `--print`; multiple positional prompt tokens are joined with spaces. CLI `@path` text file arguments are collected separately from prompt words and expanded through the same bounded permissioned file-reference path used by the TUI. Quote the shell argument when the path contains spaces, as in `"@docs/notes with spaces.md"`. Text print mode writes final assistant text to stdout and diagnostics to stderr; when either stream is a TTY, AVA sanitizes terminal control bytes before writing model/tool text while leaving non-TTY pipes raw for automation. JSON print mode writes newline-delimited runtime events to stdout and can be selected with `--json`, `--output json`, or Pi-compatible `--mode json`. `--mode text` is a compatibility alias for one-shot text print mode. `--thinking off|<level>` works in interactive, print, and RPC startup: `off` clears explicit reasoning, and other values use the same active-model reasoning-level validation as RPC `set_reasoning` (for example `low`, `medium`, `high`, or `xhigh` on the default GPT-5.5 model). Prompt turns require configured auth for the active provider unless `--offline` stops the provider call before credential resolution.
 

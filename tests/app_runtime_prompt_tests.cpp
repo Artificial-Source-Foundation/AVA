@@ -175,6 +175,9 @@ void test_app_run_prompt_isolates_ambient_extensions()
                       "---\nname: ordinary-canary\ndescription: ACP_ORDINARY_SKILL_CANARY_193c\n---\nOrdinary skill body.\n");
   write_app_test_file(workspace / ".ava" / "agents" / "ambient-agent.md",
                       "---\nname: ambient-agent-canary\ndescription: ACP_SUBAGENT_CANARY_629e\nmode: subagent\n---\nCustom agent prompt.\n");
+  auto const selected_agent_path = workspace / ".ava" / "agents" / "selected-primary.md";
+  write_app_test_file(selected_agent_path,
+                      "---\nname: selected-primary\ndescription: Selected primary canary.\nmode: primary\n---\nSELECTED_PRIMARY_PROMPT_CANARY_11f4\n");
   auto const global_skill_name = "ambient-global-skill";
   write_app_test_file(paths.ava_config_dir / "skills" / global_skill_name / "SKILL.md",
                       "---\nname: ambient-global-skill\ndescription: ACP_GLOBAL_SKILL_CANARY_73c2\n---\nACP_GLOBAL_SKILL_BODY_CANARY_8a91\n");
@@ -203,6 +206,7 @@ void test_app_run_prompt_isolates_ambient_extensions()
   open_context.mode = ava::agent::Mode::Build;
   open_context.paths = paths;
   open_context.prompt_overrides.system_prompt = "ACP_BASE_PROMPT_CANARY_5fa7";
+  open_context.requested_primary_agent = "selected-primary";
   auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
   expect(unlocked_session_result.has_value(), "runtime opens the ambient extension isolation fixture");
   if (!unlocked_session_result)
@@ -217,12 +221,31 @@ void test_app_run_prompt_isolates_ambient_extensions()
              ordinary_prompt.find("ACP_PLUGIN_SKILL_CANARY_1b64") != std::string::npos &&
              ordinary_prompt.find("ACP_GLOBAL_SKILL_CANARY_73c2") != std::string::npos &&
              ordinary_prompt.find("ACP_ORDINARY_SKILL_CANARY_193c") != std::string::npos &&
-             ordinary_prompt.find("ACP_SUBAGENT_CANARY_629e") != std::string::npos && ordinary_prompt.find("<available_skills>") != std::string::npos &&
-             ordinary_prompt.find("<available_subagents>") != std::string::npos,
+             ordinary_prompt.find("ACP_SUBAGENT_CANARY_629e") != std::string::npos &&
+             ordinary_prompt.find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+             ordinary_prompt.find("<available_skills>") != std::string::npos && ordinary_prompt.find("<available_subagents>") != std::string::npos,
          "ordinary runtime prompt retains base, context, plugin, skill, and subagent extension canaries");
 
   session_w->resources().mcp_config = std::make_shared<ava::mcp::McpConfig const>();
   CRITICAL_AREA_END_W(session);
+
+  write_app_test_file(selected_agent_path,
+                      "---\nname: selected-primary\ndescription: Changed selected primary.\nmode: primary\n---\nCHANGED_PRIMARY_MUST_NOT_RELOAD\n");
+  auto reloaded_prompt = ava::app::select_runtime_prompt_state(unlocked_session, ava::agent::Mode::Plan);
+  expect(reloaded_prompt && reloaded_prompt->system_prompt.find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+             reloaded_prompt->ambient_extension_free_system_prompt.find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+             reloaded_prompt->system_prompt.find("CHANGED_PRIMARY_MUST_NOT_RELOAD") == std::string::npos,
+         "runtime prompt reloads reuse the resolved selected primary in ordinary and ambient-free variants");
+  {
+    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+    auto switched_model = session_w->model();
+    switched_model.model_id += "-selected-primary-switch";
+    auto switched = session_w->switch_model(std::move(switched_model));
+    expect(switched && *switched && session_w->system_prompt().find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+               session_w->ambient_extension_free_system_prompt().find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+               session_w->system_prompt().find("CHANGED_PRIMARY_MUST_NOT_RELOAD") == std::string::npos,
+           "model switches preserve the resolved selected primary prompt variants");
+  }
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");
   ava::tests::FakeTransport transport({ava::http::HttpResponse{
@@ -241,8 +264,9 @@ void test_app_run_prompt_isolates_ambient_extensions()
     return;
 
   auto const& request = transport.requests()[0].body;
-  expect(request.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos && request.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos,
-         "isolated runtime request preserves explicit base prompt and ordinary AGENTS context");
+  expect(request.find("ACP_BASE_PROMPT_CANARY_5fa7") != std::string::npos && request.find("SELECTED_PRIMARY_PROMPT_CANARY_11f4") != std::string::npos &&
+             request.find("ACP_ORDINARY_CONTEXT_CANARY_846d") != std::string::npos,
+         "isolated runtime request preserves explicit base prompt, selected primary, and ordinary AGENTS context");
   expect(request.find("ACP_PLUGIN_PROMPT_CANARY_e8ad") == std::string::npos && request.find("ACP_PLUGIN_SKILL_CANARY_1b64") == std::string::npos &&
              request.find("ACP_PLUGIN_SKILL_BODY_CANARY_a53f") == std::string::npos && request.find(global_skill_name) == std::string::npos &&
              request.find("ACP_GLOBAL_SKILL_CANARY_73c2") == std::string::npos && request.find("ACP_GLOBAL_SKILL_BODY_CANARY_8a91") == std::string::npos,

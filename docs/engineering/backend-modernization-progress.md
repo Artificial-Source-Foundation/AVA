@@ -26,9 +26,9 @@ recorded commands have passed.
 | Task | Description | Owner | Status | Files changed | Tests / benchmark evidence | Commit | Remaining risks |
 |---|---|---|---|---|---|---|---|
 | M0.1 | Map backend ownership, process sites, lifecycles, cancellation, and retained data | Architecture Cartographer + coordinator | completed | `docs/engineering/backend-current-state.md` | Static inventory plus source-link and structure checks | `3d4349ef` | Re-verify if excluded concurrent work is later integrated |
-| M0.2 | Reproducible startup, RSS, dispatch, plugin, catalog, session, cancellation, cleanup, and memory harness | Performance Engineer | active | benchmark sources/docs pending | Baseline commands pending | pending | Stable cross-platform RSS/timing collection |
-| M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | active | `docs/engineering/performance-baseline.md` (planned) | JSON/CSV evidence pending | pending | Host variability; no claims before measurement |
-| M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | not started | pending | CI smoke pending | pending | Avoid noisy blocking thresholds |
+| M0.2 | Reproducible startup, RSS, dispatch, plugin, catalog, session, cancellation, cleanup, and memory harness | Performance Engineer | completed | `scripts/benchmark-backend.py`; `tests/backend_benchmark_helper.cpp`; `tests/backend_benchmark_test.py`; `tests/CMakeLists.txt`; `docs/development/backend-benchmarking.md` | Release and BetaTest `ava_benchmark.harness_self_test` + `ava_benchmark.smoke`; five-run baseline schema v2 | `8fab13fe`, `971327fb` | Machine-cold startup, persistent-worker warmth, selective routing, and indexed sessions remain explicitly unsupported before their owning milestones |
+| M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | completed | `docs/engineering/performance-baseline.md`; `docs/engineering/backend-performance-baseline-2026-08-30.json` | Release baseline, 5 runs, exact artifacts/hashes/source/build/host identity, raw RSS snapshots, median/p95/max | evidence commit pending | Same-host 20% investigation trigger is non-gating; provenance is best-effort and cold-cache control unavailable |
+| M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | completed | `tests/CMakeLists.txt`; harness smoke checks | Default CTest registration; Release and BetaTest smoke pass; helper omission has a negative test | `8fab13fe`, `971327fb` | Coarse catastrophic ceilings intentionally do not gate microbenchmark deltas |
 | M1.1 | Define process ownership identifiers and supervisor API | Process Lifecycle Engineer | not started | pending | pending | Cross-subsystem ownership compatibility |
 | M1.2 | Implement cross-platform process groups/tree cleanup | Process Lifecycle Engineer | not started | pending | pending | Windows Job Objects and POSIX race handling |
 | M1.3 | Migrate every process-spawning subsystem | Process Lifecycle Engineer + subsystem owners | not started | pending | pending | Existing dirty app changes may overlap |
@@ -86,12 +86,19 @@ recorded commands have passed.
 
 ## Review finding ledger
 
-No milestone review has run yet. Material findings will be recorded here with stable IDs
-and one of: `open`, `fixed`, `rejected`, or `deferred`, plus evidence and rationale.
+The integrated M0 review used the default reviewer on the complete mapping, harness,
+and baseline delta. Findings keep stable IDs and one of: `open`, `fixed`, `rejected`,
+or `deferred`.
 
 | Finding | Milestone | Status | Evidence / resolution |
 |---|---|---|---|
-| — | — | — | — |
+| M0-R1 | M0 | fixed | Schema v2 smoke requires an executable helper, unsupported required seams fail checks, and negative harness tests cover omission/non-executable helpers. |
+| M0-R2 | M0 | fixed | Benchmark children now receive a fixed minimal environment; tests prove provider/base-URL/database/loader/askpass/Kerberos/Docker/Python variables do not survive; docs explicitly deny OS network containment. |
+| M0-R3 | M0 | fixed | `backend-current-state.md` now records that plugin/MCP normal shutdown reaps only the leader and can leave a same-group descendant. |
+| M0-R4 | M0 | fixed | Schema v2 retains the complete memory-helper output and every RSS snapshot, aggregates per-run maxima, and measures Linux current RSS delta with peak details separate. |
+| M0-R5 | M0 | fixed | Schema v2 records SHA-256/size/mode/mtime for all artifacts, source commit/tree/dirty state, CMake/compiler/feature metadata, and explicitly unverified provenance. |
+| M0-R6 | M0 | fixed | Native registry timing now performs exact lookup of the final built-in and emits `ns_per_lookup`; catalog timing is labeled composite. |
+| M0-R7 | M0 | fixed | M0 rows now identify final files, tests, benchmark evidence, commits, and calibrated residual risks. |
 
 ## Commit ledger
 

@@ -114,8 +114,10 @@ teardown (all distributed RAII, per owner):
   curl:      cancel → SIGKILL pid + waitpid (kill_and_wait); success → waitpid
   bash:      SIGTERM group (300 ms grace) → SIGKILL group → wait for group exit (500 ms);
              leader and sentinel reaped individually
-  plugin:    SIGTERM (group if verified) → 5×10 ms poll → SIGKILL → reap; in ~PluginProcess
-  MCP:       same terminate_child pattern; in ~McpStdioClient
+  plugin:    normal EOF shutdown reaps the leader only; timeout/cancel may signal its group
+             while the leader is tracked; no post-leader process-group verification
+  MCP:       same leader-only normal-shutdown gap; forced termination targets the group only
+             while the direct child is still considered live
   LSP:       process-group kill on client destruction; cached clients die with the run
   mermaid:   SIGCONT after handshake; deadline/cancel → group kill; reaped by coordinator
   browser:   grandchild deliberately orphaned (re-parented to init); no reaping possible
@@ -316,24 +318,27 @@ registry.
 - **Shutdown** is distributed RAII: `SessionRunController::shutdown()` rejects new
   work, finishes or fails accepted appends, and releases the append target;
   `JoinThread` destructors request-stop-and-join coordinator/registry workers;
-  `~PluginProcess`, `~McpStdioClient`, and the LSP client teardown kill and reap their
-  child processes; `~SessionLease` closes the locked descriptor. Leak safety depends on
-  each owner running its destructor — a killed or hung owner has no supervisor to
-  reclaim its process group (the detached browser grandchild is deliberately
-  unreapable; see the spawn table).
+  plugin, MCP, and LSP teardown reaps each tracked direct child and may signal its
+  process group; `~SessionLease` closes the locked descriptor. Plugin and MCP normal
+  shutdown stop tracking as soon as the leader exits and do not verify that its process
+  group is empty, so a descendant can survive the direct child. More generally, leak
+  safety depends on each owner running its destructor — a killed or hung owner has no
+  supervisor to reclaim its process group (the detached browser grandchild is
+  deliberately unreapable; see the spawn table).
 
 ## Process spawn sites
 
-All sites are POSIX. "Owner" is the object whose lifetime bounds the child; "cancel"
-is the in-flight abort mechanism; "cleanup" is the guaranteed teardown. Every row's
-exception/risk is current behavior, not a proposal.
+All sites are POSIX. "Owner" is the object whose lifetime bounds the direct child;
+"cancel" is the in-flight abort mechanism; "cleanup" records the implemented teardown,
+including any gap rather than implying descendant cleanup. Every row's exception/risk
+is current behavior, not a proposal.
 
 | # | Site (file · symbol) | Owner | Lifetime | Cancel | Cleanup | Exception / risk |
 |---|---|---|---|---|---|---|
 | 1 | [src/ava/http/curl_transport.cpp](../../src/ava/http/curl_transport.cpp) · `CurlCliTransport::send` / `send_streaming` | The calling provider/tool request (run stack, coordinator worker, or tool) | One HTTP request | `cancel_requested` polled every 100 ms → `kill_and_wait` (SIGKILL + `waitpid`) | `waitpid` on success; `kill_and_wait` on every error path | Kills the pid only, **no process group**; a `curl` that itself spawned helpers is not covered (current curl usage does not). Response cap `kMaxCurlResponseBytes` 8 MiB. |
 | 2 | [src/ava/tools/bash_tool.cpp](../../src/ava/tools/bash_tool.cpp) · `run_bash` (leader + sentinel) | The `bash` tool invocation (one tool call) | One command | `is_canceled` checks pre-spawn; in-flight timeout/cancel → `terminate_verified_group` | SIGTERM to verified PGID (300 ms `kProcessGroupGrace`) → SIGKILL → `wait_for_group_exit` (500 ms); leader and sentinel reaped individually; `gate_failure_cleanup` before group verification | Strongest lifecycle in the tree: parent/child-acknowledged PGID, sentinel holds PGID identity against recycling, optional development containment handshake before `fexecve`. If AVA dies between fork and reap, the group outlives it (no supervisor). Delegated `command_executor` path spawns nothing locally — execution and containment reporting move to the frontend. |
-| 3 | [src/ava/plugin/runner.cpp](../../src/ava/plugin/runner.cpp) · `PluginProcess::start`/`launch` | One brokered plugin tool call ([src/ava/plugin/tool_broker.cpp](../../src/ava/plugin/tool_broker.cpp) · `dispatch_plugin_tool`) | **One-shot**: start → initialize → `call_tool` → `shutdown` per call | `cancel_requested` aborts startup/request waits | `~PluginProcess`/`terminate_child`: SIGTERM (group if verified) → 5×10 ms poll → SIGKILL → reap; pipes closed | Fresh fork+exec per tool call (no persistent worker); startup cost paid per call. Discovery ([src/ava/plugin/discovery.cpp](../../src/ava/plugin/discovery.cpp) · `discover_plugins`) only scans directories and parses `plugin.json` — no spawn. Protocol: `kPluginApiVersion` = `ava.plugin.v1` ([src/ava/plugin/manifest.h](../../src/ava/plugin/manifest.h)). |
-| 4 | [src/ava/mcp/stdio_client.cpp](../../src/ava/mcp/stdio_client.cpp) · `McpStdioClient::start`/`launch` | One MCP tool/resource call **or** one tool-discovery pass ([src/ava/mcp/tool_broker.cpp](../../src/ava/mcp/tool_broker.cpp) · `visit_enabled_mcp_tools`, `dispatch_*`) | One-shot per call; one-shot per discovery | `cancel_requested` aborts waits | `~McpStdioClient`/`terminate_child`: SIGTERM→SIGKILL group pattern; pipes closed | **Tool discovery spawns every configured server** at registry composition (per run) to `tools/list`; each tool call re-spawns the server. Protocol pinned to `2024-11-05`. Server env may inherit the parent environment unless `clean_environment`. |
+| 3 | [src/ava/plugin/runner.cpp](../../src/ava/plugin/runner.cpp) · `PluginProcess::start`/`launch` | One brokered plugin tool call ([src/ava/plugin/tool_broker.cpp](../../src/ava/plugin/tool_broker.cpp) · `dispatch_plugin_tool`) | **One-shot**: start → initialize → `call_tool` → `shutdown` per call | `cancel_requested` aborts startup/request waits | Normal `shutdown` closes stdin and reaps the leader; if it remains live, `terminate_child` sends SIGTERM (group if verified), polls, then SIGKILL and reaps the leader; pipes close | Fresh fork+exec per tool call (no persistent worker); startup cost paid per call. If the leader exits after forking a same-group descendant, shutdown marks the leader reaped and never checks or kills the remaining group. Discovery ([src/ava/plugin/discovery.cpp](../../src/ava/plugin/discovery.cpp) · `discover_plugins`) only scans directories and parses `plugin.json` — no spawn. Protocol: `kPluginApiVersion` = `ava.plugin.v1` ([src/ava/plugin/manifest.h](../../src/ava/plugin/manifest.h)). |
+| 4 | [src/ava/mcp/stdio_client.cpp](../../src/ava/mcp/stdio_client.cpp) · `McpStdioClient::start`/`launch` | One MCP tool/resource call **or** one tool-discovery pass ([src/ava/mcp/tool_broker.cpp](../../src/ava/mcp/tool_broker.cpp) · `visit_enabled_mcp_tools`, `dispatch_*`) | One-shot per call; one-shot per discovery | `cancel_requested` aborts waits | Normal `shutdown` closes stdin and reaps the leader; only a still-live leader reaches group SIGTERM→SIGKILL termination; pipes close | **Tool discovery spawns every configured server** at registry composition (per run) to `tools/list`; each tool call re-spawns the server. As with plugins, a leader that exits before a same-group descendant is not followed by group-empty verification, so the descendant can survive. Protocol pinned to `2024-11-05`. Server env may inherit the parent environment unless `clean_environment`. |
 | 5 | [src/ava/lsp/lsp_process.cpp](../../src/ava/lsp/lsp_process.cpp) · `LspProcess` launch (via `SubprocessLspClient::start`) | `ConfiguredLspProvider::clients_` map ([src/ava/lsp/configured_provider.cpp](../../src/ava/lsp/configured_provider.cpp)) — created per `run_admitted_prompt`, so the cache lives **one prompt run** | First use of a server/root pair → end of run | `cancel_requested` passed to requests | Gate-verified PGID; client teardown kills the group; stale/dead clients evicted from `clients_` on next use | Cache key `server.id + root` is run-local; the next prompt re-forks every LSP server. Executable identity revalidation (`ExecutableIdentity` fstat checks) for built-in recipes. |
 | 6 | [src/ava/app/mermaid_render_coordinator.cpp](../../src/ava/app/mermaid_render_coordinator.cpp) · render worker | `MermaidRenderCoordinator` (TUI-scoped; `"mermaid_render"` JoinThread) | One diagram render | Deadline `kMermaidRenderDeadline` or coordinator cancel → group kill | SIGSTOP handshake before exec; exec-failure pipe; child reaped by worker on all outcomes | Helper resolved to an `O_NOFOLLOW` descriptor and `fexecve`d; missing helper is a first-class outcome (`MissingHelper`). |
 | 7 | [src/ava/app/browser_open.cpp](../../src/ava/app/browser_open.cpp) · `open_url_in_browser` / `spawn_detached` | **None (deliberately detached)** — used by OAuth connect flows ([src/ava/app/command_connect.cpp](../../src/ava/app/command_connect.cpp), [src/ava/app/connect_openai.cpp](../../src/ava/app/connect_openai.cpp)) | Until opener exits | None | Double-fork + `setsid` + stdio→`/dev/null`; intermediate child reaped; grandchild orphaned to init | Grandchild is unreapable and unkillable by AVA by design; `AVA_DISABLE_BROWSER_OPEN` disables the site. URL scheme allowlist (`http(s)`), `$BROWSER` without spaces, then `xdg-open`/`gio`/`open`/`wslview`. |
@@ -493,6 +498,10 @@ they define what later milestones must preserve or explicitly migrate.
 - **Unknown: actual frequency** of MCP server re-spawns in production sessions
   (depends on tool-call mix); the code guarantees at least one spawn per registry
   composition per configured server, plus one per call.
+- **Known plugin/MCP descendant gap:** normal shutdown proves only that the direct
+  leader was reaped. If that leader forks a same-process-group descendant and exits on
+  stdin EOF, plugin and MCP shutdown do not verify or terminate the remaining group;
+  the descendant can survive even while immediate-child checks report success.
 - **Unknown: orphan behavior under SIGKILL of AVA itself.** Every child-cleanup path
   is destructor- or poll-loop-driven; no site registers children in a supervisor or
   uses subreaper semantics, so a hard-killed AVA can leave bash process groups,

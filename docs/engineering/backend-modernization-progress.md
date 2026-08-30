@@ -27,7 +27,7 @@ recorded commands have passed.
 |---|---|---|---|---|---|---|---|
 | M0.1 | Map backend ownership, process sites, lifecycles, cancellation, and retained data | Architecture Cartographer + coordinator | completed | `docs/engineering/backend-current-state.md` | Static inventory plus source-link and structure checks | `3d4349ef` | Re-verify if excluded concurrent work is later integrated |
 | M0.2 | Reproducible startup, RSS, dispatch, plugin, catalog, session, cancellation, cleanup, and memory harness | Performance Engineer | completed | `scripts/benchmark-backend.py`; `tests/backend_benchmark_helper.cpp`; `tests/backend_benchmark_test.py`; `tests/CMakeLists.txt`; `docs/development/backend-benchmarking.md` | Release and BetaTest `ava_benchmark.harness_self_test` + `ava_benchmark.smoke`; five-run baseline schema v2 | `8fab13fe`, `971327fb` | Machine-cold startup, persistent-worker warmth, selective routing, and indexed sessions remain explicitly unsupported before their owning milestones |
-| M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | completed | `docs/engineering/performance-baseline.md`; `docs/engineering/backend-performance-baseline-2026-08-30.json` | Release baseline, 5 runs, exact artifacts/hashes/source/build/host identity, raw RSS snapshots, median/p95/max | evidence commit pending | Same-host 20% investigation trigger is non-gating; provenance is best-effort and cold-cache control unavailable |
+| M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | completed | `docs/engineering/performance-baseline.md`; `docs/engineering/backend-performance-baseline-2026-08-30.json` | Release baseline, 5 runs, exact artifacts/hashes/source/build/host identity, raw RSS snapshots, median/p95/max | `6999441f` | Same-host 20% investigation trigger is non-gating; provenance is best-effort and cold-cache control unavailable |
 | M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | completed | `tests/CMakeLists.txt`; harness smoke checks | Default CTest registration; Release and BetaTest smoke pass; helper omission has a negative test | `8fab13fe`, `971327fb` | Coarse catastrophic ceilings intentionally do not gate microbenchmark deltas |
 | M1.1 | Define process ownership identifiers and supervisor API | Process Lifecycle Engineer | not started | pending | pending | Cross-subsystem ownership compatibility |
 | M1.2 | Implement cross-platform process groups/tree cleanup | Process Lifecycle Engineer | not started | pending | pending | Windows Job Objects and POSIX race handling |
@@ -99,12 +99,30 @@ or `deferred`.
 | M0-R5 | M0 | fixed | Schema v2 records SHA-256/size/mode/mtime for all artifacts, source commit/tree/dirty state, CMake/compiler/feature metadata, and explicitly unverified provenance. |
 | M0-R6 | M0 | fixed | Native registry timing now performs exact lookup of the final built-in and emits `ns_per_lookup`; catalog timing is labeled composite. |
 | M0-R7 | M0 | fixed | M0 rows now identify final files, tests, benchmark evidence, commits, and calibrated residual risks. |
+| M0-D1 | M0 | fixed | A full-suite-only `ESRCH` was traced to `/proc/<pid>/stat` disappearing between open and read in `parallel_test_runner_test.py`; the test now accepts only `ENOENT`/`ESRCH` as successful process disappearance. The focused test passed 100 consecutive runs and the full suite passed afterward. |
+
+## M0 validation evidence
+
+- `cmake --preset release` and the Release `ava`, benchmark-helper, and fake-provider
+  targets built successfully.
+- `cmake --preset dev` and the complete BetaTest build succeeded.
+- Release and BetaTest `ava_benchmark.harness_self_test` and
+  `ava_benchmark.smoke` passed.
+- The schema-v2 baseline completed five runs for every currently measurable family;
+  the committed JSON passed the harness schema/identity validator.
+- `ctest --repeat until-fail:100 -R '^ava_build\.parallel_test_runner$'` passed
+  after the procfs-disappearance race fix.
+- The complete BetaTest CTest run passed all 147 registered tests with zero failures;
+  credential/live-provider and opt-in terminal tests reported their expected skips.
+- Source Markdown links, documentation structure, Python compilation, C++ formatting,
+  and `git diff --check` passed.
+- No production runtime source or production dependency changed in M0.
 
 ## Commit ledger
 
 | Milestone | Commit | Scope |
 |---|---|---|
-| M0 | pending | Mapping, benchmark harness, baseline, and CI smoke |
+| M0 | `3d4349ef`, `8fab13fe`, `971327fb`, `6999441f` | Current-state map, benchmark harness/smoke, review fixes, baseline evidence, and reliability-test fix |
 | M1 | pending | Unified process supervisor |
 | M2 | pending | Persistent plugin workers |
 | M3 | pending | Selective tool catalog and router |

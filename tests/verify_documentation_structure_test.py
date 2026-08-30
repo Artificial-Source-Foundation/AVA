@@ -27,6 +27,7 @@ REQUIRED_INDEXES = (
     "operations/README.md",
     "development/README.md",
     "development/internals/README.md",
+    "engineering/README.md",
     "security/README.md",
     "product/README.md",
     "plans/README.md",
@@ -46,6 +47,7 @@ REQUIRED_LLMS = (
     "docs/operations/README.md",
     "docs/security/README.md",
     "docs/development/README.md",
+    "docs/engineering/README.md",
     "docs/product/README.md",
     "docs/plans/README.md",
     "docs/roadmap/README.md",
@@ -91,6 +93,13 @@ class DocumentationStructureTests(unittest.TestCase):
             "# Development\n\n[internals](internals/README.md)\n",
         )
         self.write(
+            "docs/engineering/backend-modernization-progress.md",
+        )
+        self.write(
+            "docs/engineering/README.md",
+            "# Engineering\n\n[backend modernization](backend-modernization-progress.md)\n",
+        )
+        self.write(
             "docs/interop/README.md",
             "# Interop\n\n[evidence](evidence/README.md)\n",
         )
@@ -120,7 +129,7 @@ class DocumentationStructureTests(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("documentation structure: verified (", result.stdout)
-        self.assertIn("16 required indexes, 20 llms links", result.stdout)
+        self.assertIn("17 required indexes, 21 llms links", result.stdout)
 
     def test_missing_required_index(self) -> None:
         (self.root / "docs/core/README.md").unlink()
@@ -145,6 +154,28 @@ class DocumentationStructureTests(unittest.TestCase):
         result = self.run_checker()
         self.assertEqual(result.returncode, 1)
         self.assertIn("unreachable first-party document: docs/core/nested/orphan.md", result.stderr)
+
+    def test_engineering_index_must_link_immediate_document(self) -> None:
+        self.write("docs/engineering/new-program.md")
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "docs/engineering/README.md: category index omits immediate document: docs/engineering/new-program.md",
+            result.stderr,
+        )
+
+    def test_engineering_category_is_unreachable_without_human_spine_link(self) -> None:
+        spine = self.root / "docs/README.md"
+        spine.write_text(
+            spine.read_text(encoding="utf-8").replace("engineering/README.md", "missing-engineering-index.md"),
+            encoding="utf-8",
+        )
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "unreachable first-party document: docs/engineering/README.md",
+            result.stderr,
+        )
 
     def test_category_index_must_link_immediate_document(self) -> None:
         self.write("docs/core/usage.md")

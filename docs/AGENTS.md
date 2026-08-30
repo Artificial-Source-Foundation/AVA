@@ -9,6 +9,7 @@ These instructions apply to first-party documentation under `docs/` and suppleme
 - `extensions/`: current LSP, MCP, and plugin setup/authoring guides.
 - `operations/`: build, test, Docker, terminal, diagnosis, and release operations.
 - `development/`: current maintainer architecture and engineering policy; narrow implementation notes belong in `development/internals/`.
+- `engineering/`: active, evidence-backed engineering programs and reproducible ledgers, baselines, ADRs, and report sets.
 - `security/`: practical security guidance plus the fixed containment contract.
 - `product/`: current feature and capability baselines.
 - `plans/`, `roadmap/`, and `goals/`: future work, sequencing, approvals, and acceptance packages.
@@ -21,7 +22,7 @@ Every category owns a concise `README.md` that links each document directly in t
 
 Do not move or rename `acp.md`, `acp-support.json`, `rpc-protocol.md`, `headless-protocol.md`, `session-format.md`, `plugin-compatibility-policy.md`, `schema/theme.schema.json`, `security/containment.md`, files under `interop/evidence/`, `goals/`, `roadmap/`, `versions/`, or `reference-code/` without a separately approved contract/evidence migration.
 
-Current descriptive pages must follow implementation and tests. Normative contracts define compatibility and verified guarantees. Plans, roadmaps, and goals do not prove implementation. History and evidence preserve dated scope and may be intentionally stale; never use them alone as proof of current behavior.
+Current descriptive pages must follow implementation and tests. Normative contracts define compatibility and verified guarantees. Plans, roadmaps, and goals do not prove implementation. History and evidence preserve dated scope and may be intentionally stale; never use them alone as proof of current behavior. Engineering program records are active evidence surfaces and must remain reproducible; current general architecture and policy belong in `development/`, and completed ledgers belong in `history/`.
 
 `docs/reference-code/` is comparative input only. Never include it in AVA documentation catalogs, structure/link claims, packages, broad source searches, or generated summaries.
 

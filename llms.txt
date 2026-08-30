@@ -24,6 +24,7 @@
 - [Security](docs/security/README.md)
 - [Normative containment contract](docs/security/containment.md)
 - [Development](docs/development/README.md)
+- [Engineering programs](docs/engineering/README.md)
 - [Documentation policy](docs/development/documentation-policy.md)
 
 ## Product direction and evidence

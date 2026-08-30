@@ -5,6 +5,7 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include "debug.h"
 
@@ -82,6 +83,17 @@ enum class RetainedInputDispatchResult
 
 [[nodiscard]] RetainedInputDispatchResult dispatch_retained_input_with_prompt_precedence(
     std::function<PendingPromptServiceResult()> const& service_pending_prompt, std::function<bool()> const& dispatch_input);
+
+// Command events have transcript authority only through an exact backend
+// ordinary-turn receipt. Empty/missing ids fail closed, including during an
+// initial slash/shell command.
+[[nodiscard]] bool command_event_request_has_conversation_authority(std::optional<std::string> const& event_request_id,
+                                                                    std::span<std::string const> ordinary_turn_request_ids) noexcept;
+
+// Merges settled tools from command request event states that did not receive
+// ordinary-turn authority. Stable tool identities update in place so backend
+// timelines and RuntimeEvents cannot create duplicate local cards.
+[[nodiscard]] std::vector<ToolTimelineItem> merge_unauthorized_command_event_tools(RuntimeActiveRunState const& state, std::vector<ToolTimelineItem> tools);
 
 enum class ActiveRunCancelDisposition
 {

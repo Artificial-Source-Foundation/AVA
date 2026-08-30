@@ -266,7 +266,7 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
   if (leading_spaces > 0)
     basic_window.addspaces(leading_spaces, default_rendition);
 
-  int gr = 0;
+  std::size_t gr = 0;
   for (GraphemeRun const& grapheme_run : grapheme_runs_)
   {
     // An empty GraphemeRun has nothing to write; just go to the next one.

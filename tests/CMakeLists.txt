@@ -187,6 +187,7 @@ set(AVA_TESTS_SOURCES
   "tools_search_tests.cpp"
   "tools_tests.cpp"
   "tui_composer_tests.cpp"
+  "tui_command_output_tests.cpp"
   "tui_completion_tests.cpp"
   "tui_composer_rendering_tests.cpp"
   "tui_keybinding_tests.cpp"

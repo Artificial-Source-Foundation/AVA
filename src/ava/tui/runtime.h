@@ -136,11 +136,29 @@ struct TuiRuntimeStateSnapshot
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TuiLocalCommandResult
+{
+  std::vector<std::string> output;
+  std::vector<ToolTimelineItem> tool_timeline;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TuiSubmitResult
 {
   bool quit = false;
+  // True only when backend handling committed a genuine provider conversation
+  // turn. Slash/shell invocation text remains local even when this is true.
+  bool ordinary_turn_committed = false;
   std::vector<std::string> output;
   std::vector<ToolTimelineItem> tool_timeline;
+  // TUI-only request authority captured before LineResult queue aggregation.
+  // Initial/queued local commands can be presented without granting their
+  // RuntimeEvents transcript authority. Missing ids always fail closed.
+  std::vector<std::string> ordinary_turn_request_ids;
+  std::optional<TuiLocalCommandResult> local_command_result = std::nullopt;
+  std::vector<std::string> conversation_output;
+  std::vector<ToolTimelineItem> conversation_tool_timeline;
   std::optional<std::size_t> context_source_count = std::nullopt;
   // Returned by submit workers so the TUI thread applies state changes before
   // accepting another prompt. This is intentionally distinct from command

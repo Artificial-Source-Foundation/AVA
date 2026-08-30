@@ -123,7 +123,7 @@ The default model is `openai/gpt-5.5`. Override models with `$XDG_CONFIG_HOME/av
 
 ## Common interactive commands
 
-This is a curated set of common commands, not an exhaustive catalog. See [the current command reference](docs/core/usage.md#commands) for the complete list.
+This is a curated set of common commands, not an exhaustive catalog. See [the current command reference](docs/core/usage.md#commands) for the complete list. In the TUI, local slash and `!`/`!!` command invocations, output, errors, and tool cards stay out of chat/provider content: rich output uses a scrollable command-output panel and short confirmations use footer status. A dynamic prompt/skill/MCP prompt command may still create a genuine provider conversation turn, but its literal slash invocation remains local.
 
 - `/help`: show commands and hotkeys
 - `/hotkeys` or `/keybindings`: show effective TUI hotkeys with human primary labels

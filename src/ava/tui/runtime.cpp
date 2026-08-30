@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/tui/command_output.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/composer_editor.h"
 #include "ava/tui/composer_internal.h"
@@ -45,11 +46,9 @@
 namespace ava::tui {
 using runtime_input::printable_jump_target;
 using runtime_input::read_curses_input_with_timeout;
-using runtime_transcript::assistant_meta_for_snapshot;
 using runtime_transcript::copy_text_from_answer;
 using runtime_transcript::copy_text_to_terminal_clipboard;
 using runtime_transcript::push_history;
-using runtime_transcript::push_transcript;
 using runtime_views::active_run_hint_for;
 using runtime_views::branch_summary_callback_failure_status;
 using runtime_views::branch_summary_input_intent;
@@ -193,6 +192,7 @@ void apply_reasoning_cycle_success(ComposerSnapshot& snapshot, std::string feedb
 void clear_reasoning_feedback_for_user_input(ComposerSnapshot& snapshot)
 {
   snapshot.reasoning_feedback.reset();
+  snapshot.local_command_feedback.reset();
 }
 
 int run_interactive_composer(TuiRuntimeOptions options)
@@ -729,6 +729,43 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     if (!runtime_wheel_input_accepted(renderer.wheel_governor, input.event.key))
       continue;
+    if (snapshot.command_output && !snapshot.permission_prompt && !snapshot.question_prompt)
+    {
+      auto const geometry = command_output_geometry(snapshot.width, snapshot.height);
+      auto const output_input = handle_command_output_input(*snapshot.command_output, input.event, geometry.width, geometry.height, snapshot.tool_presentation);
+      if (output_input.action == CommandOutputInputAction::Dismiss)
+      {
+        snapshot.command_output.reset();
+        snapshot.status = "command output closed";
+        if (!renderer.request_render())
+        {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
+      if (output_input.action == CommandOutputInputAction::Redraw)
+      {
+        snapshot.command_output->scroll_offset = output_input.scroll_offset;
+        if (!renderer.request_render())
+        {
+          terminal_write_failed = true;
+          break;
+        }
+        continue;
+      }
+      // Typing or clearing starts the next draft directly; pointer input remains
+      // captured by the modal so transcript/composer hit targets stay suppressed.
+      if (input.event.key == Key::Character || input.event.key == Key::Space || input.event.key == Key::CtrlU)
+      {
+        snapshot.command_output.reset();
+        snapshot.status.clear();
+      }
+      else
+      {
+        continue;
+      }
+    }
     if (subagent_workspace.active())
     {
       auto const handled = subagent_workspace.handle_input(input.event);
@@ -898,14 +935,12 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         return values;
       };
-      auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool announce) {
+      auto apply_opened_session_snapshot = [&](TuiRuntimeStateSnapshot state, bool) {
         auto status = state.status;
         static_cast<void>(apply_runtime_state_snapshot_with_presentation_transition(options, presentation_state, draft_state, renderer, transcript_search,
                                                                                     subagent_workspace, active_select_list, std::move(state)));
-        if (announce && !status.empty())
-        {
-          push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-        }
+        if (!status.empty())
+          settle_local_command_status(snapshot, std::move(status));
       };
       if (input_result.action == SelectListInputAction::Redraw && snapshot.select_list)
       {
@@ -961,29 +996,17 @@ int run_interactive_composer(TuiRuntimeOptions options)
         else if (selected_value == kSettingsOpenModels)
         {
           close_settings();
-          if (!open_model_selector())
-          {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-          }
+          static_cast<void>(open_model_selector());
         }
         else if (selected_value == kSettingsOpenScopedModels)
         {
           close_settings();
-          if (!open_scoped_model_selector())
-          {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-          }
+          static_cast<void>(open_scoped_model_selector());
         }
         else if (selected_value == kSettingsOpenReasoning)
         {
           close_settings();
-          if (!open_reasoning_selector(false))
-          {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-          }
+          static_cast<void>(open_reasoning_selector(false));
         }
         else if (selected_value == kSettingsOpenKeybindings)
         {
@@ -1011,8 +1034,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (!options.on_reload_key_bindings)
           {
             snapshot.status = "reload unavailable";
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
             static_cast<void>(beep());
           }
           else
@@ -1021,17 +1042,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (!reloaded)
             {
               snapshot.status = reloaded.error().format();
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
               static_cast<void>(beep());
             }
             else
             {
               options.key_bindings = std::move(reloaded->key_bindings);
               snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+              // Success feedback stays on the transient status surface from the applied DTO.
               apply_runtime_state_snapshot(std::move(reloaded->state));
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
           }
         }
@@ -1085,22 +1103,16 @@ int run_interactive_composer(TuiRuntimeOptions options)
             begin_settings_preview_baseline();
             if (settings_nav.in_display())
             {
-              // Remain in the presentation section with refreshed authoritative rows after a successful confirm.
-              // Push a transcript receipt too: the centered modal can cover the status alert dock.
+              // Remain in the presentation section with refreshed authoritative rows after a
+              // successful confirm. Feedback stays on the transient status surface; local
+              // settings actions never append chat/transcript items.
               auto const receipt = status.empty() ? std::string("display setting saved") : status;
               rebuild_settings_view(settings_nav.section, current_query, current_selected);
               snapshot.status = receipt;
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = receipt, .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
             else
             {
               close_settings();
-              if (!status.empty())
-              {
-                push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-                transcript_scroll_offset = 0;
-              }
             }
           }
           else
@@ -1475,19 +1487,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsOpenModels)
         {
-          if (!open_model_selector())
-          {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-          }
+          static_cast<void>(open_model_selector());
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsOpenScopedModels)
         {
-          if (!open_scoped_model_selector())
-          {
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
-          }
+          static_cast<void>(open_scoped_model_selector());
         }
         else if (resolved_list == ActiveSelectList::Settings && selected_value == kSettingsOpenKeybindings)
         {
@@ -1524,8 +1528,6 @@ int run_interactive_composer(TuiRuntimeOptions options)
           if (!options.on_reload_key_bindings)
           {
             snapshot.status = "reload unavailable";
-            push_transcript(snapshot, TranscriptItem{.label = "ava", .text = snapshot.status, .meta = assistant_meta_for_snapshot(snapshot)});
-            transcript_scroll_offset = 0;
             static_cast<void>(beep());
           }
           else
@@ -1534,17 +1536,14 @@ int run_interactive_composer(TuiRuntimeOptions options)
             if (!reloaded)
             {
               snapshot.status = reloaded.error().format();
-              push_transcript(snapshot, TranscriptItem{.label = "error", .text = snapshot.status});
-              transcript_scroll_offset = 0;
               static_cast<void>(beep());
             }
             else
             {
               options.key_bindings = std::move(reloaded->key_bindings);
               snapshot.active_run_hint = active_run_hint_for(options.key_bindings);
+              // Success feedback stays on the transient status surface from the applied DTO.
               apply_runtime_state_snapshot(std::move(reloaded->state));
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = "keybindings reloaded", .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
             }
           }
         }
@@ -1633,9 +1632,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         else if (resolved_list == ActiveSelectList::CopyUserTurn && options.on_read_user_turn_text)
         {
           auto decision = evaluate_copy_user_turn_selection(selected_value, options.on_read_user_turn_text, copy_text_to_terminal_clipboard);
-          snapshot.status = decision.status;
-          push_transcript(snapshot, TranscriptItem{.label = decision.transcript_label, .text = snapshot.status});
-          transcript_scroll_offset = 0;
+          settle_local_command_status(snapshot, decision.status);
           if (decision.beep)
             static_cast<void>(beep());
         }
@@ -1644,13 +1641,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
           auto selected = options.on_settings_selected(selected_value);
           if (selected)
           {
-            auto status = selected->status;
+            // Success feedback stays on the transient status surface from the applied DTO.
             apply_runtime_state_snapshot(std::move(*selected));
-            if (!status.empty())
-            {
-              push_transcript(snapshot, TranscriptItem{.label = "ava", .text = std::move(status), .meta = assistant_meta_for_snapshot(snapshot)});
-              transcript_scroll_offset = 0;
-            }
           }
           else
           {
@@ -2160,18 +2152,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       bool palette_claimed = false;
       if (begins_click)
       {
-        if (startup_overview_card_contains_screen_position(snapshot, event.mouse_row, event.mouse_column))
-        {
-          renderer.clear_transcript_selection();
-          draft_state.clear_selection();
-          if (!toggle_startup_overview())
-          {
-            terminal_write_failed = true;
-            break;
-          }
-          palette_claimed = true;
-        }
-        else if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
+        if (auto const clicked = slash_palette_selection_for_screen_position(snapshot, event.mouse_row, event.mouse_column))
         {
           renderer.clear_transcript_selection();
           draft_state.clear_selection();

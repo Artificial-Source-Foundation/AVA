@@ -184,6 +184,68 @@ def main() -> int:
             require(empty_result.stderr == "", f"empty-variable run wrote stderr: {empty_result.stderr!r}")
             require(not list(root.glob("ava_tests.*.libcwd.log")), "empty-variable run unexpectedly created a libcwd log")
 
+            # Ordinary, non-test processes leave libcwd output off by default
+            # even in this CWDEBUG build: no AVA_NO_DEBUG_OUTPUT suppression is
+            # required for a terminal-quiet run. Use a private empty HOME so
+            # doctor reads no real configuration or credentials.
+            quiet_home = root / "quiet-home"
+            quiet_home.mkdir(mode=0o700)
+            quiet_env = os.environ.copy()
+            quiet_env.update(
+                {
+                    "LIBCWD_RCFILE_NAME": str(base_rcfile),
+                    "LIBCWD_RCFILE_OVERRIDE_NAME": str(override_rcfile),
+                    "LIBCWD_NO_STARTUP_MSGS": "1",
+                    "HOME": str(quiet_home),
+                }
+            )
+            for name in (
+                "AVA_TEST_NAME",
+                "AVA_DEBUG_OUTPUT_DIR",
+                "AVA_NO_DEBUG_OUTPUT",
+                "AVA_DEBUG_OUTPUT",
+                "XDG_CONFIG_HOME",
+                "XDG_STATE_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CACHE_HOME",
+            ):
+                quiet_env.pop(name, None)
+            quiet_result = finish(start(ava_exe, ["doctor", "--json"], quiet_env, root))
+            require(quiet_result.returncode in (0, 1), f"default doctor run failed to report: {quiet_result.stderr}")
+            require('"schema_version":1' in quiet_result.stdout, f"default doctor run lost its JSON report: {quiet_result.stdout!r}")
+            require(quiet_result.stderr == "", f"default ordinary run wrote libcwd stderr: {quiet_result.stderr!r}")
+
+            # The same default applies to the test executable: without
+            # suppression and without an opt-in, no libcwd output or log.
+            quiet_tests_env = base_env.copy()
+            del quiet_tests_env["AVA_NO_DEBUG_OUTPUT"]
+            quiet_tests_result = run(ava, ["core_mode"], quiet_tests_env, root)
+            require(quiet_tests_result.returncode == 0, f"unsuppressed ava_tests run failed: {quiet_tests_result.stderr}")
+            require(quiet_tests_result.stderr == "", f"unsuppressed ava_tests run wrote libcwd stderr: {quiet_tests_result.stderr!r}")
+            require(not list(root.glob("ava_tests.*.libcwd.log")), "unsuppressed ava_tests run unexpectedly created a libcwd log")
+
+            # AVA_DEBUG_OUTPUT=1 explicitly opts an ordinary process into
+            # developer diagnostics under the caller's controlled rcfiles.
+            opted_ordinary_env = quiet_env.copy()
+            opted_ordinary_env["AVA_DEBUG_OUTPUT"] = "1"
+            opted_ordinary_result = finish(start(ava_exe, ["doctor", "--json"], opted_ordinary_env, root))
+            require(opted_ordinary_result.returncode in (0, 1), f"opted-in doctor run failed to report: {opted_ordinary_result.stderr}")
+            require(
+                "Debug output turned on." in opted_ordinary_result.stderr,
+                f"AVA_DEBUG_OUTPUT=1 did not enable libcwd diagnostics: {opted_ordinary_result.stderr!r}",
+            )
+
+            # AVA_NO_DEBUG_OUTPUT is a hard suppression control and wins when
+            # both variables are set.
+            suppressed_env = opted_ordinary_env.copy()
+            suppressed_env["AVA_NO_DEBUG_OUTPUT"] = "1"
+            suppressed_result = finish(start(ava_exe, ["doctor", "--json"], suppressed_env, root))
+            require(suppressed_result.returncode in (0, 1), f"suppressed doctor run failed to report: {suppressed_result.stderr}")
+            require(
+                suppressed_result.stderr == "",
+                f"AVA_NO_DEBUG_OUTPUT did not win over AVA_DEBUG_OUTPUT=1: {suppressed_result.stderr!r}",
+            )
+
             output_directory = root / "debug-output"
             opted_env = base_env.copy()
             opted_env["AVA_DEBUG_OUTPUT_DIR"] = str(output_directory)

@@ -4,6 +4,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/commands.h"
+#include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenContext.h"
@@ -23,6 +24,42 @@
 namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
+
+void test_tui_request_presentation_capture()
+{
+  using ava::app::line_shell_internal::capture_tui_request_presentation;
+  using ava::app::line_shell_internal::LineResult;
+  using ava::app::line_shell_internal::TuiRequestPresentation;
+
+  TuiRequestPresentation compact;
+  capture_tui_request_presentation(compact, true, "/compact", "request-compact",
+                                   LineResult{.output = {"compaction summary recorded"}, .tool_timeline = {{.name = "compact-local"}}});
+  capture_tui_request_presentation(
+      compact, true, "queued provider question", "request-failed",
+      LineResult{.output = {"Moonshot HTTP request failed with status 400"}, .tool_timeline = {{.name = "failed-follow-up-tool"}}});
+  capture_tui_request_presentation(compact, true, "queued canceled question", "request-canceled",
+                                   LineResult{.output = {"agent turn canceled"}, .tool_timeline = {}});
+  capture_tui_request_presentation(
+      compact, true, "queued successful question", "request-success",
+      LineResult{.ordinary_turn_committed = true, .output = {"queued provider answer"}, .tool_timeline = {{.name = "successful-follow-up-tool"}}});
+  expect(
+      compact.has_local_command &&
+          compact.local_command.output ==
+              std::vector<std::string>{"compaction summary recorded", "Moonshot HTTP request failed with status 400", "agent turn canceled"} &&
+          compact.local_command.tool_timeline.size() == 2 && compact.local_command.tool_timeline.front().name == "compact-local" &&
+          compact.local_command.tool_timeline.back().name == "failed-follow-up-tool" &&
+          compact.ordinary_turn_request_ids == std::vector<std::string>{"request-success"} &&
+          compact.conversation.output == std::vector<std::string>{"queued provider answer"} && compact.conversation.tool_timeline.size() == 1 &&
+          compact.conversation.tool_timeline.front().name == "successful-follow-up-tool",
+      "TUI request capture keeps every uncommitted queued result with an initial local command while granting conversation authority only to committed turns");
+
+  TuiRequestPresentation normal;
+  capture_tui_request_presentation(normal, false, "ordinary initial prompt", "request-normal-failed",
+                                   LineResult{.output = {"ordinary initial failure"}, .tool_timeline = {{.name = "ordinary-failed-tool"}}});
+  expect(!normal.has_local_command && normal.local_command.output.empty() && normal.local_command.tool_timeline.empty() &&
+             normal.ordinary_turn_request_ids.empty(),
+         "TUI request capture does not globally classify a failed normal initial prompt as local");
+}
 
 void test_app_command_dispatcher()
 {

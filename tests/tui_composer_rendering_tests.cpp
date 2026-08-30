@@ -205,6 +205,13 @@ bool test_changed_session_snapshot_resets_presentation()
   presentation.snapshot.input_selection_end = 3;
   presentation.snapshot.transcript_selection_anchor_item = 0;
   presentation.snapshot.transcript_selection_focus_item = 1;
+  presentation.snapshot.command_output = ava::tui::CommandOutputView{.title_token = "/read", .blocks = {"old local output"}};
+  presentation.snapshot.local_command_feedback = "old local status";
+  presentation.snapshot.tool_index = {ava::tui::TuiToolIndexEntry{
+      .tool = ava::tui::ToolTimelineItem{.status = ava::tui::ToolTimelineStatus::Success, .name = "read", .call_id = "old-local-tool"},
+      .origin = ava::tui::TuiToolIndexOrigin::LocalCommand}};
+  presentation.snapshot.evicted_tool_index_identities = {"call\nold-evicted-tool"};
+  presentation.snapshot.next_tool_index_sequence = 7;
 
   ava::tui::RuntimeDraftState draft_state;
   draft_state.input_history = {"old session prompt"};
@@ -258,10 +265,12 @@ bool test_changed_session_snapshot_resets_presentation()
       !draft_state.history_index && draft_state.jump_mode == ava::tui::ComposerJumpMode::None && draft_state.draft_scroll_offset == 0 &&
       presentation.snapshot.input.empty() && presentation.snapshot.input_cursor == 0 && presentation.snapshot.input_selection_start == std::string::npos &&
       presentation.snapshot.input_selection_end == std::string::npos && presentation.snapshot.transcript_selection_anchor_item == std::string::npos &&
-      presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.sidebar_drawer_visible &&
-      presentation.snapshot.sidebar_drawer_scroll_offset == 0 && renderer.transcript_scroll_offset == 0 && renderer.detached_new_output_count == 0 &&
-      !renderer.detached_sidebar_snapshot && !renderer.has_deferred_detached_transcript_update() && !renderer.transcript_layout_cache.valid &&
-      !transcript_search.is_open() && active_select_list == ava::tui::ActiveSelectList::None;
+      presentation.snapshot.transcript_selection_focus_item == std::string::npos && !presentation.snapshot.command_output &&
+      !presentation.snapshot.local_command_feedback && presentation.snapshot.tool_index.empty() &&
+      presentation.snapshot.evicted_tool_index_identities.empty() && presentation.snapshot.next_tool_index_sequence == 0 &&
+      !presentation.snapshot.sidebar_drawer_visible && presentation.snapshot.sidebar_drawer_scroll_offset == 0 && renderer.transcript_scroll_offset == 0 &&
+      renderer.detached_new_output_count == 0 && !renderer.detached_sidebar_snapshot && !renderer.has_deferred_detached_transcript_update() &&
+      !renderer.transcript_layout_cache.valid && !transcript_search.is_open() && active_select_list == ava::tui::ActiveSelectList::None;
 
   presentation.snapshot.transcript = {{.label = "ava", .text = "new receipt only"}};
   ++presentation.snapshot.transcript_generation;
@@ -613,7 +622,8 @@ bool test_transcript_message_boundary_navigation_and_live_tail_reset()
   options.key_bindings = ava::tui::default_key_bindings();
   auto tall_message = [](std::string_view name, int lines) {
     std::string text(name);
-    for (int index = 0; index < lines; ++index) text += "\n" + std::string(name) + " line " + std::to_string(index);
+    for (int index = 0; index < lines; ++index)
+      text += "\n" + std::string(name) + " line " + std::to_string(index);
     return text;
   };
   options.initial_transcript = {
@@ -1405,7 +1415,8 @@ void run_tui_composer_rendering_tests_part_1()
     auto const started_at = Clock::time_point{};
     ava::tui::FrameScheduler scheduler;
     scheduler.paint_completed(started_at, true);
-    for (std::size_t index = 0; index < 100; ++index) scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(1));
+    for (std::size_t index = 0; index < 100; ++index)
+      scheduler.request(ava::tui::FrameRenderKind::Full, started_at + std::chrono::milliseconds(1));
     auto const before_deadline = scheduler.take_due(started_at + std::chrono::milliseconds(15));
     auto const at_deadline = scheduler.take_due(started_at + std::chrono::milliseconds(16));
     auto paint_count = at_deadline ? std::size_t{1} : std::size_t{0};
@@ -1598,8 +1609,10 @@ void run_tui_composer_rendering_tests_part_1()
   auto const idle_two_row_lines = ava::tui::render_composer(idle_two_row_snapshot);
   auto idle_input = strip_sgr(idle_two_row_lines[8]);
   auto idle_footer = strip_sgr(idle_two_row_lines[9]);
-  while (!idle_input.empty() && idle_input.back() == ' ') idle_input.pop_back();
-  while (!idle_footer.empty() && idle_footer.back() == ' ') idle_footer.pop_back();
+  while (!idle_input.empty() && idle_input.back() == ' ')
+    idle_input.pop_back();
+  while (!idle_footer.empty() && idle_footer.back() == ' ')
+    idle_footer.pop_back();
   expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 870 (3.2%)" &&
              idle_two_row_lines[8].find("\x1b[49m") != std::string::npos && idle_two_row_lines[9].find("\x1b[49m") != std::string::npos &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) &&
@@ -2736,7 +2749,8 @@ void run_tui_composer_rendering_tests_part_4()
   auto const curated_idle_footer_divider = curated_idle_footer.rfind("│");
   if (curated_idle_footer_divider != std::string::npos)
     curated_idle_footer.erase(curated_idle_footer_divider);
-  while (!curated_idle_footer.empty() && curated_idle_footer.back() == ' ') curated_idle_footer.pop_back();
+  while (!curated_idle_footer.empty() && curated_idle_footer.back() == ' ')
+    curated_idle_footer.pop_back();
   expect(curated_idle_title_line != curated_idle_sidebar.end() && curated_idle_divider != std::string::npos &&
              curated_idle_title_visible.find("│", curated_idle_divider + std::string_view("│").size()) == std::string::npos &&
              curated_idle_title_visible.substr(curated_idle_divider).starts_with("│  Session") &&
@@ -3698,7 +3712,8 @@ void run_tui_composer_rendering_tests_part_4()
              narrow_scroll > narrow_without_scroll,
          "143xH active-todo layout still paints the narrow dock and reserves matching scroll/hit geometry");
 
-  // Startup overview collapsed chrome: 2 rows >=12, 1 row 8-11, hidden <8; footer unchanged.
+  // Startup overview is on-demand only: startup reserves zero overview chrome rows at
+  // every height and the quiet footer stays the home for mode/model/context essentials.
   {
     ava::tui::StartupOverviewSnapshot overview{
         .mode = "build",
@@ -3714,35 +3729,29 @@ void run_tui_composer_rendering_tests_part_4()
     snap.height = 24;
     snap.startup_overview = overview;
     snap.input = "";
-    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 2, "overview shows 2 collapsed rows at height >= 12");
-    auto const lines24 = ava::tui::render_startup_overview_collapsed_lines(snap, 80);
-    expect(lines24.size() == 2 && strip_sgr(lines24[0]).find("/overview") != std::string::npos && strip_sgr(lines24[1]).find("detail row") != std::string::npos,
-           "overview collapsed renderer emits compact+detail at roomy heights");
     auto frame24 = ava::tui::render_composer(snap);
-    expect(frame24.size() == 24 && strip_sgr(frame24.front()).find("/overview") != std::string::npos &&
-               strip_sgr(frame24.back()).find("/overview") == std::string::npos,
-           "overview collapsed card occupies the first frame rows without changing total height or footer");
+    expect(
+        frame24.size() == 24 && std::ranges::none_of(frame24, [](std::string const& line) { return strip_sgr(line).find("/overview") != std::string::npos; }),
+        "roomy startup frame reserves zero overview chrome rows and keeps total height");
+    auto const body24 = ava::tui::detail::transcript_body_screen_geometry(snap);
+    expect(body24.valid && body24.transcript_height > 0, "transcript body geometry is unaffected by the absent overview chrome");
     snap.height = 10;
-    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 1, "overview shows 1 collapsed row at height 8-11");
     auto frame10 = ava::tui::render_composer(snap);
-    expect(frame10.size() == 10 && strip_sgr(frame10.front()).find("/overview") != std::string::npos, "short height still paints one overview row");
+    expect(
+        frame10.size() == 10 && std::ranges::none_of(frame10, [](std::string const& line) { return strip_sgr(line).find("/overview") != std::string::npos; }),
+        "short startup frame reserves zero overview chrome rows");
     snap.height = 7;
-    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 0 && ava::tui::render_startup_overview_collapsed_lines(snap, 80).empty(),
-           "overview collapses away below 8 rows");
     auto frame7 = ava::tui::render_composer(snap);
-    // Overview row budget keys off snapshot.height (hidden <8). Frame paint still clamps to kMinHeight.
-    expect(frame7.size() == 8 && strip_sgr(frame7.front()).find("/overview") == std::string::npos,
-           "sub-8 snapshot height hides overview chrome even when the frame paint clamps to min height");
-    // Modal replacement suppresses collapsed card.
+    // Frame paint still clamps to kMinHeight below 8 rows.
+    expect(frame7.size() == 8 && std::ranges::none_of(frame7, [](std::string const& line) { return strip_sgr(line).find("/overview") != std::string::npos; }),
+           "sub-8 startup frame reserves zero overview chrome rows even when paint clamps to min height");
     snap.height = 24;
-    ava::tui::SelectListView list;
-    list.title = "Startup overview";
-    snap.select_list = list;
-    expect(ava::tui::startup_overview_collapsed_row_count(snap) == 0, "expanded select-list replaces collapsed overview chrome");
-    // Mouse hit region shares renderer geometry.
+    // Exact /overview still opens the bounded read-only select-list on demand.
+    snap.select_list = ava::tui::overview_select_list_view(overview);
+    auto expanded = ava::tui::render_composer(snap);
+    expect(std::ranges::any_of(expanded, [](std::string const& line) { return strip_sgr(line).find("Startup overview") != std::string::npos; }),
+           "/overview opens the read-only select-list explicitly");
     snap.select_list.reset();
-    expect(ava::tui::startup_overview_card_contains_screen_position(snap, 1, 2) && !ava::tui::startup_overview_card_contains_screen_position(snap, 5, 2),
-           "overview mouse hit-testing uses the shared collapsed row window");
 
     // Shared snapshot sync: open overview rebuilds from a refreshed DTO and preserves query/selection.
     {

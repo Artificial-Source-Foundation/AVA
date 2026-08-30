@@ -288,49 +288,28 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         tmux_exe,
         session,
         "Workspace",
-        r"Settings › Workspace|Project trust|Trust project",
+        r"Settings › Workspace|Trust project",
         "settings sessions section for trust rows",
     )
+    # The Workspace modal header carries the path-free trust summary directly; rows are
+    # mutations only. Detailed diagnostics stay with explicit /trust status below.
+    if not re.search(r"trust unknown · skipped · 3 protected", capture(tmux_exe, session)):
+        raise RuntimeError(
+            f"settings modal did not show the workspace trust summary\nscreen:\n{capture(tmux_exe, session)}"
+        )
     send_literal(tmux_exe, session, "trust")
     settings_trust_rows = wait_for(
         tmux_exe, session, r"Search\s{2}trust", "settings trust filtered rows"
     )
     if (
-        "Project trust" not in settings_trust_rows
-        or "Trust project" not in settings_trust_rows
+        "Trust project" not in settings_trust_rows
         or "Deny project" not in settings_trust_rows
+        or "Clear trust decision" not in settings_trust_rows
     ):
         raise RuntimeError(
-            f"settings modal did not expose project trust status and actions\nscreen:\n{settings_trust_rows}"
+            f"settings modal did not expose project trust mutation rows\nscreen:\n{settings_trust_rows}"
         )
     close_settings(tmux_exe, session, "settings modal closed after trust rows")
-
-    open_settings_section(
-        tmux_exe,
-        session,
-        "Workspace",
-        r"Settings › Workspace|Project trust",
-        "settings sessions section before trust status action",
-    )
-    send_literal(tmux_exe, session, "project trust")
-    settings_trust_status_row = wait_for(
-        tmux_exe, session, r"Search\s{2}project trust", "settings trust status filtered row"
-    )
-    if "Project trust" not in settings_trust_status_row:
-        raise RuntimeError(
-            f"settings modal did not expose the trust status action when filtered\nscreen:\n{settings_trust_status_row}"
-        )
-    send_keys(tmux_exe, session, "Enter")
-    settings_trust_status = wait_for(
-        tmux_exe,
-        session,
-        r"(?s)Project trust:.*decision=unknown.*project_resources=skipped.*protected_resources=3",
-        "settings trust status action output",
-    )
-    if "prompt_commands" not in settings_trust_status or "system_prompt" not in settings_trust_status:
-        raise RuntimeError(
-            f"settings trust status action did not render protected-resource diagnostics\nscreen:\n{settings_trust_status}"
-        )
 
     open_settings_section(
         tmux_exe,
@@ -451,9 +430,12 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
             f"settings modal did not expose keybinding reload guidance when filtered\nscreen:\n{settings_reload_row}"
         )
     send_keys(tmux_exe, session, "Enter")
-    settings_reload = wait_for(tmux_exe, session, r"keybindings reloaded", "settings keybinding reload action")
-    if "keybindings reloaded" not in settings_reload:
-        raise RuntimeError(f"settings keybinding reload row did not reload live bindings\nscreen:\n{settings_reload}")
+    # Successful reloads add no chat receipt and return to the composer; success statuses
+    # never render in the alert-only status dock, so any visible confirmation text would
+    # be an administrative chat receipt.
+    settings_reload = wait_for_absent(tmux_exe, session, r"Settings ›", "settings keybinding reload action")
+    if "keybindings reloaded" in settings_reload:
+        raise RuntimeError(f"settings keybinding reload leaked an administrative chat receipt\nscreen:\n{settings_reload}")
 
     send_keys(tmux_exe, session, "C-u")
     open_settings_section(
@@ -595,7 +577,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         r"(?s)project_trust=trusted project_resources=enabled.*append_system_prompt\s+project\s+APPEND_SYSTEM\.md",
         "trusted project append-system freshness",
     )
-    if "status=current" not in trusted_prompt_context:
+    if "status=current" not in re.sub(r"\s+", "", trusted_prompt_context):
         raise RuntimeError(f"/context did not report trusted append-system prompt freshness\nscreen:\n{trusted_prompt_context}")
 
     (ava_config / "keybinds.json").unlink(missing_ok=True)
@@ -707,6 +689,8 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(
             f"/keybindings reset did not remove the cursor-left override\ncontent:\n{reset_keybinds}"
         )
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"Command /keybindings", "keybindings reset output closed")
 
     send_keys(tmux_exe, session, "BTab")
     shift_tab_reasoning = wait_for(tmux_exe, session, r"reasoning set to low|reasoning low", "shift-tab reasoning cycle")
@@ -721,12 +705,12 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "/thinking")
     wait_for(tmux_exe, session, r"/thinking", "thinking command hide draft")
     send_keys(tmux_exe, session, "Enter")
-    thinking_hidden_command = wait_for(tmux_exe, session, r"thinking blocks are now hidden", "thinking command hides blocks")
-    if "thinking blocks are now hidden" not in thinking_hidden_command:
+    thinking_hidden_command = wait_for(tmux_exe, session, r"thinking hidden", "thinking command hides blocks")
+    if "thinking hidden" not in thinking_hidden_command:
         raise RuntimeError(f"/thinking no longer controls thinking-block visibility\nscreen:\n{thinking_hidden_command}")
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/thinking")
     send_keys(tmux_exe, session, "Enter")
-    wait_for(tmux_exe, session, r"thinking blocks are now visible", "thinking command restores visible blocks")
+    wait_for(tmux_exe, session, r"thinking visible", "thinking command restores visible blocks")
 
     _finish_main(tmux_exe, session)

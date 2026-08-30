@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 from tui_smoke_helpers import (
@@ -16,6 +17,20 @@ from tui_smoke_helpers import (
     wait_for_screen_change,
 )
 from .common import clear_settings_filter, close_settings, open_settings_root, open_settings_section
+
+
+def _assert_no_settings_chat_receipt(screen: str, label: str, *receipt_patterns: str) -> None:
+    # Successful local settings actions add zero chat/transcript items. Administrative
+    # confirmation text may still appear on the transient status dock, whose rows start
+    # with the status glyphs (✓/!) at column 0; transcript conversation rows carry the
+    # two-cell canvas inset or assistant markers instead. Any receipt match outside the
+    # status dock proves an administrative confirmation was styled as chat.
+    for pattern in receipt_patterns:
+        for line in screen.splitlines():
+            if re.search(pattern, line) and not re.match(r"^[✓!]", line):
+                raise RuntimeError(
+                    f"{label}: settings confirmation {pattern!r} leaked into chat\nscreen:\n{screen}"
+                )
 
 
 def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
@@ -129,12 +144,20 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "light")
     wait_for(tmux_exe, session, r"Search\s{2}light", "theme light confirm row")
     send_keys(tmux_exe, session, "Enter")
-    confirmed = wait_for(tmux_exe, session, r"Stored TUI theme light", "theme confirm write")
-    if "Stored TUI theme light" not in confirmed:
-        raise RuntimeError(f"theme confirm did not persist light theme\nscreen:\n{confirmed}")
+    # Confirm persists exactly once; synchronize on the refreshed current-row/config state
+    # instead of a chat receipt, then prove the administrative confirmation text never
+    # reached the chat surface.
+    confirmed = wait_for(tmux_exe, session, r"Light[^\n]*current", "theme confirm current row")
     if not display_config.exists() or '"theme": "light"' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"theme confirm did not write display.json\npath:\n{display_config}")
+    if "Stored TUI theme" in confirmed:
+        raise RuntimeError(f"theme confirm receipt leaked onto the settings frame\nscreen:\n{confirmed}")
     save_evidence(root, "nested-settings-theme-confirm", confirmed)
+    close_settings(tmux_exe, session, "closed after theme confirm")
+    send_keys(tmux_exe, session, "C-u")
+    after_theme_confirm = wait_for(tmux_exe, session, r"Type a message", "main frame after theme confirm")
+    _assert_no_settings_chat_receipt(after_theme_confirm, "theme confirm", r"Stored TUI theme")
+    save_evidence(root, "nested-settings-theme-confirm-no-chat-receipt", after_theme_confirm)
     tmux(tmux_exe, "kill-session", "-t", session, check=False)
 
     tmux(
@@ -298,9 +321,11 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         raise RuntimeError("images highlight wrote display.json before confirmation")
     save_evidence(root, "nested-settings-images-preview", images_off_row)
     send_keys(tmux_exe, session, "Enter")
-    images_off_saved = wait_for(tmux_exe, session, r"Stored TUI image visibility off", "images off confirm")
+    images_off_saved = wait_for(tmux_exe, session, r"Images off[^\n]*current", "images off confirm current row")
     if '"show_images": false' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"images off confirm did not persist show_images=false\nscreen:\n{images_off_saved}")
+    if "Stored TUI image visibility" in images_off_saved:
+        raise RuntimeError(f"images off receipt leaked onto the settings frame\nscreen:\n{images_off_saved}")
 
     clear_settings_filter(tmux_exe, session, "cleared images filter before width")
     send_literal(tmux_exe, session, "Width 80")
@@ -310,9 +335,11 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         raise RuntimeError("image width highlight persisted before confirmation")
     save_evidence(root, "nested-settings-width-preview", width_row)
     send_keys(tmux_exe, session, "Enter")
-    width_saved = wait_for(tmux_exe, session, r"Stored TUI image width 80", "image width confirm")
+    width_saved = wait_for(tmux_exe, session, r"Width 80[^\n]*current", "image width confirm current row")
     if '"image_width_cells": 80' not in display_config.read_text(encoding="utf-8"):
         raise RuntimeError(f"image width confirm did not persist width 80\nscreen:\n{width_saved}")
+    if "Stored TUI image width" in width_saved:
+        raise RuntimeError(f"image width receipt leaked onto the settings frame\nscreen:\n{width_saved}")
     save_evidence(root, "nested-settings-images-width-confirm", width_saved)
 
     # Mouse selection in nested theme stays non-persisting.
@@ -348,4 +375,104 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     save_evidence(root, "nested-settings-mouse-no-persist", capture(tmux_exe, session))
 
     close_settings(tmux_exe, session, "nested settings closed")
+    send_keys(tmux_exe, session, "C-u")
+
+    # Workspace trust persists once through the backend /trust command, refreshes the
+    # current row, and adds zero chat/transcript receipts (no live provider involved).
+    # Synchronize on backend authority (the persisted trust record and the refreshed
+    # current row), not on transient status text that a concurrent reload can replace.
+    trust_file = ctx.state / "ava" / "project-trust.json"
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Workspace",
+        r"Settings › Workspace|Trust project",
+        "workspace section before trust action",
+    )
+    send_literal(tmux_exe, session, "Trust project")
+    # Tolerate a first character lost to a concurrent settings-view rebuild (the same
+    # race open_settings_section already accommodates for root queries).
+    wait_for(tmux_exe, session, r"Search\s{2}(?:Trust project|rust project)", "trust project row filter")
+    # The best fuzzy match auto-selects; confirm the action row (not the Project trust
+    # status row) is selected before Enter instead of forcing the first visible row.
+    wait_for(tmux_exe, session, r"›\s*Trust project", "trust project row selected")
+    send_keys(tmux_exe, session, "Enter")
+    # Non-display confirms return to the composer; synchronize on the closed modal.
+    after_trust_action = wait_for_absent(tmux_exe, session, r"Settings ›", "trust action closed settings")
+    _assert_no_settings_chat_receipt(after_trust_action, "workspace trust", r"trusted project resources")
+    save_evidence(root, "nested-settings-trust-project", after_trust_action)
+    deadline = time.monotonic() + 8.0
+    trust_disk = trust_file.read_text(encoding="utf-8") if trust_file.exists() else ""
+    while time.monotonic() < deadline and '"trusted":true' not in trust_disk:
+        time.sleep(0.05)
+        trust_disk = trust_file.read_text(encoding="utf-8") if trust_file.exists() else ""
+    if '"trusted":true' not in trust_disk:
+        raise RuntimeError(f"trust action did not persist the trusted decision\npath:\n{trust_file}")
+    # The Workspace modal header carries the path-free trust summary; synchronize on it.
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Workspace",
+        r"Settings › Workspace|Trust project",
+        "workspace section after trust action",
+    )
+    trust_row = wait_for(tmux_exe, session, r"trust trusted · enabled", "trust summary refreshed to trusted")
+    save_evidence(root, "nested-settings-trust-row-refreshed", trust_row)
+    close_settings(tmux_exe, session, "closed after trust row refresh")
+    send_keys(tmux_exe, session, "C-u")
+
+    # Restore the unknown decision so the isolated config stays neutral for later checks.
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Workspace",
+        r"Settings › Workspace|Clear trust decision",
+        "workspace section before trust clear",
+    )
+    send_literal(tmux_exe, session, "Clear trust decision")
+    wait_for(tmux_exe, session, r"Search\s{2}(?:Clear trust decision|lear trust decision)", "clear trust row filter")
+    wait_for(tmux_exe, session, r"›\s*Clear trust decision", "clear trust row selected")
+    send_keys(tmux_exe, session, "Enter")
+    after_trust_clear = wait_for_absent(tmux_exe, session, r"Settings ›", "trust clear closed settings")
+    _assert_no_settings_chat_receipt(after_trust_clear, "workspace trust clear", r"cleared project trust decision")
+    deadline = time.monotonic() + 8.0
+    trust_disk = trust_file.read_text(encoding="utf-8") if trust_file.exists() else ""
+    while time.monotonic() < deadline and '"trusted":true' in trust_disk:
+        time.sleep(0.05)
+        trust_disk = trust_file.read_text(encoding="utf-8") if trust_file.exists() else ""
+    if '"trusted":true' in trust_disk:
+        raise RuntimeError(f"trust clear did not remove the persisted decision\npath text:\n{trust_disk}")
+
+    # Input-section keybinding reload applies live bindings with zero chat receipts.
+    # Stage a distinctive binding, reload through settings, then prove the live binding
+    # works instead of synchronizing on transient status text.
+    (ava_config / "keybinds.json").write_text(
+        '{"tui.editor.cursorLineStart":["Home","Ctrl+A"],"tui.editor.cursorLineEnd":["F2"]}\n',
+        encoding="utf-8",
+    )
+    open_settings_section(
+        tmux_exe,
+        session,
+        "Input",
+        r"Settings › Input|Reload",
+        "input section before keybinding reload",
+    )
+    send_literal(tmux_exe, session, "reload")
+    wait_for(tmux_exe, session, r"Search\s{2}(?:reload|eload)", "keybinding reload row filter")
+    wait_for(tmux_exe, session, r"›\s*Reload", "keybinding reload row selected")
+    send_keys(tmux_exe, session, "Enter")
+    reloaded = wait_for_absent(tmux_exe, session, r"Settings ›", "keybinding reload closed settings")
+    _assert_no_settings_chat_receipt(reloaded, "keybinding reload", r"keybindings reloaded")
+    save_evidence(root, "nested-settings-keybinding-reload", reloaded)
+    send_literal(tmux_exe, session, "abc")
+    send_keys(tmux_exe, session, "C-a")
+    send_keys(tmux_exe, session, "F2")
+    send_literal(tmux_exe, session, "Z")
+    live_binding = wait_for(tmux_exe, session, r"abcZ", "reloaded F2 cursor-end binding")
+    save_evidence(root, "nested-settings-keybinding-reload-live", live_binding)
+    send_keys(tmux_exe, session, "C-u")
+    (ava_config / "keybinds.json").write_text(
+        '{"tui.editor.cursorLineStart":["Home","Ctrl+A"]}\n', encoding="utf-8"
+    )
+
     tmux(tmux_exe, "kill-session", "-t", session, check=False)

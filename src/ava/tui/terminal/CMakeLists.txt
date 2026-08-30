@@ -55,5 +55,8 @@ if (OptionEnableLibcwd)
   )
 endif ()
 
+ava_apply_warnings(ava_terminal)
+ava_apply_sanitizers(ava_terminal)
+
 # Create an ALIAS target.
 add_library(AVA::terminal ALIAS ava_terminal)

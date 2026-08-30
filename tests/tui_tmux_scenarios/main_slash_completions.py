@@ -21,8 +21,9 @@ from tui_smoke_helpers import (
     wait_for_absent,
     wait_for_cursor_change,
     wait_for_screen_change,
+    wait_for_session_exit,
 )
-from .common import _finish_main, _main_session
+from .common import _finish_main, _main_session, _wait_for_normal_turn_request_count
 
 
 def scenario_main_slash_completions(ctx: SmokeContext) -> None:
@@ -171,6 +172,59 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         raise RuntimeError(f"automatic-rail sidebar click selected a main-pane slash candidate\nscreen:\n{rejected_sidebar_click}")
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "120", "-y", "36")
     wait_for_f3_composer_reflow(120, 36, "ordinary slash palette after rail click", palette_visible=True)
+
+    # Seed a genuine ordinary provider turn in an isolated pane and wait for its
+    # completion before submitting /images. This avoids accidentally exercising
+    # the active-run command path while proving local output is temporary state.
+    main_session = session
+    provider = ctx.start_fake_provider("slash-command-output", delay_ms=0, scenario="text-three")
+    session = ctx.session_name("slash-command-output")
+    provider_command = ctx.fake_provider_command(
+        provider,
+        home=ctx.active_home,
+        config=ctx.active_config,
+        state=ctx.active_state,
+        data=ctx.active_data,
+    )
+    ctx.launch_ava(session, workspace=ctx.active_workspace, command=provider_command, width=120, height=36)
+    wait_for(tmux_exe, session, r"Type a message|live session", "slash command-output provider initial frame")
+    ordinary_seed = "LOCAL-COMMAND-TRANSCRIPT-SEED"
+    send_literal(tmux_exe, session, ordinary_seed)
+    send_keys(tmux_exe, session, "Enter")
+    _wait_for_normal_turn_request_count(provider.request_log, 1, "slash command-output ordinary provider request")
+    wait_for(tmux_exe, session, r"headless active prompt complete", "slash command-output ordinary provider completion")
+    wait_for_absent(tmux_exe, session, r"Esc stop|processing", "slash command-output provider turn settled")
+
+    send_literal(tmux_exe, session, "/images")
+    send_keys(tmux_exe, session, "Enter")
+    wait_for(tmux_exe, session, r"│  /images(?:\s|$)", "provider-pane images command selected")
+    send_keys(tmux_exe, session, "Enter")
+    images_output = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)Command /images.*TUI images:.*usage: /images \[on\|off\|reset\]",
+        "images command-output modal",
+    )
+    if ordinary_seed not in images_output or "│  /images" in images_output:
+        raise RuntimeError(f"/images command output lost the provider seed or rendered its invocation as chat\nscreen:\n{images_output}")
+    save_evidence(root, "local-command-output-images", images_output)
+    send_keys(tmux_exe, session, "Escape")
+    images_closed = wait_for_absent(tmux_exe, session, r"TUI images:|Command /images", "images command output closed")
+    if ordinary_seed not in images_closed or "│  /images" in images_closed:
+        raise RuntimeError(f"/images invocation or output remained after closing the modal\nscreen:\n{images_closed}")
+
+    send_literal(tmux_exe, session, "/help")
+    send_keys(tmux_exe, session, "Enter")
+    help_output = wait_for(tmux_exe, session, r"(?s)Command /help.*Commands:", "help command-output modal")
+    if ordinary_seed not in help_output or "│  /help" in help_output:
+        raise RuntimeError(f"/help command output lost the provider seed or rendered its invocation as chat\nscreen:\n{help_output}")
+    send_keys(tmux_exe, session, "Escape")
+    help_closed = wait_for_absent(tmux_exe, session, r"Command /help|Show commands and ef", "help command output closed")
+    if ordinary_seed not in help_closed or "│  /help" in help_closed:
+        raise RuntimeError(f"/help invocation or output remained after closing the modal\nscreen:\n{help_closed}")
+    send_keys(tmux_exe, session, "C-d")
+    wait_for_session_exit(tmux_exe, session)
+    session = main_session
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/share")
@@ -493,12 +547,12 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     bang_shell = wait_for(
         tmux_exe,
         session,
-        r"(?s)!pwd.*exit: 0",
-        "allowed bang shell helper",
+        r"(?s)Command !.*exit: 0",
+        "allowed bang shell helper command output",
         timeout=30.0,
     )
-    if "Permission required" in bang_shell or "PERMISSION REQUIRED" in bang_shell:
-        raise RuntimeError(f"allowed ! shell helper left its permission prompt open\nscreen:\n{bang_shell}")
+    if "Permission required" in bang_shell or "PERMISSION REQUIRED" in bang_shell or "!pwd" in bang_shell:
+        raise RuntimeError(f"allowed ! shell helper leaked its invocation or left its permission prompt open\nscreen:\n{bang_shell}")
 
     # After path/reference proofs, seed one durable rule and prove explain completions lead with the
     # human summary while selection still drafts the exact permrule id (no raw id / [complete] chrome).

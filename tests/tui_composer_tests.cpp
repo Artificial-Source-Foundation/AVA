@@ -8,6 +8,7 @@ void run_tui_composer_tests()
   ScopedEnvVar theme_env_guard("AVA_TUI_THEME", "");
   ScopedEnvVar colorfgbg_guard("COLORFGBG", "");
   ScopedEnvVar tmux_hyperlinks_guard("AVA_TUI_TMUX_HYPERLINKS", "");
+  run_tui_command_output_tests();
   run_tui_terminal_image_tests();
   run_tui_terminal_input_tests_part_1();
   run_tui_permission_tests_part_1();

@@ -8,6 +8,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
@@ -99,7 +100,7 @@ CIEDE2000::LAB ColorPalette::rgb_to_lab(Color rgb)
 
   // Then convert to linearized sRGB color space.
   // Undo the gamma curve.
-  for (int i = 0; i < colors.size(); ++i)
+  for (std::size_t i = 0; i < colors.size(); ++i)
   {
     if (colors[i] <= 0.04045)
       colors[i] /= 12.92;
@@ -434,12 +435,13 @@ int ColorPalette::nearest_indexed_color(Color color)
 
   CIEDE2000::LAB const lab_color = rgb_to_lab(color);
 
-  for (int index = 0; index < colors_.size(); ++index)
+  for (std::size_t index = 0; index < colors_.size(); ++index)
   {
-    if (colors_[static_cast<std::size_t>(index)].as_int() == color.as_int())
+    if (colors_[index].as_int() == color.as_int())
     {
-      reserve_index(index);
-      return index;
+      int const color_index = static_cast<int>(index);
+      reserve_index(color_index);
+      return color_index;
     }
   }
 
@@ -474,14 +476,14 @@ int ColorPalette::nearest_indexed_color(Color color)
 
   // Find nearest color palette index, which corresponds to the index of palette_.
   double min_delta_E = std::numeric_limits<double>::max();
-  for (int index = 0; index < palette_.size(); ++index)
+  for (std::size_t index = 0; index < palette_.size(); ++index)
   {
     CIEDE2000::LAB const& lab_palette = palette_[index];
     double const delta_E = CIEDE2000::CIEDE2000(lab_palette, lab_color);
     if (delta_E < min_delta_E)
     {
       min_delta_E = delta_E;
-      nearest_index = index;
+      nearest_index = static_cast<int>(index);
     }
   }
 

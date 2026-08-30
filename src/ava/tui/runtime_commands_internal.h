@@ -27,9 +27,7 @@ enum class ReloadTarget
 };
 
 [[nodiscard]] bool is_compact_command(std::string_view line) noexcept;
-[[nodiscard]] bool should_echo_slash_command(std::string_view submitted);
 [[nodiscard]] bool shell_helper_submission(std::string_view submitted);
-[[nodiscard]] bool should_show_slash_command_output_as_status(std::string_view submitted);
 [[nodiscard]] bool exact_command(std::string_view submitted, std::string_view command);
 [[nodiscard]] bool session_switching_command(std::string_view submitted);
 [[nodiscard]] std::optional<std::string> reload_command_argument(std::string_view submitted);

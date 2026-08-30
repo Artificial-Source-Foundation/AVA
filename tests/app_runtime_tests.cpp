@@ -47,6 +47,7 @@ void run_app_runtime_tests()
   test_app_run_prompt_emits_tool_progress_and_session_spill();
   test_app_first_run_auth_onboarding();
   test_app_run_prompt_event_sink_failure_cancels_before_next_provider_call();
+  test_tui_request_presentation_capture();
   test_app_command_dispatcher();
   test_app_session_jsonl_import_export_portable_attachments();
   test_app_session_jsonl_export_sanitizes_private_reasoning_replay_metadata();

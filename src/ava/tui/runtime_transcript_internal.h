@@ -63,7 +63,6 @@ enum class LatestAssistantCopyResult
 [[nodiscard]] LatestAssistantCopyResult copy_latest_assistant_message(
     std::vector<TranscriptItem> const& transcript, std::function<bool(std::string_view)> const& terminal_writer = copy_text_to_terminal_clipboard);
 [[nodiscard]] std::string latest_assistant_copy_status(LatestAssistantCopyResult result);
-[[nodiscard]] std::optional<std::string> latest_tool_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::vector<std::pair<std::string, bool>> capture_tool_detail_visibility(std::vector<TranscriptItem> const& transcript);
 void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> const& overrides, std::vector<TranscriptItem>& transcript);
 // Capture/carry completed thinking expansion by exact transcript index ownership.
@@ -74,9 +73,7 @@ void carry_tool_detail_visibility(std::vector<std::pair<std::string, bool>> cons
 [[nodiscard]] std::vector<std::pair<std::size_t, bool>> capture_thinking_expansion(std::vector<TranscriptItem> const& transcript);
 void carry_thinking_expansion(std::vector<std::pair<std::size_t, bool>> const& overrides, std::vector<TranscriptItem>& transcript,
                               std::ptrdiff_t item_index_shift);
-[[nodiscard]] std::optional<std::string> latest_tool_diff_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string diff_transcript_text(std::string_view title, std::string_view diff);
-[[nodiscard]] std::optional<std::string> latest_permission_copy_text(std::vector<TranscriptItem> const& transcript, std::string_view query = {});
 [[nodiscard]] std::string question_answer_audit_detail(ava::agent::QuestionAnswer const& answer);
 std::ptrdiff_t push_transcript(ComposerSnapshot& snapshot, TranscriptItem item);
 void push_history(std::vector<std::string>& history, std::string input);

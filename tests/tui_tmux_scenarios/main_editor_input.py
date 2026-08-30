@@ -374,18 +374,13 @@ def scenario_main_editor_input(ctx: SmokeContext) -> None:
     alt_enter_help = wait_for(
         tmux_exe,
         session,
-        r"page_up PageUp|model_cycle_forward|details_toggle|tree_fold_or_up|tree_unfold_or_down",
-        "Alt+Enter idle submit help output",
+        r"(?s)Command /help.*Commands:",
+        "Alt+Enter idle submit help command output",
     )
-    if (
-        "page_up PageUp" not in alt_enter_help
-        and "model_cycle_forward" not in alt_enter_help
-        and "details_toggle" not in alt_enter_help
-        and "tree_fold_or_up" not in alt_enter_help
-        and "tree_unfold_or_down" not in alt_enter_help
-    ):
-        raise RuntimeError(f"Alt+Enter did not submit the /help command while idle\nscreen:\n{alt_enter_help}")
-    send_keys(tmux_exe, session, "C-u")
+    if "│  /help" in alt_enter_help:
+        raise RuntimeError(f"Alt+Enter rendered /help as a chat invocation\nscreen:\n{alt_enter_help}")
+    send_keys(tmux_exe, session, "Escape")
+    wait_for_absent(tmux_exe, session, r"Command /help", "Alt+Enter help output closed")
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/keybindings")

@@ -108,7 +108,18 @@ def _copy_selection_payload(ctx: SmokeContext, session: str, name: str, expected
 
 def scenario_transcript_selection(ctx: SmokeContext) -> None:
     session = ctx.session_name("transcript-selection")
-    provider = ctx.start_fake_provider("transcript-selection", delay_ms=0)
+    logical_line = "TRANSCRIPT MULTICLICK TARGETWORD SENTINEL"
+    target_word = "TARGETWORD"
+    target = ctx.active_workspace / "transcript-selection.txt"
+    target.write_text(logical_line + "\n", encoding="utf-8")
+    ctx.active_ava_config.joinpath("models.json").write_text(
+        '{"default_provider":"moonshot","default_model":"ava-tui-fake",'
+        '"models":[{"provider":"moonshot","id":"ava-tui-fake","name":"AVA TUI Fake","family":"fake",'
+        '"context_window_tokens":8192,"max_output_tokens":1024,"supports_tools":true,'
+        '"supports_streaming":false,"supports_reasoning":false,"reports_usage":true}]}\n',
+        encoding="utf-8",
+    )
+    provider = ctx.start_fake_provider("transcript-selection", delay_ms=0, scenario="read-tool", target=target)
     command = ctx.fake_provider_command(
         provider,
         home=ctx.active_home,
@@ -117,28 +128,17 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
         data=ctx.active_data,
         no_color=False,
     )
-    logical_line = "TRANSCRIPT MULTICLICK TARGETWORD SENTINEL"
-    target_word = "TARGETWORD"
-    ctx.active_workspace.joinpath("transcript-selection.txt").write_text(logical_line + "\n", encoding="utf-8")
     ctx.launch_ava(session, workspace=ctx.active_workspace, command=command, width=110, height=28)
     wait_for(ctx.tmux, session, r"Type a message|live session", "transcript-selection initial frame")
 
-    send_literal(ctx.tmux, session, "credential-free transcript selection seed")
+    send_literal(ctx.tmux, session, "credential-free ordinary provider tool selection seed")
     send_keys(ctx.tmux, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "transcript-selection fake-provider request")
-    wait_for(ctx.tmux, session, r"headless active prompt complete", "transcript-selection fake-provider response")
-
-    send_literal(ctx.tmux, session, "/details compact")
-    send_keys(ctx.tmux, session, "Enter")
-    wait_for(ctx.tmux, session, r"tool details are now compact", "transcript-selection compact tool-card mode")
-
-    send_literal(ctx.tmux, session, "/read transcript-selection.txt")
-    send_keys(ctx.tmux, session, "Enter")
+    _wait_for_normal_turn_request_count(provider.request_log, 1, "transcript-selection provider tool request")
     card = wait_for(
         ctx.tmux,
         session,
         rf"{re.escape(logical_line)}|Permission required",
-        "transcript-selection tool-card seed",
+        "transcript-selection ordinary provider tool card seed",
     )
     if "Permission required" in card:
         send_keys(ctx.tmux, session, "Tab", "Enter")
@@ -146,37 +146,43 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
             ctx.tmux,
             session,
             re.escape(logical_line),
-            "transcript-selection allowed tool card",
+            "transcript-selection allowed ordinary provider tool card",
         )
+    wait_for(ctx.tmux, session, r"after permission deny", "transcript-selection provider tool turn completion")
+    card = capture(ctx.tmux, session)
+    if "/read transcript-selection.txt" in card or "Command /read" in card:
+        raise RuntimeError(f"local command card returned while seeding an ordinary provider tool turn\nscreen:\n{card}")
 
-    header_pattern = r"[Rr]ead.*transcript-selection\.txt"
+    # Start from compact presentation exactly as the prior release gate did,
+    # but mutate only the genuine provider card rather than creating a local one.
+    send_literal(ctx.tmux, session, "/details compact")
+    send_keys(ctx.tmux, session, "Enter")
+    card = wait_for_screen_state(
+        ctx.tmux,
+        session,
+        lambda screen: "read_file" in screen and "output:" not in screen and "/details compact" not in screen,
+        "transcript-selection compact ordinary provider tool card",
+    )
+    header_pattern = r"read_file.*path="
     header_row, header_line = _last_row_matching(card, header_pattern)
-    body_row, body_line = _last_row_matching(card, re.escape(logical_line))
-    if body_row <= header_row:
-        raise RuntimeError(
-            "tool-card body was not below its header, so header drag geometry was not testable\n"
-            f"header row {header_row}: {header_line!r}\nbody row {body_row}: {body_line!r}\nscreen:\n{card}"
-        )
-    header_column = max(1, len(header_line) - len(header_line.lstrip()) + 2)
-    body_column = body_line.index(target_word) + 1 + 2
+    header_column = header_line.index("+ read_file") + 1
 
     # Rapid ordinary header clicks remain actions rather than body multi-click
-    # seeds. Re-read geometry after each redraw because expansion changes the
-    # tmux pane rows, and synchronize on visible detail content.
+    # seeds. Re-read geometry after each redraw because expansion changes rows.
     rapid_click_interval = 0.5
     rapid_started = time.monotonic()
     _send_sgr_clicks(ctx, session, header_column, header_row, 1)
     expanded = wait_for_screen_state(
         ctx.tmux,
         session,
-        lambda screen: "output:" in screen,
+        lambda screen: "output:" in screen and logical_line in screen,
         "transcript-selection header expanded state",
         timeout=0.35,
     )
     if "\x1b[7m" in capture_styled(ctx.tmux, session):
         raise RuntimeError(f"header click started transcript selection while expanding\nscreen:\n{expanded}")
     expanded_header_row, expanded_header_line = _last_row_matching(expanded, header_pattern)
-    expanded_header_column = max(1, len(expanded_header_line) - len(expanded_header_line.lstrip()) + 2)
+    expanded_header_column = expanded_header_line.index("+ read_file") + 1
     _send_sgr_clicks(ctx, session, expanded_header_column, expanded_header_row, 1)
     rapid_elapsed = time.monotonic() - rapid_started
     if rapid_elapsed >= rapid_click_interval:
@@ -189,8 +195,28 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
         lambda screen: "output:" not in screen,
         "transcript-selection header collapsed state",
     )
-    if "output:" in collapsed or "\x1b[7m" in capture_styled(ctx.tmux, session):
+    if "\x1b[7m" in capture_styled(ctx.tmux, session):
         raise RuntimeError(f"rapid header click was hijacked by word/line selection instead of collapsing\nscreen:\n{collapsed}")
+
+    # Re-expand to expose a body endpoint for drag and multi-click coverage.
+    header_row, header_line = _last_row_matching(collapsed, header_pattern)
+    header_column = header_line.index("+ read_file") + 1
+    _send_sgr_clicks(ctx, session, header_column, header_row, 1)
+    expanded = wait_for_screen_state(
+        ctx.tmux,
+        session,
+        lambda screen: "output:" in screen and logical_line in screen,
+        "transcript-selection provider card body restored",
+    )
+    header_row, header_line = _last_row_matching(expanded, header_pattern)
+    body_row, body_line = _last_row_matching(expanded, re.escape(logical_line))
+    if body_row <= header_row:
+        raise RuntimeError(
+            "tool-card body was not below its header, so header drag geometry was not testable\n"
+            f"header row {header_row}: {header_line!r}\nbody row {body_row}: {body_line!r}\nscreen:\n{expanded}"
+        )
+    header_column = header_line.index("+ read_file") + 1
+    body_column = body_line.index(target_word) + 1 + 2
 
     # Send actual xterm SGR press, motion, and release reports through tmux. The
     # first endpoint is a toggle-capable tool header; movement must turn it into
@@ -235,13 +261,13 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
     _wait_for_no_reverse(ctx, session, "transcript-selection cleared double-click selection")
     _send_sgr_clicks(ctx, session, body_column, body_row, 3)
     _wait_for_reverse(ctx, session, "transcript-selection triple-click logical line")
-    # The transcript projection owns its two-space body indent, so selecting
-    # the complete logical rendered line includes it in the clipboard text.
+    # A provider tool body is a physical card row. Triple-click copies that
+    # exact bounded row, including card chrome and right padding at width 110.
     triple_copied = _copy_selection_payload(
         ctx,
         session,
         "transcript-selection-triple-click",
-        f"  {logical_line}".encode("utf-8"),
+        f"  │       {logical_line}".ljust(110).encode("utf-8"),
     )
     save_evidence(ctx.root, "transcript-selection-multiclick-copied", triple_copied)
 

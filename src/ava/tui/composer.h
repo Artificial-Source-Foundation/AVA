@@ -104,6 +104,21 @@ struct ToolTimelineItem
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+enum class TuiToolIndexOrigin
+{
+  Provider,
+  LocalCommand,
+};
+
+struct TuiToolIndexEntry
+{
+  ToolTimelineItem tool;
+  TuiToolIndexOrigin origin = TuiToolIndexOrigin::Provider;
+  std::uint64_t sequence = 0;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TranscriptItem
 {
   std::string label = {};
@@ -121,6 +136,19 @@ struct TranscriptItem
   // stream item retains its complete previous source prefix.
   std::string stream_id = {};
   bool append_only_stream = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// TUI-only local command presentation. The title is a sanitized command token;
+// blocks and tools are bounded before storage and never enter session/provider content.
+struct CommandOutputView
+{
+  std::string title_token = {};
+  std::vector<std::string> blocks = {};
+  std::vector<ToolTimelineItem> tools = {};
+  std::size_t scroll_offset = 0;
+  bool truncated = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -592,6 +620,9 @@ struct ComposerSnapshot
   // One-action presentation feedback from a successful reasoning cycle. It is
   // neither persistent runtime status nor session/transcript content.
   std::optional<std::string> reasoning_feedback = std::nullopt;
+  // One-action local command confirmation. Presentation-only and cleared by
+  // the next user input; never session/provider/transcript content.
+  std::optional<std::string> local_command_feedback = std::nullopt;
   bool processing = false;
   ActiveRunHint active_run_hint = {};
   std::size_t spinner_frame = 0;
@@ -601,6 +632,12 @@ struct ComposerSnapshot
   std::optional<std::size_t> context_source_count = std::nullopt;
   std::vector<TranscriptItem> transcript;
   std::size_t transcript_generation = 0;
+  std::optional<CommandOutputView> command_output = std::nullopt;
+  // One bounded sequence is the sole chronology authority for /tool, /diff,
+  // and /copy. Provider cards remain in transcript; local command tools do not.
+  std::vector<TuiToolIndexEntry> tool_index = {};
+  std::vector<std::string> evicted_tool_index_identities = {};
+  std::uint64_t next_tool_index_sequence = 0;
   // Immutable TUI-only presentation results. Semantic TranscriptItem text is
   // never rewritten; renderer lookup revalidates every fence before use.
   std::shared_ptr<detail::MermaidTranscriptProjection const> mermaid_projection = {};
@@ -771,12 +808,6 @@ struct PluginUiSurfaceGeometry
 [[nodiscard]] PluginUiSurfaceGeometry plugin_ui_surface_geometry(ComposerSnapshot const& snapshot, TuiPluginUiKind kind);
 [[nodiscard]] std::size_t composer_max_transcript_scroll_offset(ComposerSnapshot const& snapshot, std::size_t width, std::size_t height);
 [[nodiscard]] std::size_t sidebar_drawer_max_scroll_offset(ComposerSnapshot const& snapshot);
-// Process-local collapsed startup overview chrome. Height policy: 2 rows at >=12,
-// 1 row at 8-11, hidden below 8. Shared by render and mouse hit-testing. Footer unchanged.
-[[nodiscard]] std::size_t startup_overview_collapsed_row_count(ComposerSnapshot const& snapshot) noexcept;
-[[nodiscard]] std::vector<std::string> render_startup_overview_collapsed_lines(ComposerSnapshot const& snapshot, std::size_t width);
-// True when (row,column) lands on the collapsed overview card in the main canvas.
-[[nodiscard]] bool startup_overview_card_contains_screen_position(ComposerSnapshot const& snapshot, std::size_t row, std::size_t column);
 [[nodiscard]] bool draw_screen(ComposerSnapshot const& snapshot);
 [[nodiscard]] std::string sanitize_terminal_text(std::string_view text);
 [[nodiscard]] std::vector<std::string> split_lines(std::string_view text);

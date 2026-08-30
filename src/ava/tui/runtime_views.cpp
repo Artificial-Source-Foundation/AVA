@@ -216,13 +216,23 @@ void populate_input_section(SelectListView& view, TuiKeyBindings const& bindings
   add_settings_action_row(view, std::string(kSettingsReloadKeybindings), "Reload");
 }
 
+// Concise path-free trust summary for the Workspace settings subtitle. Built only from
+// the already-loaded snapshot and kept short enough for the one-line modal title row;
+// detailed diagnostics stay with explicit /trust status.
+std::string settings_workspace_trust_summary(ProjectTrustSnapshot const& trust)
+{
+  std::string summary = "trust " + value_or_unknown(trust.decision);
+  if (!trust.project_resources.empty())
+    summary += " · " + trust.project_resources;
+  summary += " · " + std::to_string(trust.protected_resource_count) + " protected";
+  return summary;
+}
+
 void populate_sessions_section(SelectListView& view, ComposerSnapshot const& snapshot)
 {
   add_settings_action_row(view, std::string(kSettingsDraftSessions), "Sessions");
   if (snapshot.project_trust)
   {
-    auto const& trust = *snapshot.project_trust;
-    add_settings_action_row(view, std::string(kSettingsTrustStatus), "Project trust", value_or_unknown(trust.decision));
     add_settings_action_row(view, std::string(kSettingsTrustProject), "Trust project", {}, "Enables this project's resources");
     add_settings_action_row(view, std::string(kSettingsTrustDeny), "Deny project", {}, "Keeps this project's resources disabled");
     add_settings_action_row(view, std::string(kSettingsTrustClear), "Clear trust decision");
@@ -634,7 +644,9 @@ SelectListView build_settings_select_list_view_for_section(SettingsSection secti
     case SettingsSection::SessionsAndWorkspace: {
       auto view = make_settings_shell("Settings › Workspace", "No workspace settings match",
                                       footer_hint.empty() ? std::string("Enter select · Esc back") : std::move(footer_hint));
-      view.items.reserve(5);
+      if (snapshot.project_trust)
+        view.subtitle = settings_workspace_trust_summary(*snapshot.project_trust);
+      view.items.reserve(4);
       populate_sessions_section(view, snapshot);
       return view;
     }
@@ -990,7 +1002,6 @@ using runtime_views::kSettingsReloadKeybindings;
 using runtime_views::kSettingsTrustClear;
 using runtime_views::kSettingsTrustDeny;
 using runtime_views::kSettingsTrustProject;
-using runtime_views::kSettingsTrustStatus;
 using runtime_views::question_answer_from_view;
 
 ava::core::Result<ava::agent::QuestionAnswer> question_answer_from_prompt_view(QuestionPromptView const& prompt)

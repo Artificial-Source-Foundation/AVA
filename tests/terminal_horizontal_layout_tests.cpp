@@ -104,6 +104,25 @@ void test_weighted_layout()
   expect_assigned_width(*item_c_ptr, 17, "weighted item C");
 }
 
+// Verify layouts are not constrained by the former fixed 16-item scratch arrays.
+void test_large_item_count_layout()
+{
+  constexpr std::size_t item_count = 20;
+  terminal::HorizontalLayout horizontal_layout;
+  std::vector<terminal::TextSpan const*> items;
+  items.reserve(item_count);
+  for (std::size_t index = 0; index < item_count; ++index)
+  {
+    auto item = terminal::TextSpan::create(u8"x", {.minimum_width = 1});
+    items.push_back(item.get());
+    horizontal_layout.append(std::move(item));
+  }
+
+  horizontal_layout.set_width(item_count);
+  for (std::size_t index = 0; index < items.size(); ++index)
+    expect_assigned_width(*items[index], 1, "large-count item " + std::to_string(index));
+}
+
 // Verify that TextSpan truncation counts terminal columns rather than wide characters when rendering mixed-width text.
 //
 // Runs ncurses against temporary files and inspects both left- and right-aligned output. The rocket cannot fit in the
@@ -223,5 +242,6 @@ void run_terminal_horizontal_layout_tests()
   test_status_line_layout();
   test_priority_boundary_layout();
   test_weighted_layout();
+  test_large_item_count_layout();
   test_mixed_width_text_span_rendering();
 }

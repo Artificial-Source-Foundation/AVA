@@ -310,6 +310,58 @@ struct ModifyOtherKeysSequence
   int modifiers = 0;
 };
 
+struct SpecialCsiSequence
+{
+  int first_parameter = 0;
+  int modifier_value = 1;
+  int event_type = 1;
+  bool has_explicit_modifier = false;
+  bool has_event_type = false;
+};
+
+std::optional<SpecialCsiSequence> parse_special_csi_sequence(std::string_view sequence)
+{
+  if (!sequence.starts_with('[') || sequence.size() < 3)
+    return std::nullopt;
+
+  auto index = std::size_t{1};
+  auto const first_parameter = parse_unsigned_int(sequence, index);
+  if (!first_parameter)
+    return std::nullopt;
+
+  auto modifier_value = 1;
+  auto event_type = 1;
+  auto has_explicit_modifier = false;
+  auto has_event_type = false;
+  if (index < sequence.size() && sequence[index] == ';')
+  {
+    ++index;
+    auto const parsed_modifier = parse_unsigned_int(sequence, index);
+    if (!parsed_modifier || *parsed_modifier <= 0)
+      return std::nullopt;
+    modifier_value = *parsed_modifier;
+    has_explicit_modifier = true;
+
+    if (index < sequence.size() && sequence[index] == ':')
+    {
+      ++index;
+      auto const parsed_event_type = parse_unsigned_int(sequence, index);
+      if (!parsed_event_type || *parsed_event_type < 1 || *parsed_event_type > 3)
+        return std::nullopt;
+      event_type = *parsed_event_type;
+      has_event_type = true;
+    }
+  }
+
+  if (index + 1 != sequence.size())
+    return std::nullopt;
+  return SpecialCsiSequence{.first_parameter = *first_parameter,
+                            .modifier_value = modifier_value,
+                            .event_type = event_type,
+                            .has_explicit_modifier = has_explicit_modifier,
+                            .has_event_type = has_event_type};
+}
+
 std::optional<int> parse_optional_unsigned_int(std::string_view text, std::size_t& index)
 {
   if (index >= text.size() || text[index] < '0' || text[index] > '9')
@@ -460,22 +512,11 @@ Key csi_home_end_key(std::string_view sequence)
   if (sequence.size() == 2)
     return home_end_key_from_modifiers(home, 0);
 
-  auto index = std::size_t{1};
-  auto const first = parse_unsigned_int(sequence, index);
-  if (!first)
+  auto const parsed = parse_special_csi_sequence(sequence);
+  if (!parsed || (parsed->has_explicit_modifier && parsed->first_parameter != 1) || parsed->event_type == 3)
     return Key::Unknown;
-  auto modifier_value = *first;
-  if (index < sequence.size() && sequence[index] == ';')
-  {
-    if (*first != 1)
-      return Key::Unknown;
-    ++index;
-    auto const parsed_modifier = parse_unsigned_int(sequence, index);
-    if (!parsed_modifier)
-      return Key::Unknown;
-    modifier_value = *parsed_modifier;
-  }
-  if (modifier_value <= 0 || index + 1 != sequence.size())
+  auto const modifier_value = parsed->has_explicit_modifier ? parsed->modifier_value : parsed->first_parameter;
+  if (modifier_value <= 0)
     return Key::Unknown;
   return home_end_key_from_modifiers(home, modifier_value - 1);
 }
@@ -523,22 +564,11 @@ Key csi_cursor_key(std::string_view sequence)
   if (sequence.size() == 2)
     return cursor_key_from_direction_and_modifiers(direction, 0);
 
-  auto index = std::size_t{1};
-  auto first = parse_unsigned_int(sequence, index);
-  if (!first)
+  auto const parsed = parse_special_csi_sequence(sequence);
+  if (!parsed || (parsed->has_explicit_modifier && parsed->first_parameter != 1) || parsed->event_type == 3)
     return Key::Unknown;
-  auto modifier_value = *first;
-  if (index < sequence.size() && sequence[index] == ';')
-  {
-    if (*first != 1)
-      return Key::Unknown;
-    ++index;
-    auto const parsed_modifier = parse_unsigned_int(sequence, index);
-    if (!parsed_modifier)
-      return Key::Unknown;
-    modifier_value = *parsed_modifier;
-  }
-  if (modifier_value <= 0 || index + 1 != sequence.size())
+  auto const modifier_value = parsed->has_explicit_modifier ? parsed->modifier_value : parsed->first_parameter;
+  if (modifier_value <= 0)
     return Key::Unknown;
   return cursor_key_from_direction_and_modifiers(direction, modifier_value - 1);
 }
@@ -963,32 +993,89 @@ Key key_from_modify_other_keys_sequence(std::string_view sequence)
   return key_from_codepoint_and_modifiers(parsed->codepoint, parsed->modifiers);
 }
 
+Key function_key_from_number(int number)
+{
+  switch (number)
+  {
+    case 11:
+      return Key::F1;
+    case 12:
+      return Key::F2;
+    case 13:
+      return Key::F3;
+    case 14:
+      return Key::F4;
+    case 15:
+      return Key::F5;
+    case 17:
+      return Key::F6;
+    case 18:
+      return Key::F7;
+    case 19:
+      return Key::F8;
+    case 20:
+      return Key::F9;
+    case 21:
+      return Key::F10;
+    case 23:
+      return Key::F11;
+    case 24:
+      return Key::F12;
+    default:
+      return Key::Unknown;
+  }
+}
+
 Key function_key_from_sequence(std::string_view sequence)
 {
-  if (sequence == "OP" || sequence == "[11~")
+  if (sequence == "OP")
     return Key::F1;
-  if (sequence == "OQ" || sequence == "[12~")
+  if (sequence == "OQ")
     return Key::F2;
-  if (sequence == "OR" || sequence == "[13~")
+  if (sequence == "OR")
     return Key::F3;
-  if (sequence == "OS" || sequence == "[14~")
+  if (sequence == "OS")
     return Key::F4;
-  if (sequence == "[15~")
-    return Key::F5;
-  if (sequence == "[17~")
-    return Key::F6;
-  if (sequence == "[18~")
-    return Key::F7;
-  if (sequence == "[19~")
-    return Key::F8;
-  if (sequence == "[20~")
-    return Key::F9;
-  if (sequence == "[21~")
-    return Key::F10;
-  if (sequence == "[23~")
-    return Key::F11;
-  if (sequence == "[24~")
-    return Key::F12;
+
+  if (sequence.starts_with('[') && sequence.size() >= 2 && sequence.back() >= 'P' && sequence.back() <= 'S')
+  {
+    auto const parsed = parse_special_csi_sequence(sequence);
+    if (!parsed || !parsed->has_explicit_modifier || !parsed->has_event_type || parsed->first_parameter != 1 || parsed->event_type == 3 ||
+        effective_kitty_modifiers(parsed->modifier_value - 1) != 0)
+      return Key::Unknown;
+    switch (sequence.back())
+    {
+      case 'P':
+        return Key::F1;
+      case 'Q':
+        return Key::F2;
+      case 'R':
+        return Key::F3;
+      case 'S':
+        return Key::F4;
+      default:
+        return Key::Unknown;
+    }
+  }
+
+  if (sequence.starts_with('[') && sequence.ends_with('~'))
+  {
+    auto const parsed = parse_special_csi_sequence(sequence);
+    if (parsed && parsed->has_explicit_modifier && parsed->has_event_type)
+    {
+      if (parsed->event_type == 3 || effective_kitty_modifiers(parsed->modifier_value - 1) != 0)
+        return Key::Unknown;
+      return function_key_from_number(parsed->first_parameter);
+    }
+  }
+
+  if (sequence.size() >= 4 && sequence.starts_with('[') && sequence.ends_with('~'))
+  {
+    auto index = std::size_t{1};
+    auto const number = parse_unsigned_int(sequence, index);
+    if (number && index + 1 == sequence.size())
+      return function_key_from_number(*number);
+  }
   return Key::Unknown;
 }
 
@@ -1130,40 +1217,23 @@ Key page_key_from_csi_tilde(std::string_view sequence)
   if (!sequence.starts_with('[') || sequence.empty() || sequence.back() != '~')
     return Key::Unknown;
 
-  auto index = std::size_t{1};
-  auto const code = parse_unsigned_int(sequence, index);
-  if (!code)
-    return Key::Unknown;
-
-  auto modifier = std::optional<int>{};
-  while (index + 1 < sequence.size())
-  {
-    if (!consume_char(sequence, index, ';') && !consume_char(sequence, index, ':'))
-      return Key::Unknown;
-    auto const parsed_modifier = parse_unsigned_int(sequence, index);
-    if (!parsed_modifier)
-      return Key::Unknown;
-    if (!modifier)
-      modifier = parsed_modifier;
-  }
-  if (index + 1 != sequence.size())
+  auto const parsed = parse_special_csi_sequence(sequence);
+  if (!parsed || parsed->event_type == 3)
     return Key::Unknown;
 
   auto effective_modifiers = 0;
-  if (modifier)
+  if (parsed->has_explicit_modifier)
   {
-    if (*modifier <= 0)
-      return Key::Unknown;
-    effective_modifiers = effective_kitty_modifiers(*modifier - 1);
+    effective_modifiers = effective_kitty_modifiers(parsed->modifier_value - 1);
     if ((effective_modifiers & ~(kKittyModifierShift | kKittyModifierAlt | kKittyModifierCtrl)) != 0)
       return Key::Unknown;
   }
 
-  if (*code == 1 || *code == 7)
+  if (parsed->first_parameter == 1 || parsed->first_parameter == 7)
     return home_end_key_from_modifiers(true, effective_modifiers);
-  if (*code == 4 || *code == 8)
+  if (parsed->first_parameter == 4 || parsed->first_parameter == 8)
     return home_end_key_from_modifiers(false, effective_modifiers);
-  if (*code == 3)
+  if (parsed->first_parameter == 3)
   {
     if (effective_modifiers == kKittyModifierShift)
       return Key::ShiftDelete;
@@ -1171,11 +1241,11 @@ Key page_key_from_csi_tilde(std::string_view sequence)
       return Key::AltDelete;
     return effective_modifiers == 0 ? Key::Delete : Key::Unknown;
   }
-  if (*code == 2)
+  if (parsed->first_parameter == 2)
     return Key::Insert;
-  if (*code == 5)
+  if (parsed->first_parameter == 5)
     return Key::PageUp;
-  if (*code == 6)
+  if (parsed->first_parameter == 6)
     return Key::PageDown;
   return Key::Unknown;
 }

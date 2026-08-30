@@ -37,8 +37,6 @@ Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdo
   // Initialize the stdsrc_ handle.
   stdscr_.init_as_stdscr();
 
-  wchar_t fill[] = L" ";
-
   if (has_colors())
   {
     start_color();
@@ -101,7 +99,7 @@ bool Context::have_direct_color()
 int Context::get_wch() const
 {
   wint_t wch = 0;
-  int res = ::get_wch(&wch);
+  [[maybe_unused]] int res = ::get_wch(&wch);
   // Call blocking get_wch only while stdscr has no timeout and terminal input remains available; use try_get_wch for fallible reads.
   ASSERT(res != ERR);
   return static_cast<int>(wch);
@@ -153,7 +151,7 @@ ColorPair Context::create_color_pair(Color foreground, Color background)
 
   // On a direct-color terminal an RGB value is itself the color index. Indexed terminals instead use their nearest palette color.
   int const color_pair_index = static_cast<int>(color_pairs_.size()) + 1;
-  int const status = ::init_extended_pair(color_pair_index, foreground_index, background_index);
+  [[maybe_unused]] int const status = ::init_extended_pair(color_pair_index, foreground_index, background_index);
   // init_extended_pair returns ERR when the pair index exceeds COLOR_PAIRS or a color index is out of range; keep
   // the number of created pairs within the terminal limit and pass valid Color values.
   ASSERT(status == OK);

@@ -55,12 +55,18 @@ class GraphemeCluster
   // either the array is full, or the first unused slot contains L'\0'.
   explicit GraphemeCluster(Storage storage) : storage_(storage) { }
 
+  // Copy constructor.
+  GraphemeCluster(GraphemeCluster const& orig)
+  {
+    // From https://en.cppreference.com/cpp/string/wide/wcsncpy:
+    // If count is reached before the entire string src was copied, the resulting wide character array is not null-terminated.
+    std::wcsncpy(storage_.data(), orig.data(), storage_.size());
+  }
+
   // Assignment operator.
   GraphemeCluster& operator=(GraphemeCluster const& orig)
   {
     std::wcsncpy(storage_.data(), orig.data(), storage_.size());
-    // From https://en.cppreference.com/cpp/string/wide/wcsncpy:
-    // If count is reached before the entire string src was copied, the resulting wide character array is not null-terminated.
     return *this;
   }
 

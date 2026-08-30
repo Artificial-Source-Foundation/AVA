@@ -23,14 +23,11 @@ GraphemeSurface ParagraphPad::generate_grapheme_surface(columns_t columns)
   //
   // Reserve paragraphs_.size() number of GraphemeBlockRow's for the surface.
   GraphemeSurface wrapped_paragraphs(paragraphs_.size());
-  uint32_t pad_height = 0;
   for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
   {
     GraphemeBlockRow block_row(paragraph->create_grapheme_block(columns));
-    pad_height += block_row.height();
     wrapped_paragraphs.append(std::move(block_row));
   }
-
   return wrapped_paragraphs;
 }
 

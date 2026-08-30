@@ -327,7 +327,7 @@ def test_usage_and_required_failure(ava: Path, root: Path) -> None:
         completed = run(ava, list(args), env, workspace)
         assert completed.returncode == 2, (args, completed.returncode, completed.stdout, completed.stderr)
         assert completed.stdout == ""
-        assert completed.stderr.startswith("Usage: ava ")
+        assert completed.stderr.startswith(f"Usage: {ava} ")
 
 
 def main() -> int:

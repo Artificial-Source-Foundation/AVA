@@ -128,8 +128,10 @@ void append_prompt_argument(std::optional<std::string>& prompt, std::string_view
 
 std::string_view trim_cli_token(std::string_view token)
 {
-  while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front())) != 0) token.remove_prefix(1);
-  while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back())) != 0) token.remove_suffix(1);
+  while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front())) != 0)
+    token.remove_prefix(1);
+  while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back())) != 0)
+    token.remove_suffix(1);
   return token;
 }
 
@@ -213,6 +215,14 @@ void print_exit_card(ava::app::runtime::session_ts const& unlocked_session, int 
 
 int run(int argc, char** argv)
 {
+  // Print a command-line error with the invoked program name and return its requested exit status.
+  //
+  // The error text must not include a trailing newline.
+  auto fatal_error = [&](int exit_status, std::string_view error) {
+    std::cerr << argv[0] << ": " << error << '\n';
+    return exit_status;
+  };
+
   if (argc >= 2 && std::string_view(argv[1]) == "doctor")
   {
     bool json = false;
@@ -220,7 +230,7 @@ int run(int argc, char** argv)
       json = true;
     else if (argc != 2)
     {
-      std::cerr << "Usage: ava doctor [--json]\n";
+      std::cerr << "Usage: " << argv[0] << " doctor [--json]\n";
       return 2;
     }
     std::error_code workspace_error;
@@ -233,7 +243,7 @@ int run(int argc, char** argv)
   {
     if (argc != 3 || std::string_view(argv[2]) != "export")
     {
-      std::cerr << "Usage: ava support export\n";
+      std::cerr << "Usage: " << argv[0] << " support export\n";
       return 2;
     }
     std::error_code workspace_error;
@@ -256,27 +266,23 @@ int run(int argc, char** argv)
   {
     if (acp_line_shell_flags > 0)
     {
-      std::cerr << "use either --line-shell or --acp, not both\n";
-      return 2;
+      return fatal_error(2, "use either --line-shell or --acp, not both");
     }
     bool const valid = acp_flags == 1 && acp_trace_flags <= 1 && argc == 2 + acp_trace_flags;
     if (!valid)
     {
-      std::cerr << "--acp is a standalone mode and accepts only one optional --trace flag\n";
-      return 2;
+      return fatal_error(2, "--acp is a standalone mode and accepts only one optional --trace flag");
     }
     auto diagnostics = ava::diagnostics::RuntimeDiagnostics::create(ava::config::xdg_paths(), acp_trace_flags == 1);
     if (!diagnostics)
     {
-      std::cerr << "Trace startup failed: private diagnostics storage is unavailable.\n";
-      return 1;
+      return fatal_error(1, "trace startup failed: private diagnostics storage is unavailable.");
     }
     return run_acp_mode(std::cerr, std::move(*diagnostics));
   }
   if (acp_trace_flags > 1)
   {
-    std::cerr << "--trace may be specified only once\n";
-    return 2;
+    return fatal_error(2, "--trace may be specified only once");
   }
 
   auto mode = ava::agent::Mode::Build;
@@ -320,7 +326,7 @@ int run(int argc, char** argv)
     auto set_source = [&](CredentialSource next_source, ava::app::ConnectCredentialType next_type) -> bool {
       if (source != CredentialSource::None)
       {
-        std::cerr << "connect accepts only one credential source\n";
+        std::cerr << argv[0] << ": connect accepts only one credential source\n";
         return false;
       }
       source = next_source;
@@ -361,22 +367,20 @@ int run(int argc, char** argv)
           return 2;
         if (index + 1 >= argc)
         {
-          std::cerr << ava::tui::sanitize_terminal_text(std::string(option)) << " requires an environment variable name\n";
+          std::cerr << argv[0] << ": " << ava::tui::sanitize_terminal_text(std::string(option)) << " requires an environment variable name\n";
           return 2;
         }
         env_var = std::string(argv[++index]);
         continue;
       }
-      std::cerr << "unknown connect option\n";
-      return 2;
+      return fatal_error(2, "unknown connect option");
     }
 
     if (source == CredentialSource::BrowserOAuth || source == CredentialSource::HeadlessOAuth)
     {
       if (!provider || *provider != "openai")
       {
-        std::cerr << "OpenAI OAuth flags require provider `openai`\n";
-        return 2;
+        return fatal_error(2, "OpenAI OAuth flags require provider `openai`");
       }
       if (source == CredentialSource::BrowserOAuth)
         return run_connect_openai_browser(paths, std::cout, std::cerr);
@@ -387,8 +391,7 @@ int run(int argc, char** argv)
     {
       if (!provider)
       {
-        std::cerr << "connect requires a provider with headless credential sources\n";
-        return 2;
+        return fatal_error(2, "connect requires a provider with headless credential sources");
       }
       return run_connect_provider_credential(
           paths, ava::app::ConnectProviderCredentialOptions{.provider_id = *provider, .credential_type = credential_type.value(), .env_var = env_var}, std::cin,
@@ -432,8 +435,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || std::string_view(argv[++index]) != "login")
       {
-        std::cerr << "auth requires login\n";
-        return 2;
+        return fatal_error(2, "auth requires login");
       }
       std::optional<std::string> provider;
       if (index + 1 < argc && !std::string_view(argv[index + 1]).starts_with("--"))
@@ -461,8 +463,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--mode requires build, plan, text, json, or rpc\n";
-        return 2;
+        return fatal_error(2, "--mode requires build, plan, text, json, or rpc");
       }
       std::string_view const requested_mode(argv[++index]);
       if (requested_mode == "text")
@@ -487,8 +488,7 @@ int run(int argc, char** argv)
       auto parsed = ava::agent::parse_mode(requested_mode);
       if (!parsed)
       {
-        std::cerr << "--mode requires build, plan, text, json, or rpc\n";
-        return 2;
+        return fatal_error(2, "--mode requires build, plan, text, json, or rpc");
       }
       mode = *parsed;
       continue;
@@ -522,8 +522,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--output requires json, text, or rpc\n";
-        return 2;
+        return fatal_error(2, "--output requires json, text, or rpc");
       }
       std::string_view const output(argv[++index]);
       if (output == "json")
@@ -540,8 +539,7 @@ int run(int argc, char** argv)
       }
       else
       {
-        std::cerr << "--output requires json, text, or rpc\n";
-        return 2;
+        return fatal_error(2, "--output requires json, text, or rpc");
       }
       print_output_flag_seen = true;
       continue;
@@ -550,13 +548,12 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
       {
-        std::cerr << "--allow requires read-only\n";
-        return 2;
+        return fatal_error(2, "--allow requires read-only");
       }
       auto added = ava::app::add_headless_allow_policy(headless_permission_policy, argv[++index]);
       if (!added)
       {
-        std::cerr << added.error().format() << '\n';
+        std::cerr << argv[0] << ": " << added.error().format() << '\n';
         return 2;
       }
       print_permission_flag_seen = true;
@@ -566,13 +563,12 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
       {
-        std::cerr << "--allow-tool requires a comma-separated tool list\n";
-        return 2;
+        return fatal_error(2, "--allow-tool requires a comma-separated tool list");
       }
       auto added = ava::app::add_headless_allowed_tools(headless_permission_policy, argv[++index]);
       if (!added)
       {
-        std::cerr << added.error().format() << '\n';
+        std::cerr << argv[0] << ": " << added.error().format() << '\n';
         return 2;
       }
       print_permission_flag_seen = true;
@@ -582,7 +578,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
       {
-        std::cerr << std::string(arg) << " requires a comma-separated tool list\n";
+        std::cerr << argv[0] << ": " << std::string(arg) << " requires a comma-separated tool list\n";
         return 2;
       }
       append_tool_visibility_names(tool_visibility.included_tools, argv[++index]);
@@ -592,7 +588,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
       {
-        std::cerr << std::string(arg) << " requires a comma-separated tool list\n";
+        std::cerr << argv[0] << ": " << std::string(arg) << " requires a comma-separated tool list\n";
         return 2;
       }
       append_tool_visibility_names(tool_visibility.excluded_tools, argv[++index]);
@@ -613,7 +609,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << std::string(arg) << " requires a session id\n";
+        std::cerr << argv[0] << ": " << std::string(arg) << " requires a session id\n";
         return 2;
       }
       requested_session_id = std::string(argv[++index]);
@@ -623,8 +619,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--fork requires a session id\n";
-        return 2;
+        return fatal_error(2, "--fork requires a session id");
       }
       fork_session_id = std::string(argv[++index]);
       continue;
@@ -633,7 +628,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << std::string(arg) << " requires a session name\n";
+        std::cerr << argv[0] << ": " << std::string(arg) << " requires a session name\n";
         return 2;
       }
       initial_session_name = std::string(argv[++index]);
@@ -643,8 +638,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--session-dir requires a directory\n";
-        return 2;
+        return fatal_error(2, "--session-dir requires a directory");
       }
       session_dir = std::filesystem::path(argv[++index]);
       continue;
@@ -668,8 +662,7 @@ int run(int argc, char** argv)
     {
       if (trace_requested)
       {
-        std::cerr << "--trace may be specified only once\n";
-        return 2;
+        return fatal_error(2, "--trace may be specified only once");
       }
       trace_requested = true;
       continue;
@@ -678,8 +671,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc || is_cli_option(argv[index + 1]))
       {
-        std::cerr << "--thinking requires a reasoning level (off or a level supported by the active model)\n";
-        return 2;
+        return fatal_error(2, "--thinking requires a reasoning level (off or a level supported by the active model)");
       }
       initial_reasoning_level = std::string(argv[++index]);
       continue;
@@ -688,8 +680,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--system-prompt requires text\n";
-        return 2;
+        return fatal_error(2, "--system-prompt requires text");
       }
       prompt_overrides.system_prompt = std::string(argv[++index]);
       continue;
@@ -698,8 +689,7 @@ int run(int argc, char** argv)
     {
       if (index + 1 >= argc)
       {
-        std::cerr << "--append-system-prompt requires text\n";
-        return 2;
+        return fatal_error(2, "--append-system-prompt requires text");
       }
       prompt_overrides.append_system_prompts.push_back(std::string(argv[++index]));
       continue;
@@ -719,48 +709,41 @@ int run(int argc, char** argv)
       continue;
     }
 
-    std::cerr << "unknown argument: " << arg << '\n';
+    std::cerr << argv[0] << ": unknown argument: " << arg << '\n';
     return 2;
   }
 
   if (line_shell && print_mode)
   {
-    std::cerr << "use either --line-shell or --print, not both\n";
-    return 2;
+    return fatal_error(2, "use either --line-shell or --print, not both");
   }
   if (line_shell && rpc_mode)
   {
-    std::cerr << "use either --line-shell or --rpc, not both\n";
-    return 2;
+    return fatal_error(2, "use either --line-shell or --rpc, not both");
   }
   if (print_mode && rpc_mode)
   {
-    std::cerr << "use either --print or --rpc, not both\n";
-    return 2;
+    return fatal_error(2, "use either --print or --rpc, not both");
   }
 
   if (!print_mode && !rpc_mode && print_output_flag_seen)
   {
-    std::cerr << "--json and --output text/json are only supported with --print; use --rpc or --output rpc for RPC\n";
-    return 2;
+    return fatal_error(2, "--json and --output text/json are only supported with --print; use --rpc or --output rpc for RPC");
   }
 
   if (!print_mode && !rpc_mode && print_permission_flag_seen)
   {
-    std::cerr << "--allow and --allow-tool are only supported with --print or --rpc\n";
-    return 2;
+    return fatal_error(2, "--allow and --allow-tool are only supported with --print or --rpc");
   }
 
   auto const selected_persisted_session_mode = (requested_session_id ? 1 : 0) + (continue_last_session ? 1 : 0) + (fork_session_id ? 1 : 0);
   if (selected_persisted_session_mode > 1)
   {
-    std::cerr << "use only one of --session/--session-id, --continue/--resume, or --fork\n";
-    return 2;
+    return fatal_error(2, "use only one of --session/--session-id, --continue/--resume, or --fork");
   }
   if (sessionless && selected_persisted_session_mode > 0)
   {
-    std::cerr << "use either --no-session or session resume options, not both\n";
-    return 2;
+    return fatal_error(2, "use either --no-session or session resume options, not both");
   }
 
   prepend_file_arguments_to_prompt(print_prompt, cli_file_arguments);
@@ -772,7 +755,7 @@ int run(int argc, char** argv)
     auto resolved_session_dir = std::filesystem::absolute(*session_dir, error);
     if (error)
     {
-      std::cerr << "failed to resolve --session-dir: " << error.message() << '\n';
+      std::cerr << argv[0] << ": failed to resolve --session-dir: " << error.message() << '\n';
       return 2;
     }
     runtime_paths.sessions_dir = resolved_session_dir.lexically_normal();
@@ -782,17 +765,15 @@ int run(int argc, char** argv)
   if (!diagnostics)
   {
     if (trace_requested)
-      std::cerr << "Trace startup failed: private diagnostics storage is unavailable.\n";
-    else
-      std::cerr << "Runtime diagnostics startup failed.\n";
-    return 1;
+      return fatal_error(1, "trace startup failed: private diagnostics storage is unavailable.");
+    return fatal_error(1, "runtime diagnostics startup failed.");
   }
 
   ava::app::runtime::OpenContext open_context;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
   {
-    std::cerr << cwd.error().format() << '\n';
+    std::cerr << argv[0] << ": " << cwd.error().format() << '\n';
     return 1;
   }
   open_context.workspace_dir = std::move(*cwd);
@@ -806,7 +787,7 @@ int run(int argc, char** argv)
   auto provider_catalog = ava::provider::ProviderCatalog::build(runtime_paths);
   if (!provider_catalog)
   {
-    std::cerr << provider_catalog.error().format() << '\n';
+    std::cerr << argv[0] << ": " << provider_catalog.error().format() << '\n';
     return 1;
   }
   open_context.provider_catalog = std::move(*provider_catalog);
@@ -842,7 +823,7 @@ int run(int argc, char** argv)
   auto unlocked_session_result = ava::app::runtime::Session::open(open_context, lifecycle_request);
   if (!unlocked_session_result)
   {
-    std::cerr << unlocked_session_result.error().format() << '\n';
+    std::cerr << argv[0] << ": " << unlocked_session_result.error().format() << '\n';
     return 1;
   }
 

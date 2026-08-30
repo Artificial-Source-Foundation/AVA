@@ -68,6 +68,12 @@ target_link_libraries(ava_fake_provider_server PRIVATE ava_process_gate_test_sup
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
+add_executable(ava_backend_benchmark_helper "backend_benchmark_helper.cpp")
+target_link_libraries(ava_backend_benchmark_helper PRIVATE ${AVA_BACKEND_LIBRARIES} ${AICXX_OBJECTS_LIST})
+target_include_directories(ava_backend_benchmark_helper PRIVATE ${CMAKE_SOURCE_DIR})
+ava_apply_warnings(ava_backend_benchmark_helper)
+ava_apply_sanitizers(ava_backend_benchmark_helper)
+
 add_executable(ava_rpc_broken_pipe_subprocess_test "rpc_broken_pipe_subprocess_test.cpp")
 add_dependencies(ava_rpc_broken_pipe_subprocess_test ava)
 target_compile_definitions(ava_rpc_broken_pipe_subprocess_test PRIVATE AVA_EXE_PATH="$<TARGET_FILE:ava>")
@@ -616,6 +622,34 @@ if(Python3_Interpreter_FOUND)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/test_timing_trace_test.py)
   set_tests_properties(ava_tests.test_timing_trace PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_benchmark.harness_self_test
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py)
+  set_tests_properties(ava_benchmark.harness_self_test PROPERTIES
+    TIMEOUT 15
+    LABELS "benchmark;offline;self-test"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_benchmark.smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py
+            --ava $<TARGET_FILE:ava>
+            --benchmark-helper $<TARGET_FILE:ava_backend_benchmark_helper>
+            --fake-provider $<TARGET_FILE:ava_fake_provider_server>
+            --memory-helper ${CMAKE_SOURCE_DIR}/scripts/benchmark-memory.py
+            --sample-plugin ${CMAKE_SOURCE_DIR}/examples/plugins/todo
+            --suite smoke
+            --runs 1
+            --output ${CMAKE_BINARY_DIR}/ava-backend-benchmark-smoke.json
+            --report ${CMAKE_BINARY_DIR}/ava-backend-benchmark-smoke.md)
+  set_tests_properties(ava_benchmark.smoke PROPERTIES
+    TIMEOUT 75
+    LABELS "benchmark;offline;smoke"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_debug.generate_print_members

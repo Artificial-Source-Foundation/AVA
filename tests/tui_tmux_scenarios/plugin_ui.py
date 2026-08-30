@@ -316,6 +316,14 @@ def scenario_plugin_ui(ctx: SmokeContext) -> None:
     paths["continue_exit"].write_text("exit\n", encoding="utf-8")
     wait_for_absent(ctx.tmux, session, r"Child exit cleanup surface", "plugin presentation cleanup after child exit")
     _wait_for_process_exit(paths["pid_log"], 3, "exited plugin child cleanup")
+    wait_for(
+        ctx.tmux,
+        session,
+        r"(?s)Command /plugin.*com\.example\.plugin-ui:exit.*Enter/Esc close",
+        "exited plugin command settlement",
+    )
+    send_keys(ctx.tmux, session, "Escape")
+    wait_for_absent(ctx.tmux, session, r"Command /plugin", "exited plugin command output closed")
 
     # Escaped ESC/OSC, C1, bidi, and ordinary controls must fail before any
     # terminal bytes or raw UI fields become public. The TUI remains usable.

@@ -339,26 +339,26 @@ for all nine families; runtime dual-path flags are not a permanent rollback mech
 
 ### M1-GATE-001
 
-**Resolved — lifecycle and platform scope.** M1 guarantees exact-child and
-natural-leader-exit cleanup for launch-verified Linux/POSIX managed groups. It rejects
-`setsid`, cgroup, crash-recovery, and Windows containment claims; Windows remains the
-suspended-`CreateProcessW` plus Job Object future contract described above.
+**Resolved — foreground editor job control.** External editors run in a verified
+private group only after the app-level terminal lease transfers foreground ownership.
+The lease restores AVA's foreground group, termios, and signal mask on every path;
+stopped editors are continued and terminated with an actionable unsupported-suspension
+result rather than hanging. Real PTY tests gate activation.
 
 ### M1-GATE-002
 
-**Resolved — composition and adoption authority.** Use one explicitly injected,
-application-scoped, dependency-low `AVA::process` supervisor. Reservation precedes
-fork; common spawn or pre-gated secure adoption transfers sole signal/wait/reap
-authority. No singleton, arbitrary PID adoption, module-cycle exception, or new
-production dependency is accepted.
+**Resolved — environment and credential inheritance.** The exact profile table above
+is an implementation prerequisite. Ambient proxy and CA values are curl-only; plugins
+receive no ambient variables; MCP receives additional values only from explicit server
+configuration. Positive profile tests and negative credential, proxy, loader, askpass,
+agent, and arbitrary-host canaries gate each migration.
 
 ### M1-GATE-003
 
-**Resolved — exceptional families, privacy, and compatibility.** The exact environment
-profiles, content-free private diagnostics, subsystem output/deadline ownership,
-foreground-terminal RAII with bounded unsupported suspension, and direct supervised
-browser opener are fixed by this ADR and must pass the named canary/PTTY/migration
-tests before activation.
+**Resolved — dependency enforcement.** The foundation wave adds `process` to the
+module checker's scanned and recognized module sets, permits only its core dependency,
+and adds negative self-tests for process-to-app/agent/tools/protocol includes. The
+zero-exception fixture remains unchanged.
 
 These gates resolve design blockers only. They do not assert that the supervisor or any
 migration is already implemented.

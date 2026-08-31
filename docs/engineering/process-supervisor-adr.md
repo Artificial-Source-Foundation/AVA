@@ -87,9 +87,10 @@ The narrow API consists of the following operations; concrete C++ names may vary
 if they preserve these ownership transitions:
 
 ```text
+mint_exact_environment(role, profile, profile_inputs) -> ExactEnvironment
 reserve(owner, role, lifecycle_policy) -> Reservation
-spawn(Reservation, SpawnSpec) -> ProcessHandle
-begin_secure_adoption(Reservation) -> AdoptionGate
+spawn(Reservation, SpawnSpec{ExactEnvironment, ...}) -> ProcessHandle
+begin_secure_adoption(Reservation, ExactEnvironment) -> AdoptionGate
 adopt(AdoptionGate, exact_child_members) -> ProcessHandle
 request_stop(ProcessHandle | owner-prefix, TerminationReasonV1, absolute_deadline)
 wait(ProcessHandle, absolute_deadline) -> ExitStatusV1
@@ -97,19 +98,50 @@ snapshot() -> ProcessSnapshotV1
 shutdown(absolute_deadline) -> ShutdownResultV1
 ```
 
-`Reservation`, `AdoptionGate`, and `ProcessHandle` are opaque RAII capabilities and
-do not expose signal or reap authority. Reservation consumes live-record capacity
-**before any fork**. Capacity exhaustion, invalid owners/specifications, pipe setup,
-executable resolution, environment construction, and descriptor preparation therefore
-fail without creating a child. A reservation abandoned before fork releases capacity.
+`ava_process` is the only minter of the opaque, immutable `ExactEnvironment`
+capability. Each capability is bound to exactly one closed role/profile pair. A
+`SpawnSpec` or secure-adoption gate consumes that capability; neither can carry a raw
+environment, request ambient inheritance, or select a different profile. The process
+layer validates the complete environment when minting, then revalidates its bounds and
+reservation role/profile at the final pre-fork check. Higher modules remain responsible
+for proving facts the neutral process layer cannot establish: the sealed-command
+digest, selection of explicit MCP configuration, LSP executable identity, and
+parent-side resolution of `BROWSER`, `VISUAL`, and `EDITOR`. They establish those facts
+before requesting the capability; `ava_process` does not gain reverse dependencies to
+inspect them.
 
-For both launch paths, argv, environment, cwd, descriptor actions, signal defaults,
-and the exec-error channel are prepared before fork. The child creates a private group
-with `PGID == leader PID` and blocks behind a close-on-exec gate. Before releasing it,
-the parent repeats `setpgid(child, child)`, verifies `getpgid(child) == child`, verifies
-the group differs from AVA's group, and commits the exact child identity to the
-supervisor. Failure keeps the gate closed and transfers the child immediately to
-supervisor cleanup. No child may exec while unreserved or unregistered.
+`Reservation`, `AdoptionGate`, and `ProcessHandle` are opaque RAII capabilities and
+do not expose signal, reap, PID/PGID, pidfd, or terminal authority. Reservation
+consumes live-record capacity **before any fork**. Capacity exhaustion, invalid
+owners/specifications, launch-surface mismatch, pipe setup, executable resolution,
+exact-environment minting, and descriptor preparation therefore fail without creating
+a child. A reservation abandoned before fork releases capacity.
+
+`LifecyclePolicyV1` may contain an optional absolute `execution_deadline`. The value is
+immutable once reserved and is owned by the monitor rather than by a per-launch timer.
+A deadline already past is rejected before fork, and the final pre-fork check catches a
+deadline that elapsed after reservation. If it becomes due after fork but before gate
+release, the monitor commits `deadline_expired` unless an earlier reason already won;
+in all cases it keeps the gate closed. If it becomes due after release, the monitor
+commits the same reason under the same first-reason rule, then cleans the group without
+creating a fresh relative budget.
+
+For both launch paths, argv, the exact environment, cwd, descriptor actions, signal
+defaults, and the child-status channel are prepared before fork. The child creates a
+private group with `PGID == leader PID` and blocks behind a close-on-exec gate. Before
+releasing it, the parent repeats `setpgid(child, child)`, verifies
+`getpgid(child) == child`, verifies the group differs from AVA's group, and commits the
+exact child identity to the supervisor. Failure keeps the gate closed and transfers
+the child immediately to supervisor cleanup. No child may exec while unreserved or
+unregistered.
+
+The child-status channel has closed, content-free framing. A pre-exec setup failure or
+EOF before an `exec_attempt` frame commits `launch_failed`; immediately before the
+actual exec syscall the child emits `exec_attempt`, and a syscall that returns emits
+`exec_failed`. EOF after `exec_attempt` with no failure frame confirms exec. Both
+failure reasons report the closed exit kind `launch_error`, while retaining their
+distinct reasons. An earlier cancellation or owner/application shutdown remains the
+first reason and is not overwritten by later launch framing.
 
 `spawn` owns the complete common fork/gate/exec sequence. Secure adoption is not a
 public “adopt any PID” escape hatch: the caller must obtain its reservation and gate
@@ -127,10 +159,10 @@ escalation signals only to a launch-verified private PGID and keeps a waitable l
 unreaped while signaling/waiting so the PID/PGID identity cannot be recycled. It then
 calls `waitpid` for each registered direct child PID (leader and optional sentinel);
 group liveness checks must account for the retained zombie and never signal after that
-identity is released. It never uses `waitpid(-1)`, `waitpid(0)`, a
-process-wide subreaper, or a global `SIGCHLD` handler, so unrelated children cannot be
-stolen. An unverified group is never group-signaled; it fails before exec and is
-terminated/reaped by exact PID.
+identity is released. It never uses `waitpid(-1)`, `waitpid(0)`, a process-wide
+subreaper, or a global `SIGCHLD` handler, so unrelated children cannot be stolen. An
+unverified group is never group-signaled; it fails before exec and is terminated/reaped
+by exact PID.
 
 The table fixes which launch surface each family adopts:
 
@@ -144,7 +176,15 @@ The table fixes which launch surface each family adopts:
 | Mermaid | Secure adoption | `O_NOFOLLOW` executable descriptor, renderer protocol, existing child-side stop/exec handshake, output validation. |
 | browser opener | Common `spawn`, direct child | URL/command allowlist and `/dev/null` stdio. No double-fork or `setsid`. |
 | clipboard helper | Common `spawn` | Helper selection, output byte cap, MIME handling, and read deadline. |
-| external editor | Common `spawn` plus terminal lease | Editor selection, private draft file, shell-compatible command semantics, draft cap. |
+| external editor | Common `spawn` plus terminal lease | Editor selection; app-owned private draft creation, reading, and removal; shell-compatible command semantics; draft cap. |
+
+This role/surface matrix is closed and checked before any fork. Common `spawn` rejects
+bash and Mermaid reservations; secure adoption rejects every role except bash and
+Mermaid. Only bash may request a sentinel. Mermaid's one expected startup stop is
+consumed as part of its secure launch protocol before ordinary suspension handling, so
+it is not reported as `unsupported_suspension`; a later unexpected stop receives the
+normal closed-role handling. There is no generic sentinel or expected-stop escape
+hatch.
 
 ### Bounds, monitor, and shutdown
 
@@ -152,11 +192,30 @@ The application policy permits at most 256 live/reserved records and retains at 
 256 finished content-free records. A finished record is evicted FIFO; process handles
 retain only their final value, not an unbounded history. The single monitor is created
 lazily on the first successful fork, not at application startup, and uses exact known
-children rather than one thread per child. It is woken by reservations, stop requests,
-and deadline changes and remains idle without busy polling.
+children rather than one thread per child. It owns every reserved execution deadline;
+there is no deadline helper thread and no relative-timeout reset.
+
+On Linux, pidfds are readiness sources only. The monitor waits on them plus one
+supervisor-wide, lazily created `CLOEXEC` wake descriptor; exact
+`waitid(P_PID, ..., WNOWAIT)` observation, exact `waitpid(exact_pid)` reaping, and
+signaling of only a verified private group remain authoritative. Pidfds and all native
+process identifiers remain private implementation details. This path does not use a
+pidfd as signal or reap authority.
+
+If pidfds are unavailable, and on the conservative POSIX backend, nonblocking exact-PID
+probes start at 10 ms and back off exponentially to at most 1 second. The backoff resets
+and the monitor wakes for an active waiter, a stop request, child registration, or a
+change to the nearest absolute deadline; deadline waits target that exact instant. On
+every backend, an active external-editor terminal lease retains short stopped-job
+probes so suspension cannot strand the terminal. These event-driven/adaptive rules are
+what “idle without busy polling” means: there is no fixed-rate idle spin, global
+`SIGCHLD` handler, subreaper, or `waitpid(-1)` fallback.
 
 Normal operation deadlines are absolute `steady_clock` values; no layer resets a
-relative timeout after progress. Application shutdown has one two-second monotonic
+relative timeout after progress. Expiry before gate release keeps the gate closed;
+expiry while running commits `deadline_expired` and cleanup shares that same absolute
+budget. If the budget cannot complete cleanup, the result is incomplete rather than
+silently extending the deadline. Application shutdown has one two-second monotonic
 budget shared by all records: request graceful stop for all groups in one sweep, wait
 within the common deadline, escalate all remaining verified groups in one sweep, and
 perform exact nonblocking reap attempts until that same deadline. It is never a fresh
@@ -169,8 +228,9 @@ On supported Linux and conservative POSIX builds, M1 guarantees cleanup of the l
 registered sentinel, and every descendant that remains in the launch-verified private
 process group, including after natural leader exit, cancellation, timeout, owner
 shutdown, and normal application shutdown. “Managed process tree” means this
-managed-group scope; it is not an OS sandbox. Linux may use a stronger observation
-primitive internally, but the semantic floor is the exact-PID POSIX contract above.
+managed-group scope; it is not an OS sandbox. Linux uses an available pidfd only as the
+readiness optimization described above; the semantic floor is the exact-PID POSIX
+contract.
 
 M1 explicitly does **not** guarantee cleanup of a descendant that escapes with
 `setsid` or moves to another group, a process stuck so that even `SIGKILL` cannot make
@@ -205,54 +265,90 @@ The spawning subsystem owns pipe draining, byte/record caps, decoding, protocol
 progress, and user-visible result mapping. The supervisor neither buffers nor logs
 child output. On output cap or protocol failure the subsystem closes/drains according
 to its protocol and requests supervisor stop with the matching closed reason.
-Subsystems own request/protocol/output deadlines and pass absolute deadlines; the
-supervisor owns launch-gate, termination-grace, owner-shutdown, and application-shutdown
-deadlines. The earlier absolute deadline wins, and cleanup never extends it by starting
-a new relative timeout.
+Subsystems select request/protocol/output deadlines and the optional absolute execution
+deadline carried by `LifecyclePolicyV1`; after reservation the monitor owns its
+enforcement. The supervisor also owns launch-gate, termination-grace,
+owner-shutdown, and application-shutdown deadlines. The earlier absolute deadline wins,
+and cleanup never extends it by starting a new relative timeout.
 
 ### Foreground editor and browser opener
 
-External-editor launch acquires an RAII foreground-terminal lease after the editor's
-private PGID is verified and before its exec gate opens. The lease opens the controlling
-terminal, records AVA's foreground PGID and termios state, temporarily blocks `SIGTTOU`
-while calling `tcsetpgrp` for the editor group, and restores AVA's PGID, termios, and
-signal mask on every normal, nonzero, signaled, canceled, launch-failure, and shutdown
-path. Failure to acquire or transfer the terminal keeps the exec gate closed and fails
-the launch safely.
+The app/editor subsystem, not the supervisor, creates and owns the external editor's
+private draft with mode `0600`. It retains responsibility for bounded reading and
+removal. The process layer validates the already-owned draft path and inserts it only
+into the exact child environment as `AVA_EXTERNAL_EDITOR_FILE`; it neither creates nor
+owns the file, and no code mutates AVA's parent environment.
+
+After the editor's private PGID is verified and before its exec gate opens, the process
+layer acquires and owns the RAII foreground-terminal lease. The lease opens the
+controlling terminal, records AVA's foreground PGID and termios state, temporarily
+blocks `SIGTTOU` while calling `tcsetpgrp` for the editor group, and restores AVA's
+PGID, termios, and signal mask on every normal, nonzero, signaled, canceled,
+launch-failure, and shutdown path. No reservation, process handle, or editor-facing
+object exposes a terminal or PID capability.
+
+A foreground transfer or restoration failure never replaces an earlier committed
+reason. It marks cleanup incomplete, and the app/editor migration must reject the
+edited result rather than accepting draft contents after an unproven terminal restore.
+Failure to acquire or transfer the terminal keeps the exec gate closed; absent an
+earlier reason, it is a launch failure. Cleanup continues only within the existing
+absolute budget.
 
 M1 does not implement a shell-style stopped-job UI. If an editor stops, the monitor
-reports `unsupported_suspension`, the lease immediately restores AVA to the foreground,
-and the supervisor sends `SIGCONT` followed by bounded normal escalation within the
-existing deadline; it never waits forever on a suspended editor. PTY tests must prove
-that the editor observes itself in the foreground and that AVA regains the terminal
-and original termios after normal exit, signal, transfer failure, and suspension.
+reports `unsupported_suspension`, the lease immediately attempts to restore AVA to the
+foreground, and the supervisor sends `SIGCONT` followed by bounded normal escalation
+within the existing deadline; it never waits forever on a suspended editor. PTY tests
+must prove that the editor observes itself in the foreground, that AVA regains the
+terminal and original termios after normal exit, signal, transfer failure, and
+suspension, and that restoration failure is incomplete and rejects the draft result.
 
 Browser opening launches the selected opener (`$BROWSER`, `xdg-open`, `gio open`,
-`open`, or `wslview`) once as a direct supervised child with `/dev/null` stdio and a
-10-second opener deadline. Success means the exec handshake succeeded; monitoring then
+`open`, or `wslview`) once as a direct supervised child with `/dev/null` stdio. Its
+reservation requires an absolute execution deadline no later than ten seconds after
+the reservation instant. Success means the exec handshake succeeded; monitoring then
 continues under the application owner without blocking the OAuth flow. M1 removes the
 double-fork/`setsid` path. If an opener later daemonizes or calls `setsid`, that escaped
 process is outside the stated managed-group guarantee.
 
 ### Exact child environment profiles
 
-Every environment is constructed and bounded in the parent, rejects duplicate names or
-NULs, and is passed with `execve`/descriptor exec; child-side `setenv` and ambient
-`execvp` lookup are removed. The trusted executable path is
+The parent environment is captured once per AVA invocation into one immutable, bounded
+host-environment projection. Capture retains only the union of names sanctioned below,
+including the parent-only `BROWSER`, `VISUAL`, and `EDITOR` selectors; it is never
+refreshed and the parent environment is never mutated. Role builders receive only this
+projection as an ambient input. The bash, plugin, MCP, and Mermaid builders receive no
+host projection at all: bash uses its sealed synthetic inputs, MCP uses only selected
+explicit configuration, and plugin and Mermaid use fixed/computed values.
+
+Both the host projection and each complete exact environment have at most 256 entries.
+An MCP server's explicit `env` subset has at most 64 entries. Names are at most 128
+bytes and values at most 16 KiB. The aggregate encoding—name, `=`, value, and trailing
+NUL for every entry—is at most 1 MiB. Names contain neither NUL nor `=`; values contain
+no NUL; duplicate names fail. `PWD` is reserved to the profile's computed value and
+cannot be supplied by a caller or explicit MCP configuration. Each profile fixes a
+canonical order for its
+fixed and computed entries, and additional inherited `LC_*` entries are ordered
+lexicographically by bytewise name.
+
+Every resulting environment is passed with `execve`/descriptor exec; child-side
+`setenv` and ambient `execvp` lookup are prohibited. The trusted executable path is
 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` unless a row says
-otherwise. “Inherit” always means only the names listed, once each, if present.
+otherwise. An explicitly configured MCP `PATH` and any inherited desktop-profile
+`PATH` are accepted only when every colon-delimited component is nonempty and absolute.
+Omitted MCP `PATH` receives the trusted fixed path. “Inherit” means only a listed name,
+once, if present in the captured projection.
 
 | Role / profile ID | Exact child environment |
 | --- | --- |
 | curl / `ava-curl-v1` | Fixed `PATH` (trusted path), `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `PWD=/`; inherit only `http_proxy`, `https_proxy`, `ftp_proxy`, `all_proxy`, `no_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`. |
-| bash / existing `ava-local-bash-prompt-v2` | Preserve the sealed environment from [`EnvironmentFactory`](../../src/ava/command/environment.cpp): `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `LC_CTYPE=C.UTF-8`, `TZ=UTC`, bounded `USER` and `LOGNAME`, logical `PWD`, sealed `PATH`, and AVA-created private `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `TMPDIR`. No ambient additions. |
-| plugin / `ava-plugin-minimal-v1` | Fixed trusted `PATH`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and computed `PWD`; no inherited variables, ambient proxy/CA, provider/cloud credentials, tokens, or arbitrary `AVA_*`. Plugin v1 has no environment override. |
-| MCP / `ava-mcp-explicit-v1` | Supervisor-computed `PWD`; trusted `PATH` unless the bounded explicit server config supplies `PATH`; otherwise exactly the bounded explicit `env` pairs and nothing inherited. `PWD` is reserved, duplicate names fail, and all launches behave as `clean_environment=true`. Explicitly configured secrets remain an intentional user grant, never ambient inheritance. |
+| bash / existing `ava-local-bash-prompt-v2` | Preserve the sealed environment from [`EnvironmentFactory`](../../src/ava/command/environment.cpp): `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `LC_CTYPE=C.UTF-8`, `TZ=UTC`, bounded synthetic `USER` and `LOGNAME`, logical `PWD`, sealed `PATH`, and AVA-created private `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `TMPDIR`. No host projection or ambient additions. |
+| plugin / `ava-plugin-minimal-v1` | Fixed trusted `PATH`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and computed `PWD`; no host projection, overrides, inherited variables, ambient proxy/CA, provider/cloud credentials, tokens, or arbitrary `AVA_*`. |
+| MCP / `ava-mcp-explicit-v1` | Process-computed `PWD`; the at-most-64 bounded explicit `env` pairs; and trusted `PATH` when those pairs omit `PATH`. Nothing is inherited and no host projection is provided. All launches behave as `clean_environment=true`; explicitly configured secrets remain an intentional user grant, never ambient inheritance. |
 | LSP / `ava-lsp-strict-v1` | Preserve [`lsp_environment`](../../src/ava/lsp/lsp_process.cpp): fixed trusted `PATH`, computed `PWD`, and only inherited `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, every other `LC_*`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `TERM`, and `COLORTERM`. |
-| Mermaid / `ava-mermaid-v1` | Preserve the exact fixed set: `PATH=/usr/local/bin:/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `TERM=dumb`, `NO_COLOR=1`, `PWD=/`, `AVA_MERMAID_PROTOCOL=1`. |
-| browser opener / `ava-browser-desktop-v1` | Bounded inherited `PATH`; inherit only `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR`, `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`, `DESKTOP_STARTUP_ID`. `$BROWSER` is resolved by the parent and not forwarded. |
+| Mermaid / `ava-mermaid-v1` | Preserve the exact fixed set: `PATH=/usr/local/bin:/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `TERM=dumb`, `NO_COLOR=1`, `PWD=/`, `AVA_MERMAID_PROTOCOL=1`. No host projection. |
+| browser opener / `ava-browser-desktop-v1` | Validated bounded inherited `PATH`; inherit only `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR`, `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`, `DESKTOP_STARTUP_ID`. `$BROWSER` is resolved by the parent and not forwarded. |
 | clipboard helper / `ava-clipboard-desktop-v1` | Fixed trusted `PATH`; inherit only `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `XDG_RUNTIME_DIR`, `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, and `DBUS_SESSION_BUS_ADDRESS`. AVA clipboard test/selection variables are parent-only. |
-| external editor / `ava-external-editor-v1` | Bounded inherited `PATH`; inherit only `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `TERM`, `COLORTERM`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR`, `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, and `DBUS_SESSION_BUS_ADDRESS`; add only the supervisor-created `AVA_EXTERNAL_EDITOR_FILE`. `VISUAL`/`EDITOR` are resolved by the parent and not forwarded. |
+| external editor / `ava-external-editor-v1` | Validated bounded inherited `PATH`; inherit only `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TMP`, `TEMP`, `LANG`, `LANGUAGE`, `LC_ALL`, other `LC_*`, `TERM`, `COLORTERM`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR`, `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, and `DBUS_SESSION_BUS_ADDRESS`; add only child-local `AVA_EXTERNAL_EDITOR_FILE`, whose value is the validated path of the app/editor-owned `0600` draft. `VISUAL`/`EDITOR` are resolved by the parent and not forwarded. The process layer does not create or own the draft. |
 
 Only curl receives ambient proxy or CA variables. An MCP server receives such a value
 only when its explicit configuration names it. No other profile receives ambient proxy,
@@ -277,30 +373,49 @@ module.
 Migration is incremental, with exactly one lifecycle authority per family at every
 commit:
 
-1. **Foundation:** add `AVA::process`, closed types, explicit app-scoped injection,
-   fake child helpers, the zero-exception dependency rule, and inert unit/integration
+1. **Foundation and pre-migration hardening:** establish `AVA::process`, closed types,
+   explicit app-scoped injection, fake child helpers, and the zero-exception dependency
+   rule. Before activating a production family, complete the role-bound environment
+   capability, closed launch-surface checks, absolute execution deadline, launch-frame
+   classification, and event-driven/adaptive monitor contract in inert focused
    coverage. No production family migrates in this wave.
 2. **Common noninteractive spawn:** migrate curl and clipboard; prove output/deadline
-   behavior and environment canaries before removing their local wait/kill helpers.
+   behavior, exact-environment bounds, host-projection canaries, and parent-environment
+   immutability before removing their local wait/kill helpers.
 3. **Protocol children:** migrate plugin, MCP, and LSP without changing their wire
-   protocols, permissions, output limits, or one-shot/run-scoped compatibility.
+   protocols, permissions, output limits, or one-shot/run-scoped compatibility. Prove
+   that plugin and MCP receive no host projection, MCP input comes from the selected
+   at-most-64-entry explicit config, and LSP preserves executable identity provenance.
 4. **Secure adoption:** migrate bash and Mermaid while preserving descriptor identity,
-   containment, sentinel, stop handshake, and strict environments. Remove duplicated
-   process-group code only after parity tests pass.
-5. **Foreground/application helpers:** migrate external editor and browser, run PTY and
-   OAuth opener tests, then statically prove all nine production families use the
-   supervisor and no production `fork`/wait/signal owner remains outside the two
+   containment, bash-only sentinel, strict environments, and the Mermaid startup-stop
+   launch protocol. Remove duplicated process-group code only after parity tests pass.
+5. **Foreground/application helpers:** migrate external editor and browser. Prove
+   app/editor ownership of the `0600` draft, rejection of edited contents after terminal
+   transfer/restore failure, and the browser reservation's absolute ten-second maximum;
+   run PTY and OAuth opener tests, then statically prove all nine production families
+   use the supervisor and no production `fork`/wait/signal owner remains outside the two
    reviewed module backends.
 
 Required tests cover owner-prefix cancellation; reservation exhaustion before fork;
-exec-gate and PGID-verification failures; exact-PID reaping without stealing an
-unrelated child; normal/nonzero/signaled exits; natural leader exit with a surviving
-same-group descendant; descendant TERM refusal and escalation; cancellation, timeout,
-output limit, protocol failure, and concurrent application shutdown; record eviction;
-lazy-monitor startup; every environment allowlist with credential/proxy/CA canaries;
-bash sentinel and containment parity; LSP/Mermaid executable identity; browser direct
-parentage; and the external-editor PTY cases above. Leak tests inspect descendants after
-each case and disclose the documented `setsid` escape rather than claiming containment.
+common/adoption role mismatch and non-bash sentinel rejection before fork; exec-gate
+and PGID-verification failures; pre-exec versus exec-syscall framing, EOF classification,
+and first-reason preservation; past, gated, running, and browser execution deadlines;
+exact-PID reaping without stealing an unrelated child; normal/nonzero/signaled exits;
+natural leader exit with a surviving same-group descendant; descendant TERM refusal
+and escalation; cancellation, timeout, output limit, protocol failure, and concurrent
+application shutdown; record eviction; lazy-monitor startup; Linux pidfd-readiness and
+wake-descriptor behavior; conservative adaptive-backoff reset and cap; and Mermaid's
+consumed startup stop.
+
+Environment tests cover every allowlist with credential/proxy/CA canaries; the 256/64
+entry, 128-byte name, 16-KiB value, and 1-MiB aggregate boundaries and their first
+rejected values; duplicate, NUL, `=`, reserved-`PWD`, canonical-order, and absolute-PATH
+cases; immutable single-capture behavior; and proof that no parent mutation or forbidden
+projection reaches a child. Family tests also cover bash sentinel and containment
+parity, LSP/Mermaid executable identity, browser direct parentage, and every
+external-editor PTY case above, including short stopped-job detection and rejection of
+the draft result when cleanup is incomplete. Leak tests inspect descendants after each
+case and disclose the documented `setsid` escape rather than claiming containment.
 Linux runs the strong-path suite; another supported POSIX CI lane runs the conservative
 contract. Windows tests are deferred with Windows support.
 
@@ -340,18 +455,24 @@ for all nine families; runtime dual-path flags are not a permanent rollback mech
 ### M1-GATE-001
 
 **Resolved — foreground editor job control.** External editors run in a verified
-private group only after the app-level terminal lease transfers foreground ownership.
-The lease restores AVA's foreground group, termios, and signal mask on every path;
-stopped editors are continued and terminated with an actionable unsupported-suspension
-result rather than hanging. Real PTY tests gate activation.
+private group only after the process-owned terminal lease transfers foreground
+ownership. The app/editor subsystem owns the `0600` draft; the process layer owns the
+lease from verified PGID through restoration and injects only the child environment
+path. The lease attempts to restore AVA's foreground group, termios, and signal mask on
+every path; transfer/restore failure preserves the first reason, marks cleanup
+incomplete, and makes the app reject the edited result. Stopped editors are continued
+and terminated with an actionable unsupported-suspension result rather than hanging.
+Real PTY tests gate activation.
 
 ### M1-GATE-002
 
-**Resolved — environment and credential inheritance.** The exact profile table above
-is an implementation prerequisite. Ambient proxy and CA values are curl-only; plugins
-receive no ambient variables; MCP receives additional values only from explicit server
-configuration. Positive profile tests and negative credential, proxy, loader, askpass,
-agent, and arbitrary-host canaries gate each migration.
+**Resolved — environment and credential inheritance.** The role-bound exact-capability
+contract and profile table above are implementation prerequisites. One bounded,
+immutable host projection contains only sanctioned names; bash, plugin, MCP, and
+Mermaid do not receive it. Ambient proxy and CA values are curl-only, while MCP values
+come only from selected explicit server configuration. Positive profile/boundary tests
+and negative credential, proxy, loader, askpass, agent, and arbitrary-host canaries gate
+each migration.
 
 ### M1-GATE-003
 
@@ -365,10 +486,11 @@ migration is already implemented.
 
 ## Consequences
 
-One application owner can now provide deterministic prefix cancellation, natural-exit
-descendant cleanup, bounded diagnostics, and shutdown work that is parallel rather
-than per-child cumulative. Process races and environment policy become testable once,
-and later persistent plugin work can reuse the same owner/handle contract.
+When implemented and activated, one application owner provides deterministic prefix
+cancellation, natural-exit descendant cleanup, bounded diagnostics, and shutdown work
+that is parallel rather than per-child cumulative. Process races and environment policy
+become testable once, and later persistent plugin work can reuse the same owner/handle
+contract.
 
 The cost is a new low-level state machine, one lazy monitor after first use, explicit
 capability plumbing through current constructors, stricter plugin/MCP compatibility,

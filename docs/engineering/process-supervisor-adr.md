@@ -88,9 +88,15 @@ if they preserve these ownership transitions:
 
 ```text
 mint_exact_environment(role, profile, profile_inputs) -> ExactEnvironment
+mint_preopened_executable(startup_anchor_set, logical_executable,
+                          expected_identity) -> PreopenedExecutableV1
+mint_anchored_working_directory(startup_anchor_set, logical_cwd,
+                                expected_identity) -> AnchoredWorkingDirectoryV1
 reserve(owner, role, lifecycle_policy) -> Reservation
-spawn(Reservation, SpawnSpec{ExactEnvironment, ...}) -> ProcessHandle
-begin_secure_adoption(Reservation, ExactEnvironment) -> AdoptionGate
+spawn(Reservation, SpawnSpec{ExactEnvironment, executable, cwd,
+                             optional anchored capabilities, ...}) -> ProcessHandle
+begin_secure_adoption(Reservation, ExactEnvironment,
+                      AnchoredWorkingDirectoryV1) -> AdoptionGate
 adopt(AdoptionGate, exact_child_members) -> ProcessHandle
 request_stop(ProcessHandle | owner-prefix, TerminationReasonV1, absolute_deadline)
 wait(ProcessHandle, absolute_deadline) -> ExitStatusV1
@@ -110,12 +116,57 @@ parent-side resolution of `BROWSER`, `VISUAL`, and `EDITOR`. They establish thos
 before requesting the capability; `ava_process` does not gain reverse dependencies to
 inspect them.
 
+`ava_process` is also the sole minter of move-only, opaque RAII
+`PreopenedExecutableV1` and `AnchoredWorkingDirectoryV1` capabilities. Neither exposes
+an fd or other native handle, an expected or observed identity, or a path accessor. The
+public expected-identity value is ingress-only, process-neutral metadata supplied by a
+higher module: exactly `uid`, `gid`, `mode`, `nlink`, `dev`, `inode`, `size`, and ctime
+seconds and nanoseconds. It contains no command-, LSP-, Mermaid-, recipe-, permission-,
+or provenance-specific field.
+
+Each successful factory result privately retains the supplied shared startup
+`AnchorSet` authority, an owned target descriptor, the caller's logical spelling, and
+enough parent/final-route descriptor identity to perform one immediate final pre-fork
+freshness check. It never reconstructs startup authority from a path. Factory and
+freshness errors are content-free: they may identify a bounded operation/stage and
+error category or errno class, but never echo the logical spelling, expected or
+observed tuple, descriptor number, or native handle. Supervisor snapshots gain none of
+those fields and remain content-free under the diagnostics contract below.
+
+Both factories require the logical identity to be nonempty, absolute, NUL-free, and
+already lexically normalized. Executable minting requires a regular file with exactly
+one link, at least one execute bit, and no group/other write bit. Working-directory
+minting requires a directory. For either capability, the route observation before the
+open, the opened descriptor identity, and the route observation after the open must be
+equal and must exactly match every field of the caller's expected tuple. At the final
+pre-fork boundary, the retained parent/final route must still identify that same opened
+target. These checks establish process-neutral freshness only; they do not infer why a
+target is trusted.
+
+Accordingly, higher LSP code continues to own install-root selection, root/current-user
+ownership policy, ancestor safety, workspace exclusion/selection, and ELF recipe
+provenance. The command layer continues to own the sealed plan, bounded shebang chain,
+and containment decision and plan. The app layer continues to own Mermaid
+configured-helper provenance. Those layers reduce their richer evidence to the neutral
+expected tuple at ingress; `ava_process` neither accepts their types nor gains a reverse
+dependency on them.
+
+As a prerequisite, external `core::AnchorOpen` final-target reopen privately replaces
+its `/proc/self/fd` path with
+`openat(parent_fd, final_component, requested_flags | O_NOFOLLOW | O_CLOEXEC)` from the
+already-held resolved parent descriptor, followed by identity comparison with the
+inspected object. This is an internal core hardening, not a new public path or handle
+surface. It preserves the existing external-symlink policy and writable-anchor
+exclusion. It adds no dependency and no core-to-process reverse edge: `ava_process`
+continues to depend downward only on `AVA::core`.
+
 `Reservation`, `AdoptionGate`, and `ProcessHandle` are opaque RAII capabilities and
 do not expose signal, reap, PID/PGID, pidfd, or terminal authority. Reservation
 consumes live-record capacity **before any fork**. Capacity exhaustion, invalid
 owners/specifications, launch-surface mismatch, pipe setup, executable resolution,
-exact-environment minting, and descriptor preparation therefore fail without creating
-a child. A reservation abandoned before fork releases capacity.
+exact-environment minting, anchored-capability validation, and descriptor preparation
+therefore fail without creating a child. A reservation abandoned before fork releases
+capacity.
 
 `LifecyclePolicyV1` may contain an optional absolute `execution_deadline`. The value is
 immutable once reserved and is owned by the monitor rather than by a per-launch timer.
@@ -130,27 +181,60 @@ the group within the reservation-time cleanup horizon. An earlier caller stop or
 application-shutdown deadline still shortens that horizon.
 
 For both launch paths, argv, the exact environment, cwd, descriptor actions, signal
-defaults, and the child-status channel are prepared before fork. The child creates a
-private group with `PGID == leader PID` and blocks behind a close-on-exec gate. Before
-releasing it, the parent repeats `setpgid(child, child)`, verifies
-`getpgid(child) == child`, verifies the group differs from AVA's group, and commits the
-exact child identity to the supervisor. Failure keeps the gate closed and transfers
-the child immediately to supervisor cleanup. No child may exec while unreserved or
-unregistered.
+defaults, and the child-status channel are prepared before fork. After all fallible
+preparation, the process layer performs anchored route freshness immediately before
+the existing final role/profile/deadline decision and fork; this is the
+namespace-replacement linearization point. A replacement that wins before this check
+fails closed and creates neither a child nor a monitor. Once fork inherits descriptor
+A, replacing its pathname with object B cannot redirect that child from A to B. A failed
+freshness check or descriptor exec is never retried through a pathname. This
+replacement guarantee applies only when the corresponding anchored capability is
+supplied; path-only launch retains its current pathname semantics.
+
+The child creates a private group with `PGID == leader PID` and blocks behind a
+close-on-exec gate. Before releasing it, the parent repeats `setpgid(child, child)`,
+verifies `getpgid(child) == child`, verifies the group differs from AVA's group, and
+commits the exact child identity to the supervisor. Failure keeps the gate closed and
+transfers the child immediately to supervisor cleanup. No child may exec while
+unreserved or unregistered.
 
 The child-status channel has closed, content-free framing. A pre-exec setup failure or
-EOF before an `exec_attempt` frame commits `launch_failed`; immediately before the
-actual exec syscall the child emits `exec_attempt`, and a syscall that returns emits
-`exec_failed`. EOF after `exec_attempt` with no failure frame confirms exec. Both
-failure reasons report the closed exit kind `launch_error`, while retaining their
-distinct reasons. An earlier cancellation or owner/application shutdown remains the
-first reason and is not overwritten by later launch framing.
+EOF before the typed `ExecAttempt` frame commits `launch_failed`; immediately before
+the actual exec syscall the child emits `ExecAttempt`, and a syscall that returns emits
+the typed `ExecFailed` frame. EOF after `ExecAttempt` with no failure frame confirms
+exec. Both failure reasons report the closed exit kind `launch_error`, while retaining
+their distinct reasons. An earlier cancellation or owner/application shutdown remains
+the first reason and is not overwritten by later launch framing.
+
+Common descriptor execution uses that existing framing and invokes `execveat` with
+`AT_EMPTY_PATH` where available or `fexecve` on the conservative POSIX path. It
+intentionally does not inspect or resolve a descriptor's shebang. In particular, a
+script on a `CLOEXEC` descriptor may return `ENOENT`; that return is one typed
+`ExecFailed`, never a request to resolve an interpreter or retry by pathname. Bash
+remains separate: its higher command authority keeps the sealed interpreter chain and
+the reviewed retained script FDs through secure adoption.
+
+`SpawnSpec` may independently consume a `PreopenedExecutableV1`, an
+`AnchoredWorkingDirectoryV1`, both, or neither. When either is present, the public
+logical executable or cwd string must exactly match the capability's private logical
+spelling; mismatch fails before fork. The corresponding descriptor is then the only
+launch authority, with no pathname resolution, open, or fallback. When a capability is
+absent, current path-based executable or cwd preparation remains available for roles
+and higher-level recipes that do not require descriptor identity.
+
+Secure adoption always consumes an `AnchoredWorkingDirectoryV1`; the spec's cwd string
+remains only for private logical and exact-environment matching and is never opened as
+a temporary adoption seam. That path-open seam must be removed before either secure
+caller migrates. Bash and Mermaid continue to own their already-reviewed executable
+descriptors and pass them only through the secure child API; adoption does not transfer
+those executable descriptors into a public process capability.
 
 `spawn` owns the complete common fork/gate/exec sequence. Secure adoption is not a
-public “adopt any PID” escape hatch: the caller must obtain its reservation and gate
-before its custom fork, the child may perform only the reviewed async-signal-safe
-pre-exec sequence, and the supervisor assumes signal/wait/reap authority as soon as
-the parent has the PID, including every adoption-failure path.
+public “adopt any PID” escape hatch: the caller must obtain its reservation, exact
+environment, anchored cwd, and gate before its custom fork; the child may perform only
+the reviewed async-signal-safe pre-exec sequence, and the supervisor assumes
+signal/wait/reap authority as soon as the parent has the PID, including every
+adoption-failure path.
 
 After fork, the supervisor is the **only** code allowed to call `kill`, `killpg`,
 `waitid`, or `waitpid` for a managed child. Callers request a reason and deadline and
@@ -172,22 +256,22 @@ The table fixes which launch surface each family adopts:
 | Role | M1 integration | Subsystem behavior retained outside the supervisor |
 | --- | --- | --- |
 | curl | Common `spawn` | curl config generation, request body, response parsing/cap, streaming, and cancellation polling. |
-| bash | Secure adoption | Sealed plan, executable/interpreter descriptors, containment handshake, synthetic environment, and sentinel purpose. |
+| bash | Secure adoption with required `AnchoredWorkingDirectoryV1` | Sealed plan, caller-owned executable/interpreter descriptors and retained script FDs, containment handshake, synthetic environment, and sentinel purpose. |
 | plugin | Common `spawn` | JSONL protocol, stderr/output bounds, permissions, startup/request deadlines. |
 | MCP | Common `spawn` | JSON-RPC framing, permissions, explicit config, startup/request deadlines. |
-| LSP | Common `spawn` with a pre-opened executable descriptor when required | Executable identity revalidation, LSP framing/cache, request cancellation. |
-| Mermaid | Secure adoption | `O_NOFOLLOW` executable descriptor, renderer protocol, existing child-side stop/exec handshake, output validation. |
+| LSP | Common `spawn` consuming `PreopenedExecutableV1` when descriptor identity is required | Install/root/user/ancestor/workspace/ELF provenance, LSP framing/cache, request cancellation. |
+| Mermaid | Secure adoption with required `AnchoredWorkingDirectoryV1` | Caller-owned `O_NOFOLLOW` executable descriptor, configured-helper provenance, renderer protocol, existing child-side stop/exec handshake, output validation. |
 | browser opener | Common `spawn`, direct child | URL/command allowlist and `/dev/null` stdio. No double-fork or `setsid`. |
 | clipboard helper | Common `spawn` | Helper selection, output byte cap, MIME handling, and read deadline. |
 | external editor | Common `spawn` plus terminal lease | Editor selection; app-owned private draft creation, reading, and removal; shell-compatible command semantics; draft cap. |
 
 This role/surface matrix is closed and checked before any fork. Common `spawn` rejects
 bash and Mermaid reservations; secure adoption rejects every role except bash and
-Mermaid. Only bash may request a sentinel. Mermaid's one expected startup stop is
-consumed as part of its secure launch protocol before ordinary suspension handling, so
-it is not reported as `unsupported_suspension`; a later unexpected stop receives the
-normal closed-role handling. There is no generic sentinel or expected-stop escape
-hatch.
+Mermaid and rejects a missing anchored cwd. Only bash may request a sentinel. Mermaid's
+one expected startup stop is consumed as part of its secure launch protocol before
+ordinary suspension handling, so it is not reported as `unsupported_suspension`; a
+later unexpected stop receives the normal closed-role handling. There is no generic
+sentinel or expected-stop escape hatch.
 
 ### Bounds, monitor, and shutdown
 
@@ -246,13 +330,16 @@ supervision, or recovery by an external service. It does not claim Windows suppo
 These limits align with the separate [containment contract](../security/containment.md),
 which is not expanded by this ADR.
 
-A future Windows backend must preserve reservation-before-create and sole handle/wait
-authority by using `CreateProcessW(..., CREATE_SUSPENDED, ...)`, assigning the process
-to a kill-on-close Job Object before `ResumeThread`, and failing closed if assignment
-or verification fails. It must use exact process/job handles and a shared shutdown
-budget. That future contract is design guidance only: no Windows lifecycle or tree
-cleanup support is advertised until its implementation and descendant/timeout/shutdown
-tests pass on Windows.
+The `PreopenedExecutableV1` and `AnchoredWorkingDirectoryV1` factories and descriptor
+execution have no Windows implementation or support claim. A future Windows backend
+must preserve reservation-before-create and sole handle/wait authority by using
+`CreateProcessW(..., CREATE_SUSPENDED, ...)`, assigning the process to a kill-on-close
+Job Object before `ResumeThread`, and failing closed if assignment or verification
+fails. It must use exact process/job handles and a shared shutdown budget; equivalent
+handle-backed factories and descriptor-bound image selection would require their own
+reviewed design and tests. All of this remains unsupported design guidance only: no
+Windows factory, descriptor-execution, lifecycle, or tree-cleanup support is advertised
+until the corresponding implementation and tests pass on Windows.
 
 ### Diagnostics, output, and deadline ownership
 
@@ -385,17 +472,29 @@ commit:
    rule. Before activating a production family, complete the role-bound environment
    capability, closed launch-surface checks, absolute execution deadline, launch-frame
    classification, and event-driven/adaptive monitor contract in inert focused
-   coverage. No production family migrates in this wave.
+   coverage. Land the external-`AnchorOpen` hardening and both anchored factories,
+   common descriptor-exec branch, final freshness check, and adoption-cwd requirement
+   as a separately reviewed capability commit. That capability commit remains inert
+   with respect to production launching: no production caller consumes either
+   capability until the later LSP, Bash, and Mermaid waves, and existing path launches
+   do not change authority in this wave.
 2. **Common noninteractive spawn:** migrate curl and clipboard; prove output/deadline
    behavior, exact-environment bounds, host-projection canaries, and parent-environment
-   immutability before removing their local wait/kill helpers.
+   immutability before removing their local wait/kill helpers. They remain path launches
+   because neither role requires descriptor identity.
 3. **Protocol children:** migrate plugin, MCP, and LSP without changing their wire
    protocols, permissions, output limits, or one-shot/run-scoped compatibility. Prove
-   that plugin and MCP receive no host projection, MCP input comes from the selected
-   at-most-64-entry explicit config, and LSP preserves executable identity provenance.
-4. **Secure adoption:** migrate bash and Mermaid while preserving descriptor identity,
-   containment, bash-only sentinel, strict environments, and the Mermaid startup-stop
-   launch protocol. Remove duplicated process-group code only after parity tests pass.
+   that plugin and MCP receive no host projection and MCP input comes from the selected
+   at-most-64-entry explicit config. Identity-bound LSP recipes become the first common
+   `PreopenedExecutableV1` consumers; LSP retains install/root/user/ancestor/workspace/ELF
+   provenance and supplies only the neutral expected tuple to `ava_process`.
+4. **Secure adoption:** before migrating either caller, remove the temporary cwd
+   pathname-open seam and make `AnchoredWorkingDirectoryV1` mandatory at the adoption
+   boundary. Then migrate Bash and Mermaid while preserving caller ownership of their
+   executable descriptors, descriptor identity, Bash's sealed interpreter/script-FD
+   chain, containment, bash-only sentinel, strict environments, and the Mermaid
+   startup-stop launch protocol. Remove duplicated process-group code only after parity
+   tests pass.
 5. **Foreground/application helpers:** migrate external editor and browser. Prove
    app/editor ownership of the `0600` draft, rejection of edited contents after terminal
    transfer/restore failure, and the browser reservation's absolute ten-second maximum;
@@ -414,6 +513,31 @@ application shutdown; record eviction; lazy-monitor startup; Linux pidfd-readine
 wake-descriptor behavior; conservative adaptive-backoff reset and cap; and Mermaid's
 consumed startup stop.
 
+Anchored-capability tests additionally cover move-only/no-accessor API shape; relative,
+NUL-containing, and non-normalized logical identities; exact comparison of every
+`uid`/`gid`/`mode`/`nlink`/`dev`/`inode`/`size`/ctime field; and deterministic
+before/opened/after identity races. Error and snapshot canaries prove that no path,
+identity tuple, or descriptor value is emitted. Executable mode tests reject nonregular
+and nonexecutable targets, hardlinks, and group- or other-writable files while accepting
+an otherwise valid owner-writable file. Cwd tests reject a nondirectory and tuple or
+logical-spelling mismatch while accepting an identity-matched writable directory.
+External-path `AnchorOpen` tests preserve contained/external symlink behavior and
+writable-anchor exclusion without a `/proc/self/fd` reopen.
+
+Replacement tests prove that a parent/final-route change before the final pre-fork
+freshness check yields no child and does not start the lazy monitor, while a gate-held
+child that inherited descriptor A still executes or enters directory A after the
+logical path is replaced by B. Executable-only, cwd-only, and capability-absent path
+compatibility cases, secure adoption's mandatory anchored cwd, and every
+factory/freshness/exec failure prove there is no pathname fallback. A `CLOEXEC`
+descriptor-script test expects `ENOENT` as typed `ExecFailed`, while Bash
+interpreter-chain tests retain their reviewed script descriptors. FD-hygiene tests
+enumerate the exec'd child and failure paths: no anchor, parent-route, cwd, executable,
+duplicate stream, gate, or status descriptor leaks across exec, except Bash's
+explicitly retained script FDs; every owned capability descriptor closes on all
+pre-fork and teardown paths; and Bash/Mermaid executable descriptors remain open under
+caller ownership in the parent.
+
 Environment tests cover every allowlist with credential/proxy/CA canaries; the 256/64
 entry, 128-byte name, 16-KiB value, and 1-MiB aggregate boundaries and their first
 rejected values; duplicate, NUL, `=`, reserved-`PWD`, canonical-order, and absolute-PATH
@@ -424,7 +548,8 @@ external-editor PTY case above, including short stopped-job detection and reject
 the draft result when cleanup is incomplete. Leak tests inspect descendants after each
 case and disclose the documented `setsid` escape rather than claiming containment.
 Linux runs the strong-path suite; another supported POSIX CI lane runs the conservative
-contract. Windows tests are deferred with Windows support.
+contract. Windows factory, descriptor-execution, and lifecycle tests remain deferred
+with unsupported Windows design guidance.
 
 Benchmarks extend the [M0 methodology and baseline](performance-baseline.md) with idle
 startup/RSS (proving no eager monitor), first-spawn latency, warm sequential spawn,
@@ -451,11 +576,13 @@ fallbacks.
 Each migration wave is a separately revertible commit. During transition, construction
 selects exactly one owner; old and new code must never wait or signal the same PID.
 There is no retry through the legacy path after fork or after the exec gate opens,
-because that could duplicate a request or tool side effect. If a wave regresses its
-compatibility tests or benchmark investigation budget, revert that whole family wave
-to the last passing authority, keep the inert supervisor foundation, and record the
-blocker in the program ledger. M1 is not complete until local ownership code is removed
-for all nine families; runtime dual-path flags are not a permanent rollback mechanism.
+because that could duplicate a request or tool side effect. Once an anchored capability
+is selected, factory, logical-match, freshness, or descriptor-exec failure likewise
+never retries through the logical pathname. If a wave regresses its compatibility tests
+or benchmark investigation budget, revert that whole family wave to the last passing
+authority, keep the inert supervisor foundation, and record the blocker in the program
+ledger. M1 is not complete until local ownership code is removed for all nine families;
+runtime dual-path flags are not a permanent rollback mechanism.
 
 ## Planning gate resolutions
 

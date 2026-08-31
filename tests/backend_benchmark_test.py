@@ -507,6 +507,48 @@ class BenchmarkHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "false supervised claim"):
             self.module.validate_process_document(document)
 
+    def test_process_schema_rejects_composite_redaction_keys_and_negative_samples(self) -> None:
+        result_id = "supervisor_first_spawn_commit"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        prohibited_keys = (
+            "child_pid",
+            "raw_pgid",
+            "request_url",
+            "exec_path",
+            "command_argv",
+            "ownerRawId",
+            "endpoint-fd",
+            "child_output_bytes",
+            "protocol.frame",
+            "environmentValue",
+            "toolContent",
+            "prompt_bytes",
+            "processExecutable",
+        )
+        for key in prohibited_keys:
+            with self.subTest(key=key):
+                document = self.valid_process_document()
+                result = self.measured_process_result(result_id)
+                result["samples"][0]["metrics"][key] = 1
+                result["statistics"] = self.module.process_statistics(result["samples"])
+                document["results"][index] = result
+                with self.assertRaisesRegex(ValueError, "prohibited"):
+                    self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        result = self.measured_process_result(result_id)
+        result["samples"][0]["metrics"].update(
+            {"pidfd_successes": 1, "stdout_bytes": 2, "record_count": 3, "endpoint_eof": True}
+        )
+        result["statistics"] = self.module.process_statistics(result["samples"])
+        document["results"][index] = result
+        self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        document["results"][index] = self.measured_process_result(result_id, value=-1.0)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            self.module.validate_process_document(document)
+
     def test_helper_v2_preserves_observations_and_accepts_static_unsupported(self) -> None:
         measured = {
             "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
@@ -521,6 +563,11 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "case_metrics": {"authority": "neutral_supervisor"},
         }
         self.assertEqual(len(self.module.validate_helper_payload(measured, "process-first-spawn")["observations"]), 2)
+        measured["observations"][0]["metrics"]["child_pid"] = 123
+        with self.assertRaisesRegex(RuntimeError, "prohibited"):
+            self.module.validate_helper_payload(measured, "process-first-spawn")
+        del measured["observations"][0]["metrics"]["child_pid"]
+
         unsupported = {
             "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
             "case": "process-first-spawn",
@@ -631,6 +678,23 @@ class BenchmarkHarnessTests(unittest.TestCase):
         after["results"][index]["compatibility_checks"]["expected_response"] = False
         comparison = self.module.compare_process_documents(before, after)
         item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
+        self.assertEqual(item["reason_code"], "compatibility_mismatch")
+
+    def test_comparison_rejects_matching_false_compatibility(self) -> None:
+        before, after = self.comparison_documents()
+        result_id = "family_mcp_lifecycle"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        for document in (before, after):
+            checks = document["results"][index]["samples"][0]["checks"]
+            checks["protocol_compatible"] = False
+            checks["expected_response"] = False
+            document["results"][index]["compatibility_checks"] = {
+                "protocol_compatible": False,
+                "expected_response": False,
+            }
+        comparison = self.module.compare_process_documents(before, after)
+        item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
+        self.assertEqual(item["status"], "unsupported")
         self.assertEqual(item["reason_code"], "compatibility_mismatch")
 
     def test_historical_v2_artifact_still_validates(self) -> None:

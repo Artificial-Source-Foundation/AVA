@@ -73,13 +73,11 @@ target_link_libraries(ava_fake_provider_server PRIVATE ava_process_gate_test_sup
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
-set(AVA_BENCHMARK_CURL_AUTHORITY "legacy_local" CACHE STRING "Curl benchmark authority: legacy_local or supervised")
-set(AVA_BENCHMARK_PLUGIN_AUTHORITY "legacy_local" CACHE STRING "Plugin benchmark authority: legacy_local or supervised")
-set(AVA_BENCHMARK_MCP_AUTHORITY "legacy_local" CACHE STRING "MCP benchmark authority: legacy_local or supervised")
-set(AVA_BENCHMARK_LSP_AUTHORITY "legacy_local" CACHE STRING "LSP benchmark authority: legacy_local or supervised")
-set(AVA_BENCHMARK_BASH_AUTHORITY "legacy_local" CACHE STRING "Bash benchmark authority: legacy_local or supervised")
+include("${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_authorities.cmake")
 foreach(AVA_BENCHMARK_FAMILY IN ITEMS CURL PLUGIN MCP LSP BASH)
-  set_property(CACHE AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY PROPERTY STRINGS legacy_local supervised)
+  # Remove stale command-line/cache authority values; the included declarations
+  # are normal source variables and remain authoritative in this scope.
+  unset(AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY CACHE)
   if(NOT AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY STREQUAL "legacy_local" AND
      NOT AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY STREQUAL "supervised")
     message(FATAL_ERROR "AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY must be legacy_local or supervised")

@@ -1215,11 +1215,10 @@ PROCESS_RESULT_SPECS: dict[str, dict[str, Any]] = {
     "family_bash_lifecycle": {"family": "bash", "case": "family-bash-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "sealed_direct_argv_planning_execution_and_cleanup"},
 }
 
-PROHIBITED_SAMPLE_KEYS = {
+PROHIBITED_SAMPLE_KEY_TOKENS = {
     "pid",
     "pgid",
-    "owner_id",
-    "owner_raw_id",
+    "id",
     "fd",
     "argv",
     "command",
@@ -1227,13 +1226,22 @@ PROHIBITED_SAMPLE_KEYS = {
     "cwd",
     "path",
     "url",
+    "uri",
     "environment",
-    "child_output",
+    "env",
     "output",
-    "protocol_frame",
+    "frame",
     "prompt",
-    "tool_content",
+    "content",
 }
+
+
+def _sample_key_is_prohibited(name: Any) -> bool:
+    if not isinstance(name, str) or not name:
+        return True
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", separated.lower()) if token]
+    return not tokens or any(token in PROHIBITED_SAMPLE_KEY_TOKENS for token in tokens)
 
 
 def _is_number(value: Any) -> bool:
@@ -1341,7 +1349,7 @@ def validate_helper_payload(payload: Any, expected_case: str) -> dict[str, Any]:
     if not isinstance(observations, list) or not isinstance(case_metrics, dict):
         raise RuntimeError("benchmark helper omitted observations or case metrics")
     for name, value in case_metrics.items():
-        if not isinstance(name, str) or name in PROHIBITED_SAMPLE_KEYS:
+        if _sample_key_is_prohibited(name):
             raise RuntimeError("benchmark helper emitted a prohibited case metric")
         _validate_closed_scalar(value, "case metric")
     if payload["status"] == "unsupported":
@@ -1363,7 +1371,7 @@ def validate_helper_payload(payload: Any, expected_case: str) -> dict[str, Any]:
             if not isinstance(values, dict):
                 raise RuntimeError(f"benchmark helper observation lacks {field}")
             for name, value in values.items():
-                if not isinstance(name, str) or name in PROHIBITED_SAMPLE_KEYS:
+                if _sample_key_is_prohibited(name):
                     raise RuntimeError("benchmark helper observation contains prohibited data")
                 _validate_closed_scalar(value, field)
     return payload
@@ -1376,13 +1384,13 @@ def _validate_safe_sample(sample: Any) -> None:
         raise ValueError("process sample has an invalid shape")
     if not isinstance(sample["run"], int) or sample["run"] <= 0 or not isinstance(sample["observation"], int) or sample["observation"] <= 0:
         raise ValueError("process sample has an invalid correlation identity")
-    if not _is_number(sample["value"]):
-        raise ValueError("process sample value is not finite numeric data")
+    if not _is_number(sample["value"]) or float(sample["value"]) < 0:
+        raise ValueError("process sample value must be non-negative finite numeric data")
     for field in ("metrics", "checks"):
         if not isinstance(sample[field], dict):
             raise ValueError(f"process sample {field} must be an object")
         for key, value in sample[field].items():
-            if key in PROHIBITED_SAMPLE_KEYS:
+            if _sample_key_is_prohibited(key):
                 raise ValueError("process sample contains prohibited data")
             _validate_closed_scalar(value, f"sample {field}")
 
@@ -2328,13 +2336,17 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
                 }
             )
             continue
-        if before_result.get("compatibility_checks") != after_result.get("compatibility_checks"):
+        required_compatibility = {"protocol_compatible": True, "expected_response": True}
+        if (
+            before_result.get("compatibility_checks") != required_compatibility
+            or after_result.get("compatibility_checks") != required_compatibility
+        ):
             comparisons.append(
                 {
                     "id": result_id,
                     "status": "unsupported",
                     "reason_code": "compatibility_mismatch",
-                    "reason": "Family compatibility checks differ between cohorts.",
+                    "reason": "Both family cohorts require all compatibility checks to be present and true.",
                 }
             )
             continue

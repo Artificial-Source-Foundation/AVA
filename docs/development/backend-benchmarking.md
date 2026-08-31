@@ -71,12 +71,7 @@ Use one build recipe for both members of a pair. For example:
 
 ```sh
 cmake -S . -B /tmp/ava-process-build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DAVA_BENCHMARK_CURL_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_PLUGIN_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_MCP_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_LSP_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_BASH_AUTHORITY=legacy_local
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/ava-process-build --target \
   ava ava_backend_benchmark_helper ava_fake_process_child \
   ava_fake_mcp_server ava_fake_lsp_server
@@ -87,6 +82,10 @@ ctest --test-dir /tmp/ava-process-build --output-on-failure \
 The equivalent direct command is:
 
 ```sh
+runtime_reference=$(git rev-parse --verify \
+  'dd4460348658c4127606db679da873cbf3dba274^{commit}')
+git diff --exit-code "$runtime_reference" -- \
+  src CMakeLists.txt cmake config.h.in
 scripts/benchmark-backend.py \
   --ava /tmp/ava-process-build/ava \
   --benchmark-helper /tmp/ava-process-build/tests/ava_backend_benchmark_helper \
@@ -95,7 +94,7 @@ scripts/benchmark-backend.py \
   --fake-lsp-server /tmp/ava-process-build/tests/ava_fake_lsp_server \
   --memory-helper scripts/benchmark-memory.py \
   --sample-plugin examples/plugins/todo \
-  --runtime-reference HEAD \
+  --runtime-reference "$runtime_reference" \
   --suite process-smoke --runs 1 \
   --output /tmp/ava-process-smoke.json \
   --report /tmp/ava-process-smoke.md
@@ -105,27 +104,31 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 ### Fresh-worktree carrier and paired baseline recipe
 
-`971327fb66fc372f5828c5f5967e118d9374f9da` is an **instrumentation carrier**, not an M1 runtime. Its production runtime paths are byte-for-byte the source baseline `c94ac863141975806bbab52e950a2f2499108b65`. The following commands create an honest carrier cohort and prove that invariant. Run them from a clean checkout of this instrumentation commit; builds stay outside both worktrees.
+`971327fb66fc372f5828c5f5967e118d9374f9da` is an **instrumentation carrier**, not an M1 runtime. Its production runtime paths are byte-for-byte the source baseline `c94ac863141975806bbab52e950a2f2499108b65`. The following commands create an honest carrier cohort and prove that invariant. Builds stay outside both worktrees.
+
+Resolve every benchmark instrumentation commit to a reviewed full object ID before leaving the benchmark branch. Never derive an instrumentation commit from `HEAD` after checking out a later production branch. The first instrumentation commit is pinned below; supply this evidence-integrity follow-up's reported full ID explicitly:
 
 ```sh
-instrumentation_commit=$(git rev-parse HEAD)
+instrumentation_base=fc4b1c4d1c0be241057f98b47ef5ff24025f2953
+: "${AVA_BENCHMARK_INTEGRITY_COMMIT:?set the reviewed full evidence-integrity commit ID}"
+instrumentation_integrity_commit=$AVA_BENCHMARK_INTEGRITY_COMMIT
+test "$(printf %s "$instrumentation_integrity_commit" | wc -c)" -eq 40
+test "$(git rev-parse --verify "$instrumentation_integrity_commit^{commit}")" = \
+  "$instrumentation_integrity_commit"
+
 before_src=/tmp/ava-process-before-src
 before_build=/tmp/ava-process-before-build
 rm -rf "$before_build"
 git worktree add --detach "$before_src" 971327fb66fc372f5828c5f5967e118d9374f9da
-git -C "$before_src" cherry-pick "$instrumentation_commit"
+git -C "$before_src" cherry-pick \
+  "$instrumentation_base" "$instrumentation_integrity_commit"
 git -C "$before_src" diff --exit-code \
   c94ac863141975806bbab52e950a2f2499108b65 HEAD -- \
   src CMakeLists.txt cmake config.h.in
 test -z "$(git -C "$before_src" status --porcelain --untracked-files=normal)"
 
 cmake -S "$before_src" -B "$before_build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DAVA_BENCHMARK_CURL_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_PLUGIN_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_MCP_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_LSP_AUTHORITY=legacy_local \
-  -DAVA_BENCHMARK_BASH_AUTHORITY=legacy_local
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build "$before_build" --target \
   ava ava_backend_benchmark_helper ava_fake_mcp_server ava_fake_lsp_server
 
@@ -143,24 +146,33 @@ cmake --build "$before_build" --target \
   --report /tmp/ava-process-before.md
 ```
 
-The carrier intentionally has no `ava_fake_process_child` target, so no such argument appears in its command. Its neutral process cases are structured unsupported; its five family cases are real `legacy_local` lifecycle measurements. Remove the worktree after evidence collection:
+The carrier intentionally has no `ava_fake_process_child` target, so no such argument appears in its command. Its neutral process cases are structured unsupported; its five family cases are real `legacy_local` lifecycle measurements. Keep this worktree and build until the after cohort is complete: their fake MCP/LSP executables and sample plugin are the common fixture bytes for both runs.
+
+For the after cohort, use a fresh worktree at the explicitly pinned, full family-migration commit and the identical generator, build type, compiler, feature flags, run count, and host boot. The migration commit changes only that family's declaration in `tests/backend_benchmark_authorities.cmake` to `supervised` while adapting its driver; authority is never supplied on the CMake command line. Build the application, helper, and process child. Although helper dependencies may also rebuild fake servers, do not use those independently built copies for evidence:
 
 ```sh
-rm -rf "$before_build"
-git worktree remove "$before_src"
-```
+: "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full family-migration commit ID}"
+family_migration_commit=$AVA_FAMILY_MIGRATION_COMMIT
+test "$(printf %s "$family_migration_commit" | wc -c)" -eq 40
+test "$(git rev-parse --verify "$family_migration_commit^{commit}")" = \
+  "$family_migration_commit"
+after_src=/tmp/ava-process-after-src
+after_build=/tmp/ava-process-after-build
+rm -rf "$after_build"
+git worktree add --detach "$after_src" "$family_migration_commit"
+cmake -S "$after_src" -B "$after_build" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build "$after_build" --target \
+  ava ava_backend_benchmark_helper ava_fake_process_child
 
-For the after cohort, use a fresh worktree at the family migration commit and the identical generator, build type, compiler, feature flags, run count, fixtures, and host boot. Flip **only** the migrated family's authority cache value to `supervised`; leave the other four at `legacy_local`. Build the same targets plus `ava_fake_process_child`, then run:
-
-```sh
 "$after_src/scripts/benchmark-backend.py" \
   --ava "$after_build/ava" \
   --benchmark-helper "$after_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$after_build/tests/ava_fake_process_child" \
-  --fake-mcp-server "$after_build/tests/ava_fake_mcp_server" \
-  --fake-lsp-server "$after_build/tests/ava_fake_lsp_server" \
-  --memory-helper "$after_src/scripts/benchmark-memory.py" \
-  --sample-plugin "$after_src/examples/plugins/todo" \
+  --fake-mcp-server "$before_build/tests/ava_fake_mcp_server" \
+  --fake-lsp-server "$before_build/tests/ava_fake_lsp_server" \
+  --memory-helper "$before_src/scripts/benchmark-memory.py" \
+  --sample-plugin "$before_src/examples/plugins/todo" \
   --runtime-reference "$family_migration_commit" \
   --run-order before_then_after \
   --suite process-baseline --runs 5 \
@@ -168,9 +180,13 @@ For the after cohort, use a fresh worktree at the family migration commit and th
   --report /tmp/ava-process-after.md \
   --compare-to /tmp/ava-process-before.json \
   --comparison-output /tmp/ava-process-comparison.json
+
+rm -rf "$after_build" "$before_build"
+git worktree remove "$after_src"
+git worktree remove "$before_src"
 ```
 
-At this pre-migration commit every authority defaults to `legacy_local`; asking for `supervised` does not infer migration from the mere presence of `AVA::process`. The corresponding driver returns `caller_not_migrated` until a later family migration adapts it to verify one correctly finished, exactly-once Supervisor record. Consequently, a comparison requested from this commit is expected to be unsupported rather than claim a false delta.
+At this pre-migration commit every source-owned authority declaration is `legacy_local`. Stale cache entries and command-line values are removed during configuration and cannot assert migration. Changing a declaration to `supervised` without adapting its driver still reaches `refuse_false_supervised_claim` and returns structured `caller_not_migrated`; a valid migration must verify one correctly finished, exactly-once Supervisor record. Consequently, a comparison requested from this commit is expected to be unsupported rather than claim a false delta.
 
 ### Driver boundaries and cleanup evidence
 
@@ -189,6 +205,6 @@ The fixed family boundaries are one stdlib-Python loopback Curl request; todo sa
 
 V3 records measured checkout commit/tree/dirty state; runtime reference and production-path equality; harness commit/tree/contract; family tree/blob IDs; CMake generator/version/cache hash/source root/build type/features; compiler path/hash/ID/version/flags; every used binary/script/fixture/plugin hash, size, mode, and mtime; OS/kernel/machine/CPU/count/RAM/page/Python; hashed boot ID; limits; monotonic resolution; start/end load; and exact driver commands and scale parameters. Paths occur only under provenance or artifacts. Provenance remains best effort: binaries do not embed a verified source commit.
 
-Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
+Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Redaction checks tokenize composite sample keys, so names such as `child_pid`, `request_url`, and `command_argv` are rejected without rejecting closed aggregates such as `pidfd_successes`, `stdout_bytes`, `record_count`, and `endpoint_eof`. Primary samples must be non-negative. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
 
-Optional comparison output uses `ava.backend-benchmark-comparison.v1`. It recomputes summaries from raw samples and refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, fixture hashes, and harness contract match. A family result is comparable only for `legacy_local` to `supervised` authority with identical compatibility checks. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; a repeatable claim requires a second pair collected in reversed order.
+Optional comparison output uses `ava.backend-benchmark-comparison.v1`. It recomputes summaries from raw samples and refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, fixture hashes, and harness contract match. A family result is comparable only for `legacy_local` to `supervised` authority when both cohorts contain every required compatibility check and every check is true. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; a repeatable claim requires a second pair collected in reversed order.

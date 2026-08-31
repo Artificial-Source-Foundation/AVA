@@ -204,6 +204,7 @@ struct LifecyclePolicyV1
 {
   std::chrono::milliseconds termination_grace{100};
   std::chrono::milliseconds startup_timeout{2000};
+  std::optional<ProcessDeadline> execution_deadline;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

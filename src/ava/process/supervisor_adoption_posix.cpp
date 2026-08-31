@@ -215,18 +215,23 @@ void AdoptionGate::abandon() noexcept
     implementation_.reset();
     return;
   }
-  gate.leader_control.write_end.reset();
-  gate.containment_control.write_end.reset();
-  if (gate.sentinel_control)
-    gate.sentinel_control->write_end.reset();
   if (!gate.registered && (gate.leader > 1 || gate.sentinel > 1))
   {
-    bool const cleaned = detail::exact_provisional_cleanup(gate.leader, gate.sentinel, Clock::now() + 500ms);
+    auto const cleanup_deadline = detail::provisional_cleanup_deadline(gate.state, gate.record, TerminationReasonV1::LaunchFailed, Clock::now() + 500ms);
+    gate.leader_control.write_end.reset();
+    gate.containment_control.write_end.reset();
+    if (gate.sentinel_control)
+      gate.sentinel_control->write_end.reset();
+    bool const cleaned = detail::exact_provisional_cleanup(gate.leader, gate.sentinel, cleanup_deadline);
     detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed, cleaned ? CleanupStateV1::Complete : CleanupStateV1::Incomplete);
     gate.record = 0;
     implementation_.reset();
     return;
   }
+  gate.leader_control.write_end.reset();
+  gate.containment_control.write_end.reset();
+  if (gate.sentinel_control)
+    gate.sentinel_control->write_end.reset();
 #endif
   if (!gate.registered)
     detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
@@ -258,20 +263,17 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     return std::unexpected(detail::invalid_error("secure-adoption leader requires its retained closed launch binding"));
   }
 
-  TerminationReasonV1 stopped_reason = TerminationReasonV1::LaunchFailed;
+  detail::PreForkDecision initial_check;
   {
     std::lock_guard lock(gate.state->mutex);
-    auto found = gate.state->records.find(gate.record);
-    bool const launchable = found != gate.state->records.end() && found->second->state == ProcessStateV1::Launching && !found->second->reason &&
-                            !gate.state->shutting_down && Clock::now() < gate.startup_deadline;
-    if (!launchable)
-    {
-      if (found != gate.state->records.end() && found->second->reason)
-        stopped_reason = *found->second->reason;
-      else if (gate.state->shutting_down)
-        stopped_reason = TerminationReasonV1::ApplicationShutdown;
-      return std::unexpected(detail::canceled_launch_error("secure-adoption leader launch", stopped_reason));
-    }
+    initial_check = detail::check_pre_fork_launch_locked(*gate.state, gate.record, gate.startup_deadline);
+  }
+  detail::notify_monitor_state(gate.state);
+  if (!initial_check.launchable)
+  {
+    detail::finish_unregistered(gate.state, gate.record, initial_check.reason);
+    gate.record = 0;
+    return std::unexpected(detail::canceled_launch_error("secure-adoption leader launch", initial_check.reason));
   }
 
   // Revalidate role, profile, prepared argv, retained logical cwd, and
@@ -287,9 +289,27 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     return std::unexpected(detail::invalid_error("secure-adoption leader lost its retained closed launch binding"));
   }
 
+  detail::PreForkDecision final_check;
+  {
+    std::lock_guard lock(gate.state->mutex);
+    final_check = detail::check_pre_fork_launch_locked(*gate.state, gate.record, gate.startup_deadline);
+  }
+  detail::notify_monitor_state(gate.state);
+  if (!final_check.launchable)
+  {
+    detail::finish_unregistered(gate.state, gate.record, final_check.reason);
+    gate.record = 0;
+    return std::unexpected(detail::canceled_launch_error("secure-adoption leader launch", final_check.reason));
+  }
+
   pid_t const process = ::fork();
   if (process < 0)
-    return std::unexpected(detail::io_error("failed to fork the secure-adoption leader", errno));
+  {
+    auto error = detail::io_error("failed to fork the secure-adoption leader", errno);
+    detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
+    gate.record = 0;
+    return std::unexpected(std::move(error));
+  }
   if (process == 0)
   {
     gate.child_branch = true;
@@ -355,18 +375,22 @@ ava::core::VoidResult AdoptionGate::fork_sentinel()
   }
   if (gate.leader <= 1 || gate.sentinel > 1 || !gate.sentinel_status || !gate.sentinel_control)
     return std::unexpected(detail::invalid_error("secure adoption sentinel requires exactly one gated parent leader"));
+  detail::PreForkDecision pre_fork;
   {
     std::lock_guard lock(gate.state->mutex);
-    auto found = gate.state->records.find(gate.record);
-    bool const launchable = found != gate.state->records.end() && found->second->state == ProcessStateV1::Launching && !found->second->reason &&
-                            !gate.state->shutting_down && Clock::now() < gate.startup_deadline;
-    if (!launchable)
-      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "secure-adoption sentinel was stopped before fork"));
+    pre_fork = detail::check_pre_fork_launch_locked(*gate.state, gate.record, gate.startup_deadline);
   }
+  detail::notify_monitor_state(gate.state);
+  if (!pre_fork.launchable)
+    return std::unexpected(detail::canceled_launch_error("secure-adoption sentinel launch", pre_fork.reason));
 
   pid_t const process = ::fork();
   if (process < 0)
-    return std::unexpected(detail::io_error("failed to fork the secure-adoption sentinel", errno));
+  {
+    auto error = detail::io_error("failed to fork the secure-adoption sentinel", errno);
+    abandon();
+    return std::unexpected(std::move(error));
+  }
   if (process == 0)
   {
     gate.child_branch = true;
@@ -563,6 +587,17 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
     prepared_bytes += bytes;
   }
   auto const startup_deadline = detail::startup_deadline_for_record(state, identity);
+  detail::PreForkDecision initial_check;
+  {
+    std::lock_guard lock(state->mutex);
+    initial_check = detail::check_pre_fork_launch_locked(*state, identity, startup_deadline);
+  }
+  detail::notify_monitor_state(state);
+  if (!initial_check.launchable)
+  {
+    detail::finish_unregistered(state, identity, initial_check.reason);
+    return std::unexpected(detail::canceled_launch_error("secure adoption", initial_check.reason));
+  }
 #if defined(_WIN32)
   static_cast<void>(startup_deadline);
   detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
@@ -656,6 +691,18 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
   gate->sentinel_status = std::move(sentinel_status);
   gate->sentinel_control = std::move(sentinel_control);
   gate->maximum_descriptor = detail::descriptor_limit();
+
+  detail::PreForkDecision final_check;
+  {
+    std::lock_guard lock(state->mutex);
+    final_check = detail::check_pre_fork_launch_locked(*state, identity, startup_deadline);
+  }
+  detail::notify_monitor_state(state);
+  if (!final_check.launchable)
+  {
+    detail::finish_unregistered(state, identity, final_check.reason);
+    return std::unexpected(detail::canceled_launch_error("secure adoption", final_check.reason));
+  }
   return AdoptionGate(std::move(gate));
 #endif
 }
@@ -713,6 +760,7 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
       return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "secure-adoption reservation ended before registry commit"));
     auto& record = *found->second;
+    static_cast<void>(detail::commit_due_execution_deadline_locked(record, Clock::now()));
     handle_state->supervisor = state;
     handle_state->record = identity;
     record.handle = handle_state;
@@ -728,16 +776,22 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
   }
   detail::notify_monitor_state(state);
 
+  bool gate_release_committed = false;
   auto fail_registered = [&](TerminationReasonV1 reason, ava::core::Error error) -> ava::core::Result<ProcessHandle> {
+    auto const failure = detail::fail_registered_launch(state, identity, reason);
     ticket.leader_control.write_end.reset();
     ticket.containment_control.write_end.reset();
     ticket.launch_status.read_end.reset();
     if (ticket.sentinel_control)
       ticket.sentinel_control->write_end.reset();
-    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, reason);
     detail::notify_monitor_state(state);
-    detail::await_internal_settlement(handle_state, cleanup_deadline);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
     ticket.record = 0;
+    if (failure.reason != reason)
+    {
+      return std::unexpected(gate_release_committed ? detail::startup_stopped_error("secure adoption", failure.reason)
+                                                    : detail::canceled_launch_error("secure adoption", failure.reason));
+    }
     return std::unexpected(std::move(error));
   };
 
@@ -761,6 +815,7 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     ticket.record = 0;
     return std::unexpected(detail::canceled_launch_error("secure adoption", release_decision.reason));
   }
+  gate_release_committed = true;
 
   char const release = 'G';
   bool released = true;
@@ -776,6 +831,9 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
                            detail::process_error(ava::core::ErrorCategory::Io, "failed to release a committed secure-adoption gate"));
   }
 
+  if (auto hook = detail::invoke_after_gate_release_hook(state); !hook)
+    return fail_registered(TerminationReasonV1::LaunchFailed, std::move(hook.error()));
+
   if (ticket.role == ProcessRoleV1::Mermaid)
   {
     auto const stop = await_expected_mermaid_stop(ticket.leader, ticket.startup_deadline);
@@ -786,10 +844,13 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     {
       std::lock_guard lock(state->mutex);
       auto found = state->records.find(identity);
-      if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
-        stopped_reason = found == state->records.end() ? std::optional(TerminationReasonV1::LaunchFailed) : found->second->reason;
+      if (found == state->records.end())
+        stopped_reason = TerminationReasonV1::LaunchFailed;
       else
+      {
+        static_cast<void>(detail::commit_due_execution_deadline_locked(*found->second, Clock::now()));
         stopped_reason = found->second->reason;
+      }
     }
     if (stopped_reason)
       return fail_registered(TerminationReasonV1::LaunchFailed, detail::startup_stopped_error("secure adoption", *stopped_reason));
@@ -813,12 +874,16 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
   {
     std::lock_guard lock(state->mutex);
     auto found = state->records.find(identity);
-    if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
-      stopped_reason = found == state->records.end() ? std::optional(TerminationReasonV1::LaunchFailed) : found->second->reason;
-    else if (found->second->reason)
-      stopped_reason = found->second->reason;
+    if (found == state->records.end())
+      stopped_reason = TerminationReasonV1::LaunchFailed;
     else
-      found->second->startup_handshake_complete = true;
+    {
+      static_cast<void>(detail::commit_due_execution_deadline_locked(*found->second, Clock::now()));
+      if (found->second->state == ProcessStateV1::Finished || found->second->reason)
+        stopped_reason = found->second->reason.value_or(TerminationReasonV1::LaunchFailed);
+      else
+        found->second->startup_handshake_complete = true;
+    }
   }
   detail::notify_monitor_state(state);
   if (stopped_reason)

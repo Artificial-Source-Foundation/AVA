@@ -39,6 +39,7 @@ inline constexpr auto kShortStopProbeInterval = std::chrono::milliseconds(10);
 inline constexpr auto kPostKillObservation = std::chrono::milliseconds(20);
 inline constexpr auto kDefaultCleanupBudget = std::chrono::seconds(2);
 inline constexpr auto kMaximumStartupTimeout = std::chrono::seconds(30);
+inline constexpr auto kMaximumBrowserExecutionWindow = std::chrono::seconds(10);
 inline constexpr std::size_t kMaximumLaunchArgumentCount = 256;
 inline constexpr std::size_t kMaximumPreparedLaunchBytes = 1024 * 1024;
 
@@ -111,6 +112,7 @@ struct MonitorTelemetry
   std::atomic<std::uint64_t> wake_failures{0};
   std::atomic<std::uint64_t> poll_calls{0};
   std::atomic<std::uint64_t> poll_timeouts{0};
+  std::atomic<std::uint64_t> poll_interruptions{0};
   std::atomic<std::uint64_t> poll_peak_entries{0};
   std::atomic<std::uint64_t> pidfd_attempts{0};
   std::atomic<std::uint64_t> pidfd_successes{0};
@@ -307,6 +309,7 @@ struct SupervisorState
   std::deque<std::uint64_t> terminal_fifo;
   std::map<std::string, OwnerAliasEntry> owner_aliases;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_fork_before_release_for_test;
+  std::shared_ptr<AfterForkBeforeReleaseHook> after_gate_release_for_test;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_completion_channel_create_for_test;
   bool fail_next_common_child_working_directory_for_test = false;
   std::uint64_t next_record = 1;
@@ -326,6 +329,7 @@ struct SupervisorState
   std::shared_ptr<MonitorTelemetry> monitor_telemetry = std::make_shared<MonitorTelemetry>();
   std::shared_ptr<MonitorWake> monitor_wake;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_poll_snapshot_for_test;
+  std::atomic<std::uint64_t> poll_interruptions_for_test{0};
 #endif
 
   // Process lock order is strict:
@@ -371,12 +375,27 @@ void signal_completion_locked(HandleState& handle) noexcept;
 void publish_final_locked(Record& record, ExitStatusV1 status);
 void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 cleanup);
 [[nodiscard]] bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept;
+[[nodiscard]] bool set_earlier_stop_deadline_locked(Record& record, ProcessDeadline deadline) noexcept;
+[[nodiscard]] bool commit_due_execution_deadline_locked(Record& record, Clock::time_point now) noexcept;
 void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 [[nodiscard]] std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
                          CleanupStateV1 cleanup = CleanupStateV1::NotRequired) noexcept;
 [[nodiscard]] ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 [[nodiscard]] ava::core::VoidResult invoke_after_fork_before_release_hook(std::shared_ptr<SupervisorState> const& state);
+[[nodiscard]] ava::core::VoidResult invoke_after_gate_release_hook(std::shared_ptr<SupervisorState> const& state);
+
+struct PreForkDecision
+{
+  bool launchable = false;
+  TerminationReasonV1 reason = TerminationReasonV1::LaunchFailed;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+// The caller holds state.mutex. Every launch check first linearizes a deadline
+// already due before inspecting shutdown or startup state.
+[[nodiscard]] PreForkDecision check_pre_fork_launch_locked(SupervisorState& state, std::uint64_t identity, ProcessDeadline startup_deadline) noexcept;
 
 struct GateReleaseDecision
 {
@@ -392,8 +411,10 @@ struct GateReleaseDecision
 [[nodiscard]] GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint64_t identity, ProcessDeadline startup_deadline) noexcept;
 [[nodiscard]] ava::core::Error canceled_launch_error(std::string operation, TerminationReasonV1 reason);
 [[nodiscard]] ava::core::Error startup_stopped_error(std::string operation, TerminationReasonV1 reason);
-[[nodiscard]] ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity,
-                                                     TerminationReasonV1 fallback) noexcept;
+[[nodiscard]] GateReleaseDecision fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity,
+                                                         TerminationReasonV1 fallback) noexcept;
+[[nodiscard]] ProcessDeadline provisional_cleanup_deadline(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
+                                                           ProcessDeadline proposed_deadline) noexcept;
 
 #if !defined(_WIN32)
 

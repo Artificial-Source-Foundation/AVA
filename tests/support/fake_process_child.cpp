@@ -168,6 +168,17 @@ int main(int argc, char** argv)
   }
   if (mode == "input-gate")
     return read_control_byte(control_fd) ? 0 : 3;
+  if (mode == "progress-gate")
+  {
+    if (!write_text(status_fd, "READY\n"))
+      return 3;
+    while (read_control_byte(control_fd))
+    {
+      if (!write_text(status_fd, "PROGRESS\n"))
+        return 3;
+    }
+    return 0;
+  }
   if (mode == "staged-stdio")
   {
     if (!write_text(STDOUT_FILENO, "OUT\n") || !read_control_byte(control_fd) || !write_text(STDERR_FILENO, "ERR\n"))

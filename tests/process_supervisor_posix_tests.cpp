@@ -356,7 +356,8 @@ void test_exec_gate_normal_nonzero_and_exec_failure()
 
   auto inherited =
       spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::BrowserOpener,
-                 fake_spec("normal", ava::process::StreamModeV1::Inherit, ava::process::StreamModeV1::Inherit, ava::process::StreamModeV1::Inherit));
+                 fake_spec("normal", ava::process::StreamModeV1::Inherit, ava::process::StreamModeV1::Inherit, ava::process::StreamModeV1::Inherit),
+                 {.execution_deadline = std::chrono::steady_clock::now() + 5s});
   auto inherited_status = inherited ? wait_for(supervisor, inherited->handle) : std::nullopt;
   expect(inherited && !inherited->standard_input && !inherited->standard_output && !inherited->standard_error && inherited_status &&
              inherited_status->exit_code == 0,
@@ -438,8 +439,9 @@ void test_natural_exit_does_not_pay_termination_grace()
   auto application = application_owner();
   ava::process::Supervisor supervisor;
   SupervisorFallback fallback(supervisor);
-  auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::BrowserOpener, {.termination_grace = 5s});
   auto const begin = std::chrono::steady_clock::now();
+  auto reservation =
+      supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::BrowserOpener, {.termination_grace = 5s, .execution_deadline = begin + 8s});
   auto specification = with_role_environment(ava::process::ProcessRoleV1::BrowserOpener, {.executable = "/bin/true",
                                                                                           .argv = {"/bin/true"},
                                                                                           .environment = {},
@@ -582,7 +584,7 @@ void test_term_kill_first_reason_and_leader_first_cleanup()
   SupervisorFallback fallback(supervisor);
 
   auto stubborn = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::ClipboardHelper,
-                             fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms});
+                             fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms, .execution_deadline = std::nullopt});
   std::string ready_text;
   bool const ready =
       stubborn && stubborn->standard_output && read_until(*stubborn->standard_output, ready_text, "READY\n", std::chrono::steady_clock::now() + 2s);
@@ -602,8 +604,8 @@ void test_term_kill_first_reason_and_leader_first_cleanup()
   expect(ready && first && first->newly_requested == 1 && second && second->newly_requested == 0 && stable_status,
          "TERM refusal escalates to verified-group KILL while first reason wins and repeated wait observes one settlement");
 
-  auto stopped =
-      spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::ExternalEditor, fake_spec("stopped"), {.termination_grace = 75ms});
+  auto stopped = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::ExternalEditor, fake_spec("stopped"),
+                            {.termination_grace = 75ms, .execution_deadline = std::nullopt});
   std::string stopped_text;
   bool const stopped_ready =
       stopped && stopped->standard_output && read_until(*stopped->standard_output, stopped_text, "READY\n", std::chrono::steady_clock::now() + 2s);
@@ -616,8 +618,9 @@ void test_term_kill_first_reason_and_leader_first_cleanup()
   }
   expect(stopped_ready && stopped_status_ok, "a stopped child is continued and boundedly terminated with unsupported_suspension rather than hanging");
 
-  auto descendant = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin,
-                               fake_spec("in-group-descendant", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms});
+  auto descendant =
+      spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin,
+                 fake_spec("in-group-descendant", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms, .execution_deadline = std::nullopt});
   std::string descendant_text;
   bool const tree_ready = descendant && descendant->standard_output &&
                           read_until(*descendant->standard_output, descendant_text, "DESCENDANT_READY\n", std::chrono::steady_clock::now() + 2s) &&
@@ -637,8 +640,8 @@ void test_term_kill_first_reason_and_leader_first_cleanup()
   expect(tree_ready && tree_stop && tree_closed && tree_status_ok,
          "cancellation preserves the leader's TERM status while escalating across a TERM-ignoring descendant and closing its inherited status endpoint");
 
-  auto leader_first =
-      spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin, fake_spec("leader-exits-first"), {.termination_grace = 75ms});
+  auto leader_first = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin, fake_spec("leader-exits-first"),
+                                 {.termination_grace = 75ms, .execution_deadline = std::nullopt});
   std::string leader_text;
   bool const descendant_ready = leader_first && leader_first->standard_output &&
                                 read_until(*leader_first->standard_output, leader_text, "DESCENDANT_READY\n", std::chrono::steady_clock::now() + 2s);
@@ -877,7 +880,7 @@ void test_destructor_fallback_cleanup()
   {
     ava::process::Supervisor supervisor;
     auto child = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::ClipboardHelper,
-                            fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms});
+                            fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms, .execution_deadline = std::nullopt});
     std::string ready_text;
     ready = child && child->standard_output && read_until(*child->standard_output, ready_text, "READY\n", std::chrono::steady_clock::now() + 2s);
     if (child && child->standard_output)
@@ -944,7 +947,7 @@ void test_mixed_shared_budget_shutdown()
   for (int index = 0; index < 8; ++index)
   {
     auto child = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin,
-                            fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 100ms});
+                            fake_spec("ignore-term", ava::process::StreamModeV1::Capture), {.termination_grace = 100ms, .execution_deadline = std::nullopt});
     if (!child || !child->standard_output)
     {
       all_ready = false;

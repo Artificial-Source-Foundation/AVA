@@ -76,6 +76,27 @@ void SupervisorTestAccess::clear_after_fork_before_release_hook(Supervisor& supe
   detail::notify_monitor_state(state);
 }
 
+void SupervisorTestAccess::set_after_gate_release_hook(Supervisor& supervisor, std::function<void()> hook)
+{
+  auto owned_hook = std::make_shared<detail::AfterForkBeforeReleaseHook>(std::move(hook));
+  auto const state = supervisor.implementation_->state;
+  {
+    std::lock_guard lock(state->mutex);
+    state->after_gate_release_for_test = std::move(owned_hook);
+  }
+  detail::notify_monitor_state(state);
+}
+
+void SupervisorTestAccess::clear_after_gate_release_hook(Supervisor& supervisor) noexcept
+{
+  auto const state = supervisor.implementation_->state;
+  {
+    std::lock_guard lock(state->mutex);
+    state->after_gate_release_for_test.reset();
+  }
+  detail::notify_monitor_state(state);
+}
+
 void SupervisorTestAccess::set_after_completion_channel_create_hook(Supervisor& supervisor, std::function<void()> hook)
 {
   auto owned_hook = std::make_shared<detail::AfterForkBeforeReleaseHook>(std::move(hook));
@@ -140,6 +161,7 @@ ProcessMonitorSnapshot SupervisorTestAccess::monitor_snapshot(Supervisor const& 
   result.counters.wake_failures = load(telemetry->wake_failures);
   result.counters.poll_calls = load(telemetry->poll_calls);
   result.counters.poll_timeouts = load(telemetry->poll_timeouts);
+  result.counters.poll_interruptions = load(telemetry->poll_interruptions);
   result.counters.poll_peak_entries = load(telemetry->poll_peak_entries);
   result.counters.pidfd_attempts = load(telemetry->pidfd_attempts);
   result.counters.pidfd_successes = load(telemetry->pidfd_successes);
@@ -236,6 +258,17 @@ bool SupervisorTestAccess::wait_for_monitor_cycle(Supervisor& supervisor, std::u
   std::unique_lock lock(state->mutex);
   return state->changed.wait_until(
       lock, deadline, [&] { return state->monitor_telemetry->monitor_cycles.load(std::memory_order_relaxed) > previous_cycle || state->monitor_joined; });
+#endif
+}
+
+void SupervisorTestAccess::interrupt_next_monitor_poll(Supervisor& supervisor) noexcept
+{
+#if !defined(_WIN32)
+  auto const state = supervisor.implementation_->state;
+  state->poll_interruptions_for_test.fetch_add(1, std::memory_order_relaxed);
+  detail::notify_monitor_state(state);
+#else
+  static_cast<void>(supervisor);
 #endif
 }
 

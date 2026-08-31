@@ -196,6 +196,36 @@ bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept
   return true;
 }
 
+bool set_earlier_stop_deadline_locked(Record& record, ProcessDeadline deadline) noexcept
+{
+  if (record.policy.execution_deadline && *record.policy.execution_deadline < deadline)
+    deadline = *record.policy.execution_deadline;
+  if (record.stop_deadline && *record.stop_deadline <= deadline)
+    return false;
+  record.stop_deadline = deadline;
+  return true;
+}
+
+bool commit_due_execution_deadline_locked(Record& record, Clock::time_point now) noexcept
+{
+  if (record.state == ProcessStateV1::Finished || !record.policy.execution_deadline || now < *record.policy.execution_deadline)
+    return false;
+
+  static_cast<void>(set_earlier_stop_deadline_locked(record, *record.policy.execution_deadline));
+  if (!commit_reason_locked(record, TerminationReasonV1::DeadlineExpired))
+    return false;
+  if (record.registered)
+  {
+    record.cleanup = CleanupStateV1::Pending;
+    if (record.state != ProcessStateV1::Reaping)
+      record.state = ProcessStateV1::StopRequested;
+  }
+#if !defined(_WIN32)
+  reset_record_probe_schedule_locked(record, now);
+#endif
+  return true;
+}
+
 static void mark_launch_error_locked(Record& record) noexcept
 {
   if (record.reason != TerminationReasonV1::LaunchFailed && record.reason != TerminationReasonV1::ExecFailed)
@@ -211,15 +241,25 @@ void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uin
 {
   if (!state || identity == 0)
     return;
-  std::lock_guard lock(state->mutex);
-  auto found = state->records.find(identity);
-  if (found == state->records.end() || found->second->state != ProcessStateV1::Reserved || found->second->registered)
-    return;
-  release_owner_alias_locked(*state, *found->second);
-  state->records.erase(found);
-  if (state->live_records > 0)
-    --state->live_records;
-  state->changed.notify_all();
+  {
+    std::lock_guard lock(state->mutex);
+    auto found = state->records.find(identity);
+    if (found == state->records.end() || found->second->state != ProcessStateV1::Reserved || found->second->registered)
+      return;
+    if (commit_due_execution_deadline_locked(*found->second, Clock::now()))
+    {
+      finalize_locked(*state, *found->second, CleanupStateV1::NotRequired);
+    }
+    else
+    {
+      release_owner_alias_locked(*state, *found->second);
+      state->records.erase(found);
+      if (state->live_records > 0)
+        --state->live_records;
+      state->changed.notify_all();
+    }
+  }
+  notify_monitor_state(state);
 }
 
 std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept
@@ -235,14 +275,18 @@ void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uin
 {
   if (!state || identity == 0)
     return;
-  std::lock_guard lock(state->mutex);
-  auto found = state->records.find(identity);
-  if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
-    return;
-  auto& record = *found->second;
-  static_cast<void>(commit_reason_locked(record, fallback));
-  record.exit_kind = ExitKindV1::LaunchError;
-  finalize_locked(*state, record, cleanup);
+  {
+    std::lock_guard lock(state->mutex);
+    auto found = state->records.find(identity);
+    if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
+      return;
+    auto& record = *found->second;
+    static_cast<void>(commit_due_execution_deadline_locked(record, Clock::now()));
+    static_cast<void>(commit_reason_locked(record, fallback));
+    mark_launch_error_locked(record);
+    finalize_locked(*state, record, cleanup);
+  }
+  notify_monitor_state(state);
 }
 
 ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept
@@ -252,16 +296,14 @@ ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> con
   auto const found = state->records.find(identity);
   if (found == state->records.end())
     return now;
-  return now + found->second->policy.startup_timeout;
+  auto deadline = now + found->second->policy.startup_timeout;
+  if (found->second->policy.execution_deadline && *found->second->policy.execution_deadline < deadline)
+    deadline = *found->second->policy.execution_deadline;
+  return deadline;
 }
 
-ava::core::VoidResult invoke_after_fork_before_release_hook(std::shared_ptr<SupervisorState> const& state)
+static ava::core::VoidResult invoke_launch_hook(std::shared_ptr<AfterForkBeforeReleaseHook> const& hook)
 {
-  std::shared_ptr<AfterForkBeforeReleaseHook> hook;
-  {
-    std::lock_guard lock(state->mutex);
-    hook = state->after_fork_before_release_for_test;
-  }
   if (!hook || !*hook)
     return {};
   try
@@ -275,6 +317,39 @@ ava::core::VoidResult invoke_after_fork_before_release_hook(std::shared_ptr<Supe
   }
 }
 
+ava::core::VoidResult invoke_after_fork_before_release_hook(std::shared_ptr<SupervisorState> const& state)
+{
+  std::shared_ptr<AfterForkBeforeReleaseHook> hook;
+  {
+    std::lock_guard lock(state->mutex);
+    hook = state->after_fork_before_release_for_test;
+  }
+  return invoke_launch_hook(hook);
+}
+
+ava::core::VoidResult invoke_after_gate_release_hook(std::shared_ptr<SupervisorState> const& state)
+{
+  std::shared_ptr<AfterForkBeforeReleaseHook> hook;
+  {
+    std::lock_guard lock(state->mutex);
+    hook = state->after_gate_release_for_test;
+  }
+  return invoke_launch_hook(hook);
+}
+
+PreForkDecision check_pre_fork_launch_locked(SupervisorState& state, std::uint64_t identity, ProcessDeadline startup_deadline) noexcept
+{
+  auto const now = Clock::now();
+  auto found = state.records.find(identity);
+  if (found == state.records.end())
+    return {};
+  auto& record = *found->second;
+  static_cast<void>(commit_due_execution_deadline_locked(record, now));
+  bool const launchable = record.state == ProcessStateV1::Launching && !record.reason && !state.shutting_down && now < startup_deadline;
+  auto const reason = record.reason.value_or(state.shutting_down ? TerminationReasonV1::ApplicationShutdown : TerminationReasonV1::LaunchFailed);
+  return {.launchable = launchable, .reason = reason};
+}
+
 GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint64_t identity, ProcessDeadline startup_deadline) noexcept
 {
   auto const now = Clock::now();
@@ -282,6 +357,7 @@ GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint
   if (found == state.records.end())
     return GateReleaseDecision{.cleanup_deadline = now + kDefaultCleanupBudget};
   auto& record = *found->second;
+  static_cast<void>(commit_due_execution_deadline_locked(record, now));
   bool const launchable = record.registered && record.state == ProcessStateV1::Launching && !record.reason && !state.shutting_down &&
                           !record.release_committed && now < startup_deadline;
   if (launchable)
@@ -296,9 +372,7 @@ GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint
   mark_launch_error_locked(record);
   if (record.state != ProcessStateV1::Finished)
   {
-    bool const new_deadline = !record.stop_deadline;
-    if (new_deadline)
-      record.stop_deadline = now + kDefaultCleanupBudget;
+    bool const new_deadline = set_earlier_stop_deadline_locked(record, now + kDefaultCleanupBudget);
 #if !defined(_WIN32)
     if (new_reason || new_deadline)
       reset_record_probe_schedule_locked(record, now);
@@ -325,28 +399,54 @@ ava::core::Error startup_stopped_error(std::string operation, TerminationReasonV
   return error;
 }
 
-ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback) noexcept
+GateReleaseDecision fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback) noexcept
 {
   auto const now = Clock::now();
   std::lock_guard lock(state->mutex);
   auto found = state->records.find(identity);
   if (found == state->records.end())
-    return now;
+    return GateReleaseDecision{.reason = fallback, .cleanup_deadline = now};
   auto& record = *found->second;
   if (record.state == ProcessStateV1::Finished)
-    return now;
+  {
+    return GateReleaseDecision{.reason = record.reason.value_or(fallback),
+                               .cleanup_deadline = std::min(record.stop_deadline.value_or(now), now + kDefaultCleanupBudget)};
+  }
+  bool const deadline_committed = commit_due_execution_deadline_locked(record, now);
   bool const new_reason = commit_reason_locked(record, fallback);
   mark_launch_error_locked(record);
-  bool const new_deadline = !record.stop_deadline;
-  if (new_deadline)
-    record.stop_deadline = now + kDefaultCleanupBudget;
+  bool const new_deadline = set_earlier_stop_deadline_locked(record, now + kDefaultCleanupBudget);
 #if !defined(_WIN32)
-  if (new_reason || new_deadline)
+  if (!deadline_committed && (new_reason || new_deadline))
     reset_record_probe_schedule_locked(record, now);
 #endif
   if (record.registered && record.state != ProcessStateV1::Reaping)
     record.state = ProcessStateV1::StopRequested;
-  return std::min(*record.stop_deadline, now + kDefaultCleanupBudget);
+  return GateReleaseDecision{.reason = record.reason.value_or(fallback), .cleanup_deadline = std::min(*record.stop_deadline, now + kDefaultCleanupBudget)};
+}
+
+ProcessDeadline provisional_cleanup_deadline(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
+                                             ProcessDeadline proposed_deadline) noexcept
+{
+  auto const now = Clock::now();
+  std::lock_guard lock(state->mutex);
+  auto found = state->records.find(identity);
+  if (found == state->records.end())
+    return proposed_deadline;
+  auto& record = *found->second;
+  if (record.policy.execution_deadline && *record.policy.execution_deadline < proposed_deadline)
+    proposed_deadline = *record.policy.execution_deadline;
+  if (record.state == ProcessStateV1::Finished)
+    return proposed_deadline;
+  bool const deadline_committed = commit_due_execution_deadline_locked(record, now);
+  bool const new_reason = commit_reason_locked(record, fallback);
+  mark_launch_error_locked(record);
+  bool const new_deadline = set_earlier_stop_deadline_locked(record, proposed_deadline);
+#if !defined(_WIN32)
+  if (!deadline_committed && (new_reason || new_deadline))
+    reset_record_probe_schedule_locked(record, now);
+#endif
+  return *record.stop_deadline;
 }
 
 }  // namespace ava::process::detail
@@ -575,6 +675,7 @@ Supervisor::~Supervisor() noexcept
 
 ava::core::Result<Reservation> Supervisor::reserve(OwnerPathV1 const& owner, ProcessRoleV1 role, LifecyclePolicyV1 policy)
 {
+  auto const validation_now = Clock::now();
   if (!owner.is_launch_owner())
     return std::unexpected(detail::invalid_error("process reservation requires a generated operation owner"));
   if (!is_valid(role))
@@ -583,26 +684,38 @@ ava::core::Result<Reservation> Supervisor::reserve(OwnerPathV1 const& owner, Pro
     return std::unexpected(detail::invalid_error("process termination grace is outside the supported bound"));
   if (policy.startup_timeout <= 0ms || policy.startup_timeout > detail::kMaximumStartupTimeout)
     return std::unexpected(detail::invalid_error("process startup timeout is outside the supported bound"));
+  if (policy.execution_deadline && *policy.execution_deadline <= validation_now)
+    return std::unexpected(detail::invalid_error("process execution deadline is not in the future"));
+  if (role == ProcessRoleV1::BrowserOpener && !policy.execution_deadline)
+    return std::unexpected(detail::invalid_error("browser process reservations require an execution deadline"));
+  if (role == ProcessRoleV1::BrowserOpener && policy.execution_deadline && *policy.execution_deadline > validation_now + detail::kMaximumBrowserExecutionWindow)
+    return std::unexpected(detail::invalid_error("browser process execution deadline exceeds the supported bound"));
 
   try
   {
     auto key = owner.key();
     auto state = implementation_->state;
-    std::lock_guard lock(state->mutex);
-    if (!state->accepting || state->shutting_down)
-      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process supervisor is not accepting reservations"));
-    if (state->live_records >= kMaxLiveProcessRecordsV1)
-      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process supervisor live-record capacity is exhausted"));
+    std::uint64_t identity = 0;
+    {
+      std::lock_guard lock(state->mutex);
+      if (!state->accepting || state->shutting_down)
+        return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process supervisor is not accepting reservations"));
+      if (state->live_records >= kMaxLiveProcessRecordsV1)
+        return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process supervisor live-record capacity is exhausted"));
+      if (policy.execution_deadline && *policy.execution_deadline <= Clock::now())
+        return std::unexpected(detail::invalid_error("process execution deadline expired during reservation"));
 
-    auto alias = state->owner_aliases.find(key);
-    if (alias == state->owner_aliases.end())
-      alias = state->owner_aliases.emplace(key, detail::OwnerAliasEntry{.alias = state->next_owner_alias++, .references = 0}).first;
-    ++alias->second.references;
-    auto const identity = state->next_record++;
-    auto record = std::make_unique<detail::Record>(identity, owner, key, alias->second.alias, role, policy);
-    state->records.emplace(identity, std::move(record));
-    ++state->live_records;
-    state->changed.notify_all();
+      auto alias = state->owner_aliases.find(key);
+      if (alias == state->owner_aliases.end())
+        alias = state->owner_aliases.emplace(key, detail::OwnerAliasEntry{.alias = state->next_owner_alias++, .references = 0}).first;
+      ++alias->second.references;
+      identity = state->next_record++;
+      auto record = std::make_unique<detail::Record>(identity, owner, key, alias->second.alias, role, policy);
+      state->records.emplace(identity, std::move(record));
+      ++state->live_records;
+      state->changed.notify_all();
+    }
+    detail::notify_monitor_state(state);
     return Reservation(state, identity);
   }
   catch (std::exception const& error)
@@ -633,17 +746,45 @@ ava::core::Result<std::uint64_t> Supervisor::consume_reservation(Reservation& re
   if (!reservation.valid() || reservation.state_.get() != expected.get())
     return std::unexpected(detail::invalid_error("process reservation does not belong to this supervisor"));
   auto const identity = reservation.record_;
+  bool deadline_expired = false;
+  bool no_longer_launchable = false;
   {
     std::lock_guard lock(expected->mutex);
     auto found = expected->records.find(identity);
-    if (found == expected->records.end() || found->second->state != ProcessStateV1::Reserved)
+    if (found == expected->records.end())
       return std::unexpected(detail::invalid_error("process reservation is no longer launchable"));
-    found->second->state = ProcessStateV1::Launching;
-    found->second->cleanup = CleanupStateV1::Pending;
+    if (found->second->state == ProcessStateV1::Finished)
+    {
+      deadline_expired = found->second->reason == TerminationReasonV1::DeadlineExpired;
+      no_longer_launchable = !deadline_expired;
+    }
+    else if (found->second->state != ProcessStateV1::Reserved)
+    {
+      return std::unexpected(detail::invalid_error("process reservation is no longer launchable"));
+    }
+    else if (detail::commit_due_execution_deadline_locked(*found->second, Clock::now()))
+    {
+      deadline_expired = true;
+      detail::finalize_locked(*expected, *found->second, CleanupStateV1::NotRequired);
+    }
+    else
+    {
+      found->second->state = ProcessStateV1::Launching;
+      found->second->cleanup = CleanupStateV1::Pending;
+    }
+  }
+  if (deadline_expired || no_longer_launchable)
+  {
+    reservation.record_ = 0;
+    reservation.state_.reset();
+    detail::notify_monitor_state(expected);
+    if (deadline_expired)
+      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process reservation execution deadline expired before launch"));
+    return std::unexpected(detail::invalid_error("process reservation is no longer launchable"));
   }
   reservation.record_ = 0;
   reservation.state_.reset();
-  expected->changed.notify_all();
+  detail::notify_monitor_state(expected);
   return identity;
 }
 
@@ -665,14 +806,14 @@ ava::core::Result<StopResultV1> Supervisor::request_stop(ProcessHandle const& ha
     auto& record = *found->second;
     if (record.state != ProcessStateV1::Finished)
     {
+      auto const now = Clock::now();
+      bool const deadline_committed = detail::commit_due_execution_deadline_locked(record, now);
       bool const new_reason = detail::commit_reason_locked(record, reason);
-      result.newly_requested += new_reason ? 1U : 0U;
-      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
-      if (earlier_deadline)
-        record.stop_deadline = deadline;
+      result.newly_requested += deadline_committed || new_reason ? 1U : 0U;
+      bool const earlier_deadline = detail::set_earlier_stop_deadline_locked(record, deadline);
 #if !defined(_WIN32)
-      if (new_reason || earlier_deadline)
-        detail::reset_record_probe_schedule_locked(record, Clock::now());
+      if (!deadline_committed && (new_reason || earlier_deadline))
+        detail::reset_record_probe_schedule_locked(record, now);
 #endif
       if (record.registered && record.state != ProcessStateV1::Reaping)
         record.state = ProcessStateV1::StopRequested;
@@ -703,14 +844,14 @@ ava::core::Result<StopResultV1> Supervisor::request_stop(OwnerPathV1 const& owne
       ++result.matched;
       if (record.state == ProcessStateV1::Finished)
         continue;
+      auto const now = Clock::now();
+      bool const deadline_committed = detail::commit_due_execution_deadline_locked(record, now);
       bool const new_reason = detail::commit_reason_locked(record, reason);
-      result.newly_requested += new_reason ? 1U : 0U;
-      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
-      if (earlier_deadline)
-        record.stop_deadline = deadline;
+      result.newly_requested += deadline_committed || new_reason ? 1U : 0U;
+      bool const earlier_deadline = detail::set_earlier_stop_deadline_locked(record, deadline);
 #if !defined(_WIN32)
-      if (new_reason || earlier_deadline)
-        detail::reset_record_probe_schedule_locked(record, Clock::now());
+      if (!deadline_committed && (new_reason || earlier_deadline))
+        detail::reset_record_probe_schedule_locked(record, now);
 #endif
       if ((record.registered || record.state == ProcessStateV1::Launching) && record.state != ProcessStateV1::Reaping)
         record.state = ProcessStateV1::StopRequested;
@@ -833,16 +974,16 @@ ShutdownResultV1 Supervisor::shutdown(ProcessDeadline deadline) noexcept
       if (record.state == ProcessStateV1::Finished)
         continue;
       record.included_in_shutdown = true;
+      auto const now = Clock::now();
+      bool const deadline_committed = detail::commit_due_execution_deadline_locked(record, now);
       bool const new_reason = detail::commit_reason_locked(record, TerminationReasonV1::ApplicationShutdown);
-      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
-      if (earlier_deadline)
-        record.stop_deadline = deadline;
+      bool const earlier_deadline = detail::set_earlier_stop_deadline_locked(record, deadline);
 #if !defined(_WIN32)
-      if (new_reason || earlier_deadline)
-        detail::reset_record_probe_schedule_locked(record, Clock::now());
+      if (!deadline_committed && (new_reason || earlier_deadline))
+        detail::reset_record_probe_schedule_locked(record, now);
       if (record.registered)
       {
-        detail::begin_stop_locked(record, Clock::now());
+        detail::begin_stop_locked(record, now);
         continue;
       }
 #endif

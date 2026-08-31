@@ -27,6 +27,7 @@ struct ProcessMonitorCounters
   std::uint64_t wake_failures = 0;
   std::uint64_t poll_calls = 0;
   std::uint64_t poll_timeouts = 0;
+  std::uint64_t poll_interruptions = 0;
   std::uint64_t poll_peak_entries = 0;
   std::uint64_t pidfd_attempts = 0;
   std::uint64_t pidfd_successes = 0;
@@ -91,6 +92,8 @@ class SupervisorTestAccess final
  public:
   static void set_after_fork_before_release_hook(Supervisor& supervisor, std::function<void()> hook);
   static void clear_after_fork_before_release_hook(Supervisor& supervisor) noexcept;
+  static void set_after_gate_release_hook(Supervisor& supervisor, std::function<void()> hook);
+  static void clear_after_gate_release_hook(Supervisor& supervisor) noexcept;
   static void set_after_completion_channel_create_hook(Supervisor& supervisor, std::function<void()> hook);
   static void clear_after_completion_channel_create_hook(Supervisor& supervisor) noexcept;
   static void fail_next_common_child_working_directory(Supervisor& supervisor) noexcept;
@@ -100,6 +103,7 @@ class SupervisorTestAccess final
   [[nodiscard]] static std::uint64_t monitor_cycle(Supervisor const& supervisor) noexcept;
   [[nodiscard]] static std::uint64_t pulse_monitor(Supervisor& supervisor) noexcept;
   [[nodiscard]] static bool wait_for_monitor_cycle(Supervisor& supervisor, std::uint64_t previous_cycle, ProcessDeadline deadline) noexcept;
+  static void interrupt_next_monitor_poll(Supervisor& supervisor) noexcept;
   static void set_after_poll_snapshot_hook(Supervisor& supervisor, std::function<void()> hook);
   static void clear_after_poll_snapshot_hook(Supervisor& supervisor) noexcept;
 

@@ -346,10 +346,22 @@ void process_exact_probes_locked(SupervisorState& state, Record& record, Clock::
 
 void process_record_locked(SupervisorState& state, Record& record, Clock::time_point now) noexcept
 {
-  if (!record.registered || record.state == ProcessStateV1::Finished)
+  if (record.state == ProcessStateV1::Finished)
     return;
+  if (!record.registered)
+  {
+    bool const was_reserved = record.state == ProcessStateV1::Reserved;
+    if (commit_due_execution_deadline_locked(record, now) && was_reserved)
+      finalize_locked(state, record, CleanupStateV1::NotRequired);
+    return;
+  }
 
+  // Exact readiness is authoritative and is serviced before a deadline at the
+  // same monitor turn can commit its reason. A fallback backend also receives
+  // one nonblocking exact observation at the absolute boundary.
   process_exact_probes_locked(state, record, now);
+  if (record.policy.execution_deadline && now >= *record.policy.execution_deadline)
+    exact_probe_direct_children_locked(state, record, now);
 
   if (record.startup_handshake_complete || record.reason)
   {
@@ -358,13 +370,15 @@ void process_record_locked(SupervisorState& state, Record& record, Clock::time_p
       static_cast<void>(commit_reason_locked(record, TerminationReasonV1::NaturalExit));
       record.state = ProcessStateV1::Reaping;
       if (!record.stop_deadline)
-        record.stop_deadline = now + kDefaultCleanupBudget;
+        static_cast<void>(set_earlier_stop_deadline_locked(record, now + kDefaultCleanupBudget));
     }
     else if (record.sentinel > 1 && record.sentinel_observed && !record.reason)
     {
       static_cast<void>(commit_reason_locked(record, TerminationReasonV1::ProtocolFailure));
     }
   }
+
+  static_cast<void>(commit_due_execution_deadline_locked(record, now));
 
   if (record.reason == TerminationReasonV1::NaturalExit && record.leader_observed && !record.natural_group_observation_started)
   {
@@ -375,7 +389,7 @@ void process_record_locked(SupervisorState& state, Record& record, Clock::time_p
   }
 
   if (record.reason && !record.stop_deadline)
-    record.stop_deadline = now + kDefaultCleanupBudget;
+    static_cast<void>(set_earlier_stop_deadline_locked(record, now + kDefaultCleanupBudget));
   bool const natural_awaiting_quiet = record.reason == TerminationReasonV1::NaturalExit && !record.term_sent && record.quiet_group_observations > 0;
   if (record.reason && !natural_awaiting_quiet)
     begin_stop_locked(record, now);
@@ -490,7 +504,11 @@ std::optional<Clock::time_point> nearest_deadline_locked(SupervisorState const& 
   {
     static_cast<void>(identity);
     auto const& record = *record_pointer;
-    if (!record.registered || record.state == ProcessStateV1::Finished)
+    if (record.state == ProcessStateV1::Finished)
+      continue;
+    if (!record.reason)
+      set_nearest(nearest, record.policy.execution_deadline);
+    if (!record.registered)
       continue;
     for (MonitoredMember const kind : {MonitoredMember::Leader, MonitoredMember::Sentinel})
     {
@@ -551,13 +569,23 @@ int poll_timeout(std::optional<Clock::time_point> const& deadline) noexcept
   return std::max(1, static_cast<int>(remaining.count()));
 }
 
-void poll_batch(PollBatch& batch, std::shared_ptr<MonitorTelemetry> const& telemetry) noexcept
+void poll_batch(PollBatch& batch, std::shared_ptr<MonitorTelemetry> const& telemetry, std::atomic<std::uint64_t>& interruptions_for_test) noexcept
 {
   if (batch.count == 0)
     return;
   update_peak(telemetry->poll_peak_entries, batch.count);
   while (true)
   {
+    auto pending_interruption = interruptions_for_test.load(std::memory_order_relaxed);
+    while (pending_interruption > 0 && !interruptions_for_test.compare_exchange_weak(pending_interruption, pending_interruption - 1, std::memory_order_relaxed))
+    {
+    }
+    if (pending_interruption > 0)
+    {
+      telemetry->poll_interruptions.fetch_add(1, std::memory_order_relaxed);
+      continue;
+    }
+
     telemetry->poll_calls.fetch_add(1, std::memory_order_relaxed);
     int const result = ::poll(batch.descriptors.data(), batch.count, poll_timeout(batch.deadline));
     if (result > 0)
@@ -568,7 +596,10 @@ void poll_batch(PollBatch& batch, std::shared_ptr<MonitorTelemetry> const& telem
       return;
     }
     if (errno == EINTR)
+    {
+      telemetry->poll_interruptions.fetch_add(1, std::memory_order_relaxed);
       continue;
+    }
     batch.error_number = errno == 0 ? EIO : errno;
     return;
   }
@@ -881,7 +912,7 @@ void monitor_main(std::shared_ptr<SupervisorState> state) noexcept
     completed = std::move(next);
     have_completed_poll = true;
     invoke_poll_snapshot_hook(hook);
-    poll_batch(completed, state->monitor_telemetry);
+    poll_batch(completed, state->monitor_telemetry, state->poll_interruptions_for_test);
   }
   state->changed.notify_all();
 }

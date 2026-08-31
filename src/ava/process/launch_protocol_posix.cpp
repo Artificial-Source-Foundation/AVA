@@ -329,6 +329,8 @@ LaunchProtocolOutcomeV1 await_launch_exec_confirmation(int descriptor, ProcessDe
     {
       if (!containment_required || checkpoint || containment_continuation_descriptor <= STDERR_FILENO)
         return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::OutOfOrderFrame);
+      if (Clock::now() >= deadline)
+        return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::TimedOut);
       char const continuation = 'C';
       if (!write_without_sigpipe(containment_continuation_descriptor, &continuation, 1))
       {

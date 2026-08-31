@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -171,12 +172,16 @@ void test_startup_timeout_policy_validation()
 {
   ava::process::Supervisor supervisor;
   auto application = make_application_owner();
-  auto zero = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 0ms});
-  auto negative = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = -1ms});
-  auto excessive = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1h});
+  auto zero =
+      supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 0ms, .execution_deadline = std::nullopt});
+  auto negative =
+      supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = -1ms, .execution_deadline = std::nullopt});
+  auto excessive =
+      supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1h, .execution_deadline = std::nullopt});
   bool accepted_bounded = false;
   {
-    auto bounded = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1ms});
+    auto bounded =
+        supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1ms, .execution_deadline = std::nullopt});
     accepted_bounded = bounded.has_value();
   }
   auto snapshot = supervisor.snapshot();

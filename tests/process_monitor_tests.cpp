@@ -316,12 +316,12 @@ void test_quiet_proofs_and_prompt_stop()
                               : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(normal.error()));
   auto after_normal = SupervisorTestAccess::monitor_snapshot(supervisor);
 
-  auto leader_first = spawn_fixture(supervisor, application, "leader-exits-first", {.termination_grace = 30ms});
+  auto leader_first = spawn_fixture(supervisor, application, "leader-exits-first", {.termination_grace = 30ms, .execution_deadline = std::nullopt});
   auto leader_status = leader_first ? supervisor.wait(leader_first->handle, std::chrono::steady_clock::now() + 3s)
                                     : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(leader_first.error()));
   auto after_leader = SupervisorTestAccess::monitor_snapshot(supervisor);
 
-  auto refusing = spawn_fixture(supervisor, application, "ignore-term", {.termination_grace = 30ms}, true);
+  auto refusing = spawn_fixture(supervisor, application, "ignore-term", {.termination_grace = 30ms, .execution_deadline = std::nullopt}, true);
   bool const refusing_ready = refusing && refusing->standard_output && read_until(*refusing->standard_output, "READY\n", std::chrono::steady_clock::now() + 1s);
   auto refusal_stop = refusing ? supervisor.request_stop(refusing->handle, ava::process::TerminationReasonV1::Canceled, std::chrono::steady_clock::now() + 2s)
                                : ava::core::Result<ava::process::StopResultV1>(std::unexpected(refusing.error()));
@@ -329,7 +329,7 @@ void test_quiet_proofs_and_prompt_stop()
                                  : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(refusing.error()));
   auto after_refusal = SupervisorTestAccess::monitor_snapshot(supervisor);
 
-  auto idle = spawn_fixture(supervisor, application, "input-gate", {.termination_grace = 0ms});
+  auto idle = spawn_fixture(supervisor, application, "input-gate", {.termination_grace = 0ms, .execution_deadline = std::nullopt});
   auto stop_begin = std::chrono::steady_clock::now();
   auto stop = idle ? supervisor.request_stop(idle->handle, ava::process::TerminationReasonV1::Canceled, stop_begin + 2s)
                    : ava::core::Result<ava::process::StopResultV1>(std::unexpected(idle.error()));

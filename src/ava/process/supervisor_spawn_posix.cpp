@@ -657,6 +657,17 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     return std::unexpected(detail::invalid_error("reserved common process launch requires its matching exact-environment capability"));
   }
   auto const startup_deadline = detail::startup_deadline_for_record(state, identity);
+  detail::PreForkDecision initial_check;
+  {
+    std::lock_guard lock(state->mutex);
+    initial_check = detail::check_pre_fork_launch_locked(*state, identity, startup_deadline);
+  }
+  detail::notify_monitor_state(state);
+  if (!initial_check.launchable)
+  {
+    detail::finish_unregistered(state, identity, initial_check.reason);
+    return std::unexpected(detail::canceled_launch_error("process launch", initial_check.reason));
+  }
 #if defined(_WIN32)
   static_cast<void>(specification);
   detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
@@ -695,22 +706,16 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "failed to allocate process launch capabilities"));
   }
 
-  bool launchable = false;
-  TerminationReasonV1 stopped_reason = TerminationReasonV1::LaunchFailed;
+  detail::PreForkDecision prepared_check;
   {
     std::lock_guard lock(state->mutex);
-    auto found = state->records.find(identity);
-    launchable = found != state->records.end() && found->second->state == ProcessStateV1::Launching && !found->second->reason && !state->shutting_down &&
-                 Clock::now() < startup_deadline;
-    if (found != state->records.end() && found->second->reason)
-      stopped_reason = *found->second->reason;
-    else if (state->shutting_down)
-      stopped_reason = TerminationReasonV1::ApplicationShutdown;
+    prepared_check = detail::check_pre_fork_launch_locked(*state, identity, startup_deadline);
   }
-  if (!launchable)
+  detail::notify_monitor_state(state);
+  if (!prepared_check.launchable)
   {
-    detail::finish_unregistered(state, identity, stopped_reason);
-    return std::unexpected(detail::canceled_launch_error("process launch", stopped_reason));
+    detail::finish_unregistered(state, identity, prepared_check.reason);
+    return std::unexpected(detail::canceled_launch_error("process launch", prepared_check.reason));
   }
   {
     std::lock_guard lock(state->mutex);
@@ -724,6 +729,18 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::invalid_error("prepared common process launch lost its exact-environment binding"));
+  }
+
+  detail::PreForkDecision final_check;
+  {
+    std::lock_guard lock(state->mutex);
+    final_check = detail::check_pre_fork_launch_locked(*state, identity, startup_deadline);
+  }
+  detail::notify_monitor_state(state);
+  if (!final_check.launchable)
+  {
+    detail::finish_unregistered(state, identity, final_check.reason);
+    return std::unexpected(detail::canceled_launch_error("process launch", final_check.reason));
   }
 
   pid_t const parent_group = ::getpgrp();
@@ -760,16 +777,18 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   int const get_group_error = errno;
   if (!group_set || child <= 1 || parent_group <= 0 || observed_group != child || observed_group == parent_group)
   {
+    auto const cleanup_deadline = detail::provisional_cleanup_deadline(state, identity, TerminationReasonV1::LaunchFailed, Clock::now() + 500ms);
     prepared->gate.write_end.reset();
-    bool const cleaned = detail::exact_provisional_cleanup(child, -1, Clock::now() + 500ms);
+    bool const cleaned = detail::exact_provisional_cleanup(child, -1, cleanup_deadline);
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed, cleaned ? CleanupStateV1::Complete : CleanupStateV1::Incomplete);
     return std::unexpected(detail::io_error("failed to verify a private process group before exec", group_set ? get_group_error : set_group_error));
   }
 
   if (auto monitor = detail::ensure_monitor_started(state); !monitor)
   {
+    auto const cleanup_deadline = detail::provisional_cleanup_deadline(state, identity, TerminationReasonV1::LaunchFailed, Clock::now() + 500ms);
     prepared->gate.write_end.reset();
-    bool const cleaned = detail::exact_provisional_cleanup(child, -1, Clock::now() + 500ms);
+    bool const cleaned = detail::exact_provisional_cleanup(child, -1, cleanup_deadline);
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed, cleaned ? CleanupStateV1::Complete : CleanupStateV1::Incomplete);
     return std::unexpected(std::move(monitor.error()));
   }
@@ -785,6 +804,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     else
     {
       auto& record = *found->second;
+      static_cast<void>(detail::commit_due_execution_deadline_locked(record, Clock::now()));
       handle_state->supervisor = state;
       handle_state->record = identity;
       record.handle = handle_state;
@@ -799,17 +819,20 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   if (reservation_ended)
   {
     prepared->gate.write_end.reset();
-    static_cast<void>(detail::exact_provisional_cleanup(child, -1, Clock::now() + 500ms));
+    auto const cleanup_deadline = detail::provisional_cleanup_deadline(state, identity, TerminationReasonV1::LaunchFailed, Clock::now() + 500ms);
+    static_cast<void>(detail::exact_provisional_cleanup(child, -1, cleanup_deadline));
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process reservation ended during launch"));
   }
   detail::notify_monitor_state(state);
 
   if (auto hook = detail::invoke_after_fork_before_release_hook(state); !hook)
   {
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
     prepared->gate.write_end.reset();
-    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
     detail::notify_monitor_state(state);
-    detail::await_internal_settlement(handle_state, cleanup_deadline);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    if (failure.reason != TerminationReasonV1::LaunchFailed)
+      return std::unexpected(detail::canceled_launch_error("process launch", failure.reason));
     return std::unexpected(std::move(hook.error()));
   }
 
@@ -830,21 +853,35 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   if (!detail::write_without_sigpipe(prepared->gate.write_end.get(), &release, 1))
   {
     prepared->gate.write_end.reset();
-    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
     detail::notify_monitor_state(state);
-    detail::await_internal_settlement(handle_state, cleanup_deadline);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    if (failure.reason != TerminationReasonV1::LaunchFailed)
+      return std::unexpected(detail::startup_stopped_error("process", failure.reason));
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "failed to release the registered process exec gate"));
   }
   prepared->gate.write_end.reset();
+
+  if (auto hook = detail::invoke_after_gate_release_hook(state); !hook)
+  {
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
+    detail::notify_monitor_state(state);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    if (failure.reason != TerminationReasonV1::LaunchFailed)
+      return std::unexpected(detail::startup_stopped_error("process", failure.reason));
+    return std::unexpected(std::move(hook.error()));
+  }
 
   auto const confirmation = detail::await_launch_exec_confirmation(prepared->launch_status.read_end.get(), startup_deadline, false);
   if (confirmation.disposition != detail::LaunchProtocolDispositionV1::ExecConfirmed)
   {
     auto const fallback_reason =
         confirmation.disposition == detail::LaunchProtocolDispositionV1::ExecFailed ? TerminationReasonV1::ExecFailed : TerminationReasonV1::LaunchFailed;
-    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, fallback_reason);
+    auto const failure = detail::fail_registered_launch(state, identity, fallback_reason);
     detail::notify_monitor_state(state);
-    detail::await_internal_settlement(handle_state, cleanup_deadline);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    if (failure.reason != fallback_reason)
+      return std::unexpected(detail::startup_stopped_error("process", failure.reason));
     return std::unexpected(detail::launch_protocol_error(confirmation, "process"));
   }
 
@@ -854,17 +891,22 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     auto found = state->records.find(identity);
     if (found == state->records.end())
       startup_stop_reason = TerminationReasonV1::LaunchFailed;
-    else if (found->second->state == ProcessStateV1::Finished || found->second->reason)
-      startup_stop_reason = found->second->reason.value_or(TerminationReasonV1::LaunchFailed);
     else
-      found->second->startup_handshake_complete = true;
+    {
+      static_cast<void>(detail::commit_due_execution_deadline_locked(*found->second, Clock::now()));
+      if (found->second->state == ProcessStateV1::Finished || found->second->reason)
+        startup_stop_reason = found->second->reason.value_or(TerminationReasonV1::LaunchFailed);
+      else
+        found->second->startup_handshake_complete = true;
+    }
   }
   detail::notify_monitor_state(state);
   if (startup_stop_reason)
   {
-    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
-    detail::await_internal_settlement(handle_state, cleanup_deadline);
-    return std::unexpected(detail::startup_stopped_error("process", *startup_stop_reason));
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
+    detail::notify_monitor_state(state);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    return std::unexpected(detail::startup_stopped_error("process", failure.reason));
   }
 
   SpawnResultV1 result;

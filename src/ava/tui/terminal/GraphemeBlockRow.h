@@ -28,10 +28,7 @@ class GraphemeBlockRow
 
  public:
   // Construct an empty GraphemeBlockRow with a pre-allocated capacity for `reserved_blocks` GraphemeBlock's.
-  GraphemeBlockRow(std::size_t reserved_blocks)
-  {
-    blocks_.reserve(reserved_blocks);
-  }
+  GraphemeBlockRow(std::size_t reserved_blocks) { blocks_.reserve(reserved_blocks); }
 
   // Construct a GraphemeBlockRow from one or more horizontally stacked GraphemeBlock's.
   GraphemeBlockRow(std::vector<GraphemeBlock>&& blocks) : blocks_(std::move(blocks))
@@ -46,10 +43,7 @@ class GraphemeBlockRow
   }
 
   // Construct a GraphemeBlockRow that exists of a single GraphemeBlock.
-  GraphemeBlockRow(GraphemeBlock&& block)
-  {
-    append(std::move(block));
-  }
+  GraphemeBlockRow(GraphemeBlock&& block) { append(std::move(block)); }
 
   void append(GraphemeBlock&& block)
   {

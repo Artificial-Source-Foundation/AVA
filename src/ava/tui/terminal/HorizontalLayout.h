@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LayoutItem.h"
+
 #include <vector>
 
 namespace ava::tui::terminal {
@@ -21,10 +22,7 @@ class HorizontalLayout
  public:
   HorizontalLayout() = default;
 
-  void append(std::unique_ptr<LayoutItem>&& layout_item)
-  {
-    layout_items_.push_back(std::move(layout_item));
-  }
+  void append(std::unique_ptr<LayoutItem>&& layout_item) { layout_items_.push_back(std::move(layout_item)); }
 
   void set_width(columns_t columns);
 

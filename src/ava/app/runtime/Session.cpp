@@ -182,7 +182,7 @@ void SessionResources::swap(SessionResources& other)
   mcp_config.swap(other.mcp_config);
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::open_like(session_ts const& unlocked_session, OpenContext const& base_context, SessionLifecycleRequest request)
 {
   CRITICAL_AREA_BEGIN_CR(session);
@@ -193,7 +193,7 @@ ava::core::Result<session_ts> Session::open_like(session_ts const& unlocked_sess
   return open_at(std::move(open_context), workspace_dir, current_dir, std::move(request));
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesystem::path const& workspace_root, std::filesystem::path const& current_dir,
                                                SessionLifecycleRequest request)
 {
@@ -202,7 +202,7 @@ ava::core::Result<session_ts> Session::open_at(OpenContext context, std::filesys
   return Session::open(context, request);
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context, runtime::SessionLifecycleRequest const& request)
 {
   if (request.requested_session_id && request.continue_last_session)
@@ -343,7 +343,7 @@ ava::core::Result<session_ts> Session::open(runtime::OpenContext const& context,
   return unlocked_session_result;
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::construct(OpenContext const& context, runtime::SessionLifecycleRequest const& request, ava::session::SessionStore& store,
                                                  ava::session::SessionLease& lease, bool created, bool load_existing_entries, bool should_append_session_start,
                                                  bool append_initial_session_name, std::shared_ptr<SubagentDeliveryManager> delivery_manager,
@@ -636,7 +636,7 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   return session;
 }
 
-// static
+//static
 ava::core::Result<session_ts> Session::open_owned(OpenContext const& context, ava::session::SessionStore& store, ava::session::SessionLease& lease,
                                                   bool created)
 {
@@ -681,7 +681,7 @@ Session_aggregate_base Session::create_detached_state(ava::session::SessionLease
                                 .created = created};
 }
 
-// static
+//static
 ava::core::VoidResult Session::refresh_parent_configuration(session_ts const& unlocked_session)
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::refresh_parent_configuration");
@@ -691,7 +691,7 @@ ava::core::VoidResult Session::refresh_parent_configuration(session_ts const& un
   return manager ? manager->refresh_parent_configuration(unlocked_session) : ava::core::VoidResult{};
 }
 
-// static
+//static
 ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, session_ts& unlocked_replacement)
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::replace_with");
@@ -915,7 +915,7 @@ ava::core::VoidResult Session::apply_prompt_state(PromptState prompt_state)
   return {};
 }
 
-// static
+//static
 ava::core::VoidResult Session::apply_prompt_state_and_refresh(session_ts& unlocked_session, PromptState prompt_state)
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_prompt_state_and_refresh");
@@ -953,7 +953,7 @@ ava::core::Result<bool> Session::switch_model(ava::config::ModelInfo model)
   return true;
 }
 
-// static
+//static
 ava::core::Result<bool> Session::switch_model_and_refresh(session_ts& unlocked_session, ava::config::ModelInfo model)
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::switch_model_and_refresh");
@@ -990,7 +990,7 @@ ava::core::Result<bool> Session::set_reasoning(std::optional<ReasoningSelection>
   return true;
 }
 
-// static
+//static
 ava::core::Result<bool> Session::set_reasoning_and_refresh(session_ts& unlocked_session, std::optional<ReasoningSelection> selection)
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::set_reasoning_and_refresh");

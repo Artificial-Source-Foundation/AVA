@@ -1,17 +1,19 @@
 #include "sys.h"
-#include "HorizontalLayout.h"
 #include "BasicWindow.h"
+#include "HorizontalLayout.h"
 #include "Paragraph.h"
 #include "utils/macros.h"
+
 #include <algorithm>
-#include <span>
-#include <numeric>
 #include <cmath>
+#include <numeric>
+#include <span>
 
 namespace ava::tui::terminal {
 namespace {
 
-struct Item {
+struct Item
+{
   LayoutItem* ptr;
   columns_t assigned_width;
 };
@@ -79,11 +81,9 @@ void distribute(columns_t columns, std::span<Item> items)
   for (std::size_t k = 0; k < items.size(); ++k)
   {
     LayoutItem const* layout_item = items[k].ptr;
-    tubes[k] = Tube{
-      .delta = layout_item->natural_width().is_unlimited() ? Width::unlimited
-                                                           : (layout_item->natural_width() - layout_item->minimum_width()).columns(),
-      .weight = layout_item->shrink_weight()
-    };
+    tubes[k] =
+        Tube{.delta = layout_item->natural_width().is_unlimited() ? Width::unlimited : (layout_item->natural_width() - layout_item->minimum_width()).columns(),
+             .weight = layout_item->shrink_weight()};
 
     active_weight += layout_item->shrink_weight();
   }
@@ -130,8 +130,7 @@ void distribute(columns_t columns, std::span<Item> items)
       // If this asserts then the Properties of one or more LayoutItem's needs to be changed so the algorithm can know how to distribute
       // the required columns.
       ASSERT(first != items.size());
-    }
-    while (tubes[ok[first]].height() <= current_level * 1.0001f);
+    } while (tubes[ok[first]].height() <= current_level * 1.0001f);
   }
 
   // Run over all items again and assign the natural width to all items that were stretched to their maximum width (the 'tube' was completely filled).
@@ -282,7 +281,7 @@ void HorizontalLayout::set_width(columns_t columns)
         columns_priority = prev_priority;
       }
 
-      boundary[j++] = sum_of_widths;                                    // Assign 20 the first time, then 29 while prev_priority == 5, 42 while prev_priority == 2.
+      boundary[j++] = sum_of_widths; // Assign 20 the first time, then 29 while prev_priority == 5, 42 while prev_priority == 2.
 
       // Once we find an item with priority 0 we can exit this loop, because we'll never find a lower
       // priority and thus will never get here again (to assign a new value to `boundary`.

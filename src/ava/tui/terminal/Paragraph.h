@@ -1,11 +1,12 @@
 #pragma once
 
+#include "GraphemeSpan.h"
 #include "LayoutItem.h"
 #include "TextSpan.h"
-#include "GraphemeSpan.h"
 #include "utils/Vector.h"
-#include <vector>
+
 #include <memory>
+#include <vector>
 
 namespace ava::tui::terminal {
 
@@ -35,8 +36,14 @@ struct GraphemeBlockCategory
 using GraphemeBlockIndex = utils::VectorIndex<GraphemeBlockCategory>;
 using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex>;
 
-inline uint32_t height_of(GraphemeBlock const& block) { return static_cast<uint32_t>(block.size()); }
-inline columns_t width_of(GraphemeBlock const& block) { return block.front().max_columns(); }
+inline uint32_t height_of(GraphemeBlock const& block)
+{
+  return static_cast<uint32_t>(block.size());
+}
+inline columns_t width_of(GraphemeBlock const& block)
+{
+  return block.front().max_columns();
+}
 
 // class Paragraph
 //
@@ -57,13 +64,12 @@ class Paragraph : public LayoutItem
 
   // Construct an empty Paragraph with default rendition `default_rendition`.
   // Usually `default_rendition` equals the rendition of the (sub)window that this Paragraph will be rendered in.
-  Paragraph(LayoutItem::Properties const& layout_properties, Rendition default_rendition) : LayoutItem(layout_properties), default_rendition_(default_rendition) { }
+  Paragraph(LayoutItem::Properties const& layout_properties, Rendition default_rendition) : LayoutItem(layout_properties), default_rendition_(default_rendition)
+  {
+  }
 
  public:
-  static std::unique_ptr<Paragraph> create(LayoutItem::Properties layout_properties)
-  {
-    return std::unique_ptr<Paragraph>{new Paragraph{layout_properties}};
-  }
+  static std::unique_ptr<Paragraph> create(LayoutItem::Properties layout_properties) { return std::unique_ptr<Paragraph>{new Paragraph{layout_properties}}; }
 
   static std::unique_ptr<Paragraph> create(Rendition default_rendition, LayoutItem::Properties layout_properties)
   {

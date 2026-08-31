@@ -18,10 +18,7 @@ class GraphemeSurface
 
  public:
   // Construct an empty GraphemeSurface pre-allocating a capacity of `reserve_blocks` GraphemeBlockRow's.
-  GraphemeSurface(std::size_t reserve_blocks)
-  {
-    blocks_rows_.reserve(reserve_blocks);
-  }
+  GraphemeSurface(std::size_t reserve_blocks) { blocks_rows_.reserve(reserve_blocks); }
 
   void append(GraphemeBlockRow&& block_row)
   {

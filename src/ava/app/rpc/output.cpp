@@ -64,7 +64,7 @@ ResolverEventPayload resolver_queue_payload(std::string payload_json)
   return ResolverEventPayload{.payload_type = ava::event::PayloadType::Queue, .json = std::move(payload_json)};
 }
 
-// static
+//static
 ava::core::Result<OutputWriteResult> Output::write_record_if(output_ts& output, std::string_view record, std::function<bool()> const& gate)
 {
   DoutEntering(dc::rpc, "Output::write_record_if(output [" << (void*)&output << "], bytes=" << record.size() << ")");
@@ -90,7 +90,7 @@ ava::core::Result<OutputWriteResult> Output::write_record_if(output_ts& output, 
   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write RPC JSONL record"));
 }
 
-// static
+//static
 ava::core::VoidResult Output::write_record(output_ts& output, std::string_view record)
 {
   auto written = write_record_if(output, record, [] { return true; });

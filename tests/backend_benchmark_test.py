@@ -348,10 +348,304 @@ class BenchmarkHarnessTests(unittest.TestCase):
         ):
             self.assertFalse(checks[name], name)
 
+    def process_artifact(self, path: str) -> dict[str, object]:
+        artifact = self.artifact(path)
+        artifact["mode"] = 0o755
+        return artifact
+
+    def process_sample(self, value: float = 1.0, checks: dict[str, object] | None = None) -> dict[str, object]:
+        return {
+            "run": 1,
+            "observation": 1,
+            "value": value,
+            "metrics": {"helper_invocation_ns": 10.0},
+            "checks": checks or {"correct": True},
+        }
+
+    def valid_process_document(self):
+        artifacts = {
+            "ava": self.process_artifact("/test/ava"),
+            "benchmark_helper": self.process_artifact("/test/helper"),
+            "benchmark_script": self.process_artifact("/test/benchmark.py"),
+            "memory_helper": self.process_artifact("/test/memory.py"),
+            "python": self.process_artifact("/test/python"),
+            "fake_process_child": self.process_artifact("/test/process-child"),
+            "fake_mcp_server": self.process_artifact("/test/mcp"),
+            "fake_lsp_server": self.process_artifact("/test/lsp"),
+            "fake_provider": None,
+            "curl": self.process_artifact("/test/curl"),
+            "bash_direct_argv_executable": self.process_artifact("/test/pwd"),
+            "sample_plugin": {
+                "root": "/test/plugin",
+                "manifest": self.process_artifact("/test/plugin/plugin.json"),
+                "entrypoint": self.process_artifact("/test/plugin/plugin.sh"),
+            },
+        }
+        host = {
+            "os": "TestOS",
+            "platform": "TestOS",
+            "kernel": "1",
+            "machine": "test",
+            "cpu": "test cpu",
+            "cpu_count": 1,
+            "ram_bytes": 1,
+            "page_size_bytes": 4096,
+            "python_version": "3.test",
+            "python_implementation": "CPython",
+            "boot_id_sha256": "a" * 64,
+            "limits": {},
+            "monotonic_clock_resolution_ns": 1.0,
+            "load_at_start": [0.0, 0.0, 0.0],
+            "load_at_end": [0.0, 0.0, 0.0],
+        }
+        recipe = {"generator": "Ninja", "cmake_version": "cmake 1", "build_type": "Release", "cmake_flags": {}, "cxx_flags": {}}
+        compiler_artifact = self.process_artifact("/usr/bin/c++")
+        build = {
+            "generator": "Ninja",
+            "cmake_version": "cmake 1",
+            "cmake": self.process_artifact("/usr/bin/cmake"),
+            "cmake_cache": self.process_artifact("/test/build/CMakeCache.txt"),
+            "cmake_source_root": "/test/source",
+            "build_type": "Release",
+            "features": {
+                "sanitizers": False,
+                "tsan": False,
+                "debug": False,
+                "libcwd": False,
+                "process_supervisor": True,
+                "process_fixture": True,
+                "platform_backend": "posix",
+                "family_authorities": {name: "legacy_local" for name in ("curl", "plugin", "mcp", "lsp", "bash")},
+            },
+            "compiler": {
+                "path": "/usr/bin/c++",
+                "artifact": compiler_artifact,
+                "id": "Test",
+                "configured_version": "1",
+                "version_output": "Test 1",
+                "flags": {},
+            },
+            "recipe": recipe,
+            "best_effort_provenance": {
+                "assessment": "best_effort_unverified",
+                "statement": "No embedded commit claim.",
+                "git_commit_embedding_verified": False,
+                "cmake_source_root_matches_recorded_source": True,
+                "binary_is_within_cmake_build_tree": True,
+                "binary_not_older_than_cmake_cache": True,
+            },
+        }
+        results = [
+            self.module.process_unsupported_result(result_id, "fixture_unavailable")
+            for result_id in self.module.PROCESS_EXPECTED_RESULT_IDS
+        ]
+        return {
+            "schema_version": self.module.PROCESS_SCHEMA_VERSION,
+            "contract_version": self.module.PROCESS_CONTRACT_VERSION,
+            "generated_at_utc": "2026-01-01T00:00:00+00:00",
+            "completed_at_utc": "2026-01-01T00:00:01+00:00",
+            "suite": "process-baseline",
+            "provenance": {
+                "measured_checkout": {"commit": "1" * 40, "tree": "2" * 40, "dirty": False},
+                "runtime_reference": {"commit": "1" * 40, "tree": "2" * 40, "exact_production_path_equality": True},
+                "harness": {"commit": "1" * 40, "tree": "2" * 40, "dirty": False, "contract_version": self.module.PROCESS_CONTRACT_VERSION},
+                "family_sources": {},
+                "build": build,
+                "host": host,
+                "driver": {"exact_command": ["benchmark"], "run_order": list(self.module.PROCESS_EXPECTED_RESULT_IDS)},
+            },
+            "artifacts": artifacts,
+            "capabilities": {"helper_contract": self.module.PROCESS_CONTRACT_VERSION},
+            "results": results,
+            "checks": [],
+        }
+
+    def measured_process_result(self, result_id: str, authority: str = "legacy_local", value: float = 1.0):
+        checks: dict[str, object] = {
+            "protocol_compatible": True,
+            "expected_response": True,
+            "shutdown_complete": True,
+            "immediate_child_guard": True,
+        }
+        if authority == "supervised":
+            checks.update({"supervisor_record_finished": True, "supervisor_settlement_once": True})
+        metadata = {"authority": authority} if result_id.startswith("family_") else None
+        return self.module.process_measured_result(result_id, [self.process_sample(value, checks)], 1, metadata)
+
+    def test_process_schema_preserves_order_raw_correlation_and_metric_statistics(self) -> None:
+        document = self.valid_process_document()
+        result_id = "supervisor_warm_sequential_spawn_commit"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        samples = [
+            {"run": 1, "observation": ordinal, "value": value, "metrics": {"batch_spawn_commit_ns": value + 1}, "checks": {"correct": True}}
+            for ordinal, value in enumerate((1.0, 2.0, 3.0, 100.0), 1)
+        ]
+        document["results"][index] = self.module.process_measured_result(result_id, samples, 1)
+        self.module.validate_process_document(document)
+        result = document["results"][index]
+        self.assertEqual(result["statistics"]["primary"], {"median": 2.5, "p95": 100.0, "maximum": 100.0})
+        self.assertEqual(result["observation_count"], 4)
+
+        document["results"][index], document["results"][index + 1] = document["results"][index + 1], document["results"][index]
+        with self.assertRaisesRegex(ValueError, "out of order"):
+            self.module.validate_process_document(document)
+
+    def test_process_schema_rejects_redaction_canaries_and_false_supervised_claims(self) -> None:
+        document = self.valid_process_document()
+        result_id = "family_plugin_lifecycle"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        document["results"][index] = self.measured_process_result(result_id)
+        document["results"][index]["samples"][0]["checks"]["tool_content"] = "CANARY_REDACTION"
+        with self.assertRaisesRegex(ValueError, "prohibited"):
+            self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        result = self.measured_process_result(result_id, authority="legacy_local")
+        result["authority"] = "supervised"
+        result["metadata"]["authority"] = "supervised"
+        document["results"][index] = result
+        with self.assertRaisesRegex(ValueError, "false supervised claim"):
+            self.module.validate_process_document(document)
+
+    def test_helper_v2_preserves_observations_and_accepts_static_unsupported(self) -> None:
+        measured = {
+            "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
+            "case": "process-first-spawn",
+            "status": "measured",
+            "primary_metric": "spawn_commit_ns",
+            "unit": "ns",
+            "observations": [
+                {"ordinal": 1, "value": 1, "metrics": {}, "checks": {"confirmed_exec": True}},
+                {"ordinal": 2, "value": 2, "metrics": {}, "checks": {"confirmed_exec": True}},
+            ],
+            "case_metrics": {"authority": "neutral_supervisor"},
+        }
+        self.assertEqual(len(self.module.validate_helper_payload(measured, "process-first-spawn")["observations"]), 2)
+        unsupported = {
+            "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
+            "case": "process-first-spawn",
+            "status": "unsupported",
+            "primary_metric": "spawn_commit_ns",
+            "unit": "ns",
+            "reason_code": "source_architecture_absent",
+            "reason": self.module.PROCESS_REASON_TEXT["source_architecture_absent"],
+            "observations": [],
+            "case_metrics": {"authority": "neutral_supervisor"},
+        }
+        self.module.validate_helper_payload(unsupported, "process-first-spawn")
+        unsupported["reason"] = "dynamic detail"
+        with self.assertRaisesRegex(RuntimeError, "unsupported reason"):
+            self.module.validate_helper_payload(unsupported, "process-first-spawn")
+
+    def test_process_helper_rejects_malformed_and_truncated_output(self) -> None:
+        args = argparse.Namespace(
+            benchmark_helper=pathlib.Path(sys.executable),
+            fake_process_child=None,
+            fake_mcp_server=None,
+            fake_lsp_server=None,
+            sample_plugin=pathlib.Path("/fixture"),
+            runs=1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            for output in ("{", "{} trailing"):
+                completed = self.module.subprocess.CompletedProcess([], 0, output, "")
+                with mock.patch.object(self.module, "run_process", return_value=(1.0, completed)):
+                    with self.assertRaisesRegex(RuntimeError, "malformed or truncated"):
+                        self.module.run_process_helper(args, root, project, "supervisor_first_spawn_commit", [], [])
+
+    def test_process_argument_validation_rejects_missing_and_nonexecuting_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            output = root / "out.json"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                status = self.module.main(
+                    ["--ava", sys.executable, "--suite", "process-smoke", "--runs", "1", "--output", str(output)]
+                )
+            self.assertEqual(status, 2)
+            self.assertIn("requires an executable --benchmark-helper", stderr.getvalue())
+
+            fixture = root / "fixture"
+            fixture.write_text("not executable", encoding="utf-8")
+            args = self.module.build_parser().parse_args(
+                [
+                    "--ava", sys.executable,
+                    "--benchmark-helper", sys.executable,
+                    "--fake-process-child", str(fixture),
+                    "--suite", "process-smoke",
+                    "--runs", "1",
+                    "--output", str(output),
+                ]
+            )
+            with self.assertRaisesRegex(ValueError, "not executable"):
+                self.module.validate_arguments(args)
+
+    def test_process_smoke_threshold_failure_is_gating_but_not_a_delta_gate(self) -> None:
+        document = self.valid_process_document()
+        startup_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("application_warm_startup")
+        rss_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("application_idle_rss")
+        document["results"][startup_index] = self.measured_process_result("application_warm_startup", value=31_000_000_000.0)
+        document["results"][rss_index] = self.measured_process_result("application_idle_rss", value=1.0)
+        capabilities = {"process_supervisor": False, "platform_backend": "unsupported"}
+        checks = {check["name"]: check["passed"] for check in self.module.process_smoke_checks(document["results"], capabilities)}
+        self.assertFalse(checks["application_startup_not_catastrophic"])
+
+    def comparison_documents(self):
+        before = self.valid_process_document()
+        after = self.valid_process_document()
+        for result_id in self.module.PROCESS_EXPECTED_RESULT_IDS[-5:]:
+            index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+            before["results"][index] = self.measured_process_result(result_id, "legacy_local", 100.0)
+            after["results"][index] = self.measured_process_result(result_id, "supervised", 130.0)
+        return before, after
+
+    def test_comparison_rejects_provenance_mismatch_and_same_authority(self) -> None:
+        before, after = self.comparison_documents()
+        after["provenance"]["host"]["boot_id_sha256"] = "b" * 64
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "incomparable_cohorts")
+
+        before, after = self.comparison_documents()
+        result_id = "family_curl_lifecycle"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        after["results"][index] = self.measured_process_result(result_id, "legacy_local", 130.0)
+        comparison = self.module.compare_process_documents(before, after)
+        item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
+        self.assertEqual(item["reason_code"], "authority_transition_required")
+        self.assertFalse(comparison["repeatable_claim"])
+
+    def test_comparison_recomputes_stats_and_rejects_compatibility_change(self) -> None:
+        before, after = self.comparison_documents()
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "measured")
+        self.assertFalse(comparison["gating"])
+        self.assertFalse(comparison["faster_required"])
+
+        result_id = "family_mcp_lifecycle"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        after["results"][index]["samples"][0]["checks"]["expected_response"] = False
+        after["results"][index]["compatibility_checks"]["expected_response"] = False
+        comparison = self.module.compare_process_documents(before, after)
+        item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
+        self.assertEqual(item["reason_code"], "compatibility_mismatch")
+
+    def test_historical_v2_artifact_still_validates(self) -> None:
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        artifact = repository / "docs" / "engineering" / "backend-performance-baseline-2026-08-30.json"
+        if not artifact.is_file():
+            self.skipTest("historical v2 artifact is not present on the instrumentation carrier")
+        document = self.module.json.loads(artifact.read_text(encoding="utf-8"))
+        self.module.validate_document(document)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", required=True)
+    parser.add_argument("--process-tests", action="store_true", help=argparse.SUPPRESS)
     arguments, remaining = parser.parse_known_args()
     BenchmarkHarnessTests.script = arguments.script
     program = unittest.main(argv=[sys.argv[0], *remaining], exit=False)

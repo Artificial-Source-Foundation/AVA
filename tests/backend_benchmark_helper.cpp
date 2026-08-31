@@ -1,3 +1,4 @@
+#include "tests/backend_benchmark_cases.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/plugin/discovery.h"
@@ -27,14 +28,7 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 
-struct Options
-{
-  std::string benchmark_case;
-  std::size_t iterations = 1;
-  std::size_t entries = 0;
-  std::size_t records = 0;
-  std::filesystem::path sample_plugin;
-};
+using Options = ava::benchmark::BackendBenchmarkOptions;
 
 [[noreturn]] void fail(std::string const& message)
 {
@@ -71,8 +65,22 @@ Options parse_options(int argc, char** argv)
       options.entries = parse_size(argv[++index], argument);
     else if (argument == "--records" && index + 1 < argc)
       options.records = parse_size(argv[++index], argument);
+    else if (argument == "--hold-ms" && index + 1 < argc)
+      options.hold_milliseconds = parse_size(argv[++index], argument);
+    else if (argument == "--grace-ms" && index + 1 < argc)
+      options.grace_milliseconds = parse_size(argv[++index], argument);
+    else if (argument == "--deadline-ms" && index + 1 < argc)
+      options.deadline_milliseconds = parse_size(argv[++index], argument);
+    else if (argument == "--loopback-port" && index + 1 < argc)
+      options.loopback_port = static_cast<unsigned int>(parse_size(argv[++index], argument));
     else if (argument == "--sample-plugin" && index + 1 < argc)
       options.sample_plugin = argv[++index];
+    else if (argument == "--fake-process-child" && index + 1 < argc)
+      options.fake_process_child = argv[++index];
+    else if (argument == "--fake-mcp-server" && index + 1 < argc)
+      options.fake_mcp_server = argv[++index];
+    else if (argument == "--fake-lsp-server" && index + 1 < argc)
+      options.fake_lsp_server = argv[++index];
     else
       fail("unknown or incomplete argument: " + std::string(argument));
   }
@@ -491,7 +499,11 @@ void benchmark_repeated_memory(Options const& options)
 int main(int argc, char** argv)
 {
   auto const options = parse_options(argc, argv);
-  if (options.benchmark_case == "short-calls")
+  if (ava::benchmark::is_process_benchmark_case(options.benchmark_case))
+    ava::benchmark::run_process_benchmark(options);
+  else if (ava::benchmark::is_family_benchmark_case(options.benchmark_case))
+    ava::benchmark::run_family_benchmark(options);
+  else if (options.benchmark_case == "short-calls")
     benchmark_short_calls(options);
   else if (options.benchmark_case == "file-dispatch")
     benchmark_file_dispatch(options, false);

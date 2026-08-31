@@ -73,9 +73,42 @@ target_link_libraries(ava_fake_provider_server PRIVATE ava_process_gate_test_sup
 ava_apply_warnings(ava_fake_provider_server)
 ava_apply_sanitizers(ava_fake_provider_server)
 
-add_executable(ava_backend_benchmark_helper "backend_benchmark_helper.cpp")
+set(AVA_BENCHMARK_CURL_AUTHORITY "legacy_local" CACHE STRING "Curl benchmark authority: legacy_local or supervised")
+set(AVA_BENCHMARK_PLUGIN_AUTHORITY "legacy_local" CACHE STRING "Plugin benchmark authority: legacy_local or supervised")
+set(AVA_BENCHMARK_MCP_AUTHORITY "legacy_local" CACHE STRING "MCP benchmark authority: legacy_local or supervised")
+set(AVA_BENCHMARK_LSP_AUTHORITY "legacy_local" CACHE STRING "LSP benchmark authority: legacy_local or supervised")
+set(AVA_BENCHMARK_BASH_AUTHORITY "legacy_local" CACHE STRING "Bash benchmark authority: legacy_local or supervised")
+foreach(AVA_BENCHMARK_FAMILY IN ITEMS CURL PLUGIN MCP LSP BASH)
+  set_property(CACHE AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY PROPERTY STRINGS legacy_local supervised)
+  if(NOT AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY STREQUAL "legacy_local" AND
+     NOT AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY STREQUAL "supervised")
+    message(FATAL_ERROR "AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY must be legacy_local or supervised")
+  endif()
+endforeach()
+
+add_executable(ava_backend_benchmark_helper
+  "backend_benchmark_helper.cpp"
+  "backend_benchmark_families.cpp"
+  "backend_benchmark_process.cpp"
+  "backend_benchmark_protocol.cpp"
+)
 target_link_libraries(ava_backend_benchmark_helper PRIVATE ${AVA_BACKEND_LIBRARIES} ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_backend_benchmark_helper PRIVATE ${CMAKE_SOURCE_DIR})
+add_dependencies(ava_backend_benchmark_helper ava_fake_lsp_server ava_fake_mcp_server)
+if(TARGET AVA::process)
+  target_link_libraries(ava_backend_benchmark_helper PRIVATE AVA::process)
+  target_compile_definitions(ava_backend_benchmark_helper PRIVATE AVA_BENCHMARK_HAS_PROCESS_SUPERVISOR=1)
+endif()
+if(TARGET ava_fake_process_child)
+  add_dependencies(ava_backend_benchmark_helper ava_fake_process_child)
+endif()
+foreach(AVA_BENCHMARK_FAMILY IN ITEMS CURL PLUGIN MCP LSP BASH)
+  if(AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY STREQUAL "supervised")
+    target_compile_definitions(ava_backend_benchmark_helper PRIVATE AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY_SUPERVISED=1)
+  else()
+    target_compile_definitions(ava_backend_benchmark_helper PRIVATE AVA_BENCHMARK_${AVA_BENCHMARK_FAMILY}_AUTHORITY_LEGACY_LOCAL=1)
+  endif()
+endforeach()
 ava_apply_warnings(ava_backend_benchmark_helper)
 ava_apply_sanitizers(ava_backend_benchmark_helper)
 
@@ -679,6 +712,42 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_benchmark.smoke PROPERTIES
     TIMEOUT 75
     LABELS "benchmark;offline;smoke"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_benchmark.process_harness_self_test
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py
+            --process-tests)
+  set_tests_properties(ava_benchmark.process_harness_self_test PROPERTIES
+    TIMEOUT 30
+    LABELS "benchmark;process;offline;self-test"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  set(AVA_BENCHMARK_PROCESS_FIXTURE_ARGS)
+  if(TARGET ava_fake_process_child)
+    list(APPEND AVA_BENCHMARK_PROCESS_FIXTURE_ARGS --fake-process-child $<TARGET_FILE:ava_fake_process_child>)
+  endif()
+  add_test(
+    NAME ava_benchmark.process_smoke
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py
+            --ava $<TARGET_FILE:ava>
+            --benchmark-helper $<TARGET_FILE:ava_backend_benchmark_helper>
+            ${AVA_BENCHMARK_PROCESS_FIXTURE_ARGS}
+            --fake-mcp-server $<TARGET_FILE:ava_fake_mcp_server>
+            --fake-lsp-server $<TARGET_FILE:ava_fake_lsp_server>
+            --memory-helper ${CMAKE_SOURCE_DIR}/scripts/benchmark-memory.py
+            --sample-plugin ${CMAKE_SOURCE_DIR}/examples/plugins/todo
+            --runtime-reference HEAD
+            --suite process-smoke
+            --runs 1
+            --output ${CMAKE_BINARY_DIR}/ava-backend-process-smoke.json
+            --report ${CMAKE_BINARY_DIR}/ava-backend-process-smoke.md)
+  set_tests_properties(ava_benchmark.process_smoke PROPERTIES
+    TIMEOUT 120
+    LABELS "benchmark;process;offline;smoke"
     ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(

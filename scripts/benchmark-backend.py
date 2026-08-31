@@ -11,16 +11,20 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import http.server
 import json
 import math
 import os
 import platform
 import re
+import resource
 import shutil
+import stat
 import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -52,6 +56,57 @@ EXPECTED_RESULT_IDS = (
     "selective_router",
 )
 
+PROCESS_SCHEMA_VERSION = "ava.backend-benchmark.v3"
+PROCESS_HELPER_SCHEMA_VERSION = "ava.backend-benchmark-helper.v2"
+COMPARISON_SCHEMA_VERSION = "ava.backend-benchmark-comparison.v1"
+PROCESS_CONTRACT_VERSION = "m1_process_supervision_v1"
+PROCESS_EXPECTED_RESULT_IDS = (
+    "application_warm_startup",
+    "application_idle_rss",
+    "supervisor_idle_scope_startup",
+    "supervisor_first_spawn_commit",
+    "supervisor_warm_sequential_spawn_commit",
+    "supervisor_concurrent_records_1",
+    "supervisor_concurrent_records_8",
+    "supervisor_concurrent_records_64",
+    "supervisor_natural_exit_settlement",
+    "supervisor_leader_first_descendant_cleanup",
+    "supervisor_term_refusal_escalation",
+    "supervisor_shared_budget_shutdown_64",
+    "monitor_idle_pidfd_1",
+    "monitor_idle_pidfd_8",
+    "monitor_idle_pidfd_64",
+    "monitor_idle_posix_fallback_1",
+    "monitor_idle_posix_fallback_8",
+    "monitor_idle_posix_fallback_64",
+    "family_curl_lifecycle",
+    "family_plugin_lifecycle",
+    "family_mcp_lifecycle",
+    "family_lsp_lifecycle",
+    "family_bash_lifecycle",
+)
+PROCESS_REASON_TEXT = {
+    "source_architecture_absent": "Process-supervision source architecture is absent from this build.",
+    "caller_not_migrated": "The family authority flag requests supervision, but this benchmark driver has not been adapted to verify a finished Supervisor record.",
+    "pidfd_unavailable": "Automatic monitoring did not select pidfd on this host.",
+    "fixture_unavailable": "A required repository-owned benchmark fixture is unavailable.",
+    "platform_unsupported": "The process-supervision backend is unavailable on this platform.",
+    "procfs_unavailable": "Application idle RSS requires Linux procfs.",
+}
+PROCESS_CLOSED_LABELS = {
+    "legacy_local",
+    "supervised",
+    "neutral_supervisor",
+    "immediate_children_only",
+    "posix",
+    "unsupported",
+    "event_driven_posix",
+    "automatic_pidfd",
+    "automatic",
+    "posix_fallback",
+    PROCESS_CONTRACT_VERSION,
+}
+
 
 def positive_int(value: str) -> int:
     parsed = int(value)
@@ -73,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ava", type=Path, required=True, help="path to the AVA executable")
     parser.add_argument("--benchmark-helper", type=Path, help="test-only deterministic C++ benchmark helper")
     parser.add_argument("--fake-provider", type=Path, help="optional local fake provider executable (recorded; no network provider is used)")
+    parser.add_argument("--fake-process-child", type=Path, help="repository-owned process-supervisor child fixture")
+    parser.add_argument("--fake-mcp-server", type=Path, help="repository-owned fake MCP server fixture")
+    parser.add_argument("--fake-lsp-server", type=Path, help="repository-owned fake LSP server fixture")
     parser.add_argument(
         "--memory-helper",
         type=Path,
@@ -85,10 +143,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(__file__).resolve().parents[1] / "examples" / "plugins" / "todo",
         help="sample todo plugin fixture",
     )
-    parser.add_argument("--suite", choices=("smoke", "baseline", "stress"), required=True)
+    parser.add_argument("--suite", choices=("smoke", "baseline", "stress", "process-smoke", "process-baseline"), required=True)
     parser.add_argument("--runs", type=positive_int, required=True, help="measured repetitions")
     parser.add_argument("--output", type=Path, required=True, help="machine-readable JSON output")
     parser.add_argument("--report", type=Path, help="optional readable Markdown report")
+    parser.add_argument("--runtime-reference", default="HEAD", help="Git revision used for production-path equality provenance")
+    parser.add_argument("--run-order", choices=("standalone", "before_then_after", "after_then_before"), default="standalone")
+    parser.add_argument("--compare-to", type=Path, help="validated v3 legacy cohort to compare with this process-baseline result")
+    parser.add_argument("--comparison-output", type=Path, help="optional v1 comparison JSON output (requires --compare-to)")
     return parser
 
 
@@ -105,10 +167,20 @@ def validate_arguments(args: argparse.Namespace) -> None:
     args.ava = resolve_file(args.ava, "--ava", executable=True)
     if args.suite == "smoke" and args.benchmark_helper is None:
         raise ValueError("--suite smoke requires an executable --benchmark-helper")
+    if args.suite.startswith("process-") and args.benchmark_helper is None:
+        raise ValueError(f"--suite {args.suite} requires an executable --benchmark-helper")
     if args.benchmark_helper is not None:
         args.benchmark_helper = resolve_file(args.benchmark_helper, "--benchmark-helper", executable=True)
     if args.fake_provider is not None:
         args.fake_provider = resolve_file(args.fake_provider, "--fake-provider", executable=True)
+    for attribute, option in (
+        ("fake_process_child", "--fake-process-child"),
+        ("fake_mcp_server", "--fake-mcp-server"),
+        ("fake_lsp_server", "--fake-lsp-server"),
+    ):
+        value = getattr(args, attribute)
+        if value is not None:
+            setattr(args, attribute, resolve_file(value, option, executable=True))
     args.memory_helper = resolve_file(args.memory_helper, "--memory-helper")
     args.sample_plugin = args.sample_plugin.expanduser().resolve()
     if not (args.sample_plugin / "plugin.json").is_file() or not (args.sample_plugin / "plugin.sh").is_file():
@@ -118,6 +190,16 @@ def validate_arguments(args: argparse.Namespace) -> None:
         args.report = args.report.expanduser().resolve()
     if args.report == args.output:
         raise ValueError("--report and --output must be different paths")
+    if args.compare_to is not None:
+        args.compare_to = resolve_file(args.compare_to, "--compare-to")
+    if (args.compare_to is None) != (args.comparison_output is None):
+        raise ValueError("--compare-to and --comparison-output must be supplied together")
+    if args.compare_to is not None and args.suite != "process-baseline":
+        raise ValueError("comparison output is available only with --suite process-baseline")
+    if args.comparison_output is not None:
+        args.comparison_output = args.comparison_output.expanduser().resolve()
+        if args.comparison_output in (args.output, args.report):
+            raise ValueError("--comparison-output must be different from result and report paths")
 
 
 def isolated_environment(home: Path) -> dict[str, str]:
@@ -1107,17 +1189,1294 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         shutil.rmtree(root, ignore_errors=True)
 
 
+PROCESS_RESULT_SPECS: dict[str, dict[str, Any]] = {
+    "application_warm_startup": {"family": "application", "primary_metric": "startup_ns", "unit": "ns", "boundary": "offline_rpc_start_through_clean_eof"},
+    "application_idle_rss": {"family": "application", "primary_metric": "idle_rss_kib", "unit": "KiB", "boundary": "maximum_process_tree_rss_after_idle_settle"},
+    "supervisor_idle_scope_startup": {"family": "supervisor", "case": "process-idle-scope", "primary_metric": "scope_construction_ns", "unit": "ns", "boundary": "supervisor_and_application_scope_construction"},
+    "supervisor_first_spawn_commit": {"family": "supervisor", "case": "process-first-spawn", "primary_metric": "spawn_commit_ns", "unit": "ns", "boundary": "exact_environment_mint_reservation_spawn_through_exec_commit"},
+    "supervisor_warm_sequential_spawn_commit": {"family": "supervisor", "case": "process-warm-sequential", "primary_metric": "spawn_commit_ns", "unit": "ns", "boundary": "individual_post_warmup_spawn_through_exec_commit"},
+    "supervisor_concurrent_records_1": {"family": "supervisor", "case": "process-concurrent", "primary_metric": "spawn_commit_ns", "unit": "ns", "boundary": "barrier_release_through_each_spawn_commit", "records": 1},
+    "supervisor_concurrent_records_8": {"family": "supervisor", "case": "process-concurrent", "primary_metric": "spawn_commit_ns", "unit": "ns", "boundary": "barrier_release_through_each_spawn_commit", "records": 8},
+    "supervisor_concurrent_records_64": {"family": "supervisor", "case": "process-concurrent", "primary_metric": "spawn_commit_ns", "unit": "ns", "boundary": "barrier_release_through_each_spawn_commit", "records": 64},
+    "supervisor_natural_exit_settlement": {"family": "supervisor", "case": "process-natural-exit", "primary_metric": "settlement_ns", "unit": "ns", "boundary": "spawn_start_through_complete_natural_exit"},
+    "supervisor_leader_first_descendant_cleanup": {"family": "supervisor", "case": "process-leader-first-descendant", "primary_metric": "cleanup_settlement_ns", "unit": "ns", "boundary": "leader_exit_phase_through_complete_cleanup_and_eof"},
+    "supervisor_term_refusal_escalation": {"family": "supervisor", "case": "process-term-refusal", "primary_metric": "stop_settlement_ns", "unit": "ns", "boundary": "stop_request_through_complete_escalation"},
+    "supervisor_shared_budget_shutdown_64": {"family": "supervisor", "case": "process-shared-shutdown", "primary_metric": "shutdown_ns", "unit": "ns", "boundary": "shutdown_request_through_shared_budget_settlement", "records": 64},
+    "monitor_idle_pidfd_1": {"family": "monitor", "case": "process-monitor-pidfd", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "ready_idle_children_fixed_hold_process_cpu", "records": 1},
+    "monitor_idle_pidfd_8": {"family": "monitor", "case": "process-monitor-pidfd", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "ready_idle_children_fixed_hold_process_cpu", "records": 8},
+    "monitor_idle_pidfd_64": {"family": "monitor", "case": "process-monitor-pidfd", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "ready_idle_children_fixed_hold_process_cpu", "records": 64},
+    "monitor_idle_posix_fallback_1": {"family": "monitor", "case": "process-monitor-fallback", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "stabilized_fallback_ready_idle_children_fixed_hold_process_cpu", "records": 1},
+    "monitor_idle_posix_fallback_8": {"family": "monitor", "case": "process-monitor-fallback", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "stabilized_fallback_ready_idle_children_fixed_hold_process_cpu", "records": 8},
+    "monitor_idle_posix_fallback_64": {"family": "monitor", "case": "process-monitor-fallback", "primary_metric": "cpu_ns_per_wall_second", "unit": "cpu_ns_per_wall_second", "boundary": "stabilized_fallback_ready_idle_children_fixed_hold_process_cpu", "records": 64},
+    "family_curl_lifecycle": {"family": "curl", "case": "family-curl-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "one_loopback_request_parse_and_cleanup"},
+    "family_plugin_lifecycle": {"family": "plugin", "case": "family-plugin-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "sample_plugin_start_initialize_call_shutdown"},
+    "family_mcp_lifecycle": {"family": "mcp", "case": "family-mcp-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "fake_mcp_initialize_tools_list_shutdown"},
+    "family_lsp_lifecycle": {"family": "lsp", "case": "family-lsp-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "fake_lsp_initialize_diagnostics_and_client_destruction"},
+    "family_bash_lifecycle": {"family": "bash", "case": "family-bash-lifecycle", "primary_metric": "lifecycle_ns", "unit": "ns", "boundary": "sealed_direct_argv_planning_execution_and_cleanup"},
+}
+
+PROHIBITED_SAMPLE_KEYS = {
+    "pid",
+    "pgid",
+    "owner_id",
+    "owner_raw_id",
+    "fd",
+    "argv",
+    "command",
+    "executable",
+    "cwd",
+    "path",
+    "url",
+    "environment",
+    "child_output",
+    "output",
+    "protocol_frame",
+    "prompt",
+    "tool_content",
+}
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def process_statistics(samples: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    if not samples:
+        raise ValueError("cannot summarize process result without raw samples")
+    primary = summarize([float(sample["value"]) for sample in samples])
+    metric_names = sorted(
+        {
+            name
+            for sample in samples
+            for name, value in sample.get("metrics", {}).items()
+            if _is_number(value)
+        }
+    )
+    metrics = {
+        name: summarize(
+            [float(sample["metrics"][name]) for sample in samples if name in sample.get("metrics", {}) and _is_number(sample["metrics"][name])]
+        )
+        for name in metric_names
+    }
+    return {"primary": primary, "metrics": metrics}
+
+
+def process_unsupported_result(result_id: str, reason_code: str, reason: str | None = None) -> dict[str, Any]:
+    spec = PROCESS_RESULT_SPECS[result_id]
+    expected_reason = PROCESS_REASON_TEXT.get(reason_code)
+    if expected_reason is None:
+        raise ValueError(f"unknown process unsupported reason code: {reason_code}")
+    if reason is not None and reason != expected_reason:
+        raise ValueError(f"non-static process unsupported reason for {result_id}")
+    return {
+        "id": result_id,
+        "family": spec["family"],
+        "status": "unsupported",
+        "reason_code": reason_code,
+        "reason": expected_reason,
+        "primary_metric": spec["primary_metric"],
+        "unit": spec["unit"],
+        "boundary": spec["boundary"],
+        "repetitions": 0,
+        "observation_count": 0,
+        "samples": [],
+        "statistics": None,
+    }
+
+
+def process_measured_result(
+    result_id: str,
+    samples: Sequence[dict[str, Any]],
+    repetitions: int,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    spec = PROCESS_RESULT_SPECS[result_id]
+    result: dict[str, Any] = {
+        "id": result_id,
+        "family": spec["family"],
+        "status": "measured",
+        "primary_metric": spec["primary_metric"],
+        "unit": spec["unit"],
+        "boundary": spec["boundary"],
+        "repetitions": repetitions,
+        "observation_count": len(samples),
+        "samples": list(samples),
+        "statistics": process_statistics(samples),
+    }
+    if metadata:
+        result["metadata"] = metadata
+    if result_id.startswith("family_"):
+        compatibility_names = ("protocol_compatible", "expected_response")
+        result["compatibility_checks"] = {
+            name: all(sample.get("checks", {}).get(name) is True for sample in samples) for name in compatibility_names
+        }
+        result["authority"] = (metadata or {}).get("authority", "legacy_local")
+    return result
+
+
+def _validate_closed_scalar(value: Any, label: str) -> None:
+    if isinstance(value, bool):
+        return
+    if _is_number(value):
+        return
+    if isinstance(value, str) and value in PROCESS_CLOSED_LABELS:
+        return
+    raise RuntimeError(f"benchmark helper emitted non-closed {label}")
+
+
+def validate_helper_payload(payload: Any, expected_case: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("benchmark helper emitted a non-object JSON payload")
+    if payload.get("helper_schema_version") != PROCESS_HELPER_SCHEMA_VERSION:
+        raise RuntimeError("benchmark helper emitted an unexpected schema version")
+    if payload.get("case") != expected_case:
+        raise RuntimeError("benchmark helper changed the requested case identity")
+    if payload.get("status") not in ("measured", "unsupported"):
+        raise RuntimeError("benchmark helper emitted an unknown status")
+    for key in ("primary_metric", "unit"):
+        if not isinstance(payload.get(key), str) or not payload[key]:
+            raise RuntimeError(f"benchmark helper omitted {key}")
+    observations = payload.get("observations")
+    case_metrics = payload.get("case_metrics")
+    if not isinstance(observations, list) or not isinstance(case_metrics, dict):
+        raise RuntimeError("benchmark helper omitted observations or case metrics")
+    for name, value in case_metrics.items():
+        if not isinstance(name, str) or name in PROHIBITED_SAMPLE_KEYS:
+            raise RuntimeError("benchmark helper emitted a prohibited case metric")
+        _validate_closed_scalar(value, "case metric")
+    if payload["status"] == "unsupported":
+        reason_code = payload.get("reason_code")
+        if reason_code not in PROCESS_REASON_TEXT or payload.get("reason") != PROCESS_REASON_TEXT[reason_code]:
+            raise RuntimeError("benchmark helper emitted an invalid unsupported reason")
+        if observations:
+            raise RuntimeError("unsupported benchmark helper payload contains observations")
+        return payload
+    if not observations:
+        raise RuntimeError("measured benchmark helper payload contains no observations")
+    for expected_ordinal, observation in enumerate(observations, 1):
+        if not isinstance(observation, dict) or observation.get("ordinal") != expected_ordinal:
+            raise RuntimeError("benchmark helper observations have invalid ordinals")
+        if not _is_number(observation.get("value")) or float(observation["value"]) < 0:
+            raise RuntimeError("benchmark helper observation has an invalid value")
+        for field in ("metrics", "checks"):
+            values = observation.get(field)
+            if not isinstance(values, dict):
+                raise RuntimeError(f"benchmark helper observation lacks {field}")
+            for name, value in values.items():
+                if not isinstance(name, str) or name in PROHIBITED_SAMPLE_KEYS:
+                    raise RuntimeError("benchmark helper observation contains prohibited data")
+                _validate_closed_scalar(value, field)
+    return payload
+
+
+def _validate_safe_sample(sample: Any) -> None:
+    if not isinstance(sample, dict):
+        raise ValueError("process sample must be an object")
+    if set(sample) != {"run", "observation", "value", "metrics", "checks"}:
+        raise ValueError("process sample has an invalid shape")
+    if not isinstance(sample["run"], int) or sample["run"] <= 0 or not isinstance(sample["observation"], int) or sample["observation"] <= 0:
+        raise ValueError("process sample has an invalid correlation identity")
+    if not _is_number(sample["value"]):
+        raise ValueError("process sample value is not finite numeric data")
+    for field in ("metrics", "checks"):
+        if not isinstance(sample[field], dict):
+            raise ValueError(f"process sample {field} must be an object")
+        for key, value in sample[field].items():
+            if key in PROHIBITED_SAMPLE_KEYS:
+                raise ValueError("process sample contains prohibited data")
+            _validate_closed_scalar(value, f"sample {field}")
+
+
+def _helper_fixture_arguments(args: argparse.Namespace) -> list[str]:
+    arguments = ["--sample-plugin", str(args.sample_plugin)]
+    for option, value in (
+        ("--fake-process-child", args.fake_process_child),
+        ("--fake-mcp-server", args.fake_mcp_server),
+        ("--fake-lsp-server", args.fake_lsp_server),
+    ):
+        if value is not None:
+            arguments.extend((option, str(value)))
+    return arguments
+
+
+def run_process_helper(
+    args: argparse.Namespace,
+    root: Path,
+    project: Path,
+    result_id: str,
+    extra: Sequence[str],
+    driver_commands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if args.benchmark_helper is None:
+        return process_unsupported_result(result_id, "fixture_unavailable")
+    spec = PROCESS_RESULT_SPECS[result_id]
+    benchmark_case = spec["case"]
+    command = [str(args.benchmark_helper), "--case", benchmark_case, *extra, *_helper_fixture_arguments(args)]
+    samples: list[dict[str, Any]] = []
+    metadata: dict[str, Any] = {}
+    for run_index in range(args.runs):
+        home = root / f"process-helper-{result_id}-{run_index}"
+        prepare_home(home)
+        driver_commands.append({"result_id": result_id, "run": run_index + 1, "command": list(command)})
+        wall_ns, completed = run_process(command, project, isolated_environment(home), 30.0)
+        if completed.returncode != 0:
+            raise RuntimeError(f"benchmark helper {result_id} failed with status {completed.returncode}")
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"benchmark helper {result_id} emitted malformed or truncated JSON") from error
+        payload = validate_helper_payload(payload, benchmark_case)
+        if payload["status"] == "unsupported":
+            if samples:
+                raise RuntimeError(f"benchmark helper {result_id} changed from measured to unsupported")
+            return process_unsupported_result(result_id, payload["reason_code"], payload["reason"])
+        if payload["primary_metric"] != spec["primary_metric"] or payload["unit"] != spec["unit"]:
+            raise RuntimeError(f"benchmark helper {result_id} changed its metric contract")
+        stable_metadata = {name: value for name, value in payload["case_metrics"].items() if isinstance(value, (str, bool))}
+        if metadata and stable_metadata != metadata:
+            raise RuntimeError(f"benchmark helper {result_id} changed closed case metadata")
+        metadata = stable_metadata
+        numeric_case_metrics = {
+            name: value for name, value in payload["case_metrics"].items() if _is_number(value)
+        }
+        for observation in payload["observations"]:
+            metrics = dict(observation["metrics"])
+            for name, value in numeric_case_metrics.items():
+                metrics.setdefault(name, value)
+            metrics["helper_invocation_ns"] = wall_ns
+            samples.append(
+                {
+                    "run": run_index + 1,
+                    "observation": observation["ordinal"],
+                    "value": float(observation["value"]),
+                    "metrics": metrics,
+                    "checks": dict(observation["checks"]),
+                }
+            )
+    if not samples:
+        raise RuntimeError(f"benchmark helper {result_id} produced no observations")
+    return process_measured_result(result_id, samples, args.runs, metadata)
+
+
+class _FixedLoopbackHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib callback spelling
+        if self.path != "/benchmark":
+            self.send_error(404)
+            return
+        body = b"ava-backend-benchmark\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format: str, *_arguments: Any) -> None:
+        return
+
+
+class FixedLoopbackFixture:
+    def __init__(self) -> None:
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FixedLoopbackHandler)
+        self.server.daemon_threads = True
+        self.thread = threading.Thread(target=self.server.serve_forever, name="ava-benchmark-loopback", daemon=True)
+
+    @property
+    def port(self) -> int:
+        return int(self.server.server_address[1])
+
+    def __enter__(self) -> "FixedLoopbackFixture":
+        self.thread.start()
+        return self
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2.0)
+
+
+def run_application_startup_v3(
+    args: argparse.Namespace,
+    root: Path,
+    project: Path,
+    driver_commands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    command = [str(args.ava), "--rpc", "--offline", "--no-session"]
+    warm_home = root / "process-startup-warmup"
+    prepare_home(warm_home)
+    driver_commands.append({"result_id": "application_warm_startup", "run": 0, "command": list(command), "warmup": True})
+    _, warmup = run_process(command, project, isolated_environment(warm_home), 30.0)
+    if warmup.returncode != 0:
+        raise RuntimeError("AVA process benchmark startup warmup failed")
+    samples: list[dict[str, Any]] = []
+    for run_index in range(args.runs):
+        home = root / f"process-startup-{run_index}"
+        prepare_home(home)
+        driver_commands.append({"result_id": "application_warm_startup", "run": run_index + 1, "command": list(command), "warmup": False})
+        elapsed, completed = run_process(command, project, isolated_environment(home), 30.0)
+        if completed.returncode != 0:
+            raise RuntimeError("AVA process benchmark startup failed")
+        samples.append(
+            {
+                "run": run_index + 1,
+                "observation": 1,
+                "value": elapsed,
+                "metrics": {},
+                "checks": {"return_code_zero": True},
+            }
+        )
+    return process_measured_result("application_warm_startup", samples, args.runs, {"warmup_count": 1})
+
+
+def run_application_idle_rss_v3(
+    args: argparse.Namespace,
+    root: Path,
+    project: Path,
+    driver_commands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if sys.platform != "linux" or not Path("/proc/self/smaps_rollup").is_file():
+        return process_unsupported_result("application_idle_rss", "procfs_unavailable")
+    output = root / "process-idle-memory.json"
+    settle = "0.1" if args.suite == "process-smoke" else "1.0"
+    sample_count = "1" if args.suite == "process-smoke" else "3"
+    command = [
+        sys.executable,
+        str(args.memory_helper),
+        "--apps",
+        "ava",
+        "--ava",
+        str(args.ava),
+        "--runs",
+        str(args.runs),
+        "--settle",
+        settle,
+        "--samples",
+        sample_count,
+        "--output",
+        str(output),
+    ]
+    home = root / "process-memory-driver"
+    prepare_home(home)
+    driver_commands.append({"result_id": "application_idle_rss", "run": 1, "command": list(command)})
+    wall_ns, completed = run_process(command, project, isolated_environment(home), 120.0)
+    if completed.returncode != 0:
+        raise RuntimeError("application idle RSS helper failed")
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    try:
+        runs = payload["apps"]["ava"]["runs"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError("application idle RSS output lacks measured runs") from error
+    if not isinstance(runs, list) or len(runs) != args.runs:
+        raise RuntimeError("application idle RSS output has an invalid run count")
+    samples: list[dict[str, Any]] = []
+    for run_index, run in enumerate(runs, 1):
+        snapshots = run.get("samples") if isinstance(run, dict) else None
+        if not isinstance(snapshots, list) or not snapshots:
+            raise RuntimeError("application idle RSS run lacks snapshots")
+        try:
+            maximum = max(float(snapshot["rss_kib"]) for snapshot in snapshots)
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError("application idle RSS run has an invalid snapshot") from error
+        samples.append(
+            {
+                "run": run_index,
+                "observation": 1,
+                "value": maximum,
+                "metrics": {"driver_invocation_ns": wall_ns},
+                "checks": {"snapshots_present": True},
+            }
+        )
+    return process_measured_result("application_idle_rss", samples, args.runs, {"aggregation": "maximum_observed_snapshot"})
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return "unknown"
+    return completed.stdout.strip()
+
+
+def process_source_provenance(repository: Path, runtime_reference: str) -> dict[str, Any]:
+    checkout = git_identity(repository)
+    production_paths = ("src", "CMakeLists.txt", "cmake", "config.h.in")
+    reference_commit = _git(repository, "rev-parse", f"{runtime_reference}^{{commit}}")
+    reference_tree = _git(repository, "rev-parse", f"{runtime_reference}^{{tree}}") if reference_commit != "unknown" else "unknown"
+    if reference_commit == "unknown":
+        production_equal: bool | None = None
+    else:
+        compared = subprocess.run(
+            ["git", "-C", str(repository), "diff", "--quiet", reference_commit, "--", *production_paths],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+        production_equal = compared.returncode == 0 if compared.returncode in (0, 1) else None
+    production_status = _git(repository, "status", "--porcelain", "--", *production_paths)
+    return {
+        "measured_checkout": checkout,
+        "runtime_reference": {
+            "requested_revision": runtime_reference,
+            "commit": reference_commit,
+            "tree": reference_tree,
+            "production_paths": list(production_paths),
+            "exact_production_path_equality": production_equal,
+            "measured_production_paths_dirty": production_status not in ("", "unknown"),
+        },
+        "harness": {
+            "commit": checkout["commit"],
+            "tree": checkout["tree"],
+            "dirty": checkout["dirty"],
+            "contract_version": PROCESS_CONTRACT_VERSION,
+        },
+    }
+
+
+def family_source_identities(repository: Path) -> dict[str, Any]:
+    paths = {
+        "curl": ("src/ava/http", ("src/ava/http/curl_transport.cpp", "src/ava/http/curl_transport.h")),
+        "plugin": ("src/ava/plugin", ("src/ava/plugin/runner.cpp", "src/ava/plugin/runner.h")),
+        "mcp": ("src/ava/mcp", ("src/ava/mcp/stdio_client.cpp", "src/ava/mcp/stdio_client.h")),
+        "lsp": ("src/ava/lsp", ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h")),
+        "bash": ("src/ava/tools", ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h")),
+    }
+    identities: dict[str, Any] = {}
+    for family, (tree_path, blob_paths) in paths.items():
+        identities[family] = {
+            "tree_path": tree_path,
+            "tree_object": _git(repository, "rev-parse", f"HEAD:{tree_path}"),
+            "blobs": [
+                {"path": path, "object": _git(repository, "rev-parse", f"HEAD:{path}")} for path in blob_paths
+            ],
+        }
+    return identities
+
+
+def file_identity_v3(path: Path) -> dict[str, Any]:
+    identity = file_identity(path)
+    metadata = path.resolve().stat()
+    identity["mode"] = stat.S_IMODE(metadata.st_mode)
+    identity["mtime_ns"] = metadata.st_mtime_ns
+    return identity
+
+
+def optional_file_identity_v3(path: Path | None) -> dict[str, Any] | None:
+    return file_identity_v3(path) if path is not None else None
+
+
+def process_artifact_inventory(args: argparse.Namespace, repository: Path) -> dict[str, Any]:
+    curl_path_text = shutil.which("curl", path=TRUSTED_PATH)
+    pwd_path_text = shutil.which("pwd", path=TRUSTED_PATH)
+    manifest = args.sample_plugin / "plugin.json"
+    entrypoint = args.sample_plugin / "plugin.sh"
+    artifacts: dict[str, Any] = {
+        "ava": file_identity_v3(args.ava),
+        "benchmark_helper": file_identity_v3(args.benchmark_helper),
+        "benchmark_script": file_identity_v3(repository / "scripts" / "benchmark-backend.py"),
+        "memory_helper": file_identity_v3(args.memory_helper),
+        "python": file_identity_v3(Path(sys.executable)),
+        "fake_process_child": optional_file_identity_v3(args.fake_process_child),
+        "fake_mcp_server": optional_file_identity_v3(args.fake_mcp_server),
+        "fake_lsp_server": optional_file_identity_v3(args.fake_lsp_server),
+        "fake_provider": optional_file_identity_v3(args.fake_provider),
+        "curl": file_identity_v3(Path(curl_path_text)) if curl_path_text else None,
+        "bash_direct_argv_executable": file_identity_v3(Path(pwd_path_text)) if pwd_path_text else None,
+        "sample_plugin": {
+            "root": str(args.sample_plugin),
+            "manifest": file_identity_v3(manifest),
+            "entrypoint": file_identity_v3(entrypoint),
+        },
+    }
+    return artifacts
+
+
+def _command_first_line(command: Sequence[str]) -> str:
+    try:
+        completed = subprocess.run(
+            list(command),
+            env={"PATH": TRUSTED_PATH, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unavailable"
+    return completed.stdout.splitlines()[0] if completed.stdout else "unknown"
+
+
+def process_build_provenance(binary: Path, repository: Path, capabilities: dict[str, Any]) -> dict[str, Any]:
+    base = build_metadata(binary, repository)
+    cache = find_cmake_cache(binary)
+    values = read_cmake_cache(cache) if cache is not None else {}
+    compiler_path_text = base["compiler"]["path"]
+    compiler_path = Path(compiler_path_text) if compiler_path_text not in ("", "unknown") else None
+    compiler_artifact = None
+    if compiler_path is not None and compiler_path.is_file():
+        compiler_artifact = file_identity_v3(compiler_path)
+    cmake_path_text = shutil.which("cmake", path=TRUSTED_PATH)
+    cmake_artifact = file_identity_v3(Path(cmake_path_text)) if cmake_path_text else None
+    authority_features = {
+        name: capabilities.get(f"{name}_authority", "unknown") for name in ("curl", "plugin", "mcp", "lsp", "bash")
+    }
+    features = dict(base["features"])
+    features.update(
+        {
+            "process_supervisor": capabilities.get("process_supervisor"),
+            "process_fixture": capabilities.get("process_fixture"),
+            "platform_backend": capabilities.get("platform_backend"),
+            "family_authorities": authority_features,
+        }
+    )
+    cache_identity = file_identity_v3(cache) if cache is not None else None
+    recipe = {
+        "generator": values.get("CMAKE_GENERATOR", "unknown"),
+        "cmake_version": _command_first_line([cmake_path_text, "--version"]) if cmake_path_text else "unavailable",
+        "build_type": base["build_type"],
+        "cmake_flags": base["cmake_flags"],
+        "cxx_flags": base["cxx_flags"],
+    }
+    return {
+        "generator": recipe["generator"],
+        "cmake_version": recipe["cmake_version"],
+        "cmake": cmake_artifact,
+        "cmake_cache": cache_identity,
+        "cmake_source_root": base["cmake_source_root"],
+        "build_type": base["build_type"],
+        "features": features,
+        "compiler": {
+            "path": compiler_path_text,
+            "artifact": compiler_artifact,
+            "id": base["compiler"]["id"],
+            "configured_version": base["compiler"]["configured_version"],
+            "version_output": base["compiler"]["version_output"],
+            "flags": base["cxx_flags"],
+        },
+        "recipe": recipe,
+        "best_effort_provenance": {
+            "assessment": "best_effort_unverified",
+            "statement": "Binaries do not embed a verified source commit; cache, source-root, byte identity, and timestamps are evidence only.",
+            "git_commit_embedding_verified": False,
+            "cmake_source_root_matches_recorded_source": base["provenance"]["cmake_source_root_matches_recorded_source"],
+            "binary_is_within_cmake_build_tree": base["provenance"]["binary_is_within_cmake_build_tree"],
+            "binary_not_older_than_cmake_cache": base["provenance"]["binary_not_older_than_cmake_cache"],
+        },
+    }
+
+
+def _limit_value(value: int) -> int | str:
+    return "infinity" if value == resource.RLIM_INFINITY else int(value)
+
+
+def host_provenance(load_at_start: Sequence[float]) -> dict[str, Any]:
+    boot_hash: str | None = None
+    try:
+        boot_value = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        if boot_value:
+            boot_hash = hashlib.sha256(boot_value.encode("utf-8")).hexdigest()
+    except OSError:
+        pass
+    limits: dict[str, Any] = {}
+    for name in ("RLIMIT_NOFILE", "RLIMIT_NPROC", "RLIMIT_AS", "RLIMIT_CORE", "RLIMIT_STACK"):
+        selector = getattr(resource, name, None)
+        if selector is None:
+            continue
+        try:
+            soft, hard = resource.getrlimit(selector)
+            limits[name] = {"soft": _limit_value(soft), "hard": _limit_value(hard)}
+        except (OSError, ValueError):
+            limits[name] = {"soft": "unavailable", "hard": "unavailable"}
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+    except (OSError, ValueError, KeyError):
+        page_size = 0
+    return {
+        "os": platform.system(),
+        "platform": platform.platform(),
+        "kernel": platform.release(),
+        "machine": platform.machine(),
+        "cpu": cpu_model(),
+        "cpu_count": os.cpu_count(),
+        "ram_bytes": total_ram_bytes(),
+        "page_size_bytes": page_size,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "boot_id_sha256": boot_hash,
+        "limits": limits,
+        "monotonic_clock_resolution_ns": time.get_clock_info("monotonic").resolution * 1_000_000_000.0,
+        "load_at_start": list(load_at_start),
+        "load_at_end": None,
+    }
+
+
+def run_capability_probe(
+    args: argparse.Namespace,
+    root: Path,
+    project: Path,
+    driver_commands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    command = [str(args.benchmark_helper), "--case", "process-capabilities", *_helper_fixture_arguments(args)]
+    home = root / "process-capabilities"
+    prepare_home(home)
+    driver_commands.append({"result_id": "capabilities", "run": 1, "command": list(command)})
+    _, completed = run_process(command, project, isolated_environment(home), 30.0)
+    if completed.returncode != 0:
+        raise RuntimeError("benchmark helper capability probe failed")
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("benchmark helper capability probe emitted malformed or truncated JSON") from error
+    payload = validate_helper_payload(payload, "process-capabilities")
+    if payload["status"] != "measured" or payload["primary_metric"] != "capability_probe" or payload["unit"] != "count":
+        raise RuntimeError("benchmark helper capability probe is not measured metadata")
+    metrics = payload["case_metrics"]
+    required = {
+        "process_supervisor",
+        "process_fixture",
+        "platform_backend",
+        "process_backend",
+        "helper_contract",
+        "curl_authority",
+        "plugin_authority",
+        "mcp_authority",
+        "lsp_authority",
+        "bash_authority",
+    }
+    if set(metrics) != required or metrics["helper_contract"] != PROCESS_CONTRACT_VERSION:
+        raise RuntimeError("benchmark helper capability metadata is incomplete")
+    return dict(metrics)
+
+
+def process_smoke_checks(results: Sequence[dict[str, Any]], capabilities: dict[str, Any]) -> list[dict[str, Any]]:
+    by_id = {result["id"]: result for result in results}
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, passed: bool, ceiling: str) -> None:
+        checks.append({"name": name, "passed": bool(passed), "ceiling": ceiling})
+
+    def maximum(result_id: str, metric: str | None = None) -> float | None:
+        result = by_id[result_id]
+        statistics_value = result.get("statistics")
+        if not statistics_value:
+            return None
+        selected = statistics_value["primary"] if metric is None else statistics_value["metrics"].get(metric)
+        return float(selected["maximum"]) if selected else None
+
+    def measured(result_id: str) -> bool:
+        return by_id[result_id]["status"] == "measured" and bool(by_id[result_id]["samples"])
+
+    startup = maximum("application_warm_startup")
+    add("application_startup_not_catastrophic", startup is not None and startup < 30_000_000_000, "< 30 seconds")
+    rss = maximum("application_idle_rss")
+    add("application_idle_rss_not_catastrophic", rss is not None and rss < 4 * 1024 * 1024, "< 4 GiB")
+
+    supervisor_ids = [result_id for result_id in PROCESS_EXPECTED_RESULT_IDS if result_id.startswith(("supervisor_", "monitor_"))]
+    process_present = capabilities.get("process_supervisor") is True and capabilities.get("platform_backend") == "posix"
+    if not process_present:
+        structured = all(
+            by_id[result_id]["status"] == "unsupported" and by_id[result_id].get("reason_code") == "source_architecture_absent"
+            for result_id in supervisor_ids
+        )
+        add("source_architecture_absence_is_structured", structured, "every supervisor result is source_architecture_absent")
+    else:
+        required_measured = [
+            result_id
+            for result_id in supervisor_ids
+            if not result_id.startswith("monitor_idle_pidfd_")
+        ]
+        add("required_process_cases_measured", all(measured(result_id) for result_id in required_measured), "all required M1 process seams measured")
+        pidfd_valid = all(
+            measured(result_id)
+            or (by_id[result_id]["status"] == "unsupported" and by_id[result_id].get("reason_code") == "pidfd_unavailable")
+            for result_id in supervisor_ids
+            if result_id.startswith("monitor_idle_pidfd_")
+        )
+        add("pidfd_cases_honest", pidfd_valid, "measured automatic pidfd or pidfd_unavailable")
+        scope = maximum("supervisor_idle_scope_startup")
+        scope_rss = maximum("supervisor_idle_scope_startup", "rss_delta_kib")
+        add("idle_scope_not_catastrophic", scope is not None and scope < 1_000_000_000, "< 1 second")
+        add("idle_scope_rss_not_catastrophic", scope_rss is not None and abs(scope_rss) < 256 * 1024, "absolute RSS delta < 256 MiB")
+        concurrent = maximum("supervisor_concurrent_records_64", "batch_spawn_commit_ns")
+        add("concurrent_64_not_catastrophic", concurrent is not None and concurrent < 30_000_000_000, "batch < 30 seconds")
+        for result_id in ("supervisor_leader_first_descendant_cleanup", "supervisor_term_refusal_escalation"):
+            value = maximum(result_id)
+            add(f"{result_id}_not_catastrophic", value is not None and value < 5_000_000_000, "< 5 seconds")
+        shutdown = maximum("supervisor_shared_budget_shutdown_64")
+        add("shutdown_64_not_catastrophic", shutdown is not None and shutdown < 3_000_000_000, "< 3 seconds")
+        for prefix in ("monitor_idle_pidfd_", "monitor_idle_posix_fallback_"):
+            result_id = prefix + "64"
+            value = maximum(result_id)
+            if prefix == "monitor_idle_pidfd_" and by_id[result_id]["status"] == "unsupported":
+                continue
+            add(f"{result_id}_cpu_not_catastrophic", value is not None and value < 500_000_000, "< 0.5 core")
+        fallback = by_id["monitor_idle_posix_fallback_64"]
+        fallback_probes = maximum("monitor_idle_posix_fallback_64", "fallback_probes_delta")
+        add(
+            "fallback_probe_bound",
+            fallback["status"] == "measured" and fallback_probes is not None and fallback_probes <= 12 * 64 + 8,
+            "500ms probe delta <= 12*records+8",
+        )
+
+    for result_id in PROCESS_EXPECTED_RESULT_IDS[-5:]:
+        value = maximum(result_id)
+        add(f"{result_id}_not_catastrophic", value is not None and value < 10_000_000_000, "one lifecycle < 10 seconds")
+
+    helper_times = [
+        float(sample["metrics"]["helper_invocation_ns"])
+        for result in results
+        for sample in result.get("samples", [])
+        if "helper_invocation_ns" in sample.get("metrics", {})
+    ]
+    add("helper_invocations_not_catastrophic", bool(helper_times) and max(helper_times) < 30_000_000_000, "each helper invocation < 30 seconds")
+    measured_checks = [
+        value
+        for result in results
+        if result["status"] == "measured"
+        for sample in result["samples"]
+        for value in sample["checks"].values()
+        if isinstance(value, bool)
+    ]
+    add("all_measured_correctness_checks", bool(measured_checks) and all(measured_checks), "every emitted correctness and cleanup check is true")
+    family_measured = all(by_id[result_id]["status"] == "measured" for result_id in PROCESS_EXPECTED_RESULT_IDS[-5:])
+    add("all_legacy_family_lifecycles_measured", family_measured, "all five current-family drivers measured")
+    return checks
+
+
+def execute_process(args: argparse.Namespace) -> dict[str, Any]:
+    repository = Path(__file__).resolve().parents[1]
+    root = Path(tempfile.mkdtemp(prefix="ava-process-benchmark-"))
+    project = root / "project"
+    project.mkdir()
+    (project / ".git").mkdir()
+    driver_commands: list[dict[str, Any]] = []
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    try:
+        try:
+            load_start = os.getloadavg()
+        except OSError:
+            load_start = (0.0, 0.0, 0.0)
+        capabilities = run_capability_probe(args, root, project, driver_commands)
+        results: list[dict[str, Any]] = [
+            run_application_startup_v3(args, root, project, driver_commands),
+            run_application_idle_rss_v3(args, root, project, driver_commands),
+        ]
+        common = ["--deadline-ms", "2000", "--grace-ms", "75"]
+        results.append(run_process_helper(args, root, project, "supervisor_idle_scope_startup", common, driver_commands))
+        results.append(run_process_helper(args, root, project, "supervisor_first_spawn_commit", common, driver_commands))
+        sequential_iterations = 1 if args.suite == "process-smoke" else 20
+        results.append(
+            run_process_helper(
+                args,
+                root,
+                project,
+                "supervisor_warm_sequential_spawn_commit",
+                ["--iterations", str(sequential_iterations), *common],
+                driver_commands,
+            )
+        )
+        for records in (1, 8, 64):
+            results.append(
+                run_process_helper(
+                    args,
+                    root,
+                    project,
+                    f"supervisor_concurrent_records_{records}",
+                    ["--records", str(records), *common],
+                    driver_commands,
+                )
+            )
+        results.append(run_process_helper(args, root, project, "supervisor_natural_exit_settlement", common, driver_commands))
+        results.append(run_process_helper(args, root, project, "supervisor_leader_first_descendant_cleanup", common, driver_commands))
+        results.append(run_process_helper(args, root, project, "supervisor_term_refusal_escalation", common, driver_commands))
+        results.append(
+            run_process_helper(
+                args,
+                root,
+                project,
+                "supervisor_shared_budget_shutdown_64",
+                ["--records", "64", *common],
+                driver_commands,
+            )
+        )
+        hold_milliseconds = 500 if args.suite == "process-smoke" else 2000
+        for backend in ("pidfd", "posix_fallback"):
+            for records in (1, 8, 64):
+                results.append(
+                    run_process_helper(
+                        args,
+                        root,
+                        project,
+                        f"monitor_idle_{backend}_{records}",
+                        ["--records", str(records), "--hold-ms", str(hold_milliseconds), *common],
+                        driver_commands,
+                    )
+                )
+        with FixedLoopbackFixture() as loopback:
+            results.append(
+                run_process_helper(
+                    args,
+                    root,
+                    project,
+                    "family_curl_lifecycle",
+                    ["--loopback-port", str(loopback.port)],
+                    driver_commands,
+                )
+            )
+        for result_id in (
+            "family_plugin_lifecycle",
+            "family_mcp_lifecycle",
+            "family_lsp_lifecycle",
+            "family_bash_lifecycle",
+        ):
+            results.append(run_process_helper(args, root, project, result_id, [], driver_commands))
+
+        host = host_provenance(load_start)
+        try:
+            host["load_at_end"] = list(os.getloadavg())
+        except OSError:
+            host["load_at_end"] = [0.0, 0.0, 0.0]
+        source = process_source_provenance(repository, args.runtime_reference)
+        source["family_sources"] = family_source_identities(repository)
+        source["build"] = process_build_provenance(args.ava, repository, capabilities)
+        source["host"] = host
+        source["driver"] = {
+            "exact_command": list(args._exact_command),
+            "run_order_label": args.run_order,
+            "run_order": list(PROCESS_EXPECTED_RESULT_IDS),
+            "invocations": driver_commands,
+            "warmup": {"application": 1, "warm_sequential": 1},
+            "records": [1, 8, 64],
+            "iterations": {"warm_sequential": sequential_iterations},
+            "hold_milliseconds": hold_milliseconds,
+            "termination_grace_milliseconds": 75,
+            "shutdown_deadline_milliseconds": 2000,
+            "measured_repetitions": args.runs,
+            "clock": "monotonic_ns_and_steady_clock",
+            "environment_policy": "fixed_allowlist_no_host_environment_inheritance",
+        }
+        document: dict[str, Any] = {
+            "schema_version": PROCESS_SCHEMA_VERSION,
+            "contract_version": PROCESS_CONTRACT_VERSION,
+            "generated_at_utc": started_at,
+            "completed_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "suite": args.suite,
+            "provenance": source,
+            "artifacts": process_artifact_inventory(args, repository),
+            "capabilities": capabilities,
+            "results": results,
+            "checks": [],
+        }
+        document["checks"] = process_smoke_checks(results, capabilities) if args.suite == "process-smoke" else []
+        validate_process_document(document)
+        return document
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _statistics_equal(actual: Any, expected: Any) -> bool:
+    if not isinstance(actual, dict) or actual.keys() != expected.keys():
+        return False
+    for key, expected_value in expected.items():
+        actual_value = actual[key]
+        if isinstance(expected_value, dict):
+            if not _statistics_equal(actual_value, expected_value):
+                return False
+        elif not _is_number(actual_value) or float(actual_value) != float(expected_value):
+            return False
+    return True
+
+
+def validate_process_document(document: dict[str, Any]) -> None:
+    if document.get("schema_version") != PROCESS_SCHEMA_VERSION or document.get("contract_version") != PROCESS_CONTRACT_VERSION:
+        raise ValueError("unexpected process benchmark schema or contract version")
+    for key in ("generated_at_utc", "completed_at_utc", "suite", "provenance", "artifacts", "capabilities", "results", "checks"):
+        if key not in document:
+            raise ValueError(f"process benchmark document lacks {key}")
+    if document["suite"] not in ("process-smoke", "process-baseline"):
+        raise ValueError("process benchmark document has an invalid suite")
+    provenance = document["provenance"]
+    for key in ("measured_checkout", "runtime_reference", "harness", "family_sources", "build", "host", "driver"):
+        if key not in provenance:
+            raise ValueError(f"process benchmark provenance lacks {key}")
+    for key in ("commit", "tree", "dirty"):
+        if key not in provenance["measured_checkout"]:
+            raise ValueError(f"process measured checkout lacks {key}")
+    for key in ("commit", "tree", "exact_production_path_equality"):
+        if key not in provenance["runtime_reference"]:
+            raise ValueError(f"process runtime reference lacks {key}")
+    if provenance["harness"].get("contract_version") != PROCESS_CONTRACT_VERSION:
+        raise ValueError("process harness provenance has the wrong contract")
+    if provenance["build"].get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
+        raise ValueError("process build provenance must not claim verified source embedding")
+    host = provenance["host"]
+    for key in (
+        "os",
+        "kernel",
+        "machine",
+        "cpu",
+        "cpu_count",
+        "ram_bytes",
+        "page_size_bytes",
+        "python_version",
+        "boot_id_sha256",
+        "limits",
+        "monotonic_clock_resolution_ns",
+        "load_at_start",
+        "load_at_end",
+    ):
+        if key not in host:
+            raise ValueError(f"process host provenance lacks {key}")
+    artifacts = document["artifacts"]
+    for key in ("ava", "benchmark_helper", "benchmark_script", "memory_helper", "python"):
+        validate_file_identity(artifacts.get(key), key)
+        if not isinstance(artifacts[key].get("mode"), int):
+            raise ValueError(f"process artifact {key} lacks mode")
+    for key in ("fake_process_child", "fake_mcp_server", "fake_lsp_server", "fake_provider", "curl", "bash_direct_argv_executable"):
+        if artifacts.get(key) is not None:
+            validate_file_identity(artifacts[key], key)
+            if not isinstance(artifacts[key].get("mode"), int):
+                raise ValueError(f"process artifact {key} lacks mode")
+    sample_plugin = artifacts.get("sample_plugin")
+    if not isinstance(sample_plugin, dict) or "root" not in sample_plugin:
+        raise ValueError("process artifacts lack sample plugin identity")
+    for key in ("manifest", "entrypoint"):
+        validate_file_identity(sample_plugin.get(key), f"sample_plugin.{key}")
+        if not isinstance(sample_plugin[key].get("mode"), int):
+            raise ValueError(f"process sample plugin {key} lacks mode")
+
+    capabilities = document["capabilities"]
+    if capabilities.get("helper_contract") != PROCESS_CONTRACT_VERSION:
+        raise ValueError("process capabilities have the wrong helper contract")
+    results = document["results"]
+    if not isinstance(results, list) or [result.get("id") for result in results] != list(PROCESS_EXPECTED_RESULT_IDS):
+        raise ValueError("process benchmark results are missing, duplicated, or out of order")
+    for result in results:
+        result_id = result["id"]
+        spec = PROCESS_RESULT_SPECS[result_id]
+        for key in ("family", "status", "primary_metric", "unit", "boundary", "repetitions", "observation_count", "samples", "statistics"):
+            if key not in result:
+                raise ValueError(f"process result {result_id} lacks {key}")
+        if any(result[key] != spec[key] for key in ("family", "primary_metric", "unit", "boundary")):
+            raise ValueError(f"process result {result_id} changed its metric contract")
+        if not isinstance(result["samples"], list) or result["observation_count"] != len(result["samples"]):
+            raise ValueError(f"process result {result_id} has an invalid sample count")
+        serialized_result = json.dumps(result, sort_keys=True)
+        if "://" in serialized_result or "CANARY_REDACTION" in serialized_result:
+            raise ValueError(f"process result {result_id} contains prohibited content")
+        if result["status"] == "unsupported":
+            reason_code = result.get("reason_code")
+            if reason_code not in PROCESS_REASON_TEXT or result.get("reason") != PROCESS_REASON_TEXT[reason_code]:
+                raise ValueError(f"process result {result_id} has an invalid unsupported reason")
+            if result["samples"] or result["statistics"] is not None or result["repetitions"] != 0:
+                raise ValueError(f"unsupported process result {result_id} contains measurements")
+            continue
+        if result["status"] != "measured" or not result["samples"] or result["repetitions"] <= 0:
+            raise ValueError(f"process result {result_id} is not a valid measurement")
+        ordinals_by_run: dict[int, list[int]] = {}
+        for sample in result["samples"]:
+            _validate_safe_sample(sample)
+            failed_checks = [
+                name
+                for name, value in sample["checks"].items()
+                if isinstance(value, bool)
+                and not value
+                and not (
+                    result_id.startswith("family_")
+                    and name in ("protocol_compatible", "expected_response")
+                )
+            ]
+            if failed_checks:
+                raise ValueError(f"process result {result_id} contains a failed correctness check")
+            ordinals_by_run.setdefault(sample["run"], []).append(sample["observation"])
+        if sorted(ordinals_by_run) != list(range(1, result["repetitions"] + 1)):
+            raise ValueError(f"process result {result_id} lost run correlation")
+        if any(ordinals != list(range(1, len(ordinals) + 1)) for ordinals in ordinals_by_run.values()):
+            raise ValueError(f"process result {result_id} lost observation correlation")
+        expected_statistics = process_statistics(result["samples"])
+        if not _statistics_equal(result["statistics"], expected_statistics):
+            raise ValueError(f"process result {result_id} statistics do not match raw samples")
+        if result_id.startswith("family_"):
+            if result.get("authority") not in ("legacy_local", "supervised"):
+                raise ValueError(f"family result {result_id} has an invalid authority")
+            if result.get("authority") == "supervised" and not all(
+                sample["checks"].get("supervisor_record_finished") is True and sample["checks"].get("supervisor_settlement_once") is True
+                for sample in result["samples"]
+            ):
+                raise ValueError(f"family result {result_id} makes a false supervised claim")
+            if result.get("metadata", {}).get("authority") != result.get("authority"):
+                raise ValueError(f"family result {result_id} has inconsistent authority metadata")
+            compatibility = result.get("compatibility_checks")
+            if not isinstance(compatibility, dict) or set(compatibility.values()) - {True, False}:
+                raise ValueError(f"family result {result_id} lacks compatibility checks")
+            expected_compatibility = {
+                name: all(sample["checks"].get(name) is True for sample in result["samples"])
+                for name in ("protocol_compatible", "expected_response")
+            }
+            if compatibility != expected_compatibility:
+                raise ValueError(f"family result {result_id} compatibility checks do not match raw samples")
+    if not isinstance(document["checks"], list):
+        raise ValueError("process benchmark checks must be an array")
+
+
+def _artifact_hash(identity: Any) -> str | None:
+    return identity.get("sha256") if isinstance(identity, dict) else None
+
+
+def _comparison_identity(document: dict[str, Any]) -> dict[str, Any]:
+    provenance = document["provenance"]
+    host = provenance["host"]
+    build = provenance["build"]
+    features = dict(build["features"])
+    for migration_dimension in ("family_authorities", "process_supervisor", "process_fixture", "platform_backend"):
+        features.pop(migration_dimension, None)
+    artifacts = document["artifacts"]
+    plugin = artifacts["sample_plugin"]
+    fixture_hashes = {
+        "benchmark_script": _artifact_hash(artifacts["benchmark_script"]),
+        "memory_helper": _artifact_hash(artifacts["memory_helper"]),
+        "fake_mcp_server": _artifact_hash(artifacts.get("fake_mcp_server")),
+        "fake_lsp_server": _artifact_hash(artifacts.get("fake_lsp_server")),
+        "curl": _artifact_hash(artifacts.get("curl")),
+        "bash_direct_argv_executable": _artifact_hash(artifacts.get("bash_direct_argv_executable")),
+        "sample_plugin_manifest": _artifact_hash(plugin["manifest"]),
+        "sample_plugin_entrypoint": _artifact_hash(plugin["entrypoint"]),
+    }
+    boundaries = {
+        result["id"]: {"unit": result["unit"], "primary_metric": result["primary_metric"], "boundary": result["boundary"]}
+        for result in document["results"]
+    }
+    return {
+        "contract": document["contract_version"],
+        "host": {
+            key: host.get(key)
+            for key in ("os", "kernel", "machine", "cpu", "cpu_count", "ram_bytes", "page_size_bytes", "boot_id_sha256")
+        },
+        "build_recipe": build["recipe"],
+        "compiler": {
+            "path": build["compiler"]["path"],
+            "sha256": _artifact_hash(build["compiler"].get("artifact")),
+            "id": build["compiler"]["id"],
+            "configured_version": build["compiler"]["configured_version"],
+            "version_output": build["compiler"]["version_output"],
+            "flags": build["compiler"]["flags"],
+        },
+        "features": features,
+        "fixture_hashes": fixture_hashes,
+        "boundaries": boundaries,
+    }
+
+
+def comparison_unsupported(reason_code: str, reason: str, mismatches: Sequence[str] = ()) -> dict[str, Any]:
+    return {
+        "schema_version": COMPARISON_SCHEMA_VERSION,
+        "contract_version": PROCESS_CONTRACT_VERSION,
+        "status": "unsupported",
+        "reason_code": reason_code,
+        "reason": reason,
+        "mismatches": list(mismatches),
+        "comparisons": [],
+        "repeatable_claim": False,
+        "confirmation": "reversed_order_required",
+    }
+
+
+def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    validate_process_document(before)
+    validate_process_document(after)
+    before_identity = _comparison_identity(before)
+    after_identity = _comparison_identity(after)
+    mismatch_names = [name for name in before_identity if before_identity[name] != after_identity[name]]
+    if mismatch_names:
+        return comparison_unsupported(
+            "incomparable_cohorts",
+            "The cohorts differ in required host, boot, build, compiler, feature, fixture, boundary, or contract identity.",
+            mismatch_names,
+        )
+    before_results = {result["id"]: result for result in before["results"]}
+    after_results = {result["id"]: result for result in after["results"]}
+    comparisons: list[dict[str, Any]] = []
+    transitioned = 0
+    for result_id in PROCESS_EXPECTED_RESULT_IDS[-5:]:
+        before_result = before_results[result_id]
+        after_result = after_results[result_id]
+        if before_result["status"] != "measured" or after_result["status"] != "measured":
+            comparisons.append(
+                {
+                    "id": result_id,
+                    "status": "unsupported",
+                    "reason_code": "raw_samples_required",
+                    "reason": "Both family cohorts must contain measured raw samples.",
+                }
+            )
+            continue
+        if before_result.get("authority") != "legacy_local" or after_result.get("authority") != "supervised":
+            comparisons.append(
+                {
+                    "id": result_id,
+                    "status": "unsupported",
+                    "reason_code": "authority_transition_required",
+                    "reason": "Family comparison requires a legacy_local to supervised authority transition.",
+                }
+            )
+            continue
+        if before_result.get("compatibility_checks") != after_result.get("compatibility_checks"):
+            comparisons.append(
+                {
+                    "id": result_id,
+                    "status": "unsupported",
+                    "reason_code": "compatibility_mismatch",
+                    "reason": "Family compatibility checks differ between cohorts.",
+                }
+            )
+            continue
+        before_stats = process_statistics(before_result["samples"])
+        after_stats = process_statistics(after_result["samples"])
+        before_median = before_stats["primary"]["median"]
+        after_median = after_stats["primary"]["median"]
+        delta = after_median - before_median
+        percent = (delta / before_median * 100.0) if before_median != 0 else None
+        trigger = delta > 100_000 and percent is not None and percent > 20.0
+        comparisons.append(
+            {
+                "id": result_id,
+                "status": "measured",
+                "unit": before_result["unit"],
+                "boundary": before_result["boundary"],
+                "before_statistics": before_stats,
+                "after_statistics": after_stats,
+                "median_delta": delta,
+                "median_delta_percent": percent,
+                "investigation_trigger": trigger,
+                "gating": False,
+                "faster_required": False,
+            }
+        )
+        transitioned += 1
+    if transitioned == 0:
+        document = comparison_unsupported(
+            "authority_transition_required",
+            "No family has a validated legacy_local to supervised authority transition.",
+        )
+        document["comparisons"] = comparisons
+        return document
+    return {
+        "schema_version": COMPARISON_SCHEMA_VERSION,
+        "contract_version": PROCESS_CONTRACT_VERSION,
+        "status": "measured",
+        "comparisons": comparisons,
+        "investigation_thresholds": {
+            "latency": {"relative_percent": 20.0, "absolute_ns": 100_000.0},
+            "rss": {"relative_percent": 20.0, "absolute_kib": 4096.0},
+            "monitor_cpu": {"relative_percent": 25.0, "absolute_cpu_ns_per_wall_second": 5_000_000.0},
+        },
+        "gating": False,
+        "faster_required": False,
+        "repeatable_claim": False,
+        "confirmation": "reversed_order_required",
+    }
+
+
+def validate_comparison_document(document: dict[str, Any]) -> None:
+    if document.get("schema_version") != COMPARISON_SCHEMA_VERSION or document.get("contract_version") != PROCESS_CONTRACT_VERSION:
+        raise ValueError("unexpected process comparison schema or contract")
+    if document.get("status") not in ("measured", "unsupported") or not isinstance(document.get("comparisons"), list):
+        raise ValueError("invalid process comparison status")
+    if document.get("repeatable_claim") is not False or document.get("confirmation") != "reversed_order_required":
+        raise ValueError("a single paired comparison must require reversed-order confirmation")
+    if document["status"] == "unsupported" and not isinstance(document.get("reason_code"), str):
+        raise ValueError("unsupported process comparison lacks a reason code")
+    for comparison in document["comparisons"]:
+        if comparison.get("status") == "measured":
+            if comparison.get("gating") is not False or comparison.get("faster_required") is not False:
+                raise ValueError("process comparison must remain non-gating")
+            for key in ("before_statistics", "after_statistics"):
+                if not isinstance(comparison.get(key), dict):
+                    raise ValueError("measured process comparison lacks recomputed statistics")
+        elif comparison.get("status") != "unsupported":
+            raise ValueError("process comparison has an invalid result status")
+
+
+def process_markdown_report(document: dict[str, Any]) -> str:
+    lines = [
+        "# AVA Process-Supervision Benchmark Report",
+        "",
+        f"Generated: `{document['generated_at_utc']}`  ",
+        f"Suite: `{document['suite']}`  ",
+        f"Contract: `{document['contract_version']}`",
+        "",
+        "> Machine/build-specific evidence only. Performance triggers are non-gating and require reversed-order confirmation.",
+        "",
+        "| Measurement | Status | Median | p95 | Maximum |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for result in document["results"]:
+        statistics_value = result["statistics"]
+        if statistics_value:
+            primary = statistics_value["primary"]
+            values = tuple(f"{primary[key]:.3f} {result['unit']}" for key in ("median", "p95", "maximum"))
+        else:
+            values = ("—", "—", "—")
+        lines.append(f"| `{result['id']}` | {result['status']} | {values[0]} | {values[1]} | {values[2]} |")
+    lines.extend(["", "## Unsupported cases", ""])
+    unsupported_results = [result for result in document["results"] if result["status"] == "unsupported"]
+    if unsupported_results:
+        for result in unsupported_results:
+            lines.append(f"- `{result['id']}`: `{result['reason_code']}` — {result['reason']}")
+    else:
+        lines.append("- None.")
+    lines.extend(["", "## Catastrophic smoke checks", ""])
+    if document["checks"]:
+        for check in document["checks"]:
+            lines.append(f"- {'PASS' if check['passed'] else 'FAIL'} `{check['name']}` ({check['ceiling']})")
+    else:
+        lines.append("- Not applied to this opt-in baseline suite.")
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if argv is None:
+        args._exact_command = [sys.executable, *sys.argv]
+    else:
+        args._exact_command = [sys.executable, str(Path(__file__).resolve()), *argv]
     try:
         validate_arguments(args)
-        document = execute(args)
+        process_suite = args.suite.startswith("process-")
+        document = execute_process(args) if process_suite else execute(args)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         if args.report is not None:
             args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(markdown_report(document), encoding="utf-8")
+            report_text = process_markdown_report(document) if process_suite else markdown_report(document)
+            args.report.write_text(report_text, encoding="utf-8")
+        comparison_failed = False
+        if args.compare_to is not None and args.comparison_output is not None:
+            before = json.loads(args.compare_to.read_text(encoding="utf-8"))
+            comparison = compare_process_documents(before, document)
+            comparison["provenance"] = {
+                "before_commit": before["provenance"]["measured_checkout"]["commit"],
+                "after_commit": document["provenance"]["measured_checkout"]["commit"],
+                "run_order_confirmation": "reversed_order_required",
+            }
+            comparison["artifacts"] = {
+                "before_document": file_identity_v3(args.compare_to),
+                "after_document": file_identity_v3(args.output),
+            }
+            validate_comparison_document(comparison)
+            args.comparison_output.parent.mkdir(parents=True, exist_ok=True)
+            args.comparison_output.write_text(json.dumps(comparison, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            comparison_failed = comparison["status"] == "unsupported"
+            print(f"Comparison: {args.comparison_output}")
         print(f"JSON: {args.output}")
         if args.report is not None:
             print(f"Markdown: {args.report}")
@@ -1125,6 +2484,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if failed:
             for check in failed:
                 print(f"smoke invariant failed: {check['name']} ({check['ceiling']})", file=sys.stderr)
+            return 1
+        if comparison_failed:
+            print("comparison unsupported: cohorts are not valid legacy_local to supervised evidence", file=sys.stderr)
             return 1
         return 0
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:

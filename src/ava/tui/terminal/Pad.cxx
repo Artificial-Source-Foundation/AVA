@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "GraphemeRun.h"
-#include "ParagraphPad.h"
+#include "Pad.h"
 #include "GraphemeSurface.h"
 #include "utils/macros.h"
 
@@ -9,11 +9,11 @@
 
 namespace ava::tui::terminal {
 
-GraphemeSurface ParagraphPad::generate_grapheme_surface(columns_t columns)
+GraphemeSurface Pad::generate_grapheme_surface(columns_t columns)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
-  // Do not call `generate` unless this ParagraphPad contains at least one Paragraph.
+  // Do not call `generate` unless this Pad contains at least one Paragraph.
   ASSERT(!paragraphs_.empty());
 
   // Wrap every Paragraph first: the total number of wrapped rows (plus one blank row between
@@ -31,7 +31,7 @@ GraphemeSurface ParagraphPad::generate_grapheme_surface(columns_t columns)
   return wrapped_paragraphs;
 }
 
-void ParagraphPad::generate(columns_t columns, bool blank_line_between_block_rows)
+void Pad::generate(columns_t columns, bool blank_line_between_block_rows)
 {
   GraphemeSurface surface = generate_grapheme_surface(columns);
 
@@ -59,21 +59,21 @@ void ParagraphPad::generate(columns_t columns, bool blank_line_between_block_row
   }
 }
 
-void ParagraphPad::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
+void Pad::prefresh(Position pad_pos, Position screen_pos, Dimension screen_size)
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());
   pad_->prefresh(pad_pos, screen_pos, screen_size);
 }
 
-Dimension ParagraphPad::dimension() const
+Dimension Pad::dimension() const
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());
   return pad_->getmaxyx();
 }
 
-BasicWindow& ParagraphPad::basic_window()
+BasicWindow& Pad::basic_window()
 {
   // Call `generate` before calling this function.
   ASSERT(pad_.has_value());

@@ -7,7 +7,7 @@
 #include "terminal/Context.h"
 #include "terminal/GraphemeRun.h"
 #include "terminal/GraphemeSpan.h"
-#include "terminal/ParagraphPad.h"
+#include "terminal/Pad.h"
 #include "terminal/Rendition.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
@@ -179,7 +179,7 @@ void test_pad_generate_comment_example()
       static_cast<void>(std::fclose(input));
     if (output)
       static_cast<void>(std::fclose(output));
-    expect(false, "tmpfile must be available for the terminal::ParagraphPad test");
+    expect(false, "tmpfile must be available for the terminal::Pad test");
     return;
   }
 
@@ -190,21 +190,21 @@ void test_pad_generate_comment_example()
   terminal::Context terminal_context(output, input);
 
   bool const color_support = terminal_context.has_colors();
-  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::ParagraphPad test");
+  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
 
   if (color_support)
   {
     terminal::ColorPair styled_pair = terminal_context.create_color_pair(0x111111, 0x888888);
     terminal::Rendition const styled_rendition{styled_pair, terminal::Attribute::bold};
 
-    terminal::ParagraphPad pad;
+    terminal::Pad pad;
     pad.append(make_comment_paragraph(styled_rendition));
     pad.generate(9);
 
     std::array<ExpectedPadRow, 16> const& expected = expected_pad_rows();
 
     expect(pad.dimension().width() == 9 && pad.dimension().height() == expected.size(),
-           "ParagraphPad::generate(9) must create a 16 x 9 pad, got " + std::to_string(pad.dimension().height()) + " x " + std::to_string(pad.dimension().width()));
+           "Pad::generate(9) must create a 16 x 9 pad, got " + std::to_string(pad.dimension().height()) + " x " + std::to_string(pad.dimension().width()));
 
     std::array<terminal::ComplexChar, 9> cells;
     for (std::size_t row = 0; row < expected.size(); ++row)
@@ -253,7 +253,7 @@ void test_pad_generate_comment_example()
                "right alignment must retain every source character and its GraphemeRun ownership");
       }
 
-      terminal::ParagraphPad right_aligned_pad;
+      terminal::Pad right_aligned_pad;
       right_aligned_pad.append(std::move(right_aligned));
       right_aligned_pad.generate(6);
 
@@ -269,7 +269,7 @@ void test_pad_generate_comment_example()
     // Centered alignment deliberately keeps its prior behavior: retained trailing spaces participate in centering.
     auto centered = terminal::Paragraph::create({.alignment = terminal::HorizontalAlignment::centered});
     centered->append(terminal::TextSpan::create(u8"ab   "));
-    terminal::ParagraphPad centered_pad;
+    terminal::Pad centered_pad;
     centered_pad.append(std::move(centered));
     centered_pad.generate(6);
     std::array<terminal::ComplexChar, 6> centered_cells;

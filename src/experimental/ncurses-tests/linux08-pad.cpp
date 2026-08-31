@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "terminal/Context.h"
-#include "terminal/ParagraphPad.h"
+#include "terminal/Pad.h"
 
 #include <algorithm>
 #include <array>
@@ -156,9 +156,9 @@ int main()
       terminal_context.create_color_pair({0x182008}, {0xa8e050}),
   };
 
-  // Fill the ParagraphPad's with the lorem ipsum paragraphs, cycling through them (and through the
+  // Fill the Pad's with the lorem ipsum paragraphs, cycling through them (and through the
   // paragraph default renditions) to get enough content to scroll through.
-  std::array<terminal::ParagraphPad, 3> pads;
+  std::array<terminal::Pad, 3> pads;
   int const total_paragraph_count = paragraph_repetitions * static_cast<int>(lorem_ipsum_paragraphs.size());
   for (int paragraph_number = 0; paragraph_number < total_paragraph_count; ++paragraph_number)
   {

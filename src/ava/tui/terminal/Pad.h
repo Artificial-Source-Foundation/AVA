@@ -9,7 +9,7 @@ namespace ava::tui::terminal {
 
 class GraphemeSurface;
 
-// class ParagraphPad
+// class Pad
 //
 // Represents an ncurses pad: an off-screen terminal buffer that is not restricted
 // by the screen size and that is shown on the screen by refreshing explicit
@@ -19,18 +19,18 @@ class GraphemeSurface;
 // create or update the underlying ncurses pad; call generate() to (re)create it
 // from the current content.
 //
-class ParagraphPad
+class Pad
 {
  private:
   std::vector<std::unique_ptr<Paragraph>> paragraphs_;  // The Paragraph's that make up the content of this pad, in order.
   std::optional<BasicWindow> pad_;                      // The ncurses pad created by the last generate() call, if any.
 
  private:
-  // (Re)generate the GraphemeSurface for this ParagraphPad. Called by generate.
+  // (Re)generate the GraphemeSurface for this Pad. Called by generate.
   GraphemeSurface generate_grapheme_surface(columns_t columns);
 
  public:
-  ParagraphPad() = default;
+  Pad() = default;
 
   // Append `paragraph` to the end of the content of this pad.
   void append(std::unique_ptr<Paragraph>&& paragraph)

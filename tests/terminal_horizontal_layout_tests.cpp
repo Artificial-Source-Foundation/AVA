@@ -146,7 +146,7 @@ void test_mixed_width_text_span_rendering()
   terminal::Context terminal_context(output, input);
 
   bool const color_support = terminal_context.has_colors();
-  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::ParagraphPad test");
+  expect(color_support, "TERM=xterm-256color must provide colors for the terminal::Pad test");
 
   {
     //   index i    priority   minimum width   natural width

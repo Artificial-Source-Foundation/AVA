@@ -103,6 +103,7 @@ class SupervisorTestAccess final
   [[nodiscard]] static std::uint64_t monitor_cycle(Supervisor const& supervisor) noexcept;
   [[nodiscard]] static std::uint64_t pulse_monitor(Supervisor& supervisor) noexcept;
   [[nodiscard]] static bool wait_for_monitor_cycle(Supervisor& supervisor, std::uint64_t previous_cycle, ProcessDeadline deadline) noexcept;
+  [[nodiscard]] static std::size_t retained_native_child_count(Supervisor const& supervisor) noexcept;
   static void interrupt_next_monitor_poll(Supervisor& supervisor) noexcept;
   static void set_after_poll_snapshot_hook(Supervisor& supervisor, std::function<void()> hook);
   static void clear_after_poll_snapshot_hook(Supervisor& supervisor) noexcept;

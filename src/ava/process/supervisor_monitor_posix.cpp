@@ -360,7 +360,7 @@ void process_record_locked(SupervisorState& state, Record& record, Clock::time_p
   // same monitor turn can commit its reason. A fallback backend also receives
   // one nonblocking exact observation at the absolute boundary.
   process_exact_probes_locked(state, record, now);
-  if (record.policy.execution_deadline && now >= *record.policy.execution_deadline)
+  if (!record.execution_deadline_processed && record.policy.execution_deadline && now >= *record.policy.execution_deadline)
     exact_probe_direct_children_locked(state, record, now);
 
   if (record.startup_handshake_complete || record.reason)
@@ -380,9 +380,9 @@ void process_record_locked(SupervisorState& state, Record& record, Clock::time_p
 
   static_cast<void>(commit_due_execution_deadline_locked(record, now));
 
-  if (record.reason == TerminationReasonV1::NaturalExit && record.leader_observed && !record.natural_group_observation_started)
+  if (record.leader_observed && !record.pre_kill_group_observation_started && !record.post_kill_group_observation_started)
   {
-    record.natural_group_observation_started = true;
+    record.pre_kill_group_observation_started = true;
     process_natural_group_observation_locked(state, record, now);
     if (record.state == ProcessStateV1::Finished)
       return;
@@ -506,7 +506,7 @@ std::optional<Clock::time_point> nearest_deadline_locked(SupervisorState const& 
     auto const& record = *record_pointer;
     if (record.state == ProcessStateV1::Finished)
       continue;
-    if (!record.reason)
+    if (!record.execution_deadline_processed)
       set_nearest(nearest, record.policy.execution_deadline);
     if (!record.registered)
       continue;

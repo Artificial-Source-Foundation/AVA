@@ -157,6 +157,25 @@ bool write_byte(ava::process::PipeEndpoint& endpoint, ava::process::ProcessDeadl
   return false;
 }
 
+bool read_to_eof(ava::process::PipeEndpoint& endpoint, ava::process::ProcessDeadline deadline)
+{
+  std::array<std::byte, 256> buffer{};
+  while (Clock::now() < deadline)
+  {
+    auto read = endpoint.read(buffer);
+    if (!read)
+      return false;
+    if (read->state == ava::process::PipeIoStateV1::EndOfStream)
+      return true;
+    if (read->state == ava::process::PipeIoStateV1::Progress)
+      continue;
+    auto ready = endpoint.wait_readable(deadline);
+    if (!ready || !*ready)
+      return false;
+  }
+  return false;
+}
+
 class HookLatch final
 {
  public:
@@ -194,11 +213,12 @@ class HookLatch final
   bool released_ = false;
 };
 
-bool deadline_status(ava::process::ExitStatusV1 const& status)
+bool complete_deadline_status(ava::process::ExitStatusV1 const& status)
 {
-  return status.reason == ava::process::TerminationReasonV1::DeadlineExpired &&
-         (status.cleanup == ava::process::CleanupStateV1::Complete || status.cleanup == ava::process::CleanupStateV1::Incomplete);
+  return status.reason == ava::process::TerminationReasonV1::DeadlineExpired && status.cleanup == ava::process::CleanupStateV1::Complete;
 }
+
+std::pair<std::shared_ptr<HookLatch>, bool> freeze_monitor(ava::process::Supervisor& supervisor, ava::process::ProcessDeadline deadline);
 
 void test_reservation_policy_validation()
 {
@@ -221,6 +241,12 @@ void test_reservation_policy_validation()
     auto optional = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Plugin);
     optional_for_other_roles = optional.has_value();
   }
+  bool saturating_horizon_valid = false;
+  {
+    auto saturated =
+        supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Plugin, {.execution_deadline = ava::process::ProcessDeadline::max()});
+    saturating_horizon_valid = saturated.has_value();
+  }
 
   std::string errors;
   if (!past)
@@ -233,8 +259,8 @@ void test_reservation_policy_validation()
   auto const past_text = std::to_string(past_instant.time_since_epoch().count());
   auto const far_text = std::to_string(far_instant.time_since_epoch().count());
   expect(!ava::process::LifecyclePolicyV1{}.execution_deadline && !past && !browser_missing && !browser_far && boundary_valid && optional_for_other_roles &&
-             snapshot.records.empty() && snapshot.live_records == 0 && !snapshot.monitor_started,
-         "past deadlines and missing/overlong Browser deadlines fail before records while the exact Browser boundary and optional general policy pass");
+             saturating_horizon_valid && snapshot.records.empty() && snapshot.live_records == 0 && !snapshot.monitor_started,
+         "past deadlines and missing/overlong Browser deadlines fail before records while valid general deadlines include a saturating cleanup horizon");
   expect(errors.find(past_text) == std::string::npos && errors.find(far_text) == std::string::npos,
          "execution-deadline policy errors do not disclose absolute clock values");
 }
@@ -297,26 +323,95 @@ void test_after_fork_before_release_deadline()
          "a deadline after exact-child registration but before release keeps the gate closed and performs one exact DeadlineExpired settlement");
 }
 
-void test_running_deadlines_and_clipped_escalation()
+void test_running_deadlines_reap_within_cleanup_horizon()
 {
   ava::process::Supervisor supervisor;
   auto application = application_owner();
   auto const deadline = Clock::now() + 800ms;
-  auto cooperative = spawn_fixture(supervisor, operation_owner(application), "input-gate", deadline, 5s, true, false);
-  auto refusing = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 5s, false, true);
+  auto cooperative = spawn_fixture(supervisor, operation_owner(application), "input-gate", deadline, 75ms, true, true);
+  auto refusing = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 75ms, false, true);
   bool const ready = refusing && refusing->standard_output && read_until(*refusing->standard_output, "READY\n", deadline);
-  auto cooperative_status = cooperative ? supervisor.wait(cooperative->handle, deadline + 750ms)
-                                        : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(cooperative.error()));
+  auto cooperative_status =
+      cooperative ? supervisor.wait(cooperative->handle, deadline + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(cooperative.error()));
   auto refusing_status =
-      refusing ? supervisor.wait(refusing->handle, deadline + 750ms) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(refusing.error()));
+      refusing ? supervisor.wait(refusing->handle, deadline + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(refusing.error()));
+  bool const cooperative_eof = cooperative && cooperative->standard_output && read_to_eof(*cooperative->standard_output, deadline + 1s);
+  bool const refusing_eof = refusing && refusing->standard_output && read_to_eof(*refusing->standard_output, deadline + 1s);
+  auto const snapshot = supervisor.snapshot();
+  bool settled_once = snapshot.records.size() == 2;
+  for (auto const& record : snapshot.records)
+    settled_once = settled_once && record.state == ava::process::ProcessStateV1::Finished && record.cleanup == ava::process::CleanupStateV1::Complete &&
+                   record.settlement_count == 1;
+  bool const cooperative_signal =
+      cooperative_status && cooperative_status->kind == ava::process::ExitKindV1::Signaled && cooperative_status->signal_number == SIGTERM;
+  bool const refusing_signal = refusing_status && refusing_status->kind == ava::process::ExitKindV1::Signaled && refusing_status->signal_number == SIGKILL;
+  expect(cooperative && refusing && ready && cooperative_status && refusing_status && complete_deadline_status(*cooperative_status) &&
+             complete_deadline_status(*refusing_status) && cooperative_signal && refusing_signal && cooperative_eof && refusing_eof && settled_once &&
+             SupervisorTestAccess::retained_native_child_count(supervisor) == 0 && Clock::now() <= deadline + 1s,
+         "cooperative and TERM-refusing deadline children are proven quiet, reaped, and settled Complete once within the fixed cleanup horizon");
+}
+
+void test_natural_exit_near_trigger_is_reaped()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const deadline = Clock::now() + 700ms;
+  auto child = spawn_fixture(supervisor, operation_owner(application), "input-gate", deadline, 100ms, true, true);
+  auto [latch, frozen] = freeze_monitor(supervisor, deadline - 100ms);
+  wait_until(deadline - 30ms);
+  bool const released = child && child->standard_input && write_byte(*child->standard_input, deadline);
+  bool const eof_before_trigger = child && child->standard_output && read_to_eof(*child->standard_output, deadline);
+  wait_until(deadline + 5ms);
+  latch->release();
+  SupervisorTestAccess::clear_after_poll_snapshot_hook(supervisor);
+  auto status = child ? supervisor.wait(child->handle, deadline + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
+  auto const snapshot = supervisor.snapshot();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::NaturalExit &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete && snapshot.records.front().settlement_count == 1;
+  expect(child && frozen && released && eof_before_trigger && status && status->reason == ava::process::TerminationReasonV1::NaturalExit &&
+             status->cleanup == ava::process::CleanupStateV1::Complete && exact && SupervisorTestAccess::retained_native_child_count(supervisor) == 0,
+         "a child exiting immediately before the execution trigger keeps NaturalExit and receives complete quiet proof and reap after the trigger");
+}
+
+void test_cancellation_near_trigger_keeps_its_cleanup_deadline()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const deadline = Clock::now() + 700ms;
+  auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 75ms, false, true);
+  bool const ready = child && child->standard_output && read_until(*child->standard_output, "READY\n", deadline);
+  wait_until(deadline - 30ms);
+  auto stopped = child ? supervisor.request_stop(child->handle, ava::process::TerminationReasonV1::Canceled, deadline + 1s)
+                       : ava::core::Result<ava::process::StopResultV1>(std::unexpected(child.error()));
+  auto status = child ? supervisor.wait(child->handle, deadline + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
+  bool const eof = child && child->standard_output && read_to_eof(*child->standard_output, deadline + 1s);
+  auto const snapshot = supervisor.snapshot();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::Canceled &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete && snapshot.records.front().settlement_count == 1;
+  expect(child && ready && stopped && stopped->newly_requested == 1 && status && status->reason == ava::process::TerminationReasonV1::Canceled &&
+             status->cleanup == ava::process::CleanupStateV1::Complete && status->kind == ava::process::ExitKindV1::Signaled &&
+             status->signal_number == SIGKILL && eof && exact && SupervisorTestAccess::retained_native_child_count(supervisor) == 0,
+         "cancellation immediately before the execution trigger keeps its earlier caller cleanup deadline and is reaped Complete");
+}
+
+void test_cleanup_horizon_exhaustion_is_incomplete()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const deadline = Clock::now() + 350ms;
+  auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 5s, false, true);
+  bool const ready = child && child->standard_output && read_until(*child->standard_output, "READY\n", deadline);
+  auto status = child ? supervisor.wait(child->handle, deadline + 2500ms) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
   auto const completed = Clock::now();
-  bool refusing_signal_honest = refusing_status.has_value();
-  if (refusing_status && refusing_status->cleanup == ava::process::CleanupStateV1::Complete)
-    refusing_signal_honest = refusing_status->kind == ava::process::ExitKindV1::Signaled && refusing_status->signal_number == SIGKILL;
-  expect(cooperative && refusing && ready && cooperative_status && refusing_status && deadline_status(*cooperative_status) &&
-             deadline_status(*refusing_status) && refusing_signal_honest && completed <= deadline + 750ms,
-         "cooperative and TERM-refusing children expire without caller stops, clip a five-second grace immediately, and report complete or honest incomplete "
-         "cleanup");
+  auto const snapshot = supervisor.snapshot();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::Incomplete && snapshot.records.front().settlement_count == 1;
+  expect(child && ready && status && status->reason == ava::process::TerminationReasonV1::DeadlineExpired &&
+             status->cleanup == ava::process::CleanupStateV1::Incomplete && exact && completed >= deadline + 1800ms && completed <= deadline + 2500ms,
+         "exhausting the fixed reservation-time cleanup horizon reports one honest Incomplete settlement without extending the budget");
 }
 
 void test_expiry_during_launch_framing()
@@ -386,7 +481,7 @@ void test_first_reason_and_due_mutator_ordering()
   {
     ava::process::Supervisor supervisor;
     auto const deadline = Clock::now() + 650ms;
-    auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 5s);
+    auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 50ms);
     auto [latch, frozen] = freeze_monitor(supervisor, deadline);
     if (frozen)
       wait_until(deadline + 5ms);
@@ -397,7 +492,7 @@ void test_first_reason_and_due_mutator_ordering()
     SupervisorTestAccess::clear_after_poll_snapshot_hook(supervisor);
     auto status = child ? supervisor.wait(child->handle, Clock::now() + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
     bool const due_visible = before_release.records.size() == 1 && before_release.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired;
-    expect(child && frozen && stopped && stopped->newly_requested == 1 && due_visible && status && deadline_status(*status),
+    expect(child && frozen && stopped && stopped->newly_requested == 1 && due_visible && status && complete_deadline_status(*status),
            "a handle stop mutator commits an already-due execution deadline before its requested reason even while the monitor is delayed");
   }
 
@@ -406,7 +501,7 @@ void test_first_reason_and_due_mutator_ordering()
     auto session = application.session();
     auto const deadline = Clock::now() + 650ms;
     auto child = session
-                     ? spawn_fixture(supervisor, operation_owner(*session), "ignore-term", deadline, 5s)
+                     ? spawn_fixture(supervisor, operation_owner(*session), "ignore-term", deadline, 50ms)
                      : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "owner fixture failed")));
     auto [latch, frozen] = freeze_monitor(supervisor, deadline);
     if (frozen)
@@ -419,7 +514,7 @@ void test_first_reason_and_due_mutator_ordering()
     SupervisorTestAccess::clear_after_poll_snapshot_hook(supervisor);
     auto status = child ? supervisor.wait(child->handle, Clock::now() + 1s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
     bool const due_visible = before_release.records.size() == 1 && before_release.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired;
-    expect(session && child && frozen && stopped && due_visible && status && deadline_status(*status),
+    expect(session && child && frozen && stopped && due_visible && status && complete_deadline_status(*status),
            "an owner stop mutator gives an already-due execution deadline the same first-reason ordering");
   }
 
@@ -486,7 +581,7 @@ void test_progress_and_eintr_do_not_reset_deadline()
   }
   auto status = child ? supervisor.wait(child->handle, deadline + 750ms) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
   auto const monitor = SupervisorTestAccess::monitor_snapshot(supervisor);
-  expect(child && ready && frozen && progressed && status && deadline_status(*status) && Clock::now() <= deadline + 750ms &&
+  expect(child && ready && frozen && progressed && status && complete_deadline_status(*status) && Clock::now() <= deadline + 750ms &&
              monitor.counters.poll_interruptions >= 1,
          "output progress, readiness waits, accounting, and an interrupted monitor poll retain the original immutable absolute execution deadline");
 }
@@ -498,7 +593,7 @@ void test_dropped_handle_deadline_settles_snapshot()
   auto const deadline = Clock::now() + 500ms;
   bool launched = false;
   {
-    auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 5s);
+    auto child = spawn_fixture(supervisor, operation_owner(application), "ignore-term", deadline, 50ms);
     launched = child.has_value();
   }
   auto settled = wait_for_snapshot(
@@ -507,9 +602,10 @@ void test_dropped_handle_deadline_settles_snapshot()
         return snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished;
       },
       deadline + 1s);
-  bool const exact =
-      settled && settled->records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired && settled->records.front().settlement_count == 1;
-  expect(launched && exact, "dropping the only caller handle leaves deadline enforcement and one terminal snapshot settlement owned by the supervisor");
+  bool const exact = settled && settled->records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired &&
+                     settled->records.front().cleanup == ava::process::CleanupStateV1::Complete && settled->records.front().settlement_count == 1;
+  expect(launched && exact && SupervisorTestAccess::retained_native_child_count(supervisor) == 0,
+         "dropping the only caller handle leaves complete deadline cleanup and one terminal snapshot settlement owned by the supervisor");
 }
 
 void test_nearest_deadline_order_and_shared_shutdown()
@@ -518,8 +614,8 @@ void test_nearest_deadline_order_and_shared_shutdown()
   {
     ava::process::Supervisor supervisor;
     auto const base = Clock::now();
-    auto late = spawn_fixture(supervisor, operation_owner(application), "ignore-term", base + 1s, 5s);
-    auto early = spawn_fixture(supervisor, operation_owner(application), "ignore-term", base + 550ms, 5s);
+    auto late = spawn_fixture(supervisor, operation_owner(application), "ignore-term", base + 1s, 50ms);
+    auto early = spawn_fixture(supervisor, operation_owner(application), "ignore-term", base + 550ms, 50ms);
     auto first = wait_for_snapshot(
         supervisor,
         [](ava::process::ProcessSnapshotV1 const& snapshot) {
@@ -599,7 +695,10 @@ void run_process_deadline_tests()
   test_reservation_policy_validation();
   test_reserved_deadline_expires_before_spawn();
   test_after_fork_before_release_deadline();
-  test_running_deadlines_and_clipped_escalation();
+  test_running_deadlines_reap_within_cleanup_horizon();
+  test_natural_exit_near_trigger_is_reaped();
+  test_cancellation_near_trigger_keeps_its_cleanup_deadline();
+  test_cleanup_horizon_exhaustion_is_incomplete();
   test_expiry_during_launch_framing();
   test_first_reason_and_due_mutator_ordering();
   test_progress_and_eintr_do_not_reset_deadline();

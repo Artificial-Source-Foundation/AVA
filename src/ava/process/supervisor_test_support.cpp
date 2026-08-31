@@ -261,6 +261,27 @@ bool SupervisorTestAccess::wait_for_monitor_cycle(Supervisor& supervisor, std::u
 #endif
 }
 
+std::size_t SupervisorTestAccess::retained_native_child_count(Supervisor const& supervisor) noexcept
+{
+#if defined(_WIN32)
+  static_cast<void>(supervisor);
+  return 0;
+#else
+  auto const state = supervisor.implementation_->state;
+  std::lock_guard lock(state->mutex);
+  std::size_t result = 0;
+  for (auto const& [identity, record] : state->records)
+  {
+    static_cast<void>(identity);
+    if (record->leader > 1 && !record->leader_reaped)
+      ++result;
+    if (record->sentinel > 1 && !record->sentinel_reaped)
+      ++result;
+  }
+  return result;
+#endif
+}
+
 void SupervisorTestAccess::interrupt_next_monitor_poll(Supervisor& supervisor) noexcept
 {
 #if !defined(_WIN32)

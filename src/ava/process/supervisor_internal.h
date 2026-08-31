@@ -230,16 +230,7 @@ struct HandleState
 struct Record
 {
   Record(std::uint64_t identity, OwnerPathV1 owner_path, std::string key, std::uint64_t aliased_owner, ProcessRoleV1 process_role,
-         LifecyclePolicyV1 lifecycle_policy)
-      : id(identity),
-        owner(std::move(owner_path)),
-        owner_key(std::move(key)),
-        owner_alias(aliased_owner),
-        role(process_role),
-        policy(lifecycle_policy),
-        created(Clock::now())
-  {
-  }
+         LifecyclePolicyV1 lifecycle_policy);
 
   std::uint64_t id = 0;
   OwnerPathV1 owner;
@@ -253,6 +244,8 @@ struct Record
   ExitKindV1 exit_kind = ExitKindV1::None;
   Clock::time_point created;
   std::optional<Clock::time_point> finished;
+  // Fixed at reservation; execution expiry may only clip cleanup to this cap.
+  std::optional<ProcessDeadline> execution_cleanup_horizon;
   std::optional<ProcessDeadline> stop_deadline;
   std::optional<Clock::time_point> kill_due;
   std::optional<Clock::time_point> group_observation_due;
@@ -270,13 +263,14 @@ struct Record
   bool has_signal_number = false;
   bool registered = false;
   bool group_verified = false;
+  bool execution_deadline_processed = false;
   bool release_committed = false;
   bool startup_handshake_complete = false;
   bool included_in_shutdown = false;
   bool term_sent = false;
   bool kill_sent = false;
   bool cleanup_failed = false;
-  bool natural_group_observation_started = false;
+  bool pre_kill_group_observation_started = false;
   bool post_kill_group_observation_started = false;
   std::uint8_t quiet_group_observations = 0;
 #if !defined(_WIN32)
@@ -376,6 +370,8 @@ void publish_final_locked(Record& record, ExitStatusV1 status);
 void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 cleanup);
 [[nodiscard]] bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept;
 [[nodiscard]] bool set_earlier_stop_deadline_locked(Record& record, ProcessDeadline deadline) noexcept;
+// The caller holds state.mutex. A due trigger is processed once and clips an
+// existing cleanup deadline only to the reservation-time horizon.
 [[nodiscard]] bool commit_due_execution_deadline_locked(Record& record, Clock::time_point now) noexcept;
 void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 [[nodiscard]] std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;

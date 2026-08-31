@@ -4,6 +4,7 @@ add_library(ava_process
   "owner.cpp"
   "scope.cpp"
   "supervisor.cpp"
+  "supervisor_lifecycle.cpp"
   "supervisor_activity_posix.cpp"
   "supervisor_adoption_posix.cpp"
   "supervisor_backend_posix.cpp"

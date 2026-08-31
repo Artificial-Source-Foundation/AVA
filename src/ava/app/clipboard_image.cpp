@@ -1,76 +1,58 @@
 #include "sys.h"
+#include "ava/process/environment.h"
+#include "ava/process/supervisor.h"
 #include "ava/app/clipboard_image.h"
-
-#include "ava/core/error.h"
+#include "ava/app/clipboard_image_test_support.h"
 #include "ava/session/session_store.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
-#include <chrono>
 #include <cctype>
-#include <csignal>
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <optional>
-#include <poll.h>
+#include <span>
 #include <string>
 #include <string_view>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include <utility>
 #include <vector>
 
 namespace ava::app {
 namespace {
 
-constexpr auto kListTimeout = std::chrono::milliseconds(1000);
-constexpr auto kReadTimeout = std::chrono::milliseconds(3000);
+using Clock = std::chrono::steady_clock;
+using namespace std::chrono_literals;
+
+constexpr auto kListTimeout = 1000ms;
+constexpr auto kReadTimeout = 3000ms;
+constexpr auto kStartupTimeout = 2000ms;
+constexpr auto kCleanupBudget = 2s;
+constexpr auto kSettlementObservationBudget = 250ms;
+constexpr std::uint32_t kStdoutWatch = 1;
 constexpr std::size_t kMaxTypeListBytes = 64 * 1024;
-constexpr std::array<std::string_view, 4> kSupportedImageMimeTypes = {"image/png", "image/jpeg", "image/webp",
-                                                                       "image/gif"};
+constexpr std::array<std::string_view, 4> kSupportedImageMimeTypes = {"image/png", "image/jpeg", "image/webp", "image/gif"};
+constexpr std::string_view kTestScenarioMarker = "--ava-clipboard-test-scenario";
+constexpr std::string_view kTestLogMarker = "--ava-clipboard-test-log";
 
 struct CapturedCommand
 {
   bool ok = false;
   bool too_large = false;
   std::string stdout_data = {};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-class Fd
+struct HelperTestInjection
 {
- public:
-  explicit Fd(int fd = -1) : fd_(fd) {}
-  Fd(Fd const&) = delete;
-  Fd& operator=(Fd const&) = delete;
-  Fd(Fd&& other) noexcept : fd_(other.release()) {}
-  Fd& operator=(Fd&& other) noexcept
-  {
-    if (this != &other) {
-      reset(other.release());
-    }
-    return *this;
-  }
-  ~Fd() { reset(); }
+  std::string executable;
+  std::string scenario;
+  std::string invocation_log;
 
-  [[nodiscard]] int get() const { return fd_; }
-  [[nodiscard]] int release()
-  {
-    auto const fd = fd_;
-    fd_ = -1;
-    return fd;
-  }
-  void reset(int fd = -1)
-  {
-    if (fd_ >= 0)
-      static_cast<void>(::close(fd_));
-    fd_ = fd;
-  }
-
- private:
-  int fd_ = -1;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 std::optional<std::string> env_value(char const* name)
@@ -81,131 +63,273 @@ std::optional<std::string> env_value(char const* name)
   return std::string(value);
 }
 
-ava::core::Error errno_error(std::string message)
-{
-  auto error = ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
-  error.with_context("cause", std::strerror(errno));
-  return error;
-}
-
 ava::core::Error clipboard_error(ava::core::ErrorCategory category, std::string message)
 {
   return ava::core::Error(category, std::move(message));
 }
 
-void wait_for_child(pid_t pid)
+ava::core::Error clipboard_helper_io_error()
 {
-  int status = 0;
-  while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-  }
+  return clipboard_error(ava::core::ErrorCategory::Io, "failed to read clipboard helper output");
 }
 
-ava::core::Result<CapturedCommand> capture_command_stdout(std::vector<std::string> const& argv,
-                                                          std::chrono::milliseconds timeout,
-                                                          std::size_t max_bytes)
+Clock::time_point saturating_add(Clock::time_point value, Clock::duration duration) noexcept
+{
+  if (duration <= Clock::duration::zero())
+    return value;
+  auto const maximum = Clock::time_point::max().time_since_epoch();
+  if (value.time_since_epoch() > maximum - duration)
+    return Clock::time_point::max();
+  return value + duration;
+}
+
+std::span<std::byte> writable_bytes(std::array<char, 4096>& buffer) noexcept
+{
+  return {reinterpret_cast<std::byte*>(buffer.data()), buffer.size()};
+}
+
+ava::core::Result<CapturedCommand> capture_command_stdout(ava::process::ProcessScopeV1 const& session_process_scope, std::vector<std::string> argv,
+                                                          std::chrono::milliseconds timeout, std::size_t max_bytes, bool capacity_is_limit,
+                                                          HelperTestInjection const* test_injection)
 {
   if (argv.empty())
     return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "clipboard helper command is empty"));
 
-  int pipe_fds[2] = {-1, -1};
-  if (::pipe(pipe_fds) != 0)
-    return std::unexpected(errno_error("failed to create clipboard helper pipe"));
+  auto const helper_deadline = saturating_add(Clock::now(), timeout);
+  auto const cleanup_deadline = saturating_add(helper_deadline, kCleanupBudget);
+  auto const settlement_deadline = saturating_add(cleanup_deadline, kSettlementObservationBudget);
 
-  Fd read_fd(pipe_fds[0]);
-  Fd write_fd(pipe_fds[1]);
-  auto const pid = ::fork();
-  if (pid < 0)
-    return std::unexpected(errno_error("failed to launch clipboard helper"));
-
-  if (pid == 0) {
-    read_fd.reset();
-    if (::dup2(write_fd.get(), STDOUT_FILENO) < 0)
-      _exit(127);
-    auto const dev_null = ::open("/dev/null", O_WRONLY);
-    if (dev_null >= 0) {
-      static_cast<void>(::dup2(dev_null, STDERR_FILENO));
-      static_cast<void>(::close(dev_null));
-    }
-    write_fd.reset();
-
-    std::vector<char*> exec_argv;
-    exec_argv.reserve(argv.size() + 1);
-    for (auto const& arg : argv)
-      exec_argv.push_back(const_cast<char*>(arg.c_str()));
-    exec_argv.push_back(nullptr);
-    ::execvp(exec_argv.front(), exec_argv.data());
-    _exit(127);
+  auto operation = session_process_scope.operation();
+  if (!operation)
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::Configuration, "failed to derive clipboard helper process authority"));
+  }
+  auto environment = ava::process::make_clipboard_desktop_environment_v1(operation->host_environment());
+  if (!environment)
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::Configuration, "failed to create clipboard helper process environment"));
   }
 
-  write_fd.reset();
-  auto flags = ::fcntl(read_fd.get(), F_GETFL, 0);
-  if (flags >= 0)
-    static_cast<void>(::fcntl(read_fd.get(), F_SETFL, flags | O_NONBLOCK));
+  auto& supervisor = operation->supervisor();
+  auto reservation = supervisor.reserve(operation->owner_prefix(), ava::process::ProcessRoleV1::ClipboardHelper,
+                                        {.termination_grace = 0ms, .startup_timeout = kStartupTimeout, .execution_deadline = helper_deadline});
+  if (!reservation)
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::Io, "failed to reserve clipboard helper process"));
+
+  auto executable = argv.front();
+  if (test_injection != nullptr)
+  {
+    executable = test_injection->executable;
+    argv.emplace_back(kTestScenarioMarker);
+    argv.push_back(test_injection->scenario);
+    argv.emplace_back(kTestLogMarker);
+    argv.push_back(test_injection->invocation_log);
+  }
+
+  auto spawned = supervisor.spawn(std::move(*reservation), {.executable = std::move(executable),
+                                                            .argv = std::move(argv),
+                                                            .environment = std::move(*environment),
+                                                            .cwd = "/",
+                                                            .stdin_mode = ava::process::StreamModeV1::Discard,
+                                                            .stdout_mode = ava::process::StreamModeV1::Capture,
+                                                            .stderr_mode = ava::process::StreamModeV1::Discard});
+  // Resolution, launch, and exec failures mean that this helper is unavailable.
+  // Supervisor has already exactly-once settled the typed reservation, and
+  // selection may continue without any legacy process retry.
+  if (!spawned)
+    return CapturedCommand{};
+
+  auto& handle = spawned->handle;
+  if (!spawned->standard_output)
+  {
+    static_cast<void>(supervisor.request_stop(handle, ava::process::TerminationReasonV1::ProtocolFailure, cleanup_deadline));
+    static_cast<void>(supervisor.wait(handle, settlement_deadline));
+    return std::unexpected(clipboard_helper_io_error());
+  }
+
+  auto& output = *spawned->standard_output;
+  auto output_watch = output.watch(ava::process::PipeInterestV1::Readable, kStdoutWatch);
+  if (!output_watch)
+  {
+    output.close();
+    static_cast<void>(supervisor.request_stop(handle, ava::process::TerminationReasonV1::ProtocolFailure, cleanup_deadline));
+    static_cast<void>(supervisor.wait(handle, settlement_deadline));
+    return std::unexpected(clipboard_helper_io_error());
+  }
+
+  // This deterministic parent-side fault is reachable only through the
+  // absolute fake-helper API. It does not alter production selection, argv, or
+  // child environment and proves the read-error cleanup path.
+  if (test_injection != nullptr && test_injection->scenario == "read-failure")
+    output.close();
 
   CapturedCommand captured;
-  auto const deadline = std::chrono::steady_clock::now() + timeout;
-  std::array<char, 4096> buffer{};
-  bool child_done = false;
-  bool pipe_done = false;
-  int child_status = 0;
+  std::optional<ava::process::TerminationReasonV1> failure_reason;
+  std::optional<ava::core::Error> protocol_error;
+  std::optional<ava::process::ExitStatusV1> terminal_status;
+  std::optional<Clock::time_point> failure_cleanup_deadline;
+  std::optional<Clock::time_point> failure_settlement_deadline;
+  bool output_open = true;
+  bool output_cap_reached = false;
+  bool stop_requested = false;
 
-  while (!child_done || !pipe_done) {
-    auto const now = std::chrono::steady_clock::now();
-    if (now >= deadline && !child_done) {
-      static_cast<void>(::kill(pid, SIGKILL));
-      read_fd.reset();
-      wait_for_child(pid);
-      return CapturedCommand{.ok = false};
-    }
+  auto set_failure = [&](ava::process::TerminationReasonV1 reason) {
+    if (failure_reason)
+      return;
+    failure_reason = reason;
+    failure_cleanup_deadline = std::min(cleanup_deadline, saturating_add(Clock::now(), kCleanupBudget));
+    failure_settlement_deadline = saturating_add(*failure_cleanup_deadline, kSettlementObservationBudget);
+  };
+  auto set_protocol_failure = [&] {
+    if (failure_reason)
+      return;
+    set_failure(ava::process::TerminationReasonV1::ProtocolFailure);
+    protocol_error.emplace(clipboard_helper_io_error());
+  };
 
-    if (!pipe_done) {
-      auto poll_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
-      if (poll_timeout < 0)
-        poll_timeout = 0;
-      if (poll_timeout > 50)
-        poll_timeout = 50;
-      pollfd pfd{.fd = read_fd.get(), .events = POLLIN | POLLHUP, .revents = 0};
-      auto const polled = ::poll(&pfd, 1, static_cast<int>(poll_timeout));
-      if (polled < 0 && errno != EINTR)
-        return std::unexpected(errno_error("failed to read clipboard helper output"));
-      if (polled > 0) {
-        while (true) {
-          auto const count = ::read(read_fd.get(), buffer.data(), buffer.size());
-          if (count > 0) {
-            if (captured.stdout_data.size() + static_cast<std::size_t>(count) > max_bytes) {
-              static_cast<void>(::kill(pid, SIGKILL));
-              read_fd.reset();
-              wait_for_child(pid);
-              captured.stdout_data.clear();
-              captured.too_large = true;
-              return captured;
-            }
-            captured.stdout_data.append(buffer.data(), static_cast<std::size_t>(count));
-            continue;
+  auto request_cleanup = [&] {
+    if (!failure_reason || stop_requested)
+      return;
+    stop_requested = true;
+    auto stopped = supervisor.request_stop(handle, *failure_reason, *failure_cleanup_deadline);
+    if (!stopped && !protocol_error)
+      protocol_error.emplace(clipboard_helper_io_error());
+  };
+
+  auto drain_stdout = [&] {
+    bool progressed = false;
+    std::array<char, 4096> buffer{};
+    while (output_open)
+    {
+      auto read = output.read(writable_bytes(buffer));
+      if (!read)
+      {
+        set_protocol_failure();
+        output.close();
+        output_open = false;
+        break;
+      }
+      if (read->state == ava::process::PipeIoStateV1::WouldBlock)
+        break;
+      if (read->state == ava::process::PipeIoStateV1::EndOfStream)
+      {
+        output.close();
+        output_open = false;
+        progressed = true;
+        break;
+      }
+      if (read->state != ava::process::PipeIoStateV1::Progress || read->bytes == 0)
+      {
+        set_protocol_failure();
+        output.close();
+        output_open = false;
+        break;
+      }
+
+      progressed = true;
+      bool truncated = output_cap_reached;
+      if (!output_cap_reached)
+      {
+        auto const available = captured.stdout_data.size() >= max_bytes ? std::size_t{0} : max_bytes - captured.stdout_data.size();
+        auto const retained = std::min(available, read->bytes);
+        captured.stdout_data.append(buffer.data(), retained);
+        if (retained != read->bytes || (capacity_is_limit && captured.stdout_data.size() == max_bytes))
+        {
+          output_cap_reached = true;
+          truncated = true;
+          captured.stdout_data.clear();
+          if (!failure_reason)
+          {
+            captured.too_large = true;
+            set_failure(ava::process::TerminationReasonV1::OutputLimit);
           }
-          if (count == 0) {
-            pipe_done = true;
-            break;
-          }
-          if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-            break;
-          return std::unexpected(errno_error("failed to read clipboard helper output"));
         }
       }
-    }
 
-    auto const waited = ::waitpid(pid, &child_status, WNOHANG);
-    if (waited == pid) {
-      child_done = true;
-    } else if (waited < 0 && errno != EINTR) {
-      return std::unexpected(errno_error("failed to wait for clipboard helper"));
+      if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardOutput, read->bytes, truncated); !accounted && !failure_reason)
+      {
+        set_protocol_failure();
+      }
+
+      // Continuous output must not monopolize the drain loop past the one
+      // reservation-time absolute deadline. Cleanup then continues draining.
+      if (!failure_reason && Clock::now() >= helper_deadline)
+        set_failure(ava::process::TerminationReasonV1::DeadlineExpired);
+      if (failure_reason && !stop_requested)
+        break;
     }
-    if (child_done && !pipe_done) {
-      continue;
+    return progressed;
+  };
+
+  while (!terminal_status || output_open)
+  {
+    static_cast<void>(drain_stdout());
+
+    auto waited = supervisor.try_wait(handle);
+    if (!waited)
+      set_protocol_failure();
+    else if (*waited)
+      terminal_status = **waited;
+
+    if (terminal_status && output_open)
+      static_cast<void>(drain_stdout());
+    if (terminal_status && !output_open)
+      break;
+
+    if (!failure_reason && Clock::now() >= helper_deadline)
+      set_failure(ava::process::TerminationReasonV1::DeadlineExpired);
+    request_cleanup();
+
+    if (failure_settlement_deadline && Clock::now() >= *failure_settlement_deadline)
+      break;
+
+    auto const watches = output_open ? std::span<ava::process::PipeWatchV1 const>(&*output_watch, 1) : std::span<ava::process::PipeWatchV1 const>{};
+    auto const observation_deadline = failure_settlement_deadline.value_or(helper_deadline);
+    auto activity = supervisor.wait_for_activity(handle, watches, observation_deadline);
+    if (!activity)
+    {
+      set_protocol_failure();
     }
+    else
+    {
+      auto const invalid_ready =
+          std::ranges::any_of(activity->ready, [](ava::process::PipeReadyV1 const& ready) { return ready.token != kStdoutWatch || ready.error; });
+      if (invalid_ready)
+        set_protocol_failure();
+      if (activity->deadline_expired && !failure_reason)
+        set_failure(ava::process::TerminationReasonV1::DeadlineExpired);
+    }
+    request_cleanup();
   }
 
-  captured.ok = WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
+  auto settled = supervisor.wait(handle, failure_settlement_deadline.value_or(settlement_deadline));
+  if (settled)
+    terminal_status = *settled;
+  else
+  {
+    set_protocol_failure();
+    request_cleanup();
+  }
+
+  while (output_open && drain_stdout())
+  {
+  }
+  if (output_open)
+  {
+    output.close();
+    output_open = false;
+    set_protocol_failure();
+  }
+
+  if (protocol_error)
+    return std::unexpected(std::move(*protocol_error));
+  if (!terminal_status)
+    return std::unexpected(clipboard_helper_io_error());
+  if (captured.too_large)
+    return captured;
+
+  captured.ok = terminal_status->reason == ava::process::TerminationReasonV1::NaturalExit && terminal_status->kind == ava::process::ExitKindV1::Exited &&
+                terminal_status->has_exit_code && terminal_status->exit_code == 0;
   return captured;
 }
 
@@ -228,7 +352,8 @@ std::vector<std::string> split_lines(std::string_view text)
 {
   std::vector<std::string> lines;
   std::size_t start = 0;
-  while (start <= text.size()) {
+  while (start <= text.size())
+  {
     auto const newline = text.find('\n', start);
     auto const end = newline == std::string_view::npos ? text.size() : newline;
     auto line = base_mime_type(text.substr(start, end - start));
@@ -243,7 +368,8 @@ std::vector<std::string> split_lines(std::string_view text)
 
 std::optional<std::string> select_preferred_image_mime_type(std::vector<std::string> const& mime_types)
 {
-  for (auto const preferred : kSupportedImageMimeTypes) {
+  for (auto const preferred : kSupportedImageMimeTypes)
+  {
     auto const found = std::ranges::find(mime_types, preferred);
     if (found != mime_types.end())
       return *found;
@@ -251,51 +377,56 @@ std::optional<std::string> select_preferred_image_mime_type(std::vector<std::str
   return std::nullopt;
 }
 
-ava::core::Result<std::optional<std::string>> read_clipboard_data_command(std::vector<std::string> const& argv)
+ava::core::Result<std::optional<std::string>> read_clipboard_data_command(ava::process::ProcessScopeV1 const& session_process_scope,
+                                                                          std::vector<std::string> argv, HelperTestInjection const* test_injection)
 {
-  auto data = capture_command_stdout(argv, kReadTimeout, ava::session::kMaxImageAttachmentBytes + 1);
+  auto data = capture_command_stdout(session_process_scope, std::move(argv), kReadTimeout, ava::session::kMaxImageAttachmentBytes + 1, true, test_injection);
   if (!data)
     return std::unexpected(std::move(data.error()));
   if (data->too_large)
-    return std::unexpected(
-        clipboard_error(ava::core::ErrorCategory::InvalidArgument, "clipboard image is too large"));
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "clipboard image is too large"));
   if (!data->ok || data->stdout_data.empty())
     return std::optional<std::string>{};
   return std::optional<std::string>{std::move(data->stdout_data)};
 }
 
-ava::core::Result<std::optional<std::string>> read_clipboard_image_wl_paste()
+ava::core::Result<std::optional<std::string>> read_clipboard_image_wl_paste(ava::process::ProcessScopeV1 const& session_process_scope,
+                                                                            HelperTestInjection const* test_injection)
 {
-  auto types = capture_command_stdout({"wl-paste", "--list-types"}, kListTimeout, kMaxTypeListBytes);
+  auto types = capture_command_stdout(session_process_scope, {"wl-paste", "--list-types"}, kListTimeout, kMaxTypeListBytes, false, test_injection);
   if (!types)
     return std::unexpected(std::move(types.error()));
-  if (!types->ok)
+  if (!types->ok || types->too_large || types->stdout_data.empty())
     return std::optional<std::string>{};
   auto mime_type = select_preferred_image_mime_type(split_lines(types->stdout_data));
   if (!mime_type)
     return std::optional<std::string>{};
-  return read_clipboard_data_command({"wl-paste", "--type", *mime_type, "--no-newline"});
+  return read_clipboard_data_command(session_process_scope, {"wl-paste", "--type", *mime_type, "--no-newline"}, test_injection);
 }
 
-ava::core::Result<std::optional<std::string>> read_clipboard_image_xclip()
+ava::core::Result<std::optional<std::string>> read_clipboard_image_xclip(ava::process::ProcessScopeV1 const& session_process_scope,
+                                                                         HelperTestInjection const* test_injection)
 {
-  auto targets = capture_command_stdout({"xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"}, kListTimeout,
-                                        kMaxTypeListBytes);
+  auto targets = capture_command_stdout(session_process_scope, {"xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"}, kListTimeout, kMaxTypeListBytes,
+                                        false, test_injection);
   if (!targets)
     return std::unexpected(std::move(targets.error()));
 
   std::vector<std::string> candidates;
-  if (targets->ok) {
+  if (targets->ok && !targets->too_large && !targets->stdout_data.empty())
+  {
     if (auto preferred = select_preferred_image_mime_type(split_lines(targets->stdout_data)))
       candidates.push_back(std::move(*preferred));
   }
-  for (auto const mime_type : kSupportedImageMimeTypes) {
+  for (auto const mime_type : kSupportedImageMimeTypes)
+  {
     if (std::ranges::find(candidates, mime_type) == candidates.end())
       candidates.emplace_back(mime_type);
   }
 
-  for (auto const& mime_type : candidates) {
-    auto data = read_clipboard_data_command({"xclip", "-selection", "clipboard", "-t", mime_type, "-o"});
+  for (auto const& mime_type : candidates)
+  {
+    auto data = read_clipboard_data_command(session_process_scope, {"xclip", "-selection", "clipboard", "-t", mime_type, "-o"}, test_injection);
     if (!data)
       return std::unexpected(std::move(data.error()));
     if (*data)
@@ -304,27 +435,35 @@ ava::core::Result<std::optional<std::string>> read_clipboard_image_xclip()
   return std::optional<std::string>{};
 }
 
-ava::core::Result<std::optional<std::string>> read_clipboard_image_bytes()
+ava::core::Result<std::optional<std::string>> read_clipboard_image_bytes(std::optional<ava::process::ProcessScopeV1> const& session_process_scope,
+                                                                         HelperTestInjection const* test_injection)
 {
   if (env_value("TERMUX_VERSION"))
     return std::optional<std::string>{};
 
-  if (auto wayland = env_value("WAYLAND_DISPLAY"); wayland) {
-    auto image = read_clipboard_image_wl_paste();
+  if (!session_process_scope)
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::Configuration, "clipboard helper process scope is unavailable"));
+  }
+
+  if (auto wayland = env_value("WAYLAND_DISPLAY"); wayland)
+  {
+    auto image = read_clipboard_image_wl_paste(*session_process_scope, test_injection);
     if (!image)
       return std::unexpected(std::move(image.error()));
     if (*image)
       return image;
   }
 
-  auto xclip = read_clipboard_image_xclip();
+  auto xclip = read_clipboard_image_xclip(*session_process_scope, test_injection);
   if (!xclip)
     return std::unexpected(std::move(xclip.error()));
   if (*xclip)
     return xclip;
 
-  if (!env_value("WAYLAND_DISPLAY")) {
-    auto image = read_clipboard_image_wl_paste();
+  if (!env_value("WAYLAND_DISPLAY"))
+  {
+    auto image = read_clipboard_image_wl_paste(*session_process_scope, test_injection);
     if (!image)
       return std::unexpected(std::move(image.error()));
     if (*image)
@@ -333,19 +472,19 @@ ava::core::Result<std::optional<std::string>> read_clipboard_image_bytes()
   return std::optional<std::string>{};
 }
 
-}  // namespace
-
-ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipboard_image_attachment(
-    ava::session::SessionStore const& store)
+ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipboard_image_attachment_impl(
+    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope,
+    HelperTestInjection const* test_injection)
 {
-  if (auto override_file = env_value("AVA_CLIPBOARD_IMAGE_FILE")) {
+  if (auto override_file = env_value("AVA_CLIPBOARD_IMAGE_FILE"))
+  {
     auto imported = ava::session::import_image_attachment(store, std::filesystem::path(*override_file));
     if (!imported)
       return std::unexpected(std::move(imported.error()));
     return std::optional<ava::session::ImageAttachmentRef>{std::move(*imported)};
   }
 
-  auto bytes = read_clipboard_image_bytes();
+  auto bytes = read_clipboard_image_bytes(session_process_scope, test_injection);
   if (!bytes)
     return std::unexpected(std::move(bytes.error()));
   if (!*bytes)
@@ -355,6 +494,46 @@ ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipbo
   if (!imported)
     return std::unexpected(std::move(imported.error()));
   return std::optional<ava::session::ImageAttachmentRef>{std::move(*imported)};
+}
+
+bool contains_nul(std::string_view value) noexcept
+{
+  return value.find('\0') != std::string_view::npos;
+}
+
+}  // namespace
+
+ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipboard_image_attachment(
+    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope)
+{
+  return import_clipboard_image_attachment_impl(store, session_process_scope, nullptr);
+}
+
+ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> testing::ClipboardImageTestAccess::import_with_helper(
+    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope, std::filesystem::path const& executable,
+    std::string scenario, std::filesystem::path const& invocation_log)
+{
+  auto const executable_value = executable.string();
+  auto const log_value = invocation_log.string();
+  if (!executable.is_absolute() || executable_value.empty() || contains_nul(executable_value))
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "fake clipboard helper executable must be one absolute path"));
+  }
+  if (scenario.empty() || scenario.size() > 128 || contains_nul(scenario))
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "fake clipboard helper scenario is invalid"));
+  }
+  if (!invocation_log.is_absolute() || log_value.empty() || contains_nul(log_value))
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "fake clipboard helper log must be one absolute path"));
+  }
+
+  HelperTestInjection injection{
+      .executable = executable_value,
+      .scenario = std::move(scenario),
+      .invocation_log = log_value,
+  };
+  return import_clipboard_image_attachment_impl(store, session_process_scope, &injection);
 }
 
 }  // namespace ava::app

@@ -31,6 +31,7 @@ void run_subagent_coordinator_tests();
 void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
 void run_curl_transport_process_tests();
+void run_clipboard_image_process_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
 void run_tools_tests();
@@ -104,6 +105,7 @@ constexpr std::array kTestSuites{
     TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
     TestSuite{"curl_transport_process", run_curl_transport_process_tests},
+    TestSuite{"clipboard_image_process", run_clipboard_image_process_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},
     TestSuite{"tools", run_tools_tests},

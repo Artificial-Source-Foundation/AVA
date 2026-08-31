@@ -58,6 +58,11 @@ ava_apply_debugging(ava_fake_curl_child)
 ava_apply_warnings(ava_fake_curl_child)
 ava_apply_sanitizers(ava_fake_curl_child)
 
+add_executable(ava_fake_clipboard_child "support/fake_clipboard_child.cpp")
+ava_apply_debugging(ava_fake_clipboard_child)
+ava_apply_warnings(ava_fake_clipboard_child)
+ava_apply_sanitizers(ava_fake_clipboard_child)
+
 add_executable(ava_fake_mermaid_helper "support/fake_mermaid_helper.cpp")
 ava_apply_debugging(ava_fake_mermaid_helper)
 ava_apply_warnings(ava_fake_mermaid_helper)
@@ -206,6 +211,7 @@ set(AVA_TESTS_SOURCES
   "core_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
   "curl_transport_process_tests.cpp"
+  "clipboard_image_process_tests.cpp"
   "diagnostics_tests.cpp"
   "events_tests.cpp"
   "lsp_tests.cpp"
@@ -287,11 +293,12 @@ endif()
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
-add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_curl_child ava_fake_mermaid_helper ava_fake_provider_server)
+add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_curl_child ava_fake_clipboard_child ava_fake_mermaid_helper ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_PROCESS_CHILD_PATH="$<TARGET_FILE:ava_fake_process_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_CURL_CHILD_PATH="$<TARGET_FILE:ava_fake_curl_child>")
+target_compile_definitions(ava_tests PRIVATE AVA_FAKE_CLIPBOARD_CHILD_PATH="$<TARGET_FILE:ava_fake_clipboard_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_PROCESS_PUBLIC_HEADER_PATH="${CMAKE_SOURCE_DIR}/src/ava/process/supervisor.h")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MERMAID_HELPER_PATH="$<TARGET_FILE:ava_fake_mermaid_helper>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
@@ -317,6 +324,7 @@ set(AVA_TEST_SUITES
   subagent_delivery_manager
   core_json_permission
   curl_transport_process
+  clipboard_image_process
   app_command_classification
   app_command_registry
   tools
@@ -381,6 +389,7 @@ endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.process_adoption_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;adoption;offline")
 set_tests_properties(ava_tests.process_deadline PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;deadline;monitor;offline")
+set_tests_properties(ava_tests.clipboard_image_process PROPERTIES TIMEOUT 30 LABELS "process;clipboard;posix;offline")
 set_tests_properties(ava_tests.process_environment PROPERTIES LABELS "process;offline")
 set_tests_properties(ava_tests.process_launch_protocol_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 15 LABELS "process;posix;offline")
 set_tests_properties(ava_tests.process_monitor PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;monitor;offline")
@@ -828,6 +837,15 @@ if(Python3_Interpreter_FOUND)
             -DAVA_CURL_TRANSPORT_HEADER=${CMAKE_SOURCE_DIR}/src/ava/http/curl_transport.h
             -P ${CMAKE_CURRENT_SOURCE_DIR}/curl_transport_static_contract.cmake)
   set_tests_properties(ava_tests.curl_transport_static_contract PROPERTIES TIMEOUT 15)
+
+  add_test(
+    NAME ava_tests.clipboard_image_static_contract
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_CLIPBOARD_IMAGE_SOURCE=${CMAKE_SOURCE_DIR}/src/ava/app/clipboard_image.cpp
+            -DAVA_CLIPBOARD_IMAGE_HEADER=${CMAKE_SOURCE_DIR}/src/ava/app/clipboard_image.h
+            -DAVA_INTERACTIVE_TUI_SOURCE=${CMAKE_SOURCE_DIR}/src/ava/app/interactive_tui.cpp
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/clipboard_image_static_contract.cmake)
+  set_tests_properties(ava_tests.clipboard_image_static_contract PROPERTIES TIMEOUT 15)
 
   add_test(
     NAME ava_cli.doctor_support

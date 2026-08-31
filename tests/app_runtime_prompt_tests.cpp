@@ -736,7 +736,7 @@ void test_app_clipboard_image_file_override_imports_attachment()
   SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
 
   ScopedEnvVar clipboard_file("AVA_CLIPBOARD_IMAGE_FILE", image_path.string());
-  auto imported = ava::app::import_clipboard_image_attachment(session_w->store);
+  auto imported = ava::app::import_clipboard_image_attachment(session_w->store, std::nullopt);
   expect(imported && imported->has_value() && (*imported)->mime_type == "image/png" && (*imported)->byte_size == app_tiny_png_bytes().size(),
          "runtime clipboard image override imports supported image bytes into session storage");
   if (!imported || !*imported)

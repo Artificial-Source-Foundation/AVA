@@ -43,7 +43,7 @@ def scenario_mermaid(ctx: SmokeContext) -> None:
     display_file.write_text(_display_document(ctx, str(count_file), False), encoding="utf-8")
     display_file.chmod(0o600)
 
-    provider = ctx.start_fake_provider("mermaid", delay_ms=20, scenario="mermaid")
+    provider = ctx.start_fake_provider("mermaid", delay_ms=0, scenario="mermaid")
     command = ctx.fake_provider_command(
         provider,
         home=ctx.active_home,

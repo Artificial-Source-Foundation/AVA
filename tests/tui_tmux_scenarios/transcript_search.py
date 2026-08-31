@@ -119,9 +119,7 @@ def scenario_transcript_search(ctx: SmokeContext) -> None:
         lambda screen: "Transcript search" in screen and "0 items" in screen and "No transcript matches" in screen,
         "active transcript search reopened without future stream match",
     )
-    continue_marker = controls / "continue"
-    continue_marker.write_text("continue\n", encoding="utf-8")
-    continue_marker.chmod(0o600)
+    provider.release_request(0)
     completed_modal = wait_for_screen_state(
         ctx.tmux,
         session,

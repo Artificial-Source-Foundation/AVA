@@ -10,6 +10,7 @@ import time
 from test_timing_trace import timed_operation, timing_poll
 
 from tui_smoke_helpers import (
+    POLL_INTERVAL,
     SmokeContext,
     capture,
     send_keys,
@@ -69,7 +70,7 @@ def _wait_for_normal_turn_request_count(path: pathlib.Path, expected_count: int,
             turns, _ = _request_counts(last)
             if turns >= expected_count:
                 return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(
         f"timed out waiting for {label}; expected at least {expected_count} normal conversation turns; "
         f"{_request_count_diagnostic(last)}\nrequest log:\n{last}"
@@ -90,7 +91,7 @@ def _assert_normal_turn_request_count_stays(path: pathlib.Path, expected_count: 
                 f"{label}; expected exactly {expected_count} normal conversation turns, saw {turns}; "
                 f"{_request_count_diagnostic(last)}\nrequest log:\n{last}"
             )
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     return last
 
 
@@ -125,9 +126,18 @@ def _finish_main(tmux_exe: object, session: str) -> None:
 _SETTINGS_OPEN_PATTERN = r"Settings ›|Search\s{2}\S|Enter open · Esc close|Enter select · Esc back"
 # Root-only markers: section titles always include the breadcrumb separator.
 _SETTINGS_ROOT_PATTERN = r"(?s)Settings.*Theme.*Display.*Model.*Input.*Workspace.*Tools"
+# A filtered root can show only one section, but its standalone heading never
+# contains the nested-section breadcrumb separator.
+_SETTINGS_ROOT_FRAME_PATTERN = r"(?m)^\s*Settings\s*$"
 # Composer rows only: reject transcript/modal copy that mentions the same text.
 _COMPOSER_EMPTY_PATTERN = r"(?m)^\s*│\s+Type a message\.\.\."
 _COMPOSER_SETTINGS_DRAFT_PATTERN = r"(?m)^\s*│\s+/settings(?:\s|$)"
+
+
+def wait_for_settings_root(tmux_exe: object, session: str, label: str, timeout: float = 8.0) -> str:
+    """Wait for the standalone root heading rather than text shared by a nested section."""
+
+    return wait_for(tmux_exe, session, _SETTINGS_ROOT_FRAME_PATTERN, label, timeout=timeout)
 
 
 def _ensure_empty_composer(tmux_exe: object, session: str, label: str, timeout: float = 8.0) -> str:
@@ -218,8 +228,8 @@ def clear_settings_filter(tmux_exe: object, session: str, label: str = "settings
     return after
 
 
-def close_settings(tmux_exe: object, session: str, label: str = "settings closed") -> None:
-    """Escape until the settings selector is gone (section back-stack then root close)."""
+def close_settings(tmux_exe: object, session: str, label: str = "settings closed", close_key: str = "Escape") -> None:
+    """Send ``close_key`` until the settings selector is gone, including its section back-stack."""
 
     # Wave 2 keeps at most root + one section frame. Prefer Escape only: Ctrl+C can be
     # delivered as SIGINT depending on the terminal path and is not reliable here.
@@ -228,9 +238,11 @@ def close_settings(tmux_exe: object, session: str, label: str = "settings closed
         if not re.search(_SETTINGS_OPEN_PATTERN, screen):
             return
         before = screen
-        send_keys(tmux_exe, session, "Escape")
+        send_keys(tmux_exe, session, close_key)
         try:
-            wait_for_screen_change(tmux_exe, session, before, f"{label} esc {attempt + 1}", timeout=2.0)
+            # A normal bare Escape settles after AVA's 100 ms ambiguity window.
+            # Retry after 500 ms instead of turning an ignored key into a two-second stall.
+            wait_for_screen_change(tmux_exe, session, before, f"{label} esc {attempt + 1}", timeout=0.5)
         except RuntimeError:
             # Already closed or visually identical root/composer transition.
             pass

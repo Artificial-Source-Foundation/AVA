@@ -11,10 +11,12 @@ import subprocess
 import tempfile
 import time
 
+from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
 from timeout_support import test_timeout
 
 
 OWNED_PROCESSES = set()
+PROVIDER_GATES: dict[subprocess.Popen, ProcessGateSet] = {}
 
 
 def environment(root):
@@ -98,6 +100,9 @@ def cleanup_owned_processes():
             if stream is not None and not stream.closed:
                 stream.close()
     OWNED_PROCESSES.clear()
+    for gates in PROVIDER_GATES.values():
+        gates.close()
+    PROVIDER_GATES.clear()
 
 
 def signal_cleanup(signum, _frame):
@@ -127,10 +132,22 @@ def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", tar
     request_log = root / "requests.log"
     port_file.unlink(missing_ok=True)
     request_log.unlink(missing_ok=True)
-    server = owned_popen(
-        [executable, str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment(root / "environment"),
-    )
+    gate_pair = create_process_gate_pair()
+    provider_environment = environment(root / "environment")
+    provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
+    try:
+        server = owned_popen(
+            [executable, str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=provider_environment,
+            pass_fds=(gate_pair.child_fd,),
+        )
+    except BaseException:
+        gate_pair.close()
+        raise
+    gate_pair.close_child_endpoint()
+    PROVIDER_GATES[server] = gate_pair.gates
     deadline = time.monotonic() + test_timeout(10)
     while time.monotonic() < deadline:
         assert server.poll() is None, server.stderr.read().decode(errors="replace")
@@ -353,7 +370,7 @@ def main():
     os.chmod(root, 0o700)
     os.chmod(workspace, 0o700)
     configure_fake_model(lifecycle_root)
-    server, port, request_log = start_fake_provider(args.fake_provider, root / "provider", delay_ms=250)
+    server, port, request_log = start_fake_provider(args.fake_provider, root / "provider", scenario="text-three-delayed-first")
     lifecycle = start(
         args.ava, lifecycle_root, cwd=workspace,
         extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{port}", "MOONSHOT_API_KEY": "fake-acp-key"},
@@ -423,13 +440,11 @@ def main():
         "params": {"sessionId": sid, "prompt": [{"type": "text", "text": text}]},
     }).encode())
     prompt("p1", session_a, "first")
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and "--- request 1 ---" not in request_log.read_text(errors="replace"):
-        time.sleep(0.01)
-    assert "--- request 1 ---" in request_log.read_text(errors="replace")
+    PROVIDER_GATES[server].wait(0, test_timeout(10))
     prompt("same-active", session_a, "must reject")
     active_rejection = read_line(lifecycle)
     assert active_rejection["id"] == "same-active" and active_rejection["error"]["code"] == -32600
+    PROVIDER_GATES[server].open(0)
     first_records = read_until_id(lifecycle, "p1", operation="first session prompt completion")
     assert first_records[-1]["result"]["stopReason"] == "end_turn"
     assert first_records[-2]["method"] == "session/update"
@@ -681,7 +696,7 @@ def main():
 
     cancel_root = root / "cancel-env"
     configure_fake_model(cancel_root)
-    cancel_server, cancel_port, cancel_log = start_fake_provider(args.fake_provider, root / "cancel-provider", delay_ms=1000, scenario="text")
+    cancel_server, cancel_port, cancel_log = start_fake_provider(args.fake_provider, root / "cancel-provider", scenario="text")
     cancel_process = start(
         args.ava, cancel_root, cwd=workspace,
         extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{cancel_port}", "MOONSHOT_API_KEY": "fake-acp-key"},

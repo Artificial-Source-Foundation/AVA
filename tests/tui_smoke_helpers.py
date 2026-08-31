@@ -28,6 +28,11 @@ from test_timing_trace import timed_operation, timing_poll
 
 
 SKIP = 77
+# Poll terminal and fixture state frequently enough that one missed first capture
+# does not impose a 100 ms floor on every scripted interaction. A 20 ms interval
+# still bounds tmux subprocess churn while remaining well below AVA's 100 ms
+# bare-Escape disambiguation delay.
+POLL_INTERVAL = 0.02
 # Footer value emitted by AVA's active-context meter: a known model-window
 # percentage, a sub-0.1% sentinel, or an estimated compact token count when
 # the model has no context-window metadata.
@@ -146,7 +151,7 @@ def wait_for(tmux_client: TmuxClient, session: str, pattern: str, label: str, ti
         last = capture(tmux_client, session)
         if compiled.search(last):
             return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}; expected /{pattern}/\nlast screen:\n{last}")
 
 
@@ -165,7 +170,7 @@ def wait_for_count(
         last = capture(tmux_client, session)
         if len(compiled.findall(last)) >= expected_count:
             return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(
         f"timed out waiting for {label}; expected at least {expected_count} matches of /{pattern}/\nlast screen:\n{last}"
     )
@@ -184,7 +189,7 @@ def wait_for_absent(tmux_client: TmuxClient, session: str, pattern: str, label: 
         last = capture(tmux_client, session)
         if not compiled.search(last):
             return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}; still matched /{pattern}/\nlast screen:\n{last}")
 
 
@@ -204,8 +209,32 @@ def wait_for_screen_change(
         last = capture(tmux_client, session)
         if last != previous:
             return last
-        time.sleep(0.05)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}; screen did not change\nlast screen:\n{last}")
+
+
+@timed_operation("wait", label_argument="label")
+def wait_for_styled_screen_change(
+    tmux_client: TmuxClient, session: str, previous: str, label: str, timeout: float = 8.0
+) -> str:
+    """Wait for terminal style cells to change when visible text may remain identical.
+
+    Theme watcher tests use this after editing a color definition. Timing traces
+    retain only the caller-authored label and duration, never styled pane data.
+    """
+
+    deadline = time.monotonic() + timeout
+    last = previous
+    while time.monotonic() < deadline:
+        timing_poll()
+        status = tmux(tmux_client, "has-session", "-t", session, check=False)
+        if status.returncode != 0:
+            raise RuntimeError(f"tmux session exited before {label}")
+        last = capture_styled(tmux_client, session)
+        if last != previous:
+            return last
+        time.sleep(POLL_INTERVAL)
+    raise RuntimeError(f"timed out waiting for {label}; styled screen did not change")
 
 
 @timed_operation("wait", label_argument="label")
@@ -228,7 +257,7 @@ def wait_for_screen_state(
         last = capture(tmux_client, session)
         if predicate(last):
             return last
-        time.sleep(0.05)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}\nlast screen:\n{last}")
 
 
@@ -249,7 +278,7 @@ def assert_screen_absent_for(
         last = capture(tmux_client, session)
         if compiled.search(last):
             raise RuntimeError(f"{label}; unexpectedly matched /{pattern}/\nscreen:\n{last}")
-        time.sleep(0.05)
+        time.sleep(POLL_INTERVAL)
     return last
 
 
@@ -270,7 +299,7 @@ def assert_screen_present_for(
         last = capture(tmux_client, session)
         if not compiled.search(last):
             raise RuntimeError(f"{label}; expected /{pattern}/\nscreen:\n{last}")
-        time.sleep(0.05)
+        time.sleep(POLL_INTERVAL)
     return last
 
 
@@ -292,7 +321,7 @@ def wait_for_cursor_change(
         last = pane_cursor_position(tmux_client, session)
         if last != previous:
             return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     screen = capture(tmux_client, session)
     raise RuntimeError(f"timed out waiting for {label}; cursor remained at {last}\nscreen:\n{screen}")
 
@@ -312,7 +341,7 @@ def wait_for_pane_command(
         last = pane_current_command(tmux_client, session)
         if compiled.search(last):
             return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     screen = capture(tmux_client, session)
     raise RuntimeError(f"timed out waiting for {label}; expected pane command /{pattern}/, last {last}\nscreen:\n{screen}")
 
@@ -350,7 +379,7 @@ def wait_for_selected_modal_change(
         last_row = selected_modal_row(last_screen)
         if last_row and last_row != previous:
             return last_row, last_screen
-        time.sleep(0.05)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(
         f"timed out waiting for {label}; selected row did not change from {previous!r}\n"
         f"last selected row: {last_row!r}\nscreen:\n{last_screen}"
@@ -364,7 +393,7 @@ def wait_for_session_exit(tmux_client: TmuxClient, session: str, timeout: float 
         timing_poll()
         if tmux(tmux_client, "has-session", "-t", session, check=False).returncode != 0:
             return
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     screen = capture(tmux_client, session)
     raise RuntimeError(f"tmux session did not exit\nscreen:\n{screen}")
 
@@ -379,7 +408,7 @@ def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, 
             last = path.read_text(encoding="utf-8", errors="replace")
             if last.count("--- request ") >= expected_count:
                 return last
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(
         f"timed out waiting for {label}; expected at least {expected_count} provider requests\nlast log:\n{last}"
     )
@@ -401,7 +430,7 @@ def wait_for_json_file(path: pathlib.Path, predicate: Callable[[object], bool], 
                     return last
             except json.JSONDecodeError as exc:
                 last_error = str(exc)
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}; {last_error}\nlast content:\n{last}")
 
 
@@ -418,7 +447,7 @@ def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: s
             raise RuntimeError(
                 f"{label}; expected exactly {expected_count} provider requests, saw {count}\nrequest log:\n{last}"
             )
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     return last
 
 
@@ -445,6 +474,17 @@ class FakeProvider:
     @property
     def port(self) -> str:
         return self.port_file.read_text(encoding="utf-8").strip()
+
+    @timed_operation("provider_gate", label_argument="label")
+    def wait_for_request(self, request_index: int, label: str, timeout: float = 8.0) -> None:
+        """Wait until the provider records zero-based ``request_index``."""
+
+        self.gates.wait(request_index, timeout)
+
+    def release_request(self, request_index: int) -> None:
+        """Allow a gate-delayed zero-based provider request to respond."""
+
+        self.gates.open(request_index)
 
     @timed_operation("cleanup", label_argument="name", default_label="fake provider cleanup")
     def stop(self) -> None:
@@ -784,8 +824,9 @@ class SmokeContext:
     ) -> FakeProvider:
         """Launch an isolated provider with one inherited process-gate endpoint.
 
-        ``name`` selects private fixture artifacts, ``delay_ms`` and ``scenario``
-        configure responses, and ``target`` supplies an optional fixture path.
+        ``name`` selects private fixture artifacts, ``delay_ms`` paces scenarios
+        that intentionally stream deltas, ``scenario`` configures responses and
+        request barriers, and ``target`` supplies an optional fixture path.
         The returned owner exposes persistent bidirectional gates and guarantees
         that only the child retains its endpoint after ``Popen`` succeeds.
         """

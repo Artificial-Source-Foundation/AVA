@@ -769,10 +769,14 @@ struct PersistentChildFixture
   std::filesystem::path root;
   ava::session::SessionStore store;
   ava::session::SessionLease lease;
+  std::shared_ptr<ava::session::SessionAppendTarget> append_target;
   ava::session::SessionReadAuthority authority;
   std::shared_ptr<ava::agent::SubagentLiveInspectionSource> source;
 };
 
+// Build a persistent inspectable child and retain its cached append authority for later fixture mutations.
+//
+// Returns no fixture when lease, append-target, seed append, read-authority, or inspection-source construction fails.
 std::optional<PersistentChildFixture> make_child_fixture(std::string session_id, std::string seed_text = "hello child")
 {
   auto root = coordinator_temp_root();
@@ -783,12 +787,15 @@ std::optional<PersistentChildFixture> make_child_fixture(std::string session_id,
   auto lease = ava::session::SessionLease::create_and_acquire(store.session_path());
   if (!lease)
     return std::nullopt;
+  auto append_target = ava::session::SessionAppendTarget::create_persistent(store, *lease, ava::session::SessionReadLimits{});
+  if (!append_target)
+    return std::nullopt;
   auto entry = ava::session::SessionEntry{.id = "u1",
                                          .parent_id = "",
                                          .type = ava::session::EntryType::UserMessage,
                                          .timestamp = ava::session::now_timestamp(),
                                          .data_json = "{\"text\":\"" + seed_text + "\"}"};
-  if (!store.append(*lease, entry))
+  if (!(*append_target)->append(entry))
     return std::nullopt;
   auto authority = ava::session::SessionReadAuthority::create_persistent(store, *lease);
   if (!authority)
@@ -800,6 +807,7 @@ std::optional<PersistentChildFixture> make_child_fixture(std::string session_id,
       .root = std::move(root),
       .store = std::move(store),
       .lease = std::move(*lease),
+      .append_target = std::move(*append_target),
       .authority = std::move(*authority),
       .source = std::move(*source),
   };
@@ -917,7 +925,7 @@ void test_live_inspection_generation_freeze_and_lifecycle()
                                               .type = ava::session::EntryType::AssistantMessage,
                                               .timestamp = ava::session::now_timestamp(),
                                               .data_json = "{\"text\":\"live update\"}"};
-  expect(child->store.append(child->lease, assistant).has_value(), "freeze fixture appends assistant message");
+  expect(child->append_target->append(assistant).has_value(), "freeze fixture appends assistant message");
   auto updated = coordinator->inspect("parent_freeze", started->job.identity.job_id, (*first)->generation);
   expect(updated && !(*updated)->not_modified && (*updated)->generation == 2 && (*updated)->messages.size() == 2 &&
              (*updated)->messages.back().text == "live update",
@@ -1045,7 +1053,7 @@ void test_live_inspection_deterministic_stale_inflight_race()
                                               .type = ava::session::EntryType::AssistantMessage,
                                               .timestamp = ava::session::now_timestamp(),
                                               .data_json = "{\"text\":\"stale-live\"}"};
-  expect(child->store.append(child->lease, assistant).has_value(), "race fixture appends before paused inspect");
+  expect(child->append_target->append(assistant).has_value(), "race fixture appends before paused inspect");
 
   {
     std::lock_guard lock(hook_mutex);
@@ -1126,7 +1134,7 @@ void test_live_inspection_monotonic_concurrent_publish_race()
                                        .type = ava::session::EntryType::AssistantMessage,
                                        .timestamp = ava::session::now_timestamp(),
                                        .data_json = "{\"text\":\"C1\"}"};
-  expect(child->store.append(child->lease, c1).has_value(), "monotonic race appends C1");
+  expect(child->append_target->append(c1).has_value(), "monotonic race appends C1");
 
   {
     std::lock_guard lock(hook_mutex);
@@ -1147,7 +1155,7 @@ void test_live_inspection_monotonic_concurrent_publish_race()
                                        .type = ava::session::EntryType::AssistantMessage,
                                        .timestamp = ava::session::now_timestamp(),
                                        .data_json = "{\"text\":\"C2\"}"};
-  expect(child->store.append(child->lease, c2).has_value(), "monotonic race appends C2 while A is paused");
+  expect(child->append_target->append(c2).has_value(), "monotonic race appends C2 while A is paused");
 
   // remaining_blocks is already 0, so B must not block on the before-publish seam.
   auto inspector_b = coordinator->inspect("parent_mono_race", started->job.identity.job_id, (*initial)->generation);
@@ -1226,7 +1234,7 @@ void test_live_inspection_two_client_lost_response_and_sink()
                                               .type = ava::session::EntryType::AssistantMessage,
                                               .timestamp = ava::session::now_timestamp(),
                                               .data_json = "{\"text\":\"second\"}"};
-  expect(child->store.append(child->lease, assistant).has_value(), "two-client fixture appends");
+  expect(child->append_target->append(assistant).has_value(), "two-client fixture appends");
 
   auto client_b = coordinator->inspect("parent_two_client", started->job.identity.job_id);
   expect(client_b && (*client_b)->generation == 2 && (*client_b)->messages.size() == 2, "client B observes generation 2");
@@ -1313,7 +1321,7 @@ void test_live_inspection_path_free_refresh_failures()
                                             .type = ava::session::EntryType::UserMessage,
                                             .timestamp = ava::session::now_timestamp(),
                                             .data_json = "{\"text\":\"x\"}"};
-    expect(over_child->store.append(over_child->lease, entry).has_value(), "over-cap fixture appends");
+    expect(over_child->append_target->append(entry).has_value(), "over-cap fixture appends");
   }
   auto over = coordinator->inspect("parent_over_cap", over_started->job.identity.job_id, (*over_first)->generation);
   expect(over && (*over)->refresh_unavailable && (*over)->messages.size() == 1,

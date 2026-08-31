@@ -15,6 +15,7 @@ from tui_smoke_helpers import (
     tmux,
     wait_for,
     wait_for_absent,
+    wait_for_count,
     wait_for_session_exit,
     wait_for_screen_state,
 )
@@ -34,7 +35,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     compact_session = ctx.session_name("compact-follow-up")
     compact_provider = ctx.start_fake_provider(
         "compact-follow-up",
-        delay_ms=3000,
+        delay_ms=0,
         scenario="compact-follow-up",
         target=ctx.restore_workspace / "AGENTS.md",
     )
@@ -64,13 +65,13 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     time.sleep(0.25)
     if re.search(r"│  /compact(?:\s|$)", capture(tmux_exe, compact_session)):
         send_keys(tmux_exe, compact_session, "Enter")
-    _wait_for_normal_turn_request_count(compact_request_log, 2, "delayed compact summary request")
+    compact_provider.wait_for_request(1, "delayed compact summary request")
     send_literal(tmux_exe, compact_session, "queued after compact")
     send_literal(tmux_exe, compact_session, "\x1b\r")
     wait_for(tmux_exe, compact_session, r"follow-up queued", "compact ordinary follow-up queued")
-    compact_log = _wait_for_normal_turn_request_count(
-        compact_request_log, 3, "compact queued follow-up provider request", timeout=14.0
-    )
+    compact_provider.release_request(1)
+    compact_provider.wait_for_request(2, "compact queued follow-up provider request", timeout=14.0)
+    compact_log = compact_request_log.read_text(encoding="utf-8")
     if "queued after compact" not in compact_log:
         raise RuntimeError(f"queued compact follow-up did not reach the fake provider\nrequest log:\n{compact_log}")
     compact_output = wait_for(
@@ -102,13 +103,14 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     time.sleep(0.25)
     if re.search(r"│  /compact(?:\s|$)", capture(tmux_exe, compact_session)):
         send_keys(tmux_exe, compact_session, "Enter")
-    _wait_for_normal_turn_request_count(compact_request_log, 4, "second delayed compact summary request")
+    compact_provider.wait_for_request(3, "second delayed compact summary request")
     send_literal(tmux_exe, compact_session, "queued compact failure")
+    wait_for(tmux_exe, compact_session, r"queued compact failure", "failing compact follow-up draft")
     send_literal(tmux_exe, compact_session, "\x1b\r")
-    wait_for(tmux_exe, compact_session, r"follow-up queued", "failing compact follow-up queued")
-    failed_compact_log = _wait_for_normal_turn_request_count(
-        compact_request_log, 5, "failing compact follow-up tool-call request", timeout=14.0
-    )
+    wait_for_count(tmux_exe, compact_session, r"follow-up queued", 2, "failing compact follow-up queued")
+    compact_provider.release_request(3)
+    compact_provider.wait_for_request(4, "failing compact follow-up tool-call request", timeout=14.0)
+    failed_compact_log = compact_request_log.read_text(encoding="utf-8")
     if "queued compact failure" not in failed_compact_log:
         raise RuntimeError(f"failing compact follow-up did not reach the fake provider\nrequest log:\n{failed_compact_log}")
     permission_deadline = time.monotonic() + 10.0
@@ -120,9 +122,8 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         if "Permission required" in current_screen:
             send_keys(tmux_exe, compact_session, "A")
         time.sleep(0.1)
-    failed_continuation_log = _wait_for_normal_turn_request_count(
-        compact_request_log, 6, "failing compact follow-up provider continuation", timeout=14.0
-    )
+    compact_provider.wait_for_request(5, "failing compact follow-up provider continuation", timeout=14.0)
+    failed_continuation_log = compact_request_log.read_text(encoding="utf-8")
     if "restore tmux smoke context" not in failed_continuation_log:
         raise RuntimeError(
             "failing compact follow-up continuation did not contain completed tool output"
@@ -166,7 +167,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
     )
     active_session = ctx.session_name("active")
-    active_provider = ctx.start_fake_provider("active", delay_ms=22000, scenario="text-three-delayed-third")
+    active_provider = ctx.start_fake_provider("active", delay_ms=0, scenario="text-three-delayed-third")
     active_request_log = active_provider.request_log
     active_env_prefix = ctx.fake_provider_command(
         active_provider,
@@ -276,7 +277,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, active_session, "tmux active first prompt")
     wait_for(tmux_exe, active_session, r"tmux active first prompt", "active-run first prompt draft")
     send_keys(tmux_exe, active_session, "Enter")
-    _wait_for_normal_turn_request_count(active_request_log, 2, "active-run first provider request")
+    active_provider.wait_for_request(2, "active-run first provider request")
     active_empty_hint = wait_for(tmux_exe, active_session, r"Esc stop.*type a follow-up", "F3 active empty contextual hint")
     active_dimensions = tmux(tmux_exe, "display-message", "-p", "-t", active_session, "#{pane_width},#{pane_height}").stdout.strip()
     if active_dimensions != "110,28":
@@ -313,7 +314,6 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, active_session, "Enter")
     wait_for(tmux_exe, active_session, r"F5-ACTIVE-DRAFT-KEEP", "active-run stash selector restore")
     send_keys(tmux_exe, active_session, "C-c")
-    _assert_normal_turn_request_count_stays(active_request_log, 2, "active F5/F6 actions must not queue or submit drafts")
 
     # Active-run nonblocking local output must use the same modal and must not
     # project its invocation or report into the still-streaming conversation.
@@ -379,7 +379,6 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if any(command in active_tool_closed for command in ("/details compact", "/details rich", "/details expanded", "/tool write", "/tools write")):
         raise RuntimeError(f"active local detail commands or tool cards remained in transcript\nscreen:\n{active_tool_closed}")
     set_active_details("rich")
-    _assert_normal_turn_request_count_stays(active_request_log, 2, "active local details/history commands must not reach the provider")
 
     send_literal(tmux_exe, active_session, "AGENTS")
     active_draft_hint = wait_for(tmux_exe, active_session, r"Esc stop|queue", "F3 active draft contextual hint")
@@ -420,7 +419,6 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     active_path_selected = wait_for(tmux_exe, active_session, r"inspect \./AGENTS\.md", "active-run normal path mouse selection")
     if "inspect ./AGENTS.md" not in active_path_selected:
         raise RuntimeError(f"active path mouse selection did not insert the canonical path\nscreen:\n{active_path_selected}")
-    _assert_normal_turn_request_count_stays(active_request_log, 2, "active palette selections must not queue before cleanup")
     send_keys(tmux_exe, active_session, "C-u")
     send_literal(tmux_exe, active_session, "/share")
     active_disabled_share = wait_for(tmux_exe, active_session, r"│  /share", "active disabled slash draft")
@@ -445,7 +443,14 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     )
     if "/share" not in active_disabled_mouse or "commands run between turns" in active_disabled_mouse:
         raise RuntimeError(f"disabled slash mouse click mutated or queued the active draft\nscreen:\n{active_disabled_mouse}")
-    _assert_normal_turn_request_count_stays(active_request_log, 2, "disabled active slash acceptance must not queue")
+    # The request log is append-only and the active request remains gated, so
+    # one final observation covers every non-submitting action above without
+    # paying four separate negative-observation windows.
+    _assert_normal_turn_request_count_stays(
+        active_request_log,
+        2,
+        "active F5/F6, local commands, palettes, and disabled commands must not reach the provider",
+    )
     send_keys(tmux_exe, active_session, "C-u")
 
     send_literal(tmux_exe, active_session, "/")
@@ -511,7 +516,9 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     if "tmux active follow-up" not in queued_follow_up:
         raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
     save_evidence(root, "active-run-follow-up-queued", queued_follow_up)
-    active_log = _wait_for_normal_turn_request_count(active_request_log, 3, "active-run queued follow-up provider request", timeout=14.0)
+    active_provider.release_request(2)
+    active_provider.wait_for_request(3, "active-run queued follow-up provider request", timeout=14.0)
+    active_log = active_request_log.read_text(encoding="utf-8")
     if (
         "tmux idle F5 assistant seed" not in active_log
         or "tmux active first prompt" not in active_log

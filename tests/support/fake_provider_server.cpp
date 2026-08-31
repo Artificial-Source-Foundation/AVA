@@ -1,5 +1,4 @@
 #include "process_gate.h"
-#include "test_timeout.h"
 
 #include <array>
 #include <cerrno>
@@ -80,6 +79,21 @@ std::optional<ava::test::ProcessGateSet> process_gates_from_environment()
   if (error != std::errc{} || parsed_end != end || descriptor < 0)
     throw std::runtime_error(std::string(process_gate_fd_environment) + " must contain a nonnegative inherited descriptor");
   return ava::test::ProcessGateSet(descriptor);
+}
+
+// Wait for one harness-owned release gate and convert protocol failures into fixture diagnostics.
+bool wait_for_process_gate(ava::test::ProcessGateSet& process_gates, std::size_t gate, std::string_view operation)
+{
+  try
+  {
+    process_gates.wait(gate, std::chrono::seconds(30));
+    return true;
+  }
+  catch (std::exception const& error)
+  {
+    std::cerr << operation << ": " << error.what() << '\n';
+    return false;
+  }
 }
 
 std::string_view trim_ascii(std::string_view text)
@@ -453,30 +467,8 @@ bool write_streaming_marker(std::filesystem::path const& directory, std::string_
   return true;
 }
 
-bool wait_for_streaming_marker(std::filesystem::path const& marker_directory, std::string_view marker_name)
-{
-  auto const marker = marker_directory / marker_name;
-  auto const deadline = ava::tests::now_plus_seconds(12);
-  while (true)
-  {
-    std::error_code exists_error;
-    if (std::filesystem::exists(marker, exists_error))
-      return true;
-    if (exists_error)
-    {
-      std::cerr << "streaming-scroll failed to inspect " << marker_name << " marker " << marker << ": " << exists_error.message() << '\n';
-      return false;
-    }
-    if (std::chrono::steady_clock::now() >= deadline)
-    {
-      std::cerr << "streaming-scroll timed out waiting for the scenario-owned " << marker_name << " marker\n";
-      return false;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-}
-
-bool send_streaming_scroll_response(int client_fd, std::string const& request, std::chrono::milliseconds delay, std::filesystem::path const& marker_directory)
+bool send_streaming_scroll_response(int client_fd, std::string const& request, std::chrono::milliseconds delay, std::filesystem::path const& marker_directory,
+                                    ava::test::ProcessGateSet* process_gates)
 {
   auto const first_line_end = request.find("\r\n");
   auto const first_line = request.substr(0, first_line_end);
@@ -509,8 +501,18 @@ bool send_streaming_scroll_response(int client_fd, std::string const& request, s
 
   for (int index = 0; index < 60; ++index)
   {
-    if (index == 30 && (!write_streaming_marker(marker_directory, "paused") || !wait_for_streaming_marker(marker_directory, "continue")))
-      return false;
+    if (index == 30)
+    {
+      if (!write_streaming_marker(marker_directory, "paused"))
+        return false;
+      if (process_gates == nullptr)
+      {
+        std::cerr << "streaming-scroll requires a process-gate control descriptor\n";
+        return false;
+      }
+      if (!wait_for_process_gate(*process_gates, 0, "streaming-scroll continuation gate failed"))
+        return false;
+    }
 
     std::ostringstream content;
     content << "stream line " << std::setw(3) << std::setfill('0') << index;
@@ -525,6 +527,7 @@ bool send_streaming_scroll_response(int client_fd, std::string const& request, s
       std::cerr << "streaming-scroll delta " << index << " write failed: " << errno_text() << '\n';
       return false;
     }
+    // Deliberately pace individual SSE deltas so terminal tests can exercise live streaming states; this is not a synchronization wait.
     std::this_thread::sleep_for(delay);
     if (index == 29 &&
         !write_all(client_fd,
@@ -543,6 +546,7 @@ bool send_streaming_scroll_response(int client_fd, std::string const& request, s
     std::cerr << "streaming-scroll final marker write failed: " << errno_text() << '\n';
     return false;
   }
+  // Preserve one final live-stream frame before the stop event; the scenario controls continuation separately through gate 0.
   std::this_thread::sleep_for(delay);
   if (!write_all(client_fd,
                  "data: {\"id\":\"chatcmpl-stream-scroll\",\"object\":\"chat.completion.chunk\",\"model\":\"ava-tui-fake\",\"choices\":[{\"index\":0,"
@@ -690,7 +694,7 @@ int main(int argc, char** argv)
 {
   if (argc != 4 && argc != 6)
   {
-    std::cerr << "usage: ava_fake_provider_server PORT_FILE REQUEST_LOG DELAY_MS [SCENARIO TARGET_PATH]\n";
+    std::cerr << "usage: ava_fake_provider_server PORT_FILE REQUEST_LOG STREAM_DELAY_MS [SCENARIO TARGET_PATH]\n";
     return 2;
   }
 
@@ -713,6 +717,7 @@ int main(int argc, char** argv)
       scenario == "http-error"                 ? 3
       : scenario == "branch-summary"           ? 12
       : scenario == "text-three"               ? 3
+      : scenario == "text-three-delayed-first" ? 3
       : scenario == "text-three-delayed-third" ? 4
       : scenario == "compact-follow-up"        ? 6
       : scenario == "streaming-scroll"         ? 2
@@ -787,18 +792,36 @@ int main(int argc, char** argv)
       process_gates->open(static_cast<std::size_t>(request_index));
     if (scenario == "streaming-scroll" && request_index == 0)
     {
-      if (!send_streaming_scroll_response(client.get(), request, delay, target_path))
+      if (!send_streaming_scroll_response(client.get(), request, delay, target_path, process_gates ? &*process_gates : nullptr))
         return 1;
       continue;
     }
-    if (scenario == "subagent-workspace" && request_index > 0 && !wait_for_streaming_marker(target_path, "release-live"))
-      return 1;
-    auto const delay_this_request = scenario == "compact-follow-up"          ? request_index == 1 || request_index == 3
-                                    : scenario == "compact-delayed"          ? request_index == 1
-                                    : scenario == "text-three-delayed-third" ? request_index == 2
-                                                                             : request_index == 0;
-    if (delay_this_request)
-      std::this_thread::sleep_for(delay);
+    if (scenario == "subagent-workspace" && request_index > 0)
+    {
+      if (!process_gates)
+      {
+        std::cerr << "subagent-workspace requires a process-gate control descriptor\n";
+        return 1;
+      }
+      if (!wait_for_process_gate(*process_gates, 0, "subagent-workspace release gate failed"))
+        return 1;
+    }
+    auto const gate_this_request = scenario == "compact-follow-up"          ? request_index == 1 || request_index == 3
+                                   : scenario == "compact-delayed"          ? request_index == 1
+                                   : scenario == "text-three-delayed-third" ? request_index == 2
+                                   : scenario == "text-three-delayed-first" ? request_index == 0
+                                   : scenario == "text-delayed"             ? request_index == 0
+                                                                            : false;
+    if (gate_this_request)
+    {
+      if (!process_gates)
+      {
+        std::cerr << "delayed fake-provider requests require a process-gate control descriptor\n";
+        return 1;
+      }
+      if (!wait_for_process_gate(*process_gates, static_cast<std::size_t>(request_index), "delayed provider release gate failed"))
+        return 1;
+    }
 
     auto provider_response = response_for(scenario, request_index, target_path);
     if (scenario == "branch-summary" && request.find("Summarize only the supplied abandoned parent-session branch") != std::string::npos)

@@ -8,6 +8,7 @@ import time
 from tui_smoke_helpers import (
     SmokeContext,
     capture,
+    capture_styled,
     save_evidence,
     send_keys,
     send_literal,
@@ -15,8 +16,9 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_screen_change,
+    wait_for_styled_screen_change,
 )
-from .common import clear_settings_filter, close_settings, open_settings_root, open_settings_section
+from .common import clear_settings_filter, close_settings, open_settings_root, open_settings_section, wait_for_settings_root
 
 
 def _assert_no_settings_chat_receipt(screen: str, label: str, *receipt_patterns: str) -> None:
@@ -48,7 +50,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         extra={"NO_COLOR": "", "AVA_TUI_THEME": "", "COLORFGBG": ""},
     )
     (ava_config / "keybinds.json").write_text(
-        '{"tui.editor.cursorLineStart":["Home","Ctrl+A"]}\n', encoding="utf-8"
+        '{"tui.editor.cursorLineStart":["Home","Ctrl+A"],"tui.select.cancel":["F12","Escape"]}\n', encoding="utf-8"
     )
     if display_config.exists():
         display_config.unlink()
@@ -68,6 +70,16 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         env_prefix,
     )
     wait_for(tmux_exe, session, r"Type a message|live session", "nested-settings initial TUI frame")
+
+    def close_nested_settings(label: str) -> None:
+        """Close settings with an unambiguous key after explicit Escape behavior has been asserted.
+
+        Bare Escape intentionally waits 100 ms for terminal-sequence disambiguation.
+        This scenario covers that path directly, but administrative cleanup uses
+        F12 so repeated section/root teardown does not dominate suite runtime.
+        """
+
+        close_settings(tmux_exe, session, label, close_key="F12")
 
     root_modal = open_settings_root(tmux_exe, session, "nested settings root")
     if "Display" not in root_modal or "Model" not in root_modal:
@@ -90,7 +102,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
 
     # Back-stack restores the root frame (including the prior root filter).
     send_keys(tmux_exe, session, "Escape")
-    back_to_root = wait_for(tmux_exe, session, r"Theme|Model|Search\s{2}Display", "esc returns to settings root")
+    back_to_root = wait_for_settings_root(tmux_exe, session, "esc returns to settings root")
     if "Settings › Display" in back_to_root:
         raise RuntimeError(f"Esc from display did not restore settings root\nscreen:\n{back_to_root}")
     clear_settings_filter(tmux_exe, session, "root filter cleared after display back-stack")
@@ -106,10 +118,10 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     short_tools_section = wait_for(tmux_exe, session, r"Settings › Tools|Permissions|Plugins", "short-height tools section")
     save_evidence(root, "nested-settings-short-tools", short_tools_section)
     send_keys(tmux_exe, session, "Escape")
-    wait_for(tmux_exe, session, r"Theme|Display|Model", "short-height back to root")
+    wait_for_settings_root(tmux_exe, session, "short-height back to root")
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "100", "-y", "24")
     wait_for(tmux_exe, session, r"Theme|Display|Model", "restored normal-height settings root")
-    close_settings(tmux_exe, session, "closed before preview checks")
+    close_nested_settings("closed before preview checks")
     send_keys(tmux_exe, session, "C-u")
 
     # Theme highlight previews without writing display.json; Esc restores authority.
@@ -127,10 +139,10 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         raise RuntimeError("theme highlight wrote display.json before confirmation")
     save_evidence(root, "nested-settings-theme-preview", preview_row)
     send_keys(tmux_exe, session, "Escape")
-    wait_for(tmux_exe, session, r"Theme|Display|Model", "esc cancels display preview to root")
+    wait_for_settings_root(tmux_exe, session, "esc cancels display preview to root")
     if display_config.exists() and display_config.read_text(encoding="utf-8") != before_preview:
         raise RuntimeError("cancel path wrote display.json")
-    close_settings(tmux_exe, session, "closed after preview cancel")
+    close_nested_settings("closed after preview cancel")
     send_keys(tmux_exe, session, "C-u")
 
     # Confirm writes exactly once and survives restart.
@@ -153,7 +165,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     if "Stored TUI theme" in confirmed:
         raise RuntimeError(f"theme confirm receipt leaked onto the settings frame\nscreen:\n{confirmed}")
     save_evidence(root, "nested-settings-theme-confirm", confirmed)
-    close_settings(tmux_exe, session, "closed after theme confirm")
+    close_nested_settings("closed after theme confirm")
     send_keys(tmux_exe, session, "C-u")
     after_theme_confirm = wait_for(tmux_exe, session, r"Type a message", "main frame after theme confirm")
     _assert_no_settings_chat_receipt(after_theme_confirm, "theme confirm", r"Stored TUI theme")
@@ -189,19 +201,8 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     # External edit during an active preview rebases authority then keeps the staged highlight.
     send_literal(tmux_exe, session, "plain")
     wait_for(tmux_exe, session, r"Search\s{2}plain", "plain theme staged during external edit")
-    before_external = display_config.read_text(encoding="utf-8")
     display_config.write_text('{\n  "theme": "dark",\n  "show_images": true,\n  "image_width_cells": 60\n}\n', encoding="utf-8")
-    # The Display filter may still be "Theme plain", so dark "current" rows are hidden.
-    # Synchronize on the watched file and a live settings frame instead of the covered status dock.
-    deadline = time.monotonic() + 8.0
     rebased = capture(tmux_exe, session)
-    while time.monotonic() < deadline:
-        rebased = capture(tmux_exe, session)
-        disk = display_config.read_text(encoding="utf-8")
-        settings_still_open = "Settings › Theme" in rebased
-        if '"theme": "dark"' in disk and settings_still_open:
-            break
-        time.sleep(0.05)
     disk = display_config.read_text(encoding="utf-8")
     if '"theme": "dark"' not in disk:
         raise RuntimeError(f"external display.json edit was not observed\npath text:\n{disk}\nscreen:\n{rebased}")
@@ -211,8 +212,12 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         raise RuntimeError(f"external reload discarded the settings display frame\nscreen:\n{rebased}")
     save_evidence(root, "nested-settings-external-during-preview", rebased)
     send_keys(tmux_exe, session, "Escape")
-    wait_for(tmux_exe, session, r"Theme|Display|Model", "esc after external rebase")
-    close_settings(tmux_exe, session, "closed after external rebase")
+    wait_for_settings_root(tmux_exe, session, "esc after external rebase")
+    close_nested_settings("closed after external rebase")
+    # Settings intentionally cover the status dock. Once closed, AVA's
+    # auto-reload status becomes an observable acknowledgement from the file
+    # watcher, unlike the disk content that Python itself wrote.
+    wait_for(tmux_exe, session, r"display theme auto-reloaded", "external display edit applied")
     send_keys(tmux_exe, session, "C-u")
 
     # W2-002: while configured theme is dark, a valid edit to an unconfigured previewed custom
@@ -248,8 +253,6 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         '{\n  "theme": "dark",\n  "show_images": true,\n  "image_width_cells": 60\n}\n',
         encoding="utf-8",
     )
-    # Give the display watcher a beat to observe dark authority before opening settings.
-    time.sleep(0.6)
     open_settings_section(
         tmux_exe,
         session,
@@ -257,22 +260,19 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
         r"Settings › Theme|Dark|Light|Plain|sunrise",
         "display section before unconfigured custom theme preview",
     )
+    # Opening settings is not proof that the earlier file notification was
+    # consumed. The authoritative current row is the user-visible completion
+    # event and replaces the former fixed 600 ms delay.
+    wait_for(tmux_exe, session, r"Dark[^\n]*current", "dark authority applied before sunrise preview")
     send_literal(tmux_exe, session, "sunrise")
     sunrise_row = wait_for(tmux_exe, session, r"Search\s{2}sunrise|sunrise", "sunrise custom theme staged")
     if "sunrise" not in sunrise_row.lower():
         raise RuntimeError(f"sunrise custom theme was not listed for preview\nscreen:\n{sunrise_row}")
     before_sunrise_edit = display_config.read_text(encoding="utf-8")
+    before_sunrise_style = capture_styled(tmux_exe, session)
     write_sunrise(238)
-    deadline = time.monotonic() + 8.0
+    wait_for_styled_screen_change(tmux_exe, session, before_sunrise_style, "custom theme catalog edit applied to preview")
     sunrise_reloaded = capture(tmux_exe, session)
-    while time.monotonic() < deadline:
-        sunrise_reloaded = capture(tmux_exe, session)
-        disk = display_config.read_text(encoding="utf-8")
-        settings_still_open = "Settings › Theme" in sunrise_reloaded
-        if settings_still_open and disk == before_sunrise_edit:
-            # Catalog-only reload must not persist the staged preview.
-            break
-        time.sleep(0.05)
     if display_config.read_text(encoding="utf-8") != before_sunrise_edit:
         raise RuntimeError("unconfigured custom theme edit wrote display.json during preview")
     if "Settings › Theme" not in sunrise_reloaded:
@@ -282,26 +282,20 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     save_evidence(root, "nested-settings-custom-theme-catalog-reload", sunrise_reloaded)
 
     # Invalidating the previewed custom theme must keep the session open and must not persist sunrise.
+    before_invalid_style = capture_styled(tmux_exe, session)
     sunrise_path.write_text(
         '{\n  "name": "sunrise",\n  "colors": {"text":"","muted":242,"success":34,"warning":220,"error":196,"accent":39,"screenBg":235}\n}\n',
         encoding="utf-8",
     )
-    deadline = time.monotonic() + 8.0
+    wait_for_styled_screen_change(tmux_exe, session, before_invalid_style, "invalid custom theme removed from preview")
     sunrise_invalid = capture(tmux_exe, session)
-    while time.monotonic() < deadline:
-        sunrise_invalid = capture(tmux_exe, session)
-        disk = display_config.read_text(encoding="utf-8")
-        settings_still_open = "Settings › Theme" in sunrise_invalid
-        if settings_still_open and '"theme": "dark"' in disk and '"theme": "sunrise"' not in disk:
-            break
-        time.sleep(0.05)
     disk = display_config.read_text(encoding="utf-8")
     if '"theme": "sunrise"' in disk:
         raise RuntimeError("invalid custom theme edit/confirm path persisted sunrise into display.json")
     if '"theme": "dark"' not in disk:
         raise RuntimeError(f"invalid custom theme path disturbed configured dark theme\npath text:\n{disk}")
     save_evidence(root, "nested-settings-custom-theme-invalid-retained", sunrise_invalid)
-    close_settings(tmux_exe, session, "closed after custom theme catalog reload")
+    close_nested_settings("closed after custom theme catalog reload")
     send_keys(tmux_exe, session, "C-u")
     # Restore a valid sunrise file so later image checks are unaffected.
     write_sunrise(236)
@@ -343,7 +337,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     save_evidence(root, "nested-settings-images-width-confirm", width_saved)
 
     # Mouse selection in nested theme stays non-persisting.
-    close_settings(tmux_exe, session, "closed display settings before mouse theme")
+    close_nested_settings("closed display settings before mouse theme")
     send_keys(tmux_exe, session, "C-u")
     open_settings_section(tmux_exe, session, "Theme", r"Settings › Theme|Dark|Light", "theme rows before mouse selection")
     send_literal(tmux_exe, session, "theme")
@@ -374,7 +368,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
             raise RuntimeError(f"settings mouse selection confirmed a theme write\nscreen:\n{after_mouse}")
     save_evidence(root, "nested-settings-mouse-no-persist", capture(tmux_exe, session))
 
-    close_settings(tmux_exe, session, "nested settings closed")
+    close_nested_settings("nested settings closed")
     send_keys(tmux_exe, session, "C-u")
 
     # Workspace trust persists once through the backend /trust command, refreshes the
@@ -418,7 +412,7 @@ def scenario_nested_settings_preview(ctx: SmokeContext) -> None:
     )
     trust_row = wait_for(tmux_exe, session, r"trust trusted · enabled", "trust summary refreshed to trusted")
     save_evidence(root, "nested-settings-trust-row-refreshed", trust_row)
-    close_settings(tmux_exe, session, "closed after trust row refresh")
+    close_nested_settings("closed after trust row refresh")
     send_keys(tmux_exe, session, "C-u")
 
     # Restore the unknown decision so the isolated config stays neutral for later checks.

@@ -451,7 +451,7 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     if not any(value in restored_model_cycle for value in restored_cycle_markers):
         raise RuntimeError(f"Ctrl+P did not cycle after restoring scoped models\nscreen:\n{restored_model_cycle}")
 
-    active_provider = ctx.start_fake_provider("models-thinking-active", delay_ms=12000)
+    active_provider = ctx.start_fake_provider("models-thinking-active", delay_ms=0, scenario="text-three-delayed-first")
     active_session = ctx.session_name("models-thinking-active")
     active_env_prefix = ctx.fake_provider_command(
         active_provider,
@@ -477,7 +477,7 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, active_session, r"Type a message|live session", "thinking active-run initial frame")
     send_literal(tmux_exe, active_session, "thinking selector active-run guard")
     send_keys(tmux_exe, active_session, "Enter")
-    _wait_for_normal_turn_request_count(active_provider.request_log, 1, "thinking active-run provider request")
+    active_provider.wait_for_request(0, "thinking active-run provider request")
     wait_for(tmux_exe, active_session, r"Esc stop", "thinking active-run streaming state")
     send_keys(tmux_exe, active_session, "C-t")
     active_rejection = wait_for(
@@ -490,6 +490,7 @@ def scenario_main_models_selectors(ctx: SmokeContext) -> None:
         raise RuntimeError(f"Ctrl+T opened or persisted a thinking selector during an active run\nscreen:\n{active_rejection}")
     send_keys(tmux_exe, active_session, "Escape")
     wait_for(tmux_exe, active_session, r"stop requested|stopped|submit a new prompt", "thinking active-run stop")
+    active_provider.release_request(0)
     send_keys(tmux_exe, active_session, "C-d")
     wait_for_session_exit(tmux_exe, active_session)
     tmux(tmux_exe, "kill-session", "-t", active_session, check=False)

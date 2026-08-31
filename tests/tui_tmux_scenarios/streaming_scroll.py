@@ -248,9 +248,7 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
         raise RuntimeError(f"alternating wheel flood changed the composer draft or cursor insertion point\nscreen:\n{burst_screen}")
     _assert_no_deleted_scrollback_text(burst_screen, "alternating wheel-flood stream")
 
-    continue_marker = controls / "continue"
-    continue_marker.write_text("continue\n", encoding="utf-8")
-    continue_marker.chmod(0o600)
+    provider.release_request(0)
     _wait_for_path(controls / "completed", "streaming-scroll completed marker")
     _wait_for_session_text(ctx.active_state, "STREAM COMPLETE", "persisted streaming completion")
 
@@ -266,17 +264,15 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     live_stream_screen = completed_detached
     for step in range(32):
         previous_numbers = [int(value) for value in _NUMBERED_LINE.findall(live_stream_screen)]
-        observed_change = False
+        wheel_sent_at = time.monotonic()
 
         def reverse_step_synchronized(screen: str) -> bool:
-            nonlocal observed_change
             changed = "STREAM COMPLETE" in screen or [int(value) for value in _NUMBERED_LINE.findall(screen)] != previous_numbers
-            if not changed:
-                return False
-            if observed_change:
-                return True
-            observed_change = True
-            return False
+            # AVA intentionally drops repeated same-direction wheel events
+            # within 40 ms. Synchronize on both the rendered step and expiry of
+            # that documented governor interval before sending the next step;
+            # relying on two poll captures became too short at a 20 ms cadence.
+            return changed and time.monotonic() >= wheel_sent_at + 0.045
 
         send_literal(tmux_exe, session, wheel_down)
         live_stream_screen = wait_for_screen_state(

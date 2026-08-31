@@ -11,10 +11,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_session_exit,
 )
-from .common import (
-    _assert_normal_turn_request_count_stays,
-    _wait_for_normal_turn_request_count,
-)
+from .common import _assert_normal_turn_request_count_stays
 
 
 def scenario_restore_followup(ctx: SmokeContext) -> None:
@@ -22,7 +19,7 @@ def scenario_restore_followup(ctx: SmokeContext) -> None:
     root = ctx.root
     restore_workspace = ctx.restore_workspace
     restore_active_session = ctx.session_name("restore")
-    restore_provider = ctx.start_fake_provider("restore", delay_ms=3500)
+    restore_provider = ctx.start_fake_provider("restore", delay_ms=0, scenario="text-three-delayed-first")
     restore_request_log = restore_provider.request_log
     restore_env_prefix = ctx.fake_provider_command(
         restore_provider,
@@ -49,7 +46,7 @@ def scenario_restore_followup(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, restore_active_session, "tmux restore first prompt")
     wait_for(tmux_exe, restore_active_session, r"tmux restore first prompt", "active-run restore first prompt draft")
     send_keys(tmux_exe, restore_active_session, "Enter")
-    _wait_for_normal_turn_request_count(restore_request_log, 1, "active-run restore first provider request")
+    restore_provider.wait_for_request(0, "active-run restore first provider request")
     send_literal(tmux_exe, restore_active_session, "tmux restore follow-up")
     wait_for(tmux_exe, restore_active_session, r"tmux restore follow-up", "active-run restore follow-up draft")
     send_literal(tmux_exe, restore_active_session, "\x1b\r")
@@ -86,6 +83,7 @@ def scenario_restore_followup(ctx: SmokeContext) -> None:
         raise RuntimeError(
             f"active-run restored follow-up was not editable in the composer\nscreen:\n{restored_draft_edit}"
         )
+    restore_provider.release_request(0)
     wait_for(
         tmux_exe,
         restore_active_session,

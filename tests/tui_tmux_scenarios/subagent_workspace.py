@@ -114,7 +114,7 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "Enter")
     wait_for(tmux_exe, session, r"Esc jobs.*Tab", "complete reopened workspace frame without stopping parent")
 
-    marker_directory.joinpath("release-live").write_text("release\n", encoding="utf-8")
+    provider.release_request(0)
     terminal = wait_for(
         tmux_exe,
         session,

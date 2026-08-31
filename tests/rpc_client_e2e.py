@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Any
 
+from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
 from timeout_support import test_timeout
 
 
@@ -42,6 +43,7 @@ def main() -> int:
     root.mkdir(parents=True)
     clients: list[AvaRpcClient] = []
     providers: list[subprocess.Popen[bytes]] = []
+    provider_gates: dict[subprocess.Popen[bytes], ProcessGateSet] = {}
     worker_threads: list[threading.Thread] = []
 
     def base_environment(case: pathlib.Path) -> dict[str, str]:
@@ -67,8 +69,23 @@ def main() -> int:
         command = [str(args.fake_provider), str(port_file), str(request_log), str(delay_ms)]
         if scenario != "text" or target:
             command += [scenario, target]
-        provider = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        gate_pair = create_process_gate_pair()
+        provider_environment = os.environ.copy()
+        provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
+        try:
+            provider = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=provider_environment,
+                pass_fds=(gate_pair.child_fd,),
+            )
+        except BaseException:
+            gate_pair.close()
+            raise
+        gate_pair.close_child_endpoint()
         providers.append(provider)
+        provider_gates[provider] = gate_pair.gates
         try:
             wait_for(lambda: port_file.exists() and port_file.stat().st_size > 0, 5, "fake provider did not publish port")
             port = port_file.read_text(encoding="ascii").strip()
@@ -120,6 +137,7 @@ def main() -> int:
         if status != 0:
             stderr = provider.stderr.read().decode("utf-8", errors="replace") if provider.stderr else ""
             raise AssertionError(f"fake provider failed ({status}): {stderr}")
+        provider_gates.pop(provider).close()
 
     try:
         # Local state, malformed recovery, session operation, protocol discovery, clean EOF.
@@ -189,7 +207,7 @@ def main() -> int:
 
         # Cooperative cancellation while the real provider subprocess is delayed.
         case = root / "cancel"
-        provider, env = start_provider(case, "text", delay_ms=1500)
+        provider, env = start_provider(case, "text-delayed")
         client = track_client(AvaRpcClient([str(args.ava), "--rpc"], cwd=str(case / "workspace"), env=env))
         prompt_outcome: list[BaseException | dict[str, Any]] = []
 
@@ -202,8 +220,7 @@ def main() -> int:
         prompt_thread = threading.Thread(target=run_prompt)
         worker_threads.append(prompt_thread)
         prompt_thread.start()
-        request_log = case / "provider.requests"
-        wait_for(lambda: request_log.exists() and request_log.stat().st_size > 0, 5, "provider did not receive cancel prompt")
+        provider_gates[provider].wait(0, test_timeout(5))
         canceled = client.request("cancel", request_id="cancel", timeout=test_timeout(5))
         prompt_thread.join(timeout=test_timeout(8))
         assert not prompt_thread.is_alive() and canceled["active_run"] is True
@@ -215,13 +232,14 @@ def main() -> int:
         cancel_events = client.events_by_request["cancel-prompt"]
         assert any(event["name"] == "canceled" for event in cancel_events)
         assert all(event["name"] != "done" for event in cancel_events)
+        provider_gates[provider].open(0)
         assert client.close(timeout=test_timeout(5)) == 0
         finish_provider(provider)
 
         # Compaction is a joinable worker: stdin remains live and cancellation
         # completes before the delayed provider response can arrive.
         case = root / "compact-cancel"
-        provider, env = start_provider(case, "compact-delayed", delay_ms=1800)
+        provider, env = start_provider(case, "compact-delayed")
         client = track_client(AvaRpcClient([str(args.ava), "--rpc"], cwd=str(case / "workspace"), env=env))
         seeded = client.request("prompt", request_id="compact-seed", message="seed compaction", timeout=test_timeout(5))
         assert seeded["final_text"] == "before compact"
@@ -236,9 +254,7 @@ def main() -> int:
         compact_thread = threading.Thread(target=run_compact)
         worker_threads.append(compact_thread)
         compact_thread.start()
-        request_log = case / "provider.requests"
-        wait_for(lambda: request_log.exists() and "--- request 2 ---" in request_log.read_text(encoding="utf-8"), 5,
-                 "provider did not receive delayed compaction request")
+        provider_gates[provider].wait(1, test_timeout(5))
         cancel_started = time.monotonic()
         canceled = client.request("cancel", request_id="compact-cancel-request", timeout=test_timeout(2))
         compact_thread.join(timeout=1.2)
@@ -247,6 +263,7 @@ def main() -> int:
         assert not compact_thread.is_alive() and cancel_elapsed < 1.2
         assert len(compact_outcome) == 1 and isinstance(compact_outcome[0], RpcError)
         assert compact_outcome[0].error["code"] == "canceled"
+        provider_gates[provider].open(1)
         assert client.close(timeout=test_timeout(5)) == 0
         cleanup_process(provider)
         return 0
@@ -260,6 +277,9 @@ def main() -> int:
                     cleanup_process(client.process)
         for provider in reversed(providers):
             cleanup_process(provider)
+            gates = provider_gates.pop(provider, None)
+            if gates is not None:
+                gates.close()
         for thread in worker_threads:
             thread.join(timeout=3)
 

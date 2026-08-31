@@ -1,10 +1,12 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/process/scope.h"
 #include "ava/process/supervisor.h"
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -96,6 +98,70 @@ void test_generated_owner_hierarchy()
   expect(operation && operation->matches_prefix(application) && operation->matches_prefix(*session) && operation->matches_prefix(*run) &&
              !operation->matches_prefix(other_application),
          "owner prefix matching selects descendants without conflating independently generated applications");
+}
+
+bool same_owner(ava::process::OwnerPathV1 const& left, ava::process::OwnerPathV1 const& right)
+{
+  return left.matches_prefix(right) && right.matches_prefix(left);
+}
+
+void test_process_scope_hierarchy_and_inert_copying()
+{
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto const initial = supervisor->snapshot();
+  auto null_scope = ava::process::ProcessScopeV1::application({});
+  auto application = ava::process::ProcessScopeV1::application(supervisor);
+  expect(!null_scope && application.has_value(), "application process scope rejects null authority and accepts one explicit supervisor");
+  if (!application)
+    return;
+
+  auto first_session = application->session();
+  auto second_session = application->session();
+  auto invalid_application_run = application->run();
+  auto application_operation = application->operation();
+  expect(first_session && second_session && !invalid_application_run && application_operation,
+         "process scope permits generated application children but requires a session before a run");
+  if (!first_session || !second_session || !application_operation)
+    return;
+
+  auto run = first_session->run();
+  auto invalid_second_session = first_session->session();
+  auto session_operation = first_session->operation();
+  expect(run && !invalid_second_session && session_operation, "session process scope derives one run or operation and rejects another session level");
+  if (!run || !session_operation)
+    return;
+
+  auto operation = run->operation();
+  auto invalid_second_run = run->run();
+  auto invalid_below_operation = operation ? operation->operation() : run->operation();
+  expect(operation && !invalid_second_run && !invalid_below_operation,
+         "run process scope derives an operation while repeated and below-operation derivations fail explicitly");
+  if (!operation)
+    return;
+
+  auto recovered_application = operation->application_scope();
+  auto copied_session = *first_session;
+  auto fresh_session = recovered_application.session();
+  bool const distinct_siblings = fresh_session && !same_owner(first_session->owner_prefix(), second_session->owner_prefix()) &&
+                                 !same_owner(first_session->owner_prefix(), fresh_session->owner_prefix());
+  bool const same_authority = &application->supervisor() == supervisor.get() && &first_session->supervisor() == supervisor.get() &&
+                              &run->supervisor() == supervisor.get() && &operation->supervisor() == supervisor.get() &&
+                              &recovered_application.supervisor() == supervisor.get();
+  bool const recovered_root = same_owner(application->owner_prefix(), recovered_application.owner_prefix()) &&
+                              operation->owner_prefix().matches_prefix(recovered_application.owner_prefix());
+  expect(fresh_session && distinct_siblings, "generated sibling session scopes are distinct under one recovered application root");
+  expect(same_authority && recovered_root && same_owner(copied_session.owner_prefix(), first_session->owner_prefix()),
+         "derived and copied process scopes retain one supervisor and recover the original application owner without changing session identity");
+#ifdef CWDEBUG
+  std::ostringstream debug_output;
+  debug_output << *application;
+  expect(debug_output.str() == "$process_scope$", "process scope debug output is a fixed content-free token");
+#endif
+
+  auto const final = supervisor->snapshot();
+  expect(!initial.monitor_started && initial.live_records == 0 && initial.records.empty() && !final.monitor_started && final.live_records == 0 &&
+             final.records.empty(),
+         "process scope construction, derivation, root recovery, and copying create no monitor or live process record");
 }
 
 void test_startup_timeout_policy_validation()
@@ -282,6 +348,7 @@ void run_process_supervisor_tests()
 {
   test_closed_vocabulary();
   test_generated_owner_hierarchy();
+  test_process_scope_hierarchy_and_inert_copying();
   test_startup_timeout_policy_validation();
   test_lazy_monitor_and_live_capacity();
   test_terminal_pruning_and_content_free_snapshot();

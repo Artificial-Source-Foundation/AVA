@@ -26,6 +26,7 @@ void run_app_runtime_tests()
   test_app_active_context_status_tracks_compaction_projection();
   test_app_runtime_no_session_mode();
   test_app_runtime_replacement_open_context();
+  test_app_runtime_process_scope_lifecycle();
   test_app_runtime_session_startup_options();
   test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();
   test_app_runtime_reconciles_committed_function_calls_on_resume();

@@ -171,6 +171,7 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
 void SessionResources::swap(SessionResources& other)
 {
   lease.swap(other.lease);
+  session_process_scope.swap(other.session_process_scope);
   anchor_set.swap(other.anchor_set);
   run_controller.swap(other.run_controller);
   append_target.swap(other.append_target);
@@ -351,6 +352,15 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
 {
   // This function ends with a move of the newly created Session, after which that moved Session is destructed.
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::construct");
+
+  std::optional<ava::process::ProcessScopeV1> session_process_scope;
+  if (context.application_process_scope)
+  {
+    auto derived = context.application_process_scope->session();
+    if (!derived)
+      return std::unexpected(std::move(derived.error()));
+    session_process_scope = std::move(*derived);
+  }
 
   // Provider catalog is application-scoped authority. Resolve it before any
   // session-file mutation so unsafe providers.json fails closed at startup.
@@ -605,6 +615,7 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
   TrustState trust_state{.project_trust = std::move(project_trust)};
   SessionResources resources{.lease = std::move(lease),
+                             .session_process_scope = std::move(session_process_scope),
                              .anchor_set = std::move(anchor_set),
                              .run_controller = std::make_shared<SessionRunController>(*append_target),
                              .append_target = std::move(*append_target),
@@ -662,6 +673,7 @@ Session_aggregate_base Session::create_detached_state(ava::session::SessionLease
                                                       std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const
 {
   SessionResources session_resources{.lease = std::move(lease),
+                                     .session_process_scope = session_process_scope(),
                                      .anchor_set = anchor_set(),
                                      .run_controller = run_controller(),
                                      .append_target = append_target(),
@@ -837,6 +849,10 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.anchor_set = sessionless() ? nullptr : anchor_set();
   context.prompt_overrides = prompt_overrides();
   context.session_read_limits = session_read_limits();
+  if (session_process_scope())
+    context.application_process_scope = session_process_scope()->application_scope();
+  else
+    context.application_process_scope.reset();
   context.subagent_coordinator = subagent_coordinator();
   context.subagent_delivery_manager = subagent_delivery_manager();
   context.session_title_coordinator = session_title_coordinator();

@@ -137,6 +137,9 @@ struct SessionResources
 {
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
   ava::session::SessionLease lease;
+  // One generated session owner, when explicit application process authority
+  // was supplied. Copies representing this same runtime session share it.
+  std::optional<ava::process::ProcessScopeV1> session_process_scope = std::nullopt;
   // Pre-opened anchor descriptors for all writable directories. Opened once
   // at session creation and shared across all prompts and subagent loops.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
@@ -335,6 +338,7 @@ class Session : protected Session_aggregate_base
 
   // Session resources.
   ava::session::SessionLease const& lease() const { return resources_.lease; }
+  std::optional<ava::process::ProcessScopeV1> const& session_process_scope() const { return resources_.session_process_scope; }
   std::shared_ptr<ava::core::AnchorSet> const& anchor_set() const { return resources_.anchor_set; }
   std::shared_ptr<SessionRunController> const& run_controller() const { return resources_.run_controller; }
   std::shared_ptr<ava::session::SessionAppendTarget> const& append_target() const { return resources_.append_target; }
@@ -422,8 +426,10 @@ class Session : protected Session_aggregate_base
   // Build replacement OpenContext from this session and `base_context`.
   //
   // Runtime context, filesystem policy, resolved read limits, and shared
-  // application services are inherited from this session. Frontend policy in
-  // `base_context`, including model pinning and exact-ID behavior, is retained.
+  // application services are inherited from this session. A stored process
+  // scope is reduced to its application root so the replacement derives one
+  // fresh session owner. Frontend policy in `base_context`, including model
+  // pinning and exact-ID behavior, is retained.
   // An ephemeral session's AnchorSet is not inherited because its temporary
   // spill root cannot authorize a new persistent or ephemeral store.
   [[nodiscard]] OpenContext replacement_open_context(OpenContext const& base_context) const;

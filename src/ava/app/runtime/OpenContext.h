@@ -2,6 +2,7 @@
 
 #include "PromptOverrides.h"
 #include "ava/debug/print_members_on.h"
+#include "ava/process/scope.h"
 #include "ava/agent/mode.h"
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/agent/tool_visibility.h"
@@ -62,6 +63,9 @@ struct OpenContext
   // Strict adapters opt out of CLI prefix resolution and may bound persistence reads without changing legacy CLI/RPC behavior.
   bool exact_session_id = false;
   std::optional<ava::session::SessionReadLimits> session_read_limits = std::nullopt;
+  // Explicit application-lifetime process authority. Production composition
+  // supplies this; legacy/unit adapters that do not spawn may leave it empty.
+  std::optional<ava::process::ProcessScopeV1> application_process_scope = std::nullopt;
   // Long-lived frontends supply one shared coordinator across every runtime
   // session they open. Null creates the initial application coordinator.
   std::shared_ptr<ava::agent::SubagentCoordinator> subagent_coordinator = nullptr;

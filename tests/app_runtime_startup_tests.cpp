@@ -25,6 +25,8 @@
 #include "ava/session/validation.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 #include "ava/core/result.h"
@@ -34,6 +36,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -505,6 +508,104 @@ void test_app_runtime_replacement_open_context()
   auto created_metadata = ava::session::load_session_metadata(created_at_r->store);
   expect(created_metadata && created_metadata->name.empty() && !created_metadata->has_manual_name,
          "location-explicit session creation has no startup lifecycle state");
+}
+
+void test_app_runtime_process_scope_lifecycle()
+{
+  auto const root = create_empty_root("app-runtime-process-scope");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(application_scope.has_value(),
+         application_scope ? "runtime process-scope fixture creates one application authority" : application_scope.error().format());
+  if (!application_scope)
+    return;
+
+  auto same_owner = [](ava::process::ProcessScopeV1 const& left, ava::process::ProcessScopeV1 const& right) {
+    return left.owner_prefix().matches_prefix(right.owner_prefix()) && right.owner_prefix().matches_prefix(left.owner_prefix());
+  };
+
+  ava::app::runtime::OpenContext scoped_context;
+  scoped_context.workspace_dir = workspace;
+  scoped_context.current_dir = workspace;
+  scoped_context.paths = paths;
+  scoped_context.application_process_scope = *application_scope;
+  auto first_result = ava::app::runtime::Session::open(scoped_context);
+  expect(first_result.has_value(), first_result ? "runtime session derives one process scope" : first_result.error().format());
+  if (!first_result)
+    return;
+
+  std::optional<ava::process::ProcessScopeV1> first_session_scope;
+  ava::app::runtime::OpenContext replacement_context;
+  {
+    SCOPED_CRITICAL_AREA_R(first_r, *first_result);
+    first_session_scope = first_r->session_process_scope();
+    expect(first_session_scope && first_session_scope->owner_prefix().depth() == 2, "runtime session stores one generated session-level process scope");
+
+    auto duplicate = first_r->lease().duplicate();
+    auto authority = first_r->read_authority_1();
+    expect(duplicate && authority, "runtime process-scope fixture obtains detached session authority");
+    if (duplicate && authority)
+    {
+      auto detached = first_r->create_detached_state(std::move(*duplicate), std::move(*authority), first_r->subagent_delivery_manager());
+      expect(detached.resources_.session_process_scope && first_session_scope && same_owner(*detached.resources_.session_process_scope, *first_session_scope) &&
+                 &detached.resources_.session_process_scope->supervisor() == supervisor.get(),
+             "detached state for the same runtime session shares its existing process scope");
+    }
+
+    replacement_context = first_r->replacement_open_context({});
+  }
+
+  expect(replacement_context.application_process_scope && replacement_context.application_process_scope->owner_prefix().depth() == 1 &&
+             same_owner(*replacement_context.application_process_scope, *application_scope),
+         "replacement context recovers the preserved application process root");
+  auto replacement_result = ava::app::runtime::Session::open(replacement_context);
+  expect(replacement_result.has_value(),
+         replacement_result ? "replacement runtime session derives a fresh process scope" : replacement_result.error().format());
+  if (!replacement_result || !first_session_scope)
+    return;
+
+  std::optional<ava::process::ProcessScopeV1> replacement_session_scope;
+  {
+    SCOPED_CRITICAL_AREA_R(replacement_r, *replacement_result);
+    replacement_session_scope = replacement_r->session_process_scope();
+    bool const distinct_session = replacement_session_scope && !same_owner(*replacement_session_scope, *first_session_scope);
+    bool const shared_application = replacement_session_scope && same_owner(replacement_session_scope->application_scope(), *application_scope) &&
+                                    &replacement_session_scope->supervisor() == supervisor.get();
+    expect(distinct_session && shared_application,
+           "replacement session receives a different generated session owner under the same application supervisor and root");
+  }
+
+  auto installed = ava::app::runtime::Session::replace_with(*first_result, *replacement_result);
+  expect(installed.has_value(), installed ? "runtime replacement installs the fresh session process scope" : installed.error().format());
+  if (installed)
+  {
+    SCOPED_CRITICAL_AREA_R(installed_r, *first_result);
+    expect(installed_r->session_process_scope() && replacement_session_scope && same_owner(*installed_r->session_process_scope(), *replacement_session_scope),
+           "session resource move and swap semantics retain the replacement session scope");
+  }
+
+  ava::app::runtime::OpenContext legacy_context;
+  legacy_context.workspace_dir = workspace;
+  legacy_context.current_dir = workspace;
+  legacy_context.paths = paths;
+  auto legacy_result = ava::app::runtime::Session::open(legacy_context);
+  expect(legacy_result.has_value(),
+         legacy_result ? "legacy non-spawning adapter remains constructible without process authority" : legacy_result.error().format());
+  if (legacy_result)
+  {
+    SCOPED_CRITICAL_AREA_R(legacy_r, *legacy_result);
+    auto legacy_replacement = legacy_r->replacement_open_context({});
+    expect(!legacy_r->session_process_scope() && !legacy_replacement.application_process_scope,
+           "missing optional application scope neither invents session authority nor appears in replacement construction");
+  }
+
+  auto const snapshot = supervisor->snapshot();
+  expect(!snapshot.monitor_started && snapshot.live_records == 0 && snapshot.records.empty(),
+         "runtime session process-scope propagation remains process and monitor inert");
 }
 
 void test_app_runtime_session_startup_options()

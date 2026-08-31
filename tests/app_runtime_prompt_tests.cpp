@@ -118,7 +118,8 @@ void test_debug_session_mutex_tracks_current_thread()
   std::atomic<bool> worker_finished = false;
   {
     auto worker = ava::core::JoinThread::create("join_thread_test", [&worker_finished](std::stop_token stop_token) {
-      while (!stop_token.stop_requested()) std::this_thread::yield();
+      while (!stop_token.stop_requested())
+        std::this_thread::yield();
       worker_finished.store(true, std::memory_order_release);
     });
   }
@@ -733,16 +734,19 @@ void test_app_clipboard_image_file_override_imports_attachment()
   if (!unlocked_session_result)
     return;
 
-  SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
+  auto const store = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
+    return session_r->store;
+  }();
 
   ScopedEnvVar clipboard_file("AVA_CLIPBOARD_IMAGE_FILE", image_path.string());
-  auto imported = ava::app::import_clipboard_image_attachment(session_w->store, std::nullopt);
+  auto imported = ava::app::import_clipboard_image_attachment(store, std::nullopt);
   expect(imported && imported->has_value() && (*imported)->mime_type == "image/png" && (*imported)->byte_size == app_tiny_png_bytes().size(),
          "runtime clipboard image override imports supported image bytes into session storage");
   if (!imported || !*imported)
     return;
 
-  auto loaded = ava::session::load_image_attachment(session_w->store, **imported);
+  auto loaded = ava::session::load_image_attachment(store, **imported);
   expect(loaded && loaded->bytes == app_tiny_png_bytes(), "runtime clipboard image override writes reusable session-owned attachment bytes");
 }
 

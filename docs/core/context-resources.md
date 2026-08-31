@@ -27,9 +27,10 @@ AVA builds the prompt in this order:
 1. Built-in prompt or provider/family/mode prompt override from `prompts/...`.
 2. `SYSTEM.md`, or `--system-prompt`, replaces that selected base text.
 3. `APPEND_SYSTEM.md`, or repeated `--append-system-prompt`, appends extra text.
-4. Loaded `AGENTS.md`/`CLAUDE.md` instruction files are appended.
-5. Enabled static plugin prompt resources are appended as plugin context sources.
-6. Available skills, including enabled static plugin skill resources, and visible
+4. A `--agent` selected primary definition's body is appended as an explicit instruction section.
+5. Loaded `AGENTS.md`/`CLAUDE.md` instruction files are appended.
+6. Enabled static plugin prompt resources are appended as plugin context sources.
+7. Available skills, including enabled static plugin skill resources, and visible
    subagents are summarized so the model can decide whether to call `skill` or
    `task`.
 
@@ -109,11 +110,19 @@ delivery, durability, and limits.
   and `~/.claude/*` agent directories.
 - Project roots include `.ava/agents/`, `.ava/agent/`, `.agents/*`, and
   `.claude/*`, gated by project trust.
-- Frontmatter supports `name`, required `description`, `mode`, `tools`, and
-  `hidden`. `tools: read-only`/`explore` applies the read-only preset; otherwise
-  the subagent inherits parent tool visibility with recursive `task` removed.
-- Visible subagents are summarized in the prompt. The body prompt is used only
-  when the model dispatches the `task` tool to that subagent.
+- The schema consists of frontmatter `name`, required `description`, `mode`,
+  `tools`, and `hidden`, plus the Markdown body. `mode: subagent` is task-only, `mode: primary`
+  is `--agent`-only, and `mode: all` is both.
+- Visible task subagents are summarized in the prompt. A task-only body is used
+  when `task` dispatches it. A selected primary body is appended to both the
+  ordinary and ambient-extension-free system-prompt variants without replacing
+  AVA's base, safety, or context material.
+- Global definitions load regardless of trust. Trusted project definitions
+  override same-name global definitions; untrusted project definitions are not
+  selectable.
+- `tools: read-only`/`explore` narrows tool visibility and does not grant tool
+  permission. Primary narrowing intersects CLI visibility; primary inherit does
+  not automatically remove `task`, `job`, or `todowrite`.
 
 ## Plugins
 
@@ -204,8 +213,9 @@ workspace `AGENTS.md`/`CLAUDE.md` instruction files.
   show `current`, `changed`, `missing`, or `unreadable`.
 - `/context` is diagnostic only; it does not update the current system prompt.
 - `/reload prompts` rebuilds the current prompt state from prompt files,
-  instruction files, skills, and subagents, and refreshes freshness metadata for
-  prompt commands, skills, and plugin resources.
+  instruction files, skills, and task subagents, and refreshes freshness metadata for
+  prompt commands, skills, and plugin resources. It reuses the already resolved
+  selected-primary definition rather than changing that agent's identity or policy.
 - `/reload trust` reloads project trust and then rebuilds prompt state with the
   new project-resource decision.
 - `/reload mcp`, `/reload lsp`, and `/reload plugins` report restart-required

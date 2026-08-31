@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Community documentation and GitHub contribution templates.
+- Configurable primary agent definitions and invocation-local `--agent` selection; see [subagent configuration](docs/core/configuration.md#subagents).
 - Completed TUI parity documentation for the bounded `--line-shell`, Mermaid fence projection, transcript selection/navigation/copy affordances, cursor control and direct-Alacritty negotiation, prompt stash, and the 23-scenario isolated tmux suite. These surfaces retain explicit accessibility, renderer, probing, and session-tree non-goals.
 - Current architecture, codebase, build-configuration, environment-variable, LSP, built-in-tool, subagent/background-job, troubleshooting, and documentation-policy references.
 - Offline source Markdown relative-target validation with focused CTest coverage.

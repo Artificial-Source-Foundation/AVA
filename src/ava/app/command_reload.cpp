@@ -128,11 +128,18 @@ ReloadReportRow reload_prompt_settings(runtime::session_ts& unlocked_session)
 {
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->paths(), session_r->model(), session_r->mode(), session_r->workspace_dir(), session_r->current_dir(),
-                      project_resources_trusted(session_r->project_trust()), session_r->prompt_overrides()};
+    return std::tuple{session_r->paths(),
+                      session_r->model(),
+                      session_r->mode(),
+                      session_r->workspace_dir(),
+                      session_r->current_dir(),
+                      project_resources_trusted(session_r->project_trust()),
+                      session_r->prompt_overrides(),
+                      session_r->selected_primary_agent()};
   }();
-  auto& [paths, model, mode, workspace_dir, current_dir, project_trusted, prompt_overrides] = snapshot;
-  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_trusted, prompt_overrides);
+  auto& [paths, model, mode, workspace_dir, current_dir, project_trusted, prompt_overrides, selected_primary_agent] = snapshot;
+  auto prompt_state =
+      runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_trusted, prompt_overrides, selected_primary_agent);
   if (!prompt_state)
     return reload_error_row("prompts", prompt_state.error());
   if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
@@ -158,12 +165,18 @@ ReloadReportRow reload_trust_settings(runtime::session_ts& unlocked_session)
 {
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->paths(), session_r->model(), session_r->mode(), session_r->workspace_dir(), session_r->current_dir(),
-                      session_r->prompt_overrides()};
+    return std::tuple{session_r->paths(),
+                      session_r->model(),
+                      session_r->mode(),
+                      session_r->workspace_dir(),
+                      session_r->current_dir(),
+                      session_r->prompt_overrides(),
+                      session_r->selected_primary_agent()};
   }();
-  auto& [paths, model, mode, workspace_dir, current_dir, prompt_overrides] = snapshot;
+  auto& [paths, model, mode, workspace_dir, current_dir, prompt_overrides, selected_primary_agent] = snapshot;
   auto next_trust = load_project_trust_state(paths, workspace_dir);
-  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust), prompt_overrides);
+  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust),
+                                                         prompt_overrides, selected_primary_agent);
   if (!prompt_state)
   {
     auto row = reload_error_row("trust", prompt_state.error());

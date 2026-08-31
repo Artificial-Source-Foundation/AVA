@@ -6,12 +6,20 @@ AVA can delegate a bounded unit of work to a `task` subagent and run it in a sep
 
 AVA always provides two built-ins:
 
-- `general` inherits the parent's visible tools, except that recursive `task` delegation is hidden.
-- `explore` is read-only: it exposes `read_file`, `list_directory`, `glob`, and `grep`, and hides mutation, shell, network, LSP, and recursive `task` tools.
+- `general` inherits the parent's visible tools, except that `task`, `job`, and `todowrite` are hidden.
+- `explore` is a read-only preset: it exposes `read_file`, `list_directory`, `glob`, and `grep`, and hides mutation, shell, network, LSP, `task`, `job`, and `todowrite`.
 
 Trusted custom subagents are Markdown definitions with frontmatter plus an instruction body. Global definitions come from AVA, Agents, and Claude configuration roots; project definitions are loaded only for a trusted project. See [CONFIG.md](configuration.md#subagents) for exact paths and fields, and [context-resources.md](context-resources.md#subagents) for discovery, prompt visibility, trust, and reload behavior. Those references, rather than this operational page, define the file grammar.
 
-A custom definition is trusted instruction content. Review it before installing it globally or trusting a project's definitions. Custom definitions cannot replace `general` or `explore`, and every child has `task` removed from its visible tools.
+A custom definition is trusted instruction content. Review it before installing it globally or trusting a project's definitions. Custom task definitions cannot replace built-in `general` or `explore`, and every child has `task`, `job`, and `todowrite` removed from its visible tools.
+
+## Selectable primary agents
+
+The same roots may contain `mode: primary` definitions selected at process startup with `ava --agent <name>`; `mode: all` definitions are both primary-selectable and task-visible. `mode: subagent` definitions are not primary-selectable, and primary-only definitions are not included in the task catalog. Built-in `general` and `explore` remain task-only, although a configured primary may independently use either name.
+
+A selected definition's body is appended as explicit system instructions, preserving AVA's base, safety, context, and ambient-extension-free prompt composition. `tools: read-only` intersects the current CLI visibility with AVA's read/search built-ins and does not grant permission. An inherit primary keeps `task`, `job`, and `todowrite` unless CLI visibility removed them.
+
+Selection is invocation-local and available to the TUI, line shell, print mode, and CLI RPC; ACP rejects extra startup flags. The resolved definition remains fixed across model switches, prompt/trust reloads, and ordinary turns and is not persisted as a conversation turn. A navigated replacement may resolve the carried name again. Start or replace a session after config/trust changes when selected identity or policy must change; AVA has no live primary-agent picker.
 
 ## Foreground and background execution
 

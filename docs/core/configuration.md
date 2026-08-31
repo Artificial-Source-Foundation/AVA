@@ -418,12 +418,12 @@ The template body supports `$1`, `$2`, `$@`, `$ARGUMENTS`, `${1:-default}`,
 
 ## Subagents
 
-The built-in `task` tool can run foreground or background child sessions through configured subagents. See [subagents.md](subagents.md) for operational behavior, job controls, delivery, durability, and limits. AVA always provides two built-ins:
+The built-in `task` tool can run foreground or background child sessions through configured subagents. A definition can instead be selected as the process's primary agent with `ava --agent <name>`. See [subagents.md](subagents.md) for operational behavior, job controls, delivery, durability, and limits. AVA always provides two built-ins:
 
-- `general`: inherits the parent tool visibility except recursive `task` is hidden.
-- `explore`: read-only preset that exposes `read_file`, `list_directory`, `glob`, and `grep` while hiding mutation, shell, network, LSP, and recursive `task` tools.
+- `general`: inherits parent tool visibility except `task`, `job`, and `todowrite` are hidden.
+- `explore`: read-only preset that exposes `read_file`, `list_directory`, `glob`, and `grep` while hiding mutation, shell, network, LSP, `task`, `job`, and `todowrite`.
 
-Custom subagents are Markdown files with YAML-like frontmatter. Global files are discovered from:
+Configured agents are Markdown files with YAML-like frontmatter. Global files are discovered regardless of project trust from:
 
 ```text
 $XDG_CONFIG_HOME/ava/agents/*.md
@@ -451,12 +451,17 @@ Example:
 ---
 name: reviewer
 description: Review a focused implementation change.
+mode: all
 tools: read-only
 ---
 Inspect the requested files and return concise findings with file references.
 ```
 
-`name` defaults to the file stem when omitted and must use letters, digits, `.`, `_`, or `-`. Names are capped at 128 bytes, cannot contain consecutive separators, and cannot end with a separator. `description` is required for custom subagents. `mode: primary` is skipped; `mode: subagent` and `mode: all` are usable by `task`. `tools: read-only`, `read_only`, `readonly`, or `explore` applies the read-only preset; other values inherit parent tool visibility with recursive `task` still removed. `hidden: true`, `yes`, or `1` keeps a subagent out of the prompt's visible `available_subagents` list while preserving explicit lookup. Custom definitions cannot override built-in `general` or `explore`. Each file is bounded to 64 KiB, and AVA loads at most 128 subagents.
+`name` defaults to the file stem when omitted and must use letters, digits, `.`, `_`, or `-`. Names are capped at 128 bytes, cannot contain consecutive separators, and cannot end with a separator. `description` is required. `mode: subagent` (the default) is usable only by `task`, `mode: primary` is selectable only by `--agent`, and `mode: all` is available in both catalogs. `tools` accepts inherit/default forms or `read-only`, `read_only`, `readonly`, or `explore`; invalid presets make a definition non-primary-selectable (legacy task definitions retain inherited visibility). `hidden: true`, `yes`, or `1` keeps a task subagent out of the prompt's visible `available_subagents` list while preserving explicit lookup.
+
+For task children, inherit starts from parent visibility and still removes `task`, `job`, and `todowrite`. For a selected primary, inherit leaves startup tool visibility unchanged, including those tools. A read-only primary narrows visibility to AVA's built-in `read_file`, `list_directory`, `glob`, and `grep` set by intersection with `--tools`, `--exclude-tools`, `--no-builtin-tools`, and `--no-tools`; it never grants permission or widens CLI visibility.
+
+Trusted project definitions override same-name global definitions. Project-only definitions are unavailable while untrusted. The built-in `general` and `explore` names are reserved only in the task-subagent catalog, so a configured primary may use either name. Each file and catalog is bounded; selected unknown, malformed, unreadable, invalid, or unavailable definitions fail startup before a provider request.
 
 ## Project Trust
 

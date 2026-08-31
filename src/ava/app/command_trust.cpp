@@ -48,6 +48,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts&
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   runtime::PromptOverrides prompt_overrides;
+  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
   {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     paths = session_r->paths();
@@ -56,9 +57,11 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts&
     workspace_dir = session_r->workspace_dir();
     current_dir = session_r->current_dir();
     prompt_overrides = session_r->prompt_overrides();
+    selected_primary_agent = session_r->selected_primary_agent();
   }
   auto next_trust = load_project_trust_state(paths, workspace_dir);
-  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust), prompt_overrides);
+  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust),
+                                                         prompt_overrides, selected_primary_agent);
   if (!prompt_state)
     return std::unexpected(std::move(prompt_state.error()));
   ProjectTrustState applied_trust;

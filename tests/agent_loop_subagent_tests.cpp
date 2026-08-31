@@ -810,8 +810,47 @@ void test_subagent_config_loads_project_definitions()
   auto const root = create_empty_root("subagent-config");
 
   auto const workspace = root / "workspace";
+  auto const global_agent_dir = root / "global-agents";
   auto const agent_dir = workspace / ".ava" / "agents";
+  std::filesystem::create_directories(global_agent_dir);
   std::filesystem::create_directories(agent_dir);
+  {
+    std::ofstream file(global_agent_dir / "coder.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "name: coder\n"
+            "description: Global primary coder.\n"
+            "mode: primary\n"
+            "---\n"
+            "GLOBAL PRIMARY INSTRUCTIONS";
+  }
+  {
+    // Create the lexically later file first so this fixture proves discovery sorts paths rather than relying on filesystem iteration order.
+    std::ofstream file(global_agent_dir / "ordered-z.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "name: ordered\n"
+            "description: Lexically later primary.\n"
+            "mode: primary\n"
+            "---\n"
+            "LEXICALLY LATER PRIMARY";
+  }
+  {
+    std::ofstream file(global_agent_dir / "ordered-a.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "name: ordered\n"
+            "description: Lexically earlier primary.\n"
+            "mode: primary\n"
+            "---\n"
+            "LEXICALLY EARLIER PRIMARY";
+  }
+  {
+    std::ofstream file(global_agent_dir / "broken-primary.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "description: Broken primary.\n"
+            "mode: primary\n"
+            "tools: unrestricted\n"
+            "---\n"
+            "BROKEN PRIMARY";
+  }
   {
     std::ofstream file(agent_dir / "reviewer.md", std::ios::binary | std::ios::trunc);
     file << "---\n"
@@ -828,23 +867,74 @@ void test_subagent_config_loads_project_definitions()
             "---\n"
             "Should be ignored.";
   }
+  {
+    std::ofstream file(agent_dir / "coder.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "name: coder\n"
+            "description: Project coder for both catalogs.\n"
+            "mode: all\n"
+            "tools: read-only\n"
+            "---\n"
+            "PROJECT PRIMARY INSTRUCTIONS";
+  }
+  {
+    std::ofstream file(agent_dir / "primary-only.md", std::ios::binary | std::ios::trunc);
+    file << "---\n"
+            "description: Primary only.\n"
+            "mode: primary\n"
+            "---\n"
+            "PRIMARY ONLY";
+  }
 
-  auto loaded = ava::agent::load_subagents(
-      ava::agent::SubagentLoadOptions{.workspace_root = workspace, .global_agent_dirs = {}, .project_agent_dirs = {agent_dir}, .include_project_agents = true});
+  auto loaded = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{
+      .workspace_root = workspace, .global_agent_dirs = {global_agent_dir}, .project_agent_dirs = {agent_dir}, .include_project_agents = true});
   auto const* reviewer = ava::agent::find_subagent(loaded.subagents, "reviewer");
   auto const* general = ava::agent::find_subagent(loaded.subagents, "general");
   expect(reviewer && reviewer->description == "Review implementation details." && reviewer->tool_preset == ava::agent::SubagentToolPreset::ReadOnly &&
              reviewer->system_prompt.find("Inspect files") != std::string::npos,
          "subagent config loads project-defined read-only subagents");
   expect(general && general->builtin, "subagent config keeps builtin subagents from project override");
+  auto ordered_primary = ava::agent::resolve_primary_agent(loaded, "ordered");
+  expect(ordered_primary && ordered_primary->system_prompt.find("LEXICALLY LATER") != std::string::npos,
+         "same-root duplicate definitions resolve in deterministic lexical path order");
+  auto coder_primary = ava::agent::resolve_primary_agent(loaded, "coder");
+  expect(coder_primary && coder_primary->system_prompt.find("PROJECT PRIMARY") != std::string::npos &&
+             coder_primary->tool_preset == ava::agent::SubagentToolPreset::ReadOnly,
+         "project mode-all definitions override global primary definitions");
+  expect(ava::agent::find_subagent(loaded.subagents, "coder") != nullptr, "mode-all definitions are task-subagent visible");
+  expect(ava::agent::find_subagent(loaded.subagents, "primary-only") == nullptr, "primary-mode definitions are not task-subagent visible");
+  expect(!ava::agent::resolve_primary_agent(loaded, "reviewer"), "subagent-mode definitions are not primary selectable");
+  auto broken_primary = ava::agent::resolve_primary_agent(loaded, "broken-primary");
+  expect(!broken_primary && broken_primary.error().format().find("failed validation") != std::string::npos,
+         "malformed selected primary definitions fail closed with a sanitized validation error");
   expect(std::ranges::any_of(
              loaded.diagnostics,
              [](ava::agent::SubagentDiagnostic const& diagnostic) { return diagnostic.message.find("collides with a builtin") != std::string::npos; }),
          "subagent config reports builtin-name collisions");
 
   auto untrusted = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{
-      .workspace_root = workspace, .global_agent_dirs = {}, .project_agent_dirs = {agent_dir}, .include_project_agents = false});
+      .workspace_root = workspace, .global_agent_dirs = {global_agent_dir}, .project_agent_dirs = {agent_dir}, .include_project_agents = false});
   expect(ava::agent::find_subagent(untrusted.subagents, "reviewer") == nullptr, "project subagents are gated by project resource trust");
+  auto global_coder = ava::agent::resolve_primary_agent(untrusted, "coder");
+  expect(global_coder && global_coder->system_prompt.find("GLOBAL PRIMARY") != std::string::npos, "global primary definitions load without project trust");
+  expect(!ava::agent::resolve_primary_agent(untrusted, "primary-only"), "project-only primary definitions fail closed without trust");
+
+  auto narrowed_default = ava::agent::narrow_tool_visibility_to_read_only({});
+  expect(narrowed_default.mode == ava::agent::ToolVisibilityMode::Default &&
+             narrowed_default.included_tools == std::vector<std::string>({"read_file", "list_directory", "glob", "grep"}),
+         "primary read-only preset narrows default visibility to canonical read tools");
+  auto narrowed_include = ava::agent::narrow_tool_visibility_to_read_only(
+      ava::agent::ToolVisibilityOptions{.included_tools = {"read", "write_file", "grep"}, .excluded_tools = {"grep"}});
+  expect(narrowed_include.mode == ava::agent::ToolVisibilityMode::Default && narrowed_include.included_tools == std::vector<std::string>({"read", "grep"}) &&
+             narrowed_include.excluded_tools == std::vector<std::string>({"grep"}),
+         "primary read-only preset intersects aliases and preserves explicit exclusions");
+  auto narrowed_mutation_only = ava::agent::narrow_tool_visibility_to_read_only(ava::agent::ToolVisibilityOptions{.included_tools = {"write_file"}});
+  expect(narrowed_mutation_only.mode == ava::agent::ToolVisibilityMode::NoTools && narrowed_mutation_only.included_tools.empty(),
+         "primary read-only preset fails closed when an explicit include has no read-only tools");
+  auto narrowed_no_builtins =
+      ava::agent::narrow_tool_visibility_to_read_only(ava::agent::ToolVisibilityOptions{.mode = ava::agent::ToolVisibilityMode::NoBuiltinTools});
+  expect(narrowed_no_builtins.mode == ava::agent::ToolVisibilityMode::NoTools,
+         "primary read-only preset cannot widen no-builtin visibility through an include list");
 }
 
 void test_agent_loop_custom_subagent_definition_controls_prompt_and_tools()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/agent/tool_visibility.h"
 #include "ava/core/result.h"
 
 #include <cstddef>
@@ -34,6 +35,8 @@ struct SubagentDiagnostic
 {
   std::filesystem::path path;
   std::string message;
+  std::optional<std::string> agent_name = std::nullopt;
+  bool blocks_primary_selection = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -52,6 +55,8 @@ struct SubagentLoadOptions
 struct SubagentLoadResult
 {
   std::vector<SubagentDefinition> subagents;
+  std::vector<SubagentDefinition> primary_agents;
+  std::vector<std::string> invalid_primary_agents;
   std::vector<SubagentDiagnostic> diagnostics;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
@@ -63,7 +68,10 @@ struct SubagentLoadResult
 [[nodiscard]] std::vector<std::filesystem::path> default_project_subagent_dirs(std::filesystem::path const& workspace_root);
 [[nodiscard]] SubagentLoadResult load_subagents(SubagentLoadOptions options = {});
 [[nodiscard]] SubagentDefinition const* find_subagent(std::vector<SubagentDefinition> const& subagents, std::string_view name);
+[[nodiscard]] ava::core::Result<SubagentDefinition> resolve_primary_agent(SubagentLoadResult const& loaded, std::string_view name);
 [[nodiscard]] std::string subagent_names_csv(std::vector<SubagentDefinition> const& subagents);
+[[nodiscard]] std::string primary_agent_names_csv(std::vector<SubagentDefinition> const& primary_agents);
 [[nodiscard]] std::string format_available_subagents_for_prompt(std::vector<SubagentDefinition> const& subagents);
+[[nodiscard]] ToolVisibilityOptions narrow_tool_visibility_to_read_only(ToolVisibilityOptions visibility);
 
 }  // namespace ava::agent

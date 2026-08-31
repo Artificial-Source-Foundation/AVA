@@ -12,6 +12,7 @@
 #include "ava/app/runtime/session_ts.h"
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
+#include "ava/agent/subagent_config.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -54,7 +55,10 @@ struct InvocationInputs
 {
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
+  // Invocation-requested visibility is retained separately so a replacement can re-resolve primary policy from the original CLI boundary.
+  ava::agent::ToolVisibilityOptions requested_tool_visibility = {};
   ava::agent::ToolVisibilityOptions tool_visibility = {};
+  std::optional<ava::agent::SubagentDefinition> selected_primary_agent = std::nullopt;
   ava::config::XdgPaths paths;
   bool sessionless;
   bool is_offline_ = false;
@@ -304,6 +308,7 @@ class Session : protected Session_aggregate_base
   std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
   std::filesystem::path const& current_dir() const noexcept { return invocation_inputs_.current_dir; }
   ava::agent::ToolVisibilityOptions const& tool_visibility() const { return invocation_inputs_.tool_visibility; }
+  std::optional<ava::agent::SubagentDefinition> const& selected_primary_agent() const { return invocation_inputs_.selected_primary_agent; }
   ava::config::XdgPaths const& paths() const { return invocation_inputs_.paths; }
   bool sessionless() const { return invocation_inputs_.sessionless; }
 

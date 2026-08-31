@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -51,6 +52,8 @@ struct HelperTestInjection
   std::string executable;
   std::string scenario;
   std::string invocation_log;
+  std::chrono::milliseconds preparation_delay = 0ms;
+  mutable bool preparation_delay_used = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -71,6 +74,25 @@ ava::core::Error clipboard_error(ava::core::ErrorCategory category, std::string 
 ava::core::Error clipboard_helper_io_error()
 {
   return clipboard_error(ava::core::ErrorCategory::Io, "failed to read clipboard helper output");
+}
+
+ava::core::Error clipboard_helper_lifecycle_error()
+{
+  return clipboard_error(ava::core::ErrorCategory::Io, "clipboard helper process cleanup did not complete");
+}
+
+ava::core::Result<testing::ClipboardHelperStatusDisposition> classify_settled_helper_status(ava::process::ExitStatusV1 const& status, bool output_limit)
+{
+  if (status.cleanup != ava::process::CleanupStateV1::Complete)
+    return std::unexpected(clipboard_helper_lifecycle_error());
+  if (output_limit)
+    return testing::ClipboardHelperStatusDisposition::OutputLimit;
+  if (status.reason == ava::process::TerminationReasonV1::NaturalExit && status.kind == ava::process::ExitKindV1::Exited && status.has_exit_code &&
+      status.exit_code == 0)
+  {
+    return testing::ClipboardHelperStatusDisposition::Accepted;
+  }
+  return testing::ClipboardHelperStatusDisposition::Unavailable;
 }
 
 Clock::time_point saturating_add(Clock::time_point value, Clock::duration duration) noexcept
@@ -110,6 +132,16 @@ ava::core::Result<CapturedCommand> capture_command_stdout(ava::process::ProcessS
     return std::unexpected(clipboard_error(ava::core::ErrorCategory::Configuration, "failed to create clipboard helper process environment"));
   }
 
+  // One test-only delay proves that parent-side authority/environment work can
+  // exhaust the same absolute deadline without creating a process record.
+  if (test_injection != nullptr && test_injection->preparation_delay > 0ms && !test_injection->preparation_delay_used)
+  {
+    test_injection->preparation_delay_used = true;
+    std::this_thread::sleep_for(test_injection->preparation_delay);
+  }
+  if (Clock::now() >= helper_deadline)
+    return CapturedCommand{};
+
   auto& supervisor = operation->supervisor();
   auto reservation = supervisor.reserve(operation->owner_prefix(), ava::process::ProcessRoleV1::ClipboardHelper,
                                         {.termination_grace = 0ms, .startup_timeout = kStartupTimeout, .execution_deadline = helper_deadline});
@@ -143,7 +175,9 @@ ava::core::Result<CapturedCommand> capture_command_stdout(ava::process::ProcessS
   if (!spawned->standard_output)
   {
     static_cast<void>(supervisor.request_stop(handle, ava::process::TerminationReasonV1::ProtocolFailure, cleanup_deadline));
-    static_cast<void>(supervisor.wait(handle, settlement_deadline));
+    auto settled = supervisor.wait(handle, settlement_deadline);
+    if (settled && settled->cleanup != ava::process::CleanupStateV1::Complete)
+      return std::unexpected(clipboard_helper_lifecycle_error());
     return std::unexpected(clipboard_helper_io_error());
   }
 
@@ -153,7 +187,9 @@ ava::core::Result<CapturedCommand> capture_command_stdout(ava::process::ProcessS
   {
     output.close();
     static_cast<void>(supervisor.request_stop(handle, ava::process::TerminationReasonV1::ProtocolFailure, cleanup_deadline));
-    static_cast<void>(supervisor.wait(handle, settlement_deadline));
+    auto settled = supervisor.wait(handle, settlement_deadline);
+    if (settled && settled->cleanup != ava::process::CleanupStateV1::Complete)
+      return std::unexpected(clipboard_helper_lifecycle_error());
     return std::unexpected(clipboard_helper_io_error());
   }
 
@@ -321,15 +357,23 @@ ava::core::Result<CapturedCommand> capture_command_stdout(ava::process::ProcessS
     set_protocol_failure();
   }
 
-  if (protocol_error)
-    return std::unexpected(std::move(*protocol_error));
   if (!terminal_status)
     return std::unexpected(clipboard_helper_io_error());
-  if (captured.too_large)
+
+  // Deterministically exercise the otherwise platform-failure-only status
+  // decision without weakening the Supervisor's actual cleanup invariant.
+  if (test_injection != nullptr && test_injection->scenario == "cleanup-incomplete")
+    terminal_status->cleanup = ava::process::CleanupStateV1::Incomplete;
+
+  auto disposition = classify_settled_helper_status(*terminal_status, captured.too_large);
+  if (!disposition)
+    return std::unexpected(std::move(disposition.error()));
+  if (protocol_error)
+    return std::unexpected(std::move(*protocol_error));
+  if (*disposition == testing::ClipboardHelperStatusDisposition::OutputLimit)
     return captured;
 
-  captured.ok = terminal_status->reason == ava::process::TerminationReasonV1::NaturalExit && terminal_status->kind == ava::process::ExitKindV1::Exited &&
-                terminal_status->has_exit_code && terminal_status->exit_code == 0;
+  captured.ok = *disposition == testing::ClipboardHelperStatusDisposition::Accepted;
   return captured;
 }
 
@@ -501,17 +545,8 @@ bool contains_nul(std::string_view value) noexcept
   return value.find('\0') != std::string_view::npos;
 }
 
-}  // namespace
-
-ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipboard_image_attachment(
-    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope)
-{
-  return import_clipboard_image_attachment_impl(store, session_process_scope, nullptr);
-}
-
-ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> testing::ClipboardImageTestAccess::import_with_helper(
-    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope, std::filesystem::path const& executable,
-    std::string scenario, std::filesystem::path const& invocation_log)
+ava::core::Result<HelperTestInjection> make_test_injection(std::filesystem::path const& executable, std::string scenario,
+                                                           std::filesystem::path const& invocation_log, std::chrono::milliseconds preparation_delay = 0ms)
 {
   auto const executable_value = executable.string();
   auto const log_value = invocation_log.string();
@@ -527,13 +562,56 @@ ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> testing::Clip
   {
     return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "fake clipboard helper log must be one absolute path"));
   }
+  if (preparation_delay < 0ms || preparation_delay > 10s)
+  {
+    return std::unexpected(clipboard_error(ava::core::ErrorCategory::InvalidArgument, "fake clipboard helper preparation delay is invalid"));
+  }
 
-  HelperTestInjection injection{
+  return HelperTestInjection{
       .executable = executable_value,
       .scenario = std::move(scenario),
       .invocation_log = log_value,
+      .preparation_delay = preparation_delay,
   };
-  return import_clipboard_image_attachment_impl(store, session_process_scope, &injection);
+}
+
+}  // namespace
+
+ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> import_clipboard_image_attachment(
+    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("importing a clipboard image attachment");
+  return import_clipboard_image_attachment_impl(store, session_process_scope, nullptr);
+}
+
+ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> testing::ClipboardImageTestAccess::import_with_helper(
+    ava::session::SessionStore const& store, std::optional<ava::process::ProcessScopeV1> const& session_process_scope, std::filesystem::path const& executable,
+    std::string scenario, std::filesystem::path const& invocation_log)
+{
+  auto injection = make_test_injection(executable, std::move(scenario), invocation_log);
+  if (!injection)
+    return std::unexpected(std::move(injection.error()));
+  return import_clipboard_image_attachment_impl(store, session_process_scope, &*injection);
+}
+
+ava::core::Result<bool> testing::ClipboardImageTestAccess::capture_list_after_preparation_delay(ava::process::ProcessScopeV1 const& session_process_scope,
+                                                                                                std::filesystem::path const& executable, std::string scenario,
+                                                                                                std::filesystem::path const& invocation_log,
+                                                                                                std::chrono::milliseconds preparation_delay)
+{
+  auto injection = make_test_injection(executable, std::move(scenario), invocation_log, preparation_delay);
+  if (!injection)
+    return std::unexpected(std::move(injection.error()));
+  auto captured = capture_command_stdout(session_process_scope, {"wl-paste", "--list-types"}, kListTimeout, kMaxTypeListBytes, false, &*injection);
+  if (!captured)
+    return std::unexpected(std::move(captured.error()));
+  return captured->ok;
+}
+
+ava::core::Result<testing::ClipboardHelperStatusDisposition> testing::ClipboardImageTestAccess::classify_helper_status(ava::process::ExitStatusV1 const& status,
+                                                                                                                       bool output_limit)
+{
+  return classify_settled_helper_status(status, output_limit);
 }
 
 }  // namespace ava::app

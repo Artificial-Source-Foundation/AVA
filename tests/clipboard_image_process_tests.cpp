@@ -192,6 +192,62 @@ void clear_clipboard_parent_selection()
   static_cast<void>(::unsetenv("TERMUX_VERSION"));
 }
 
+void test_settled_status_requires_complete_cleanup()
+{
+  using Disposition = ava::app::testing::ClipboardHelperStatusDisposition;
+
+  ava::process::ExitStatusV1 success{
+      .reason = ava::process::TerminationReasonV1::NaturalExit,
+      .kind = ava::process::ExitKindV1::Exited,
+      .cleanup = ava::process::CleanupStateV1::Complete,
+      .exit_code = 0,
+      .has_exit_code = true,
+  };
+  auto accepted = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(success, false);
+
+  auto nonzero = success;
+  nonzero.exit_code = 7;
+  auto unavailable = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(nonzero, false);
+
+  ava::process::ExitStatusV1 output_limit{
+      .reason = ava::process::TerminationReasonV1::OutputLimit,
+      .kind = ava::process::ExitKindV1::Signaled,
+      .cleanup = ava::process::CleanupStateV1::Complete,
+      .signal_number = SIGTERM,
+      .has_signal_number = true,
+  };
+  auto limited = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(output_limit, true);
+  expect(accepted && *accepted == Disposition::Accepted && unavailable && *unavailable == Disposition::Unavailable && limited &&
+             *limited == Disposition::OutputLimit,
+         "complete helper cleanup preserves success, ordinary nonzero fallback, and the specific output-limit disposition");
+
+  success.cleanup = ava::process::CleanupStateV1::Incomplete;
+  nonzero.cleanup = ava::process::CleanupStateV1::Incomplete;
+  output_limit.cleanup = ava::process::CleanupStateV1::Incomplete;
+  auto incomplete_success = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(success, false);
+  auto incomplete_nonzero = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(nonzero, false);
+  auto incomplete_limit = ava::app::testing::ClipboardImageTestAccess::classify_helper_status(output_limit, true);
+  auto is_lifecycle_error = [](auto const& result) {
+    return !result && result.error().category() == ava::core::ErrorCategory::Io &&
+           result.error().message() == "clipboard helper process cleanup did not complete";
+  };
+  expect(is_lifecycle_error(incomplete_success) && is_lifecycle_error(incomplete_nonzero) && is_lifecycle_error(incomplete_limit),
+         "incomplete cleanup rejects success bytes, nonzero fallback, and output-limit classification with one content-free lifecycle error");
+}
+
+void test_pre_reservation_deadline_is_unavailable_without_record()
+{
+  ClipboardFixture fixture("pre-reservation-deadline");
+  auto const started = std::chrono::steady_clock::now();
+  auto result = ava::app::testing::ClipboardImageTestAccess::capture_list_after_preparation_delay(fixture.scope, AVA_FAKE_CLIPBOARD_CHILD_PATH,
+                                                                                                  "pre-reservation-deadline", fixture.log, 1100ms);
+  auto const elapsed = std::chrono::steady_clock::now() - started;
+  auto const snapshot = fixture.snapshot();
+  expect(result && !*result && elapsed >= 1050ms && elapsed < 2500ms && snapshot.records.empty() && snapshot.live_records == 0 && !snapshot.monitor_started &&
+             !std::filesystem::exists(fixture.log) && no_waitable_immediate_child(),
+         "parent preparation exhausting the helper deadline maps to unavailable before reservation, monitor startup, or child exec");
+}
+
 void test_file_override_and_no_helper_branches_need_no_scope()
 {
   EnvironmentRestore restore({"AVA_CLIPBOARD_IMAGE_FILE", "TERMUX_VERSION", "WAYLAND_DISPLAY"});
@@ -457,6 +513,25 @@ void test_output_limits_and_group_cleanup()
          "clipboard natural leader cleanup kills a same-group TERM-refusing descendant before EOF and complete settlement");
 }
 
+void test_incomplete_cleanup_stops_helper_fallback()
+{
+  EnvironmentRestore restore({"AVA_CLIPBOARD_IMAGE_FILE", "TERMUX_VERSION", "WAYLAND_DISPLAY"});
+  clear_clipboard_parent_selection();
+  static_cast<void>(::unsetenv("WAYLAND_DISPLAY"));
+
+  ClipboardFixture fixture("cleanup-incomplete");
+  auto result = fixture.import("cleanup-incomplete");
+  auto const invocations = read_invocation_log(fixture.log);
+  auto const snapshot = fixture.snapshot();
+  auto const formatted = result ? std::string{} : result.error().format();
+  expect(!result && result.error().category() == ava::core::ErrorCategory::Io &&
+             result.error().message() == "clipboard helper process cleanup did not complete" && invocations.size() == 1 &&
+             invocations[0].arguments == std::vector<std::string>{"xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"} &&
+             all_records_settled(snapshot, 1) && formatted.find("cleanup-incomplete") == std::string::npos &&
+             formatted.find("image/png") == std::string::npos && no_waitable_immediate_child(),
+         "an injected incomplete settlement returns a content-free lifecycle error without importing bytes or trying another helper");
+}
+
 void test_exec_and_read_failures_have_no_legacy_retry()
 {
   EnvironmentRestore restore({"AVA_CLIPBOARD_IMAGE_FILE", "TERMUX_VERSION", "WAYLAND_DISPLAY"});
@@ -501,10 +576,13 @@ void test_exec_and_read_failures_have_no_legacy_retry()
 void run_clipboard_image_process_tests()
 {
   expect(std::string_view(AVA_FAKE_CLIPBOARD_CHILD_PATH).starts_with('/'), "repository-owned fake clipboard child has an absolute test path");
+  test_settled_status_requires_complete_cleanup();
+  test_pre_reservation_deadline_is_unavailable_without_record();
   test_file_override_and_no_helper_branches_need_no_scope();
   test_exact_wayland_and_xclip_argv_order();
   test_exact_clipboard_environment_capture();
   test_buffered_hup_and_absolute_deadlines();
   test_output_limits_and_group_cleanup();
+  test_incomplete_cleanup_stops_helper_fallback();
   test_exec_and_read_failures_have_no_legacy_retry();
 }

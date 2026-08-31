@@ -28,6 +28,7 @@ endforeach()
 foreach(required IN ITEMS
     "session_process_scope.operation()"
     "make_clipboard_desktop_environment_v1"
+    "if (Clock::now() >= helper_deadline)"
     "supervisor.reserve"
     "ProcessRoleV1::ClipboardHelper"
     ".termination_grace = 0ms"
@@ -40,12 +41,21 @@ foreach(required IN ITEMS
     "supervisor.wait("
     "supervisor.try_wait"
     "supervisor.wait_for_activity"
-    "supervisor.account_output")
+    "supervisor.account_output"
+    "status.cleanup != ava::process::CleanupStateV1::Complete"
+    "clipboard_helper_lifecycle_error()"
+    "AVA_ASSERT_NO_SESSION_LOCK_HELD")
   string(FIND "${clipboard_source}" "${required}" found)
   if(found EQUAL -1)
     message(FATAL_ERROR "clipboard image static contract is missing: ${required}")
   endif()
 endforeach()
+
+string(FIND "${clipboard_source}" "if (Clock::now() >= helper_deadline)" deadline_check_index)
+string(FIND "${clipboard_source}" "auto reservation = supervisor.reserve" reservation_index)
+if(deadline_check_index EQUAL -1 OR reservation_index EQUAL -1 OR deadline_check_index GREATER reservation_index)
+  message(FATAL_ERROR "clipboard image helper must reject an exhausted deadline before reservation")
+endif()
 
 foreach(required_header IN ITEMS
     "std::optional<ava::process::ProcessScopeV1> const& session_process_scope"
@@ -57,8 +67,10 @@ foreach(required_header IN ITEMS
 endforeach()
 
 foreach(required_tui IN ITEMS
-    "auto const session_process_scope = session_w->session_process_scope()"
-    "import_clipboard_image_attachment(session_w->store, session_process_scope)")
+    "auto const [store, session_process_scope] = [&unlocked_session]"
+    "SCOPED_CRITICAL_AREA_R(session_r, unlocked_session)"
+    "return std::pair{session_r->store, session_r->session_process_scope()}"
+    "import_clipboard_image_attachment(store, session_process_scope)")
   string(FIND "${tui_source}" "${required_tui}" found)
   if(found EQUAL -1)
     message(FATAL_ERROR "interactive TUI does not snapshot and pass the current session scope: ${required_tui}")

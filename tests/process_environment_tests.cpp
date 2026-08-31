@@ -644,9 +644,10 @@ void test_secure_adoption_rejects_mismatched_logical_cwd()
     auto reservation = supervisor.reserve(operation_owner(*application), role);
     if (!reservation)
       return false;
-    auto result = supervisor.begin_secure_adoption(
-        std::move(*reservation),
-        {.environment = std::move(environment), .cwd = std::string(adoption_cwd), .bash_containment = ava::process::BashContainmentHandshakeV1::None});
+    auto result = supervisor.begin_secure_adoption(std::move(*reservation), {.environment = std::move(environment),
+                                                                             .argv = {"adopted-process"},
+                                                                             .cwd = std::string(adoption_cwd),
+                                                                             .bash_containment = ava::process::BashContainmentHandshakeV1::None});
     if (!result)
       errors.push_back(result.error().format());
     return !result;
@@ -696,7 +697,8 @@ void test_closed_launch_surface_and_content_free_failures()
     if (!reservation)
       return false;
     auto result = supervisor.begin_secure_adoption(
-        std::move(*reservation), {.environment = std::move(environment), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None});
+        std::move(*reservation),
+        {.environment = std::move(environment), .argv = {"adopted-process"}, .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None});
     if (!result)
       errors.push_back(result.error().format());
     return !result;
@@ -717,9 +719,10 @@ void test_closed_launch_surface_and_content_free_failures()
   auto mermaid_environment = ava::process::make_mermaid_environment_v1();
   auto mermaid_gate =
       mermaid_reservation && mermaid_environment
-          ? supervisor.begin_secure_adoption(
-                std::move(*mermaid_reservation),
-                {.environment = std::move(*mermaid_environment), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None})
+          ? supervisor.begin_secure_adoption(std::move(*mermaid_reservation), {.environment = std::move(*mermaid_environment),
+                                                                               .argv = {"adopted-process"},
+                                                                               .cwd = "/",
+                                                                               .bash_containment = ava::process::BashContainmentHandshakeV1::None})
           : ava::core::Result<ava::process::AdoptionGate>(
                 std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "failed to prepare sentinel fixture")));
   auto sentinel =

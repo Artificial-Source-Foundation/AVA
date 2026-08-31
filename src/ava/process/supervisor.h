@@ -70,11 +70,12 @@ struct SpawnSpecV1
 struct SecureAdoptionSpecV1
 {
   ExactEnvironmentV1 environment;
+  std::vector<std::string> argv;
   std::string cwd;
   BashContainmentHandshakeV1 bash_containment = BashContainmentHandshakeV1::None;
 
-  // Exact environment and cwd content are intentionally excluded from debug
-  // output. The containment selector is a closed role-bound policy value.
+  // Exact environment, argv, and cwd content are intentionally excluded from
+  // debug output. The containment selector is a closed role-bound policy value.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
@@ -182,9 +183,10 @@ class AdoptionGate
   [[nodiscard]] bool valid() const noexcept;
 
   // In the child branch this call has already reset signals, established a
-  // private group, acknowledged the parent, and waited for registration. The
-  // caller must then execute only its reviewed async-signal-safe child path and
-  // finish with exec or _exit; it must not return to application code.
+  // private group, acknowledged the parent, waited for registration, and
+  // entered the preopened cwd. It must then execute only its reviewed
+  // async-signal-safe child path, ending with exec or _exit rather than
+  // returning to application code.
   [[nodiscard]] ava::core::Result<AdoptionForkBranchV1> fork_leader();
 
   // Adds the one optional AVA-owned Bash sentinel as an exact direct child.
@@ -193,11 +195,12 @@ class AdoptionGate
   [[nodiscard]] ava::core::VoidResult fork_sentinel();
 
   // These methods are available only on the child copy returned by
-  // fork_leader. They use only state prepared before fork and never return to
-  // application code after a failed launch or exec attempt.
+  // fork_leader. They use only argv, environment, and control state prepared
+  // before fork and never return to application code after a failed launch or
+  // exec attempt.
   [[noreturn]] void child_launch_failed(AdoptionChildFailureStageV1 stage, int errno_value) noexcept;
   void child_bash_containment_applied() noexcept;
-  [[noreturn]] void child_exec_descriptor(int executable_descriptor, char* const argv[], std::span<int const> retained_script_descriptors = {}) noexcept;
+  [[noreturn]] void child_exec_descriptor(int executable_descriptor, std::span<int const> retained_script_descriptors = {}) noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 

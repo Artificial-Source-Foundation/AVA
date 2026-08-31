@@ -127,6 +127,16 @@ void test_fixed_protocol_success_and_failures()
          "EOF before an explicit exec attempt is never launch success");
 }
 
+void test_absolute_deadline_timeout()
+{
+  using namespace ava::process::detail;
+
+  TestPipe channel;
+  auto const timed_out = await_launch_exec_confirmation(channel.read_descriptor(), std::chrono::steady_clock::now(), false);
+  expect(channel.valid() && timed_out.disposition == LaunchProtocolDispositionV1::LaunchFailed && timed_out.problem == LaunchProtocolProblemV1::TimedOut,
+         "the launch protocol classifies an exhausted absolute deadline as a timeout");
+}
+
 void test_malformed_truncated_and_out_of_order_protocol()
 {
   using namespace ava::process::detail;
@@ -200,6 +210,7 @@ void run_process_launch_protocol_posix_tests()
   ava::tests::request_skip("process launch framing is compile-time unsupported on Windows");
 #else
   test_fixed_protocol_success_and_failures();
+  test_absolute_deadline_timeout();
   test_malformed_truncated_and_out_of_order_protocol();
   test_containment_checkpoint_sequence();
 #endif

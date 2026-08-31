@@ -34,6 +34,8 @@ inline constexpr auto kMonitorPollInterval = std::chrono::milliseconds(10);
 inline constexpr auto kPostKillObservation = std::chrono::milliseconds(20);
 inline constexpr auto kDefaultCleanupBudget = std::chrono::seconds(2);
 inline constexpr auto kMaximumStartupTimeout = std::chrono::seconds(30);
+inline constexpr std::size_t kMaximumLaunchArgumentCount = 256;
+inline constexpr std::size_t kMaximumPreparedLaunchBytes = 1024 * 1024;
 
 [[nodiscard]] ava::core::Error process_error(ava::core::ErrorCategory category, std::string message);
 [[nodiscard]] ava::core::Error unsupported_error();
@@ -313,12 +315,15 @@ struct AdoptionGate::Impl
   ProcessRoleV1 role = ProcessRoleV1::Curl;
   ExactEnvironmentV1 environment;
   std::string cwd;
+  std::vector<std::string> argv_storage;
+  std::vector<char*> argv_pointers;
   std::vector<std::string> environment_storage;
   std::vector<char*> environment_pointers;
   BashContainmentHandshakeV1 bash_containment = BashContainmentHandshakeV1::None;
   ProcessDeadline startup_deadline{};
   bool child_branch = false;
   bool child_api_ready = false;
+  bool cwd_applied = false;
   bool containment_applied = false;
   bool registered = false;
 #if !defined(_WIN32)

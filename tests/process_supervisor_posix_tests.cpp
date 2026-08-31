@@ -152,9 +152,10 @@ ava::process::SpawnSpecV1 with_role_environment(ava::process::ProcessRoleV1 role
 }
 
 ava::process::SecureAdoptionSpecV1 adoption_spec(ava::process::ProcessRoleV1 role, std::string cwd = "/",
-                                                 ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None)
+                                                 ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None,
+                                                 std::vector<std::string> argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"})
 {
-  return {.environment = environment_for_role(role), .cwd = std::move(cwd), .bash_containment = containment};
+  return {.environment = environment_for_role(role), .argv = std::move(argv), .cwd = std::move(cwd), .bash_containment = containment};
 }
 
 ava::core::Result<ava::process::SpawnResultV1> spawn_fake(ava::process::Supervisor& supervisor, ava::process::OwnerPathV1 const& owner,
@@ -831,15 +832,12 @@ void test_secure_adoption_and_abandoned_ticket_cleanup()
   SupervisorFallback fallback(supervisor);
 
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 7> mode_argument{"normal"};
-  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
   auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), adoption_spec(ava::process::ProcessRoleV1::Bash))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
-    gate->child_exec_descriptor(executable, argv.data());
+    gate->child_exec_descriptor(executable);
   if (executable >= 0)
     static_cast<void>(::close(executable));
   auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
@@ -900,16 +898,15 @@ void test_gated_adoption_shutdown_race()
   auto const root = create_empty_root("process-supervisor-adoption-after-fork-shutdown");
   auto const marker = root / "executed";
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 12> mode_argument{"exec-marker"};
-  auto marker_argument = marker.string();
-  std::array<char*, 4> argv{executable_argument.data(), mode_argument.data(), marker_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), adoption_spec(ava::process::ProcessRoleV1::Mermaid))
-                          : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
+  auto gate = reservation
+                  ? supervisor.begin_secure_adoption(std::move(*reservation),
+                                                     adoption_spec(ava::process::ProcessRoleV1::Mermaid, "/", ava::process::BashContainmentHandshakeV1::None,
+                                                                   {AVA_FAKE_PROCESS_CHILD_PATH, "exec-marker", marker.string()}))
+                  : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
-    gate->child_exec_descriptor(executable, argv.data());
+    gate->child_exec_descriptor(executable);
   if (executable >= 0)
     static_cast<void>(::close(executable));
   expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent, "Mermaid secure adoption creates its one exact gated leader without a sentinel");

@@ -88,13 +88,22 @@ FrameReadResult read_frame(int descriptor, ProcessDeadline deadline) noexcept
   {
     pollfd item{.fd = descriptor, .events = POLLIN, .revents = 0};
     int result = -1;
-    do
+    int poll_error = 0;
+    while (true)
+    {
       result = ::poll(&item, 1, bounded_poll_timeout(deadline));
-    while (result < 0 && errno == EINTR && Clock::now() < deadline);
+      if (result >= 0)
+        break;
+      poll_error = errno == 0 ? EIO : errno;
+      if (poll_error != EINTR)
+        break;
+      if (Clock::now() >= deadline)
+        return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+    }
     if (result == 0)
       return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
     if (result < 0)
-      return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = errno == 0 ? EIO : errno};
+      return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = poll_error};
     if ((item.revents & POLLNVAL) != 0)
       return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = EBADF};
 

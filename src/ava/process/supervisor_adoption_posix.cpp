@@ -2,6 +2,7 @@
 #include "ava/process/launch_protocol_posix.h"
 #include "ava/process/supervisor_internal.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -39,7 +40,20 @@ bool contains_nul(std::string const& value) noexcept
 
 #if !defined(_WIN32)
 
-constexpr std::size_t kMaximumAdoptionArgumentCount = 256;
+bool prepared_argv_valid(std::vector<std::string> const& storage, std::vector<char*> const& pointers) noexcept
+{
+  if (storage.empty() || storage.size() > detail::kMaximumLaunchArgumentCount || storage.front().empty() || pointers.size() != storage.size() + 1 ||
+      pointers.back() != nullptr)
+  {
+    return false;
+  }
+  for (std::size_t index = 0; index < storage.size(); ++index)
+  {
+    if (contains_nul(storage[index]) || pointers[index] != storage[index].data())
+      return false;
+  }
+  return true;
+}
 
 [[noreturn]] void child_fail(int descriptor, detail::LaunchFailureStageV1 stage, int error_number) noexcept
 {
@@ -233,7 +247,8 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
   if (!valid() || implementation_->leader > 1 || implementation_->child_branch)
     return std::unexpected(detail::invalid_error("secure adoption gate cannot fork another leader"));
   auto& gate = *implementation_;
-  bool const binding_valid = detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) && is_valid(gate.bash_containment) &&
+  bool const binding_valid = detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) &&
+                             prepared_argv_valid(gate.argv_storage, gate.argv_pointers) && is_valid(gate.bash_containment) &&
                              (gate.role != ProcessRoleV1::Mermaid || gate.cwd == "/") &&
                              (gate.bash_containment != BashContainmentHandshakeV1::Required || gate.role == ProcessRoleV1::Bash);
   if (!binding_valid)
@@ -259,9 +274,11 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     }
   }
 
-  // Revalidate role, profile, retained logical cwd, and containment policy at
-  // the final pre-fork boundary after all allocator-backed preparation.
-  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) || !is_valid(gate.bash_containment) ||
+  // Revalidate role, profile, prepared argv, retained logical cwd, and
+  // containment policy at the final pre-fork boundary after all
+  // allocator-backed preparation.
+  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) ||
+      !prepared_argv_valid(gate.argv_storage, gate.argv_pointers) || !is_valid(gate.bash_containment) ||
       (gate.role == ProcessRoleV1::Mermaid && gate.cwd != "/") ||
       (gate.bash_containment == BashContainmentHandshakeV1::Required && gate.role != ProcessRoleV1::Bash))
   {
@@ -305,10 +322,14 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     gate.leader_control.read_end.reset();
     if (gate.bash_containment == BashContainmentHandshakeV1::None)
       gate.containment_control.read_end.reset();
-    gate.child_api_ready = true;
 
     if (gate.role == ProcessRoleV1::Mermaid && ::raise(SIGSTOP) != 0)
       child_fail(status_descriptor, detail::LaunchFailureStageV1::Gate, errno == 0 ? EIO : errno);
+    if (::fchdir(gate.cwd_descriptor.get()) != 0)
+      child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, errno == 0 ? EIO : errno);
+    gate.cwd_descriptor.reset();
+    gate.cwd_applied = true;
+    gate.child_api_ready = true;
     return AdoptionForkBranchV1::Child;
   }
   gate.leader = process;
@@ -405,8 +426,8 @@ void AdoptionGate::child_bash_containment_applied() noexcept
     _exit(127);
   auto& gate = *implementation_;
   int const status_descriptor = gate.launch_status.write_end.get();
-  if (!gate.child_branch || !gate.child_api_ready || gate.role != ProcessRoleV1::Bash || gate.bash_containment != BashContainmentHandshakeV1::Required ||
-      gate.containment_applied)
+  if (!gate.child_branch || !gate.child_api_ready || !gate.cwd_applied || gate.role != ProcessRoleV1::Bash ||
+      gate.bash_containment != BashContainmentHandshakeV1::Required || gate.containment_applied)
   {
     child_fail(status_descriptor, detail::LaunchFailureStageV1::DescriptorValidation, EINVAL);
   }
@@ -421,11 +442,10 @@ void AdoptionGate::child_bash_containment_applied() noexcept
 #endif
 }
 
-[[noreturn]] void AdoptionGate::child_exec_descriptor(int executable_descriptor, char* const argv[], std::span<int const> retained_script_descriptors) noexcept
+[[noreturn]] void AdoptionGate::child_exec_descriptor(int executable_descriptor, std::span<int const> retained_script_descriptors) noexcept
 {
 #if defined(_WIN32)
   static_cast<void>(executable_descriptor);
-  static_cast<void>(argv);
   static_cast<void>(retained_script_descriptors);
   std::_Exit(127);
 #else
@@ -434,26 +454,17 @@ void AdoptionGate::child_bash_containment_applied() noexcept
   auto& gate = *implementation_;
   int const status_descriptor = gate.launch_status.write_end.get();
   auto descriptor_failure = [&]() -> void { child_fail(status_descriptor, detail::LaunchFailureStageV1::DescriptorValidation, EINVAL); };
-  if (!gate.child_branch || !gate.child_api_ready || (gate.bash_containment == BashContainmentHandshakeV1::Required && !gate.containment_applied) ||
-      retained_script_descriptors.size() > kMaxRetainedScriptDescriptorsV1 || !descriptor_open(executable_descriptor) || argv == nullptr ||
-      argv[0] == nullptr || gate.environment_pointers.empty() || gate.environment_pointers.back() != nullptr)
+  if (!gate.child_branch || !gate.child_api_ready)
+    descriptor_failure();
+  if (!gate.cwd_applied)
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, EPROTO);
+  if (gate.bash_containment == BashContainmentHandshakeV1::Required && !gate.containment_applied)
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::Containment, EPROTO);
+  if (retained_script_descriptors.size() > kMaxRetainedScriptDescriptorsV1 || !descriptor_open(executable_descriptor) || gate.argv_pointers.empty() ||
+      gate.argv_pointers.back() != nullptr || gate.environment_pointers.empty() || gate.environment_pointers.back() != nullptr)
   {
-    if (gate.bash_containment == BashContainmentHandshakeV1::Required && !gate.containment_applied)
-      child_fail(status_descriptor, detail::LaunchFailureStageV1::Containment, EPROTO);
     descriptor_failure();
   }
-
-  bool argv_terminated = false;
-  for (std::size_t index = 0; index <= kMaximumAdoptionArgumentCount; ++index)
-  {
-    if (argv[index] == nullptr)
-    {
-      argv_terminated = true;
-      break;
-    }
-  }
-  if (!argv_terminated)
-    descriptor_failure();
 
   auto hidden_descriptor = [&](int descriptor) noexcept {
     bool hidden = descriptor == status_descriptor || descriptor == gate.cwd_descriptor.get() || descriptor == gate.leader_control.read_end.get() ||
@@ -480,9 +491,6 @@ void AdoptionGate::child_bash_containment_applied() noexcept
     }
   }
 
-  if (::fchdir(gate.cwd_descriptor.get()) != 0)
-    child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, errno);
-  gate.cwd_descriptor.reset();
   if (!set_descriptor_cloexec(executable_descriptor, true))
     descriptor_failure();
 
@@ -502,9 +510,9 @@ void AdoptionGate::child_bash_containment_applied() noexcept
   if (!detail::child_write_exec_attempt(status_descriptor))
     _exit(127);
 #if defined(__linux__) && defined(SYS_execveat) && defined(AT_EMPTY_PATH)
-  static_cast<void>(::syscall(SYS_execveat, executable_descriptor, "", argv, gate.environment_pointers.data(), AT_EMPTY_PATH));
+  static_cast<void>(::syscall(SYS_execveat, executable_descriptor, "", gate.argv_pointers.data(), gate.environment_pointers.data(), AT_EMPTY_PATH));
 #else
-  static_cast<void>(::fexecve(executable_descriptor, argv, gate.environment_pointers.data()));
+  static_cast<void>(::fexecve(executable_descriptor, gate.argv_pointers.data(), gate.environment_pointers.data()));
 #endif
   int const execute_error = errno == 0 ? EIO : errno;
   static_cast<void>(detail::child_write_exec_failed(status_descriptor, execute_error));
@@ -520,15 +528,39 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
     return std::unexpected(std::move(consumed.error()));
   auto const identity = *consumed;
   auto const role = detail::record_role(state, identity);
-  bool const specification_valid = role && is_valid(specification.bash_containment) && !specification.cwd.empty() && specification.cwd.starts_with('/') &&
-                                   !contains_nul(specification.cwd) &&
-                                   detail::EnvironmentAccess::matches_secure_adoption(specification.environment, *role, specification.cwd) &&
-                                   (*role != ProcessRoleV1::Mermaid || specification.cwd == "/") &&
-                                   (specification.bash_containment != BashContainmentHandshakeV1::Required || *role == ProcessRoleV1::Bash);
-  if (!specification_valid)
-  {
+  auto reject_invalid = [&](std::string message) -> ava::core::Result<AdoptionGate> {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
-    return std::unexpected(detail::invalid_error("reserved secure adoption requires one matching closed environment, cwd, and containment specification"));
+    return std::unexpected(detail::invalid_error(std::move(message)));
+  };
+  bool const binding_valid = role && is_valid(specification.bash_containment) && !specification.cwd.empty() && specification.cwd.starts_with('/') &&
+                             !contains_nul(specification.cwd) &&
+                             detail::EnvironmentAccess::matches_secure_adoption(specification.environment, *role, specification.cwd) &&
+                             (*role != ProcessRoleV1::Mermaid || specification.cwd == "/") &&
+                             (specification.bash_containment != BashContainmentHandshakeV1::Required || *role == ProcessRoleV1::Bash);
+  if (!binding_valid)
+    return reject_invalid("reserved secure adoption requires one matching closed environment, cwd, and containment specification");
+  if (specification.argv.empty() || specification.argv.size() > detail::kMaximumLaunchArgumentCount)
+    return reject_invalid("secure-adoption argv count is outside the supported bound");
+  if (specification.argv.front().empty())
+    return reject_invalid("secure-adoption argv[0] must be nonempty");
+
+  std::size_t prepared_bytes = specification.cwd.size();
+  if (prepared_bytes > detail::kMaximumPreparedLaunchBytes)
+    return reject_invalid("secure-adoption cwd exceeds the aggregate byte bound");
+  for (auto const& argument : specification.argv)
+  {
+    if (contains_nul(argument))
+      return reject_invalid("secure-adoption argv contains a NUL byte");
+    if (argument.size() > detail::kMaximumPreparedLaunchBytes - std::min(prepared_bytes, detail::kMaximumPreparedLaunchBytes))
+      return reject_invalid("secure-adoption argv exceeds the aggregate byte bound");
+    prepared_bytes += argument.size();
+  }
+  for (auto const& variable : detail::EnvironmentAccess::variables(specification.environment))
+  {
+    auto const bytes = variable.name.size() + variable.value.size() + 2;
+    if (bytes > detail::kMaximumPreparedLaunchBytes - std::min(prepared_bytes, detail::kMaximumPreparedLaunchBytes))
+      return reject_invalid("secure-adoption environment exceeds the aggregate byte bound");
+    prepared_bytes += bytes;
   }
   auto const startup_deadline = detail::startup_deadline_for_record(state, identity);
 #if defined(_WIN32)
@@ -536,6 +568,8 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
   detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
   return std::unexpected(detail::unsupported_error());
 #else
+  // Deliberately neutral transition seam: cwd is preopened here until the
+  // anchored cwd capability lands as a separate migration prerequisite.
   int cwd_descriptor = ::open(specification.cwd.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK);
   if (cwd_descriptor < 0)
   {
@@ -588,7 +622,12 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
     gate->role = *role;
     gate->environment = std::move(specification.environment);
     gate->cwd = std::move(specification.cwd);
+    gate->argv_storage = std::move(specification.argv);
     gate->bash_containment = specification.bash_containment;
+    gate->argv_pointers.reserve(gate->argv_storage.size() + 1);
+    for (auto& argument : gate->argv_storage)
+      gate->argv_pointers.push_back(argument.data());
+    gate->argv_pointers.push_back(nullptr);
     auto const& variables = detail::EnvironmentAccess::variables(gate->environment);
     gate->environment_storage.reserve(variables.size());
     for (auto const& variable : variables)

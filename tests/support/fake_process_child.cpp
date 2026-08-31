@@ -266,14 +266,10 @@ int main(int argc, char** argv)
   }
   if (mode == "adoption-environment")
   {
-    constexpr std::array<std::string_view, 14> expected{"LANG=C.UTF-8",
-                                                        "LC_ALL=C.UTF-8",
-                                                        "LC_CTYPE=C.UTF-8",
-                                                        "TZ=UTC",
-                                                        "USER=ava-test",
-                                                        "LOGNAME=ava-test",
-                                                        "PWD=/",
-                                                        "PATH=/usr/bin:/bin",
+    if (argc < 3)
+      return 2;
+    constexpr std::array<std::string_view, 6> before_pwd{"LANG=C.UTF-8", "LC_ALL=C.UTF-8", "LC_CTYPE=C.UTF-8", "TZ=UTC", "USER=ava-test", "LOGNAME=ava-test"};
+    constexpr std::array<std::string_view, 7> after_pwd{"PATH=/usr/bin:/bin",
                                                         "HOME=/tmp/ava-process-home",
                                                         "XDG_CONFIG_HOME=/tmp/ava-process-xdg-config",
                                                         "XDG_CACHE_HOME=/tmp/ava-process-xdg-cache",
@@ -281,9 +277,14 @@ int main(int argc, char** argv)
                                                         "XDG_STATE_HOME=/tmp/ava-process-xdg-state",
                                                         "TMPDIR=/tmp/ava-process-tmp"};
     bool clean = std::getenv("AVA_PROCESS_AMBIENT_CANARY") == nullptr;
-    for (std::size_t index = 0; clean && index < expected.size(); ++index)
-      clean = ::environ[index] != nullptr && std::string_view(::environ[index]) == expected[index];
-    clean = clean && ::environ[expected.size()] == nullptr;
+    std::size_t index = 0;
+    for (auto const expected : before_pwd)
+      clean = clean && ::environ[index] != nullptr && std::string_view(::environ[index++]) == expected;
+    std::string const expected_pwd = std::string("PWD=") + argv[2];
+    clean = clean && ::environ[index] != nullptr && std::string_view(::environ[index++]) == expected_pwd;
+    for (auto const expected : after_pwd)
+      clean = clean && ::environ[index] != nullptr && std::string_view(::environ[index++]) == expected;
+    clean = clean && ::environ[index] == nullptr;
     return write_text(status_fd, clean ? "CLEAN\n" : "DIRTY\n") ? (clean ? 0 : 6) : 3;
   }
   if (mode == "check-retained-and-closed")

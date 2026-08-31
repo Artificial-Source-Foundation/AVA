@@ -358,9 +358,6 @@ using namespace std::chrono_literals;
 
 #if !defined(_WIN32)
 
-constexpr std::size_t kMaxArgumentCount = 256;
-constexpr std::size_t kMaxPreparedBytes = 1024 * 1024;
-
 struct PreparedStream
 {
   StreamModeV1 mode = StreamModeV1::Inherit;
@@ -492,7 +489,7 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
 {
   if (!is_valid(specification.stdin_mode) || !is_valid(specification.stdout_mode) || !is_valid(specification.stderr_mode))
     return std::unexpected(detail::invalid_error("process specification has an unknown stream mode"));
-  if (specification.argv.empty() || specification.argv.size() > kMaxArgumentCount)
+  if (specification.argv.empty() || specification.argv.size() > detail::kMaximumLaunchArgumentCount)
     return std::unexpected(detail::invalid_error("process argv count is outside the supported bound"));
   if (!detail::EnvironmentAccess::revalidate(specification.environment))
     return std::unexpected(detail::invalid_error("process specification requires one valid exact-environment capability"));
@@ -500,7 +497,8 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
   if (specification.cwd.empty() || !specification.cwd.starts_with('/') || contains_nul(specification.cwd))
     return std::unexpected(detail::invalid_error("process cwd must be a NUL-free absolute path"));
 
-  if (specification.executable.size() > kMaxPreparedBytes || specification.cwd.size() > kMaxPreparedBytes - specification.executable.size())
+  if (specification.executable.size() > detail::kMaximumPreparedLaunchBytes ||
+      specification.cwd.size() > detail::kMaximumPreparedLaunchBytes - specification.executable.size())
     return std::unexpected(detail::invalid_error("process executable and cwd exceed the aggregate byte bound"));
   if (specification.argv.front().empty())
     return std::unexpected(detail::invalid_error("process argv[0] must be nonempty"));
@@ -509,7 +507,7 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
   {
     if (contains_nul(argument))
       return std::unexpected(detail::invalid_error("process argv contains a NUL byte"));
-    if (argument.size() > kMaxPreparedBytes - std::min(prepared_bytes, kMaxPreparedBytes))
+    if (argument.size() > detail::kMaximumPreparedLaunchBytes - std::min(prepared_bytes, detail::kMaximumPreparedLaunchBytes))
       return std::unexpected(detail::invalid_error("process argv exceeds the aggregate byte bound"));
     prepared_bytes += argument.size();
   }
@@ -524,7 +522,7 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
       return std::unexpected(detail::invalid_error("process environment contains a duplicate name"));
     names.push_back(variable.name);
     auto const bytes = variable.name.size() + variable.value.size() + 2;
-    if (bytes > kMaxPreparedBytes - std::min(prepared_bytes, kMaxPreparedBytes))
+    if (bytes > detail::kMaximumPreparedLaunchBytes - std::min(prepared_bytes, detail::kMaximumPreparedLaunchBytes))
       return std::unexpected(detail::invalid_error("process environment exceeds the aggregate byte bound"));
     prepared_bytes += bytes;
   }

@@ -70,20 +70,21 @@ std::vector<ava::process::EnvironmentVariableV1> bash_variables(std::string cwd 
           {"TMPDIR", "/tmp/ava-process-tmp"}};
 }
 
-ava::process::SecureAdoptionSpecV1 bash_spec(ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None)
+ava::process::SecureAdoptionSpecV1 bash_spec(ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None,
+                                             std::vector<std::string> argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"}, std::string cwd = "/")
 {
-  auto environment = ava::process::validate_bash_environment_v1(ava::process::kBashEnvironmentProfileIdV1, "/", bash_variables());
+  auto environment = ava::process::validate_bash_environment_v1(ava::process::kBashEnvironmentProfileIdV1, cwd, bash_variables(cwd));
   if (!environment)
     throw std::runtime_error(environment.error().format());
-  return {.environment = std::move(*environment), .cwd = "/", .bash_containment = containment};
+  return {.environment = std::move(*environment), .argv = std::move(argv), .cwd = std::move(cwd), .bash_containment = containment};
 }
 
-ava::process::SecureAdoptionSpecV1 mermaid_spec()
+ava::process::SecureAdoptionSpecV1 mermaid_spec(std::vector<std::string> argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"})
 {
   auto environment = ava::process::make_mermaid_environment_v1();
   if (!environment)
     throw std::runtime_error(environment.error().format());
-  return {.environment = std::move(*environment), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None};
+  return {.environment = std::move(*environment), .argv = std::move(argv), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None};
 }
 
 std::optional<ava::process::ExitStatusV1> wait_for(ava::process::Supervisor& supervisor, ava::process::ProcessHandle const& handle)
@@ -184,6 +185,40 @@ bool one_launch_error(ava::process::ProcessSnapshotRecordV1 const& record, ava::
          record.settlement_count == 1;
 }
 
+void test_adoption_argv_rejected_before_fork()
+{
+  auto application = application_owner();
+  ava::process::Supervisor supervisor;
+  std::vector<std::vector<std::string>> invalid_arguments;
+  invalid_arguments.emplace_back();
+  invalid_arguments.push_back({""});
+  invalid_arguments.push_back({AVA_FAKE_PROCESS_CHILD_PATH, std::string("bad\0argument", 12)});
+  invalid_arguments.push_back({AVA_FAKE_PROCESS_CHILD_PATH, std::string(1024 * 1024, 'x')});
+  invalid_arguments.emplace_back(257, "x");
+  invalid_arguments.back().front() = AVA_FAKE_PROCESS_CHILD_PATH;
+
+  bool rejected = true;
+  for (auto& argv : invalid_arguments)
+  {
+    auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
+    auto specification = bash_spec();
+    specification.argv = std::move(argv);
+    auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), std::move(specification))
+                            : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
+    rejected = rejected && !gate && gate.error().format().find("argv") != std::string::npos;
+  }
+
+  auto snapshot = supervisor.snapshot();
+  bool exact = rejected && !snapshot.monitor_started && snapshot.live_records == 0 && snapshot.records.size() == invalid_arguments.size();
+  for (auto const& record : snapshot.records)
+  {
+    exact = exact && record.reason == ava::process::TerminationReasonV1::LaunchFailed && record.exit_kind == ava::process::ExitKindV1::LaunchError &&
+            record.cleanup == ava::process::CleanupStateV1::NotRequired && record.settlement_count == 1;
+  }
+  expect(exact, "secure adoption rejects empty, NUL-bearing, aggregate-oversize, and over-count argv before any child fork");
+  static_cast<void>(supervisor.shutdown(std::chrono::steady_clock::now() + 2s));
+}
+
 void test_eof_child_stages_and_invalid_image()
 {
   auto application = application_owner();
@@ -219,15 +254,14 @@ void test_eof_child_stages_and_invalid_image()
   }
   static_cast<void>(::chmod(invalid_path.c_str(), 0700));
   int invalid_descriptor = ::open(invalid_path.c_str(), O_RDONLY | O_CLOEXEC);
-  auto invalid_argument = invalid_path.string();
-  std::array<char*, 2> invalid_argv{invalid_argument.data(), nullptr};
   auto invalid_reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto invalid_gate = invalid_reservation ? supervisor.begin_secure_adoption(std::move(*invalid_reservation), bash_spec())
+  auto invalid_gate = invalid_reservation ? supervisor.begin_secure_adoption(std::move(*invalid_reservation),
+                                                                             bash_spec(ava::process::BashContainmentHandshakeV1::None, {invalid_path.string()}))
                                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(invalid_reservation.error()));
   auto invalid_branch =
       invalid_gate ? invalid_gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(invalid_gate.error()));
   if (invalid_branch && *invalid_branch == ava::process::AdoptionForkBranchV1::Child)
-    invalid_gate->child_exec_descriptor(invalid_descriptor, invalid_argv.data());
+    invalid_gate->child_exec_descriptor(invalid_descriptor);
   if (invalid_descriptor >= 0)
     static_cast<void>(::close(invalid_descriptor));
   auto invalid_adopted =
@@ -250,21 +284,31 @@ void test_required_containment_exact_environment_sentinel_and_confirmation()
   ScopedEnvVar ambient("AVA_PROCESS_AMBIENT_CANARY", "must-not-leak");
   auto application = application_owner();
   ava::process::Supervisor supervisor;
+  auto const child_cwd = create_empty_root("process-adoption-cwd-before-containment");
+  auto const cwd_marker = child_cwd / "cwd-ready";
+  {
+    std::ofstream marker(cwd_marker, std::ios::binary | std::ios::trunc);
+    marker << "ready\n";
+  }
   std::array<int, 2> ready{-1, -1};
   std::array<int, 2> proceed{-1, -1};
   std::array<int, 2> output{-1, -1};
   bool const pipes_ready = ::pipe2(ready.data(), O_CLOEXEC) == 0 && ::pipe2(proceed.data(), O_CLOEXEC) == 0 && ::pipe2(output.data(), O_CLOEXEC) == 0;
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 21> mode_argument{"adoption-environment"};
-  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
 
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec(ava::process::BashContainmentHandshakeV1::Required))
-                          : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
+  auto gate = reservation
+                  ? supervisor.begin_secure_adoption(std::move(*reservation),
+                                                     bash_spec(ava::process::BashContainmentHandshakeV1::Required,
+                                                               {AVA_FAKE_PROCESS_CHILD_PATH, "adoption-environment", child_cwd.string()}, child_cwd.string()))
+                  : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
   {
+    int const marker = ::open("cwd-ready", O_RDONLY | O_CLOEXEC);
+    if (marker < 0)
+      gate->child_launch_failed(ava::process::AdoptionChildFailureStageV1::WorkingDirectory, errno);
+    static_cast<void>(::close(marker));
     static_cast<void>(::close(ready[0]));
     static_cast<void>(::close(proceed[1]));
     static_cast<void>(::close(output[0]));
@@ -278,7 +322,7 @@ void test_required_containment_exact_environment_sentinel_and_confirmation()
     if (count != 1 || release != 'C')
       gate->child_launch_failed(ava::process::AdoptionChildFailureStageV1::Containment, EIO);
     gate->child_bash_containment_applied();
-    gate->child_exec_descriptor(executable, argv.data());
+    gate->child_exec_descriptor(executable);
   }
   auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
   static_cast<void>(::close(ready[1]));
@@ -325,9 +369,6 @@ void test_containment_order_and_non_bash_rejection()
   auto application = application_owner();
   ava::process::Supervisor supervisor;
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 7> mode_argument{"normal"};
-  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
 
   auto skipped_reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
   auto skipped_gate = skipped_reservation
@@ -336,7 +377,7 @@ void test_containment_order_and_non_bash_rejection()
   auto skipped_branch =
       skipped_gate ? skipped_gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(skipped_gate.error()));
   if (skipped_branch && *skipped_branch == ava::process::AdoptionForkBranchV1::Child)
-    skipped_gate->child_exec_descriptor(executable, argv.data());
+    skipped_gate->child_exec_descriptor(executable);
   auto skipped =
       skipped_gate ? supervisor.adopt(std::move(*skipped_gate)) : ava::core::Result<ava::process::ProcessHandle>(std::unexpected(skipped_gate.error()));
 
@@ -354,9 +395,10 @@ void test_containment_order_and_non_bash_rejection()
   auto non_bash_reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
   auto non_bash =
       non_bash_reservation && mermaid_environment
-          ? supervisor.begin_secure_adoption(
-                std::move(*non_bash_reservation),
-                {.environment = std::move(*mermaid_environment), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::Required})
+          ? supervisor.begin_secure_adoption(std::move(*non_bash_reservation), {.environment = std::move(*mermaid_environment),
+                                                                                .argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"},
+                                                                                .cwd = "/",
+                                                                                .bash_containment = ava::process::BashContainmentHandshakeV1::Required})
           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "fixture failed")));
   auto snapshot = supervisor.snapshot();
   bool exact = !skipped && !wrong && !non_bash && snapshot.records.size() == 3;
@@ -418,19 +460,15 @@ ava::core::Result<ava::process::ProcessHandle> launch_mermaid(ava::process::Supe
 {
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
   int null_output = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 16> mode_argument{};
-  std::copy(mode.begin(), mode.end(), mode_argument.begin());
-  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), mermaid_spec())
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), mermaid_spec({AVA_FAKE_PROCESS_CHILD_PATH, std::string(mode)}))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
   {
     if (::dup2(null_output, STDOUT_FILENO) < 0 || ::dup2(null_output, STDERR_FILENO) < 0)
       gate->child_launch_failed(ava::process::AdoptionChildFailureStageV1::Streams, errno);
-    gate->child_exec_descriptor(executable, argv.data());
+    gate->child_exec_descriptor(executable);
   }
   if (executable >= 0)
     static_cast<void>(::close(executable));
@@ -463,18 +501,16 @@ void test_sentinel_descriptor_hygiene_while_leader_runs()
   std::array<int, 2> unrelated{-1, -1};
   bool const pipes_ready = ::pipe2(control.data(), O_CLOEXEC) == 0 && ::pipe2(output.data(), O_CLOEXEC) == 0 && ::pipe2(unrelated.data(), O_CLOEXEC) == 0;
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 13> mode_argument{"closed-pipes"};
-  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec())
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec(ava::process::BashContainmentHandshakeV1::None,
+                                                                                                {AVA_FAKE_PROCESS_CHILD_PATH, "closed-pipes"}))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
   {
     if (::dup2(control[0], STDIN_FILENO) < 0 || ::dup2(output[1], STDOUT_FILENO) < 0 || ::dup2(output[1], STDERR_FILENO) < 0)
       gate->child_launch_failed(ava::process::AdoptionChildFailureStageV1::Streams, errno);
-    gate->child_exec_descriptor(executable, argv.data());
+    gate->child_exec_descriptor(executable);
   }
   auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
   static_cast<void>(::close(control[0]));
@@ -507,19 +543,18 @@ void test_retained_script_descriptor_and_invalid_keep_sets()
   int unrelated = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
   auto retained_text = std::to_string(retained);
   auto unrelated_text = std::to_string(unrelated);
-  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
-  std::array<char, 26> mode_argument{"check-retained-and-closed"};
-  std::array<char*, 5> argv{executable_argument.data(), mode_argument.data(), retained_text.data(), unrelated_text.data(), nullptr};
   std::array<int, 1> keep{retained};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec())
+  auto gate = reservation ? supervisor.begin_secure_adoption(
+                                std::move(*reservation), bash_spec(ava::process::BashContainmentHandshakeV1::None,
+                                                                   {AVA_FAKE_PROCESS_CHILD_PATH, "check-retained-and-closed", retained_text, unrelated_text}))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
   {
     if (::dup2(output[1], STDOUT_FILENO) < 0)
       gate->child_launch_failed(ava::process::AdoptionChildFailureStageV1::Streams, errno);
-    gate->child_exec_descriptor(executable, argv.data(), keep);
+    gate->child_exec_descriptor(executable, keep);
   }
   static_cast<void>(::close(output[1]));
   static_cast<void>(::close(executable));
@@ -557,15 +592,13 @@ void test_retained_script_descriptor_and_invalid_keep_sets()
     {
       invalid = descriptors;
     }
-    std::array<char, 7> normal_mode{"normal"};
-    std::array<char*, 3> normal_argv{executable_argument.data(), normal_mode.data(), nullptr};
     auto invalid_reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
     auto invalid_gate = invalid_reservation ? supervisor.begin_secure_adoption(std::move(*invalid_reservation), bash_spec())
                                             : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(invalid_reservation.error()));
     auto invalid_branch =
         invalid_gate ? invalid_gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(invalid_gate.error()));
     if (invalid_branch && *invalid_branch == ava::process::AdoptionForkBranchV1::Child)
-      invalid_gate->child_exec_descriptor(final_descriptor, normal_argv.data(), invalid);
+      invalid_gate->child_exec_descriptor(final_descriptor, invalid);
     auto invalid_adopted =
         invalid_gate ? supervisor.adopt(std::move(*invalid_gate)) : ava::core::Result<ava::process::ProcessHandle>(std::unexpected(invalid_gate.error()));
     invalid_sets_failed = invalid_sets_failed && !invalid_adopted;
@@ -596,6 +629,7 @@ void run_process_adoption_posix_tests()
 #if defined(_WIN32)
   ava::tests::request_skip("secure process adoption is compile-time unsupported on Windows");
 #else
+  test_adoption_argv_rejected_before_fork();
   test_eof_child_stages_and_invalid_image();
   test_required_containment_exact_environment_sentinel_and_confirmation();
   test_containment_order_and_non_bash_rejection();

@@ -7,8 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
-#include <string_view>
 #include <mutex>
+#include <string_view>
 #include "debug.h"
 
 namespace terminal = ava::tui::terminal;
@@ -51,30 +51,30 @@ std::array<char const*, 10> lorem_ipsum_paragraphs = {
 
     "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse sit amet lacus nec odio iaculis tincidunt "
     "quis vel metus. Nullam sit amet diam imperdiet, egestas sapien eu, rutrum justo. In at orci tortor. Vestibulum vehicula vehicula est, et pharetra purus "
-    "commodo pulvinar. Suspendisse potenti. Suspendisse dignissim rutrum sapien ut finibus. Donec bibendum ultricies dui, quis dignissim lacus mattis sit amet. "
-    "Sed suscipit non neque vel auctor. Sed ac tellus quis eros imperdiet finibus ut ac nulla. Etiam ultrices, diam vel vehicula tincidunt, dolor metus "
+    "commodo pulvinar. Suspendisse potenti. Suspendisse dignissim rutrum sapien ut finibus. Donec bibendum ultricies dui, quis dignissim lacus mattis sit "
+    "amet. Sed suscipit non neque vel auctor. Sed ac tellus quis eros imperdiet finibus ut ac nulla. Etiam ultrices, diam vel vehicula tincidunt, dolor metus "
     "feugiat orci, et ullamcorper mauris ante vel tortor.",
 
-    "Mauris laoreet est arcu. Phasellus tortor nisi, commodo in faucibus ac, luctus cursus magna. Ut molestie leo vitae augue maximus, in interdum justo ornare. "
-    "In hac habitasse platea dictumst. Aenean scelerisque iaculis suscipit. Cras interdum velit et justo commodo, eu elementum enim pellentesque. Fusce luctus "
-    "egestas fermentum. Morbi consectetur justo id neque eleifend tristique id a lacus. Quisque sed sollicitudin odio, sed sollicitudin massa. Aliquam ac nulla "
-    "vel turpis ultricies bibendum at sagittis orci. In iaculis vel ante et porttitor. Etiam eu turpis nec est iaculis elementum quis volutpat neque. Nulla "
-    "volutpat, neque sit amet luctus faucibus, sapien nunc mollis neque, non eleifend neque libero sit amet dui. Donec a vehicula quam, mollis blandit turpis. "
-    "Donec sed accumsan massa.",
+    "Mauris laoreet est arcu. Phasellus tortor nisi, commodo in faucibus ac, luctus cursus magna. Ut molestie leo vitae augue maximus, in interdum justo "
+    "ornare. In hac habitasse platea dictumst. Aenean scelerisque iaculis suscipit. Cras interdum velit et justo commodo, eu elementum enim pellentesque. "
+    "Fusce luctus egestas fermentum. Morbi consectetur justo id neque eleifend tristique id a lacus. Quisque sed sollicitudin odio, sed sollicitudin massa. "
+    "Aliquam ac nulla vel turpis ultricies bibendum at sagittis orci. In iaculis vel ante et porttitor. Etiam eu turpis nec est iaculis elementum quis "
+    "volutpat neque. Nulla volutpat, neque sit amet luctus faucibus, sapien nunc mollis neque, non eleifend neque libero sit amet dui. Donec a vehicula quam, "
+    "mollis blandit turpis. Donec sed accumsan massa.",
 
     "Nulla rutrum vel nunc sit amet luctus. Nullam mattis ultrices diam vitae suscipit. Sed viverra pretium nibh, vel blandit lacus posuere nec. Orci varius "
-    "natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Nulla fringilla risus quis consectetur vehicula. Suspendisse eget nibh eu dolor "
-    "mollis viverra. Mauris commodo ut odio in egestas. Vestibulum commodo felis vel libero viverra, sit amet interdum risus lacinia. Suspendisse ultrices "
-    "ullamcorper metus, ullamcorper semper orci accumsan non. In ipsum velit, pharetra in odio vel, tristique vulputate dolor. Integer cursus gravida luctus. "
-    "Nullam sapien arcu, luctus eget interdum in, tempor sit amet nisl. Vivamus ultrices vel urna et egestas. Aliquam nisl tellus, sodales et ultricies in, "
-    "fringilla et mi.",
+    "natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Nulla fringilla risus quis consectetur vehicula. Suspendisse eget nibh eu "
+    "dolor mollis viverra. Mauris commodo ut odio in egestas. Vestibulum commodo felis vel libero viverra, sit amet interdum risus lacinia. Suspendisse "
+    "ultrices ullamcorper metus, ullamcorper semper orci accumsan non. In ipsum velit, pharetra in odio vel, tristique vulputate dolor. Integer cursus gravida "
+    "luctus. Nullam sapien arcu, luctus eget interdum in, tempor sit amet nisl. Vivamus ultrices vel urna et egestas. Aliquam nisl tellus, sodales et "
+    "ultricies in, fringilla et mi.",
 
     "Sed justo magna, volutpat efficitur fermentum id, iaculis in sem. Cras laoreet massa tortor, eget sollicitudin mi auctor quis. Suspendisse libero urna, "
-    "commodo vel molestie in, faucibus ullamcorper neque. Aenean dictum ultricies nulla convallis gravida. Praesent nec lorem ac nibh finibus dignissim at id dui. "
-    "Mauris quis sodales turpis. Sed tristique eros ut justo blandit lobortis. Nulla eget lorem sapien. Praesent eros nibh, ullamcorper nec purus in, sodales "
-    "finibus massa. Morbi elementum quis ligula sit amet dictum. Integer semper imperdiet sapien, non aliquet massa mattis sit amet. In aliquet, lacus vel aliquam "
-    "gravida, libero lectus volutpat libero, ut scelerisque est libero nec odio. Sed vitae mattis dolor, eget placerat lorem. Fusce sapien turpis, vestibulum ut "
-    "tortor vitae, euismod vestibulum metus. Donec non dignissim lectus."};
+    "commodo vel molestie in, faucibus ullamcorper neque. Aenean dictum ultricies nulla convallis gravida. Praesent nec lorem ac nibh finibus dignissim at id "
+    "dui. Mauris quis sodales turpis. Sed tristique eros ut justo blandit lobortis. Nulla eget lorem sapien. Praesent eros nibh, ullamcorper nec purus in, "
+    "sodales finibus massa. Morbi elementum quis ligula sit amet dictum. Integer semper imperdiet sapien, non aliquet massa mattis sit amet. In aliquet, lacus "
+    "vel aliquam gravida, libero lectus volutpat libero, ut scelerisque est libero nec odio. Sed vitae mattis dolor, eget placerat lorem. Fusce sapien turpis, "
+    "vestibulum ut tortor vitae, euismod vestibulum metus. Donec non dignissim lectus."};
 
 namespace {
 
@@ -91,7 +91,8 @@ std::u8string to_u8string(std::string_view text)
 // Build one Paragraph from a single lorem ipsum paragraph by chopping it into phrases of
 // alternating 51 and 19 characters long. Every third 19-character phrase gets its own colored
 // Rendition.
-std::unique_ptr<terminal::Paragraph> make_paragraph(std::string_view text, terminal::Rendition paragraph_rendition, std::array<terminal::ColorPair, 4> const& phrase_colors)
+std::unique_ptr<terminal::Paragraph> make_paragraph(std::string_view text, terminal::Rendition paragraph_rendition,
+                                                    std::array<terminal::ColorPair, 4> const& phrase_colors)
 {
   auto paragraph = terminal::Paragraph::create(paragraph_rendition, {.minimum_width = 16});
 
@@ -164,8 +165,7 @@ int main()
   {
     int const source_index = paragraph_number % static_cast<int>(lorem_ipsum_paragraphs.size());
     for (int p = 0; p < pads.size(); ++p)
-      pads[p].append(make_paragraph(lorem_ipsum_paragraphs[source_index],
-                                    terminal::Rendition{paragraph_colors[paragraph_number % paragraph_colors.size()]},
+      pads[p].append(make_paragraph(lorem_ipsum_paragraphs[source_index], terminal::Rendition{paragraph_colors[paragraph_number % paragraph_colors.size()]},
                                     phrase19_colors));
   }
 

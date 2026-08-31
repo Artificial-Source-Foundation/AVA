@@ -15,6 +15,9 @@ class EnvironmentTestAccess final
 {
  public:
   [[nodiscard]] static ava::core::Result<HostEnvironmentV1> capture_host();
+  // Constructs a bounded synthetic projection without mutating process-global
+  // environment state in threaded supervisor fixtures.
+  [[nodiscard]] static ava::core::Result<HostEnvironmentV1> make_host(std::vector<EnvironmentVariableV1> variables);
   [[nodiscard]] static std::vector<EnvironmentVariableV1> const& variables(ExactEnvironmentV1 const& environment) noexcept;
   [[nodiscard]] static std::vector<EnvironmentVariableV1> const& host_variables(HostEnvironmentV1 const& environment) noexcept;
   [[nodiscard]] static bool shares_capture(HostEnvironmentV1 const& left, HostEnvironmentV1 const& right) noexcept;

@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -561,6 +563,63 @@ ava::process::OwnerPathV1 operation_owner(ava::process::OwnerPathV1 const& appli
   return std::move(*owner);
 }
 
+void test_common_launch_rejects_mismatched_logical_cwd()
+{
+  EnvironmentSandbox sandbox;
+  sandbox.set("PATH", "/usr/bin:/bin");
+  auto host = EnvironmentTestAccess::capture_host();
+  auto application = ava::process::OwnerPathV1::application();
+  expect(host && application, "common cwd-binding fixture creates its host projection and application owner");
+  if (!host || !application)
+    return;
+
+  auto const root = create_empty_root("process-environment-common-cwd-binding");
+  auto const environment_cwd = root / "ENVIRONMENT_CWD_CANARY_42d7";
+  auto const spawn_cwd = root / "SPAWN_CWD_CANARY_85ac";
+  std::filesystem::create_directories(environment_cwd);
+  std::filesystem::create_directories(spawn_cwd);
+
+  ava::process::Supervisor supervisor;
+  std::vector<std::string> errors;
+  auto reject = [&](ava::process::ProcessRoleV1 role, ava::core::Result<ExactEnvironmentV1> environment) {
+    if (!environment)
+      return false;
+    auto reservation = supervisor.reserve(operation_owner(*application), role);
+    if (!reservation)
+      return false;
+    auto result = supervisor.spawn(std::move(*reservation),
+                                   {.executable = "/bin/true", .argv = {"/bin/true"}, .environment = std::move(*environment), .cwd = spawn_cwd.string()});
+    if (result)
+    {
+      static_cast<void>(supervisor.wait(result->handle, std::chrono::steady_clock::now() + std::chrono::seconds(2)));
+      return false;
+    }
+    errors.push_back(result.error().format());
+    return true;
+  };
+
+  bool const rejected = reject(ava::process::ProcessRoleV1::Curl, ava::process::make_curl_environment_v1(*host)) &&
+                        reject(ava::process::ProcessRoleV1::Plugin, ava::process::make_plugin_environment_v1(environment_cwd)) &&
+                        reject(ava::process::ProcessRoleV1::Mcp, ava::process::make_mcp_environment_v1(environment_cwd, {})) &&
+                        reject(ava::process::ProcessRoleV1::Lsp, ava::process::make_lsp_environment_v1(*host, environment_cwd));
+  auto snapshot = supervisor.snapshot();
+  bool settled_once = snapshot.records.size() == 4;
+  for (auto const& record : snapshot.records)
+  {
+    settled_once = settled_once && record.state == ava::process::ProcessStateV1::Finished && record.reason == ava::process::TerminationReasonV1::LaunchFailed &&
+                   record.exit_kind == ava::process::ExitKindV1::LaunchError && record.settlement_count == 1;
+  }
+  bool content_free = errors.size() == 4;
+  for (auto const& error : errors)
+  {
+    content_free = content_free && error.find(environment_cwd.string()) == std::string::npos && error.find(spawn_cwd.string()) == std::string::npos &&
+                   error.find("PWD=/") == std::string::npos;
+  }
+  expect(rejected && settled_once && snapshot.live_records == 0 && !snapshot.monitor_started,
+         "Curl, Plugin, MCP, and LSP cwd mismatches fail before fork or monitor with one launch-error settlement");
+  expect(content_free, "common cwd-binding failures do not echo either logical path");
+}
+
 void test_closed_launch_surface_and_content_free_failures()
 {
   EnvironmentSandbox sandbox;
@@ -647,5 +706,6 @@ void run_process_environment_tests()
   test_mcp_path_and_reserved_input_validation();
   test_desktop_path_and_external_draft_validation();
   test_bash_validation_matrix();
+  test_common_launch_rejects_mismatched_logical_cwd();
   test_closed_launch_surface_and_content_free_failures();
 }

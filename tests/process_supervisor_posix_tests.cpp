@@ -99,8 +99,8 @@ std::vector<ava::process::EnvironmentVariableV1> sealed_bash_variables()
 
 ava::process::ExactEnvironmentV1 environment_for_role(ava::process::ProcessRoleV1 role)
 {
-  auto capture_host = [] {
-    auto host = ava::process::testing::EnvironmentTestAccess::capture_host();
+  auto make_host = [] {
+    auto host = ava::process::testing::EnvironmentTestAccess::make_host({{"PATH", std::string(ava::process::kTrustedEnvironmentPathV1)}});
     if (!host)
       throw std::runtime_error(host.error().format());
     return std::move(*host);
@@ -110,7 +110,7 @@ ava::process::ExactEnvironmentV1 environment_for_role(ava::process::ProcessRoleV
     switch (role)
     {
       case ava::process::ProcessRoleV1::Curl: {
-        auto host = capture_host();
+        auto host = make_host();
         return ava::process::make_curl_environment_v1(host);
       }
       case ava::process::ProcessRoleV1::Bash:
@@ -120,21 +120,21 @@ ava::process::ExactEnvironmentV1 environment_for_role(ava::process::ProcessRoleV
       case ava::process::ProcessRoleV1::Mcp:
         return ava::process::make_mcp_environment_v1("/", {});
       case ava::process::ProcessRoleV1::Lsp: {
-        auto host = capture_host();
+        auto host = make_host();
         return ava::process::make_lsp_environment_v1(host, "/");
       }
       case ava::process::ProcessRoleV1::Mermaid:
         return ava::process::make_mermaid_environment_v1();
       case ava::process::ProcessRoleV1::BrowserOpener: {
-        auto host = capture_host();
+        auto host = make_host();
         return ava::process::make_browser_desktop_environment_v1(host);
       }
       case ava::process::ProcessRoleV1::ClipboardHelper: {
-        auto host = capture_host();
+        auto host = make_host();
         return ava::process::make_clipboard_desktop_environment_v1(host);
       }
       case ava::process::ProcessRoleV1::ExternalEditor: {
-        auto host = capture_host();
+        auto host = make_host();
         return ava::process::make_external_editor_environment_v1(host, "/tmp/ava-process-editor-draft");
       }
     }
@@ -382,6 +382,28 @@ void test_exec_gate_normal_nonzero_and_exec_failure()
   for (auto const& record : snapshot.records)
     saw_exec_failure = saw_exec_failure || record.reason == ava::process::TerminationReasonV1::ExecFailed;
   expect(saw_exec_failure && snapshot.monitor_started, "exec failure is first-reason classified and the monitor starts only after an actual registered child");
+}
+
+void test_matching_common_logical_cwd_executes()
+{
+  auto application = application_owner();
+  ava::process::Supervisor supervisor;
+  SupervisorFallback fallback(supervisor);
+  auto const logical_cwd = create_empty_root("process-supervisor-common-cwd-match");
+  auto environment = ava::process::make_plugin_environment_v1(logical_cwd);
+  auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Plugin);
+  auto specification = fake_spec("normal");
+  specification.cwd = logical_cwd.string();
+  if (environment)
+    specification.environment = std::move(*environment);
+  auto child = reservation ? supervisor.spawn(std::move(*reservation), std::move(specification))
+                           : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
+  auto status = child ? wait_for(supervisor, child->handle) : std::nullopt;
+  auto snapshot = supervisor.snapshot();
+  bool const settled_once = snapshot.records.size() == 1 && snapshot.records.front().settlement_count == 1;
+  expect(environment && child && status && status->reason == ava::process::TerminationReasonV1::NaturalExit &&
+             status->kind == ava::process::ExitKindV1::Exited && status->exit_code == 0 && settled_once && snapshot.monitor_started,
+         "a common exact environment executes when SpawnSpec cwd exactly matches its bound logical cwd");
 }
 
 void test_natural_exit_does_not_pay_termination_grace()
@@ -924,6 +946,7 @@ void run_process_supervisor_posix_tests()
   ava::tests::request_skip("process supervisor POSIX lifecycle backend is compile-time unsupported");
 #else
   test_exec_gate_normal_nonzero_and_exec_failure();
+  test_matching_common_logical_cwd_executes();
   test_natural_exit_does_not_pay_termination_grace();
   test_exact_environment_signal_reset_and_descriptor_closure();
   test_closed_pipes_and_flood_draining();

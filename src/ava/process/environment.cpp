@@ -151,6 +151,25 @@ bool profile_matches_role(EnvironmentProfileV1 profile, ProcessRoleV1 role) noex
   return false;
 }
 
+bool profile_binds_logical_cwd(EnvironmentProfileV1 profile) noexcept
+{
+  switch (profile)
+  {
+    case EnvironmentProfileV1::Curl:
+    case EnvironmentProfileV1::Bash:
+    case EnvironmentProfileV1::PluginMinimal:
+    case EnvironmentProfileV1::McpExplicit:
+    case EnvironmentProfileV1::LspStrict:
+    case EnvironmentProfileV1::Mermaid:
+      return true;
+    case EnvironmentProfileV1::BrowserDesktop:
+    case EnvironmentProfileV1::ClipboardDesktop:
+    case EnvironmentProfileV1::ExternalEditor:
+      return false;
+  }
+  return false;
+}
+
 bool is_common_role(ProcessRoleV1 role) noexcept
 {
   switch (role)
@@ -266,6 +285,20 @@ EnvironmentVariableV1 const* find_variable(std::vector<EnvironmentVariableV1> co
   return found == variables.end() ? nullptr : &*found;
 }
 
+bool valid_logical_cwd_binding(EnvironmentProfileV1 profile, std::vector<EnvironmentVariableV1> const& variables,
+                               std::optional<std::string> const& logical_cwd) noexcept
+{
+  auto const* pwd = find_variable(variables, "PWD");
+  if (!profile_binds_logical_cwd(profile))
+    return !logical_cwd && pwd == nullptr;
+  if (!logical_cwd || logical_cwd->size() > kMaxEnvironmentValueBytesV1 || !valid_absolute_path_value(*logical_cwd) || pwd == nullptr ||
+      pwd->value != *logical_cwd)
+  {
+    return false;
+  }
+  return (profile != EnvironmentProfileV1::Curl && profile != EnvironmentProfileV1::Mermaid) || *logical_cwd == "/";
+}
+
 }  // namespace
 
 struct HostEnvironmentV1::Impl
@@ -280,6 +313,9 @@ struct ExactEnvironmentV1::Impl
   EnvironmentProfileV1 profile = EnvironmentProfileV1::Curl;
   ProcessRoleV1 role = ProcessRoleV1::Curl;
   std::vector<EnvironmentVariableV1> variables;
+  // PWD-bearing profiles retain the exact computed logical cwd out of band so
+  // launch validation never has to expose or trust raw child environment data.
+  std::optional<std::string> logical_cwd;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -385,7 +421,7 @@ ava::core::Result<ExactEnvironmentV1> make_curl_environment_v1(HostEnvironmentV1
       return std::unexpected(invalid_input_error());
     std::vector<EnvironmentVariableV1> variables{{"PATH", std::string(kTrustedEnvironmentPathV1)}, {"LANG", "C.UTF-8"}, {"LC_ALL", "C.UTF-8"}, {"PWD", "/"}};
     append_if_present(variables, host, kCurlInheritedNames);
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Curl, ProcessRoleV1::Curl, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Curl, ProcessRoleV1::Curl, std::move(variables), std::string("/"));
   });
 }
 
@@ -422,7 +458,7 @@ ava::core::Result<ExactEnvironmentV1> validate_bash_environment_v1(std::string_v
       if (!valid_absolute_path_value(variables[index].value))
         return std::unexpected(invalid_input_error());
     }
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Bash, ProcessRoleV1::Bash, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Bash, ProcessRoleV1::Bash, std::move(variables), std::move(*cwd));
   });
 }
 
@@ -432,9 +468,8 @@ ava::core::Result<ExactEnvironmentV1> make_plugin_environment_v1(std::filesystem
     auto cwd = bounded_absolute_path(logical_cwd);
     if (!cwd)
       return std::unexpected(std::move(cwd.error()));
-    std::vector<EnvironmentVariableV1> variables{
-        {"PATH", std::string(kTrustedEnvironmentPathV1)}, {"LANG", "C.UTF-8"}, {"LC_ALL", "C.UTF-8"}, {"PWD", std::move(*cwd)}};
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::PluginMinimal, ProcessRoleV1::Plugin, std::move(variables));
+    std::vector<EnvironmentVariableV1> variables{{"PATH", std::string(kTrustedEnvironmentPathV1)}, {"LANG", "C.UTF-8"}, {"LC_ALL", "C.UTF-8"}, {"PWD", *cwd}};
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::PluginMinimal, ProcessRoleV1::Plugin, std::move(variables), std::move(*cwd));
   });
 }
 
@@ -453,14 +488,14 @@ ava::core::Result<ExactEnvironmentV1> make_mcp_environment_v1(std::filesystem::p
 
     std::vector<EnvironmentVariableV1> variables;
     variables.reserve(explicit_variables.size() + (explicit_path == nullptr ? 2U : 1U));
-    variables.push_back({.name = "PWD", .value = std::move(*cwd)});
+    variables.push_back({.name = "PWD", .value = *cwd});
     variables.push_back({.name = "PATH", .value = explicit_path == nullptr ? std::string(kTrustedEnvironmentPathV1) : explicit_path->value});
     for (auto const& variable : explicit_variables)
     {
       if (variable.name != "PATH")
         variables.push_back(variable);
     }
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::McpExplicit, ProcessRoleV1::Mcp, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::McpExplicit, ProcessRoleV1::Mcp, std::move(variables), std::move(*cwd));
   });
 }
 
@@ -472,12 +507,12 @@ ava::core::Result<ExactEnvironmentV1> make_lsp_environment_v1(HostEnvironmentV1 
     auto cwd = bounded_absolute_path(logical_cwd);
     if (!cwd)
       return std::unexpected(std::move(cwd.error()));
-    std::vector<EnvironmentVariableV1> variables{{"PATH", std::string(kTrustedEnvironmentPathV1)}, {"PWD", std::move(*cwd)}};
+    std::vector<EnvironmentVariableV1> variables{{"PATH", std::string(kTrustedEnvironmentPathV1)}, {"PWD", *cwd}};
     append_if_present(variables, host, std::array<std::string_view, 9>{"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LANGUAGE", "LC_ALL"});
     append_additional_locales(variables, host);
     append_if_present(variables, host,
                       std::array<std::string_view, 6>{"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "TERM", "COLORTERM"});
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::LspStrict, ProcessRoleV1::Lsp, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::LspStrict, ProcessRoleV1::Lsp, std::move(variables), std::move(*cwd));
   });
 }
 
@@ -491,7 +526,7 @@ ava::core::Result<ExactEnvironmentV1> make_mermaid_environment_v1()
                                                  {"NO_COLOR", "1"},
                                                  {"PWD", "/"},
                                                  {"AVA_MERMAID_PROTOCOL", "1"}};
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Mermaid, ProcessRoleV1::Mermaid, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::Mermaid, ProcessRoleV1::Mermaid, std::move(variables), std::string("/"));
   });
 }
 
@@ -509,7 +544,7 @@ ava::core::Result<ExactEnvironmentV1> make_browser_desktop_environment_v1(HostEn
     append_if_present(variables, host,
                       std::array<std::string_view, 10>{"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "DISPLAY",
                                                        "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "DESKTOP_STARTUP_ID"});
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::BrowserDesktop, ProcessRoleV1::BrowserOpener, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::BrowserDesktop, ProcessRoleV1::BrowserOpener, std::move(variables), std::nullopt);
   });
 }
 
@@ -523,7 +558,7 @@ ava::core::Result<ExactEnvironmentV1> make_clipboard_desktop_environment_v1(Host
     append_additional_locales(variables, host);
     append_if_present(variables, host,
                       std::array<std::string_view, 5>{"XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"});
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::ClipboardDesktop, ProcessRoleV1::ClipboardHelper, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::ClipboardDesktop, ProcessRoleV1::ClipboardHelper, std::move(variables), std::nullopt);
   });
 }
 
@@ -544,7 +579,7 @@ ava::core::Result<ExactEnvironmentV1> make_external_editor_environment_v1(HostEn
                       std::array<std::string_view, 11>{"TERM", "COLORTERM", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
                                                        "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"});
     variables.push_back({.name = "AVA_EXTERNAL_EDITOR_FILE", .value = std::move(*draft)});
-    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::ExternalEditor, ProcessRoleV1::ExternalEditor, std::move(variables));
+    return detail::EnvironmentAccess::mint(EnvironmentProfileV1::ExternalEditor, ProcessRoleV1::ExternalEditor, std::move(variables), std::nullopt);
   });
 }
 
@@ -616,16 +651,21 @@ std::vector<EnvironmentVariableV1> const& EnvironmentAccess::host_variables(Host
   return host.implementation_ ? host.implementation_->variables : empty;
 }
 
-ava::core::Result<ExactEnvironmentV1> EnvironmentAccess::mint(EnvironmentProfileV1 profile, ProcessRoleV1 role, std::vector<EnvironmentVariableV1> variables)
+ava::core::Result<ExactEnvironmentV1> EnvironmentAccess::mint(EnvironmentProfileV1 profile, ProcessRoleV1 role, std::vector<EnvironmentVariableV1> variables,
+                                                              std::optional<std::string> logical_cwd)
 {
-  if (!is_valid(profile) || !is_valid(role) || !profile_matches_role(profile, role) || !valid_variables(variables, kMaxEnvironmentEntriesV1))
+  if (!is_valid(profile) || !is_valid(role) || !profile_matches_role(profile, role) || !valid_variables(variables, kMaxEnvironmentEntriesV1) ||
+      !valid_logical_cwd_binding(profile, variables, logical_cwd))
+  {
     return std::unexpected(invalid_input_error());
+  }
   try
   {
     auto implementation = std::make_unique<ExactEnvironmentV1::Impl>();
     implementation->profile = profile;
     implementation->role = role;
     implementation->variables = std::move(variables);
+    implementation->logical_cwd = std::move(logical_cwd);
     return ExactEnvironmentV1(std::move(implementation));
   }
   catch (...)
@@ -644,13 +684,15 @@ bool EnvironmentAccess::revalidate(ExactEnvironmentV1 const& environment) noexce
 {
   return environment.implementation_ && is_valid(environment.implementation_->profile) && is_valid(environment.implementation_->role) &&
          profile_matches_role(environment.implementation_->profile, environment.implementation_->role) &&
-         valid_variables(environment.implementation_->variables, kMaxEnvironmentEntriesV1);
+         valid_variables(environment.implementation_->variables, kMaxEnvironmentEntriesV1) &&
+         valid_logical_cwd_binding(environment.implementation_->profile, environment.implementation_->variables, environment.implementation_->logical_cwd);
 }
 
-bool EnvironmentAccess::matches_common_launch(ExactEnvironmentV1 const& environment, ProcessRoleV1 role) noexcept
+bool EnvironmentAccess::matches_common_launch(ExactEnvironmentV1 const& environment, ProcessRoleV1 role, std::string_view cwd) noexcept
 {
   return is_common_role(role) && revalidate(environment) && environment.implementation_->role == role &&
-         profile_matches_role(environment.implementation_->profile, role);
+         profile_matches_role(environment.implementation_->profile, role) &&
+         (!environment.implementation_->logical_cwd || *environment.implementation_->logical_cwd == cwd);
 }
 
 bool EnvironmentAccess::matches_secure_adoption(ExactEnvironmentV1 const& environment, ProcessRoleV1 role) noexcept
@@ -666,6 +708,25 @@ namespace testing {
 ava::core::Result<HostEnvironmentV1> EnvironmentTestAccess::capture_host()
 {
   return detail::EnvironmentAccess::capture_host();
+}
+
+ava::core::Result<HostEnvironmentV1> EnvironmentTestAccess::make_host(std::vector<EnvironmentVariableV1> variables)
+{
+  if (!valid_variables(variables, kMaxEnvironmentEntriesV1) ||
+      std::ranges::any_of(variables, [](auto const& variable) { return !is_sanctioned_host_name(variable.name); }))
+  {
+    return std::unexpected(capture_error());
+  }
+  try
+  {
+    auto implementation = std::make_shared<HostEnvironmentV1::Impl>();
+    implementation->variables = std::move(variables);
+    return HostEnvironmentV1(std::move(implementation));
+  }
+  catch (...)
+  {
+    return std::unexpected(allocation_error());
+  }
 }
 
 std::vector<EnvironmentVariableV1> const& EnvironmentTestAccess::variables(ExactEnvironmentV1 const& environment) noexcept

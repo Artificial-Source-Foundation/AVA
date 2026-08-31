@@ -690,7 +690,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     return std::unexpected(std::move(consumed.error()));
   auto const identity = *consumed;
   auto const role = detail::record_role(state, identity);
-  if (!role || !detail::EnvironmentAccess::matches_common_launch(specification.environment, *role))
+  if (!role || !detail::EnvironmentAccess::matches_common_launch(specification.environment, *role, specification.cwd))
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::invalid_error("reserved common process launch requires its matching exact-environment capability"));
@@ -752,9 +752,9 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     return std::unexpected(detail::canceled_launch_error("process launch", stopped_reason));
   }
 
-  // Repeat the immutable capability and role/profile check at the final
-  // pre-fork boundary after every allocator-backed launch preparation.
-  if (!detail::EnvironmentAccess::matches_common_launch(specification.environment, *role))
+  // Repeat the immutable role/profile/logical-cwd capability check at the
+  // final pre-fork boundary after every allocator-backed launch preparation.
+  if (!detail::EnvironmentAccess::matches_common_launch(specification.environment, *role, specification.cwd))
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::invalid_error("prepared common process launch lost its exact-environment binding"));

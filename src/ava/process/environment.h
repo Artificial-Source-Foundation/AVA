@@ -100,7 +100,8 @@ class HostEnvironmentV1 final
 };
 
 // Opaque, move-only authority to launch one exact role/profile environment.
-// Child values are deliberately unavailable through the production API.
+// PWD-bearing profiles also retain their computed logical-cwd binding. Child
+// values and the binding are deliberately unavailable through the public API.
 class ExactEnvironmentV1 final
 {
  public:

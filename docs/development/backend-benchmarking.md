@@ -106,13 +106,13 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 `971327fb66fc372f5828c5f5967e118d9374f9da` is an **instrumentation carrier**, not an M1 runtime. Its production runtime paths are byte-for-byte the source baseline `c94ac863141975806bbab52e950a2f2499108b65`. The following commands create an honest carrier cohort and prove that invariant. Builds stay outside both worktrees.
 
-Resolve every benchmark instrumentation commit to a reviewed full object ID before leaving the benchmark branch. Never derive an instrumentation commit from `HEAD` after checking out a later production branch. The first instrumentation commit is pinned below; supply this evidence-integrity follow-up's reported full ID explicitly:
+Resolve every benchmark instrumentation commit to a reviewed full object ID before leaving the benchmark branch. Never derive an instrumentation commit from `HEAD` after checking out a later production branch. Both integrated instrumentation commits are pinned below:
 
 ```sh
-instrumentation_base=fc4b1c4d1c0be241057f98b47ef5ff24025f2953
-: "${AVA_BENCHMARK_INTEGRITY_COMMIT:?set the reviewed full evidence-integrity commit ID}"
-instrumentation_integrity_commit=$AVA_BENCHMARK_INTEGRITY_COMMIT
-test "$(printf %s "$instrumentation_integrity_commit" | wc -c)" -eq 40
+instrumentation_base=dd7cb260d58beb6f2d69bc07dc0bb604d65bd3ef
+instrumentation_integrity_commit=789b100c728bd9f95a68324e8eaa8012d9b09cdb
+test "$(git rev-parse --verify "$instrumentation_base^{commit}")" = \
+  "$instrumentation_base"
 test "$(git rev-parse --verify "$instrumentation_integrity_commit^{commit}")" = \
   "$instrumentation_integrity_commit"
 

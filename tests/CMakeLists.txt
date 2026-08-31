@@ -178,6 +178,7 @@ set(AVA_TESTS_SOURCES
   "plugin_tests.cpp"
   "plugin_ui_tests.cpp"
   "process_environment_tests.cpp"
+  "process_readiness_tests.cpp"
   "process_supervisor_tests.cpp"
   "process_supervisor_posix_tests.cpp"
   "provider_anthropic_tests.cpp"
@@ -249,6 +250,7 @@ add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_proc
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_PROCESS_CHILD_PATH="$<TARGET_FILE:ava_fake_process_child>")
+target_compile_definitions(ava_tests PRIVATE AVA_PROCESS_PUBLIC_HEADER_PATH="${CMAKE_SOURCE_DIR}/src/ava/process/supervisor.h")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MERMAID_HELPER_PATH="$<TARGET_FILE:ava_fake_mermaid_helper>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
 target_compile_definitions(ava_tests PRIVATE AVA_080_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden/ava-080")
@@ -302,6 +304,7 @@ set(AVA_TEST_SUITES
   plugin
   plugin_ui
   process_environment
+  process_readiness
   process_supervisor
   process_supervisor_posix
   mcp
@@ -330,6 +333,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.process_environment PROPERTIES LABELS "process;offline")
+set_tests_properties(ava_tests.process_readiness PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;readiness;offline")
 set_tests_properties(ava_tests.process_supervisor_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;offline")
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.tool_scheduler PROPERTIES TIMEOUT 30)

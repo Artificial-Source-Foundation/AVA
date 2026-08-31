@@ -83,6 +83,54 @@ std::uint64_t elapsed_milliseconds(Clock::time_point begin, Clock::time_point en
   return value <= 0 ? 0 : static_cast<std::uint64_t>(value);
 }
 
+ActiveWaiterRegistration::ActiveWaiterRegistration(std::shared_ptr<SupervisorState> state) noexcept : state_(std::move(state))
+{
+}
+
+ActiveWaiterRegistration::ActiveWaiterRegistration(ActiveWaiterRegistration&& other) noexcept : state_(std::move(other.state_))
+{
+}
+
+ActiveWaiterRegistration& ActiveWaiterRegistration::operator=(ActiveWaiterRegistration&& other) noexcept
+{
+  if (this != &other)
+  {
+    release();
+    state_ = std::move(other.state_);
+  }
+  return *this;
+}
+
+ActiveWaiterRegistration::~ActiveWaiterRegistration()
+{
+  release();
+}
+
+void ActiveWaiterRegistration::release() noexcept
+{
+  if (!state_)
+    return;
+  {
+    std::lock_guard lock(state_->mutex);
+    if (state_->active_waiters > 0)
+      --state_->active_waiters;
+  }
+  state_->changed.notify_all();
+  state_.reset();
+}
+
+ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state)
+{
+  {
+    std::lock_guard lock(state->mutex);
+    if (state->active_waiters == std::numeric_limits<std::size_t>::max())
+      return std::unexpected(process_error(ava::core::ErrorCategory::Io, "process supervisor active-waiter capacity is exhausted"));
+    ++state->active_waiters;
+  }
+  state->changed.notify_all();
+  return ActiveWaiterRegistration(state);
+}
+
 void release_owner_alias_locked(SupervisorState& state, Record const& record)
 {
   auto found = state.owner_aliases.find(record.owner_key);
@@ -116,16 +164,42 @@ void await_internal_settlement(std::shared_ptr<HandleState> const& handle, Proce
   static_cast<void>(handle->changed.wait_until(lock, deadline, [&] { return handle->final_status.has_value(); }));
 }
 
+void signal_completion_locked(HandleState& handle) noexcept
+{
+#if !defined(_WIN32)
+  if (!handle.completion_channel || handle.completion_signaled)
+    return;
+  char const signal = 'F';
+  ssize_t result = -1;
+  do
+    result = ::write(handle.completion_channel->write_end.get(), &signal, 1);
+  while (result < 0 && errno == EINTR);
+  if (result == 1)
+    handle.completion_signaled = true;
+  else
+    handle.completion_channel->write_end.reset();
+#else
+  static_cast<void>(handle);
+#endif
+}
+
 void publish_final_locked(Record& record, ExitStatusV1 status)
 {
   if (!record.handle)
     return;
+  auto handle = record.handle;
   {
-    std::lock_guard handle_lock(record.handle->mutex);
-    if (!record.handle->final_status)
-      record.handle->final_status = status;
+    std::lock_guard handle_lock(handle->mutex);
+    if (!handle->final_status)
+    {
+      handle->final_status = status;
+      signal_completion_locked(*handle);
+    }
   }
-  record.handle->changed.notify_all();
+  handle->changed.notify_all();
+  // Once publication is complete, the caller's capability is the only reason
+  // to retain the bounded value cell and its optional completion channel.
+  record.handle.reset();
 }
 
 void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 cleanup)
@@ -295,6 +369,11 @@ namespace ava::process {
 using detail::Clock;
 using namespace std::chrono_literals;
 
+PipeWatchV1::PipeWatchV1(std::weak_ptr<detail::PipeEndpointState> endpoint, PipeInterestV1 interest, std::uint32_t token) noexcept
+    : endpoint_(std::move(endpoint)), interest_(interest), token_(token)
+{
+}
+
 PipeEndpoint::PipeEndpoint() noexcept = default;
 PipeEndpoint::PipeEndpoint(std::unique_ptr<Impl> implementation) noexcept : implementation_(std::move(implementation))
 {
@@ -306,7 +385,10 @@ PipeEndpoint::~PipeEndpoint() = default;
 bool PipeEndpoint::valid() const noexcept
 {
 #if !defined(_WIN32)
-  return implementation_ && implementation_->descriptor.get() >= 0;
+  if (!implementation_ || !implementation_->state)
+    return false;
+  std::lock_guard lock(implementation_->state->mutex);
+  return implementation_->state->descriptor.get() >= 0;
 #else
   return false;
 #endif
@@ -315,8 +397,11 @@ bool PipeEndpoint::valid() const noexcept
 void PipeEndpoint::close() noexcept
 {
 #if !defined(_WIN32)
-  if (implementation_)
-    implementation_->descriptor.reset();
+  if (implementation_ && implementation_->state)
+  {
+    std::lock_guard lock(implementation_->state->mutex);
+    implementation_->state->descriptor.reset();
+  }
 #endif
 }
 
@@ -326,13 +411,17 @@ ava::core::Result<PipeIoResultV1> PipeEndpoint::read(std::span<std::byte> destin
   static_cast<void>(destination);
   return std::unexpected(detail::unsupported_error());
 #else
-  if (!valid() || !implementation_->readable)
+  if (!implementation_ || !implementation_->state)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is not readable"));
+  auto state = implementation_->state;
+  std::lock_guard lock(state->mutex);
+  if (state->descriptor.get() < 0 || !state->readable)
     return std::unexpected(detail::invalid_error("process pipe endpoint is not readable"));
   if (destination.empty())
     return PipeIoResultV1{.bytes = 0, .state = PipeIoStateV1::Progress};
   while (true)
   {
-    auto const result = ::read(implementation_->descriptor.get(), destination.data(), destination.size());
+    auto const result = ::read(state->descriptor.get(), destination.data(), destination.size());
     if (result > 0)
       return PipeIoResultV1{.bytes = static_cast<std::size_t>(result), .state = PipeIoStateV1::Progress};
     if (result == 0)
@@ -352,7 +441,11 @@ ava::core::Result<PipeIoResultV1> PipeEndpoint::write(std::span<std::byte const>
   static_cast<void>(source);
   return std::unexpected(detail::unsupported_error());
 #else
-  if (!valid() || !implementation_->writable)
+  if (!implementation_ || !implementation_->state)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is not writable"));
+  auto state = implementation_->state;
+  std::lock_guard lock(state->mutex);
+  if (state->descriptor.get() < 0 || !state->writable)
     return std::unexpected(detail::invalid_error("process pipe endpoint is not writable"));
   if (source.empty())
     return PipeIoResultV1{.bytes = 0, .state = PipeIoStateV1::Progress};
@@ -361,7 +454,7 @@ ava::core::Result<PipeIoResultV1> PipeEndpoint::write(std::span<std::byte const>
   sigset_t previous{};
   if (::sigemptyset(&blocked) != 0 || ::sigaddset(&blocked, SIGPIPE) != 0 || ::pthread_sigmask(SIG_BLOCK, &blocked, &previous) != 0)
     return std::unexpected(detail::io_error("failed to block SIGPIPE for process pipe write", errno));
-  auto const result = ::write(implementation_->descriptor.get(), source.data(), source.size());
+  auto const result = ::write(state->descriptor.get(), source.data(), source.size());
   int const saved_errno = errno;
   bool const was_blocked = ::sigismember(&previous, SIGPIPE) == 1;
   if (result < 0 && saved_errno == EPIPE && !was_blocked)
@@ -387,9 +480,13 @@ ava::core::Result<bool> PipeEndpoint::wait_readable(ProcessDeadline deadline) co
   static_cast<void>(deadline);
   return std::unexpected(detail::unsupported_error());
 #else
-  if (!valid() || !implementation_->readable)
+  if (!implementation_ || !implementation_->state)
     return std::unexpected(detail::invalid_error("process pipe endpoint is not readable"));
-  return detail::wait_descriptor(implementation_->descriptor.get(), POLLIN, deadline);
+  auto state = implementation_->state;
+  std::lock_guard lock(state->mutex);
+  if (state->descriptor.get() < 0 || !state->readable)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is not readable"));
+  return detail::wait_descriptor(state->descriptor.get(), POLLIN, deadline);
 #endif
 }
 
@@ -399,9 +496,35 @@ ava::core::Result<bool> PipeEndpoint::wait_writable(ProcessDeadline deadline) co
   static_cast<void>(deadline);
   return std::unexpected(detail::unsupported_error());
 #else
-  if (!valid() || !implementation_->writable)
+  if (!implementation_ || !implementation_->state)
     return std::unexpected(detail::invalid_error("process pipe endpoint is not writable"));
-  return detail::wait_descriptor(implementation_->descriptor.get(), POLLOUT, deadline);
+  auto state = implementation_->state;
+  std::lock_guard lock(state->mutex);
+  if (state->descriptor.get() < 0 || !state->writable)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is not writable"));
+  return detail::wait_descriptor(state->descriptor.get(), POLLOUT, deadline);
+#endif
+}
+
+ava::core::Result<PipeWatchV1> PipeEndpoint::watch(PipeInterestV1 interest, std::uint32_t token) const
+{
+  if (!is_valid(interest))
+    return std::unexpected(detail::invalid_error("process pipe watch has an unknown interest"));
+#if defined(_WIN32)
+  static_cast<void>(token);
+  return std::unexpected(detail::unsupported_error());
+#else
+  if (!implementation_ || !implementation_->state)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is closed"));
+  auto state = implementation_->state;
+  std::lock_guard lock(state->mutex);
+  if (state->descriptor.get() < 0)
+    return std::unexpected(detail::invalid_error("process pipe endpoint is closed"));
+  if (interest == PipeInterestV1::Readable && !state->readable)
+    return std::unexpected(detail::invalid_error("process pipe endpoint does not support readable watches"));
+  if (interest == PipeInterestV1::Writable && !state->writable)
+    return std::unexpected(detail::invalid_error("process pipe endpoint does not support writable watches"));
+  return PipeWatchV1(state, interest, token);
 #endif
 }
 
@@ -605,10 +728,24 @@ ava::core::Result<ExitStatusV1> Supervisor::wait(ProcessHandle const& handle, Pr
   auto state = implementation_->state;
   if (!handle.valid() || handle.state_->supervisor.lock().get() != state.get())
     return std::unexpected(detail::invalid_error("process handle does not belong to this supervisor"));
-  std::unique_lock lock(handle.state_->mutex);
-  if (!handle.state_->changed.wait_until(lock, deadline, [&] { return handle.state_->final_status.has_value(); }))
+  auto handle_state = handle.state_;
+  auto waiter = detail::register_active_waiter(state);
+  if (!waiter)
+    return std::unexpected(std::move(waiter.error()));
+  std::unique_lock lock(handle_state->mutex);
+  if (!handle_state->changed.wait_until(lock, deadline, [&] { return handle_state->final_status.has_value(); }))
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process wait deadline expired"));
-  return *handle.state_->final_status;
+  return *handle_state->final_status;
+}
+
+ava::core::Result<std::optional<ExitStatusV1>> Supervisor::try_wait(ProcessHandle const& handle) const
+{
+  auto state = implementation_->state;
+  if (!handle.valid() || handle.state_->supervisor.lock().get() != state.get())
+    return std::unexpected(detail::invalid_error("process handle does not belong to this supervisor"));
+  auto handle_state = handle.state_;
+  std::lock_guard lock(handle_state->mutex);
+  return handle_state->final_status;
 }
 
 ava::core::VoidResult Supervisor::account_output(ProcessHandle const& handle, StreamKindV1 stream, std::uint64_t bytes, bool truncated)
@@ -793,6 +930,19 @@ void SupervisorTestAccess::clear_after_fork_before_release_hook(Supervisor& supe
 {
   std::lock_guard lock(supervisor.implementation_->state->mutex);
   supervisor.implementation_->state->after_fork_before_release_for_test.reset();
+}
+
+void SupervisorTestAccess::set_after_completion_channel_create_hook(Supervisor& supervisor, std::function<void()> hook)
+{
+  auto owned_hook = std::make_shared<detail::AfterForkBeforeReleaseHook>(std::move(hook));
+  std::lock_guard lock(supervisor.implementation_->state->mutex);
+  supervisor.implementation_->state->after_completion_channel_create_for_test = std::move(owned_hook);
+}
+
+void SupervisorTestAccess::clear_after_completion_channel_create_hook(Supervisor& supervisor) noexcept
+{
+  std::lock_guard lock(supervisor.implementation_->state->mutex);
+  supervisor.implementation_->state->after_completion_channel_create_for_test.reset();
 }
 
 }  // namespace testing

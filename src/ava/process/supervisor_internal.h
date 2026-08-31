@@ -43,6 +43,58 @@ inline constexpr auto kMaximumStartupTimeout = std::chrono::seconds(30);
 
 struct SupervisorState;
 
+#if !defined(_WIN32)
+
+class UniqueFd final
+{
+ public:
+  explicit UniqueFd(int descriptor = -1) noexcept : descriptor_(descriptor) { }
+  UniqueFd(UniqueFd const&) = delete;
+  UniqueFd& operator=(UniqueFd const&) = delete;
+  UniqueFd(UniqueFd&& other) noexcept : descriptor_(other.release()) { }
+  UniqueFd& operator=(UniqueFd&& other) noexcept
+  {
+    if (this != &other)
+      reset(other.release());
+    return *this;
+  }
+  ~UniqueFd() { reset(); }
+
+  [[nodiscard]] int get() const noexcept { return descriptor_; }
+  [[nodiscard]] int release() noexcept { return std::exchange(descriptor_, -1); }
+  void reset(int descriptor = -1) noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  int descriptor_ = -1;
+};
+
+struct Pipe
+{
+  UniqueFd read_end;
+  UniqueFd write_end;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+#endif
+
+struct PipeEndpointState
+{
+#if !defined(_WIN32)
+  explicit PipeEndpointState(int value, bool can_read, bool can_write) noexcept : descriptor(value), readable(can_read), writable(can_write) { }
+  UniqueFd descriptor;
+#else
+  explicit PipeEndpointState(bool can_read, bool can_write) noexcept : readable(can_read), writable(can_write) { }
+#endif
+  mutable std::mutex mutex;
+  bool readable = false;
+  bool writable = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct HandleState
 {
   mutable std::mutex mutex;
@@ -50,6 +102,10 @@ struct HandleState
   std::optional<ExitStatusV1> final_status;
   std::weak_ptr<SupervisorState> supervisor;
   std::uint64_t record = 0;
+#if !defined(_WIN32)
+  std::optional<Pipe> completion_channel;
+  bool completion_signaled = false;
+#endif
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -130,10 +186,12 @@ struct SupervisorState
   std::deque<std::uint64_t> terminal_fifo;
   std::map<std::string, OwnerAliasEntry> owner_aliases;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_fork_before_release_for_test;
+  std::shared_ptr<AfterForkBeforeReleaseHook> after_completion_channel_create_for_test;
   std::uint64_t next_record = 1;
   std::uint64_t next_owner_alias = 1;
   std::size_t live_records = 0;
   std::size_t settled_records = 0;
+  std::size_t active_waiters = 0;
   bool accepting = true;
   bool shutting_down = false;
   bool monitor_started = false;
@@ -145,9 +203,32 @@ struct SupervisorState
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+class ActiveWaiterRegistration final
+{
+ public:
+  ActiveWaiterRegistration() noexcept = default;
+  ActiveWaiterRegistration(ActiveWaiterRegistration const&) = delete;
+  ActiveWaiterRegistration& operator=(ActiveWaiterRegistration const&) = delete;
+  ActiveWaiterRegistration(ActiveWaiterRegistration&& other) noexcept;
+  ActiveWaiterRegistration& operator=(ActiveWaiterRegistration&& other) noexcept;
+  ~ActiveWaiterRegistration();
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  explicit ActiveWaiterRegistration(std::shared_ptr<SupervisorState> state) noexcept;
+  void release() noexcept;
+
+  std::shared_ptr<SupervisorState> state_;
+
+  friend ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state);
+};
+
+[[nodiscard]] ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state);
 void release_owner_alias_locked(SupervisorState& state, Record const& record);
 void prune_terminal_locked(SupervisorState& state);
 void await_internal_settlement(std::shared_ptr<HandleState> const& handle, ProcessDeadline deadline) noexcept;
+void signal_completion_locked(HandleState& handle) noexcept;
 void publish_final_locked(Record& record, ExitStatusV1 status);
 void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 cleanup);
 [[nodiscard]] bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept;
@@ -175,39 +256,6 @@ struct GateReleaseDecision
                                                      TerminationReasonV1 fallback) noexcept;
 
 #if !defined(_WIN32)
-
-class UniqueFd final
-{
- public:
-  explicit UniqueFd(int descriptor = -1) noexcept : descriptor_(descriptor) { }
-  UniqueFd(UniqueFd const&) = delete;
-  UniqueFd& operator=(UniqueFd const&) = delete;
-  UniqueFd(UniqueFd&& other) noexcept : descriptor_(other.release()) { }
-  UniqueFd& operator=(UniqueFd&& other) noexcept
-  {
-    if (this != &other)
-      reset(other.release());
-    return *this;
-  }
-  ~UniqueFd() { reset(); }
-
-  [[nodiscard]] int get() const noexcept { return descriptor_; }
-  [[nodiscard]] int release() noexcept { return std::exchange(descriptor_, -1); }
-  void reset(int descriptor = -1) noexcept;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-
- private:
-  int descriptor_ = -1;
-};
-
-struct Pipe
-{
-  UniqueFd read_end;
-  UniqueFd write_end;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
 
 [[nodiscard]] ava::core::Result<int> move_above_standard_descriptors(int descriptor);
 [[nodiscard]] ava::core::Result<Pipe> make_cloexec_pipe();
@@ -243,13 +291,11 @@ namespace ava::process {
 struct PipeEndpoint::Impl
 {
 #if !defined(_WIN32)
-  explicit Impl(int value, bool can_read, bool can_write) noexcept : descriptor(value), readable(can_read), writable(can_write) { }
-  detail::UniqueFd descriptor;
+  explicit Impl(int value, bool can_read, bool can_write) : state(std::make_shared<detail::PipeEndpointState>(value, can_read, can_write)) { }
 #else
-  explicit Impl(bool can_read, bool can_write) noexcept : readable(can_read), writable(can_write) { }
+  explicit Impl(bool can_read, bool can_write) : state(std::make_shared<detail::PipeEndpointState>(can_read, can_write)) { }
 #endif
-  bool readable = false;
-  bool writable = false;
+  std::shared_ptr<detail::PipeEndpointState> state;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

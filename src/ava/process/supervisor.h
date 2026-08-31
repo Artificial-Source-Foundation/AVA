@@ -18,6 +18,7 @@ namespace ava::process {
 
 namespace detail {
 struct HandleState;
+struct PipeEndpointState;
 struct SupervisorState;
 }  // namespace detail
 
@@ -26,6 +27,30 @@ class SupervisorTestAccess;
 }  // namespace testing
 
 class Supervisor;
+
+// A borrowed readiness capability. It keeps no endpoint or native resource
+// alive and can be constructed only by PipeEndpoint::watch.
+class PipeWatchV1
+{
+ public:
+  PipeWatchV1(PipeWatchV1 const&) noexcept = default;
+  PipeWatchV1& operator=(PipeWatchV1 const&) noexcept = default;
+  PipeWatchV1(PipeWatchV1&&) noexcept = default;
+  PipeWatchV1& operator=(PipeWatchV1&&) noexcept = default;
+  ~PipeWatchV1() = default;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  PipeWatchV1(std::weak_ptr<detail::PipeEndpointState> endpoint, PipeInterestV1 interest, std::uint32_t token) noexcept;
+
+  std::weak_ptr<detail::PipeEndpointState> endpoint_;
+  PipeInterestV1 interest_ = PipeInterestV1::Readable;
+  std::uint32_t token_ = 0;
+
+  friend class PipeEndpoint;
+  friend class Supervisor;
+};
 
 struct SpawnSpecV1
 {
@@ -59,7 +84,10 @@ class PipeEndpoint
   [[nodiscard]] ava::core::Result<PipeIoResultV1> write(std::span<std::byte const> source);
   [[nodiscard]] ava::core::Result<bool> wait_readable(ProcessDeadline deadline) const;
   [[nodiscard]] ava::core::Result<bool> wait_writable(ProcessDeadline deadline) const;
+  [[nodiscard]] ava::core::Result<PipeWatchV1> watch(PipeInterestV1 interest, std::uint32_t token) const;
 
+  // Watches are borrowed. An endpoint watched by wait_for_activity must stay
+  // alive and must not be moved or closed concurrently with that call.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
@@ -185,6 +213,9 @@ class Supervisor
   [[nodiscard]] ava::core::Result<StopResultV1> request_stop(ProcessHandle const& handle, TerminationReasonV1 reason, ProcessDeadline deadline);
   [[nodiscard]] ava::core::Result<StopResultV1> request_stop(OwnerPathV1 const& owner_prefix, TerminationReasonV1 reason, ProcessDeadline deadline);
   [[nodiscard]] ava::core::Result<ExitStatusV1> wait(ProcessHandle const& handle, ProcessDeadline deadline) const;
+  [[nodiscard]] ava::core::Result<std::optional<ExitStatusV1>> try_wait(ProcessHandle const& handle) const;
+  [[nodiscard]] ava::core::Result<ProcessActivityV1> wait_for_activity(ProcessHandle const& handle, std::span<PipeWatchV1 const> watches,
+                                                                       ProcessDeadline deadline) const;
   [[nodiscard]] ava::core::VoidResult account_output(ProcessHandle const& handle, StreamKindV1 stream, std::uint64_t bytes, bool truncated);
 
   [[nodiscard]] ProcessSnapshotV1 snapshot() const;

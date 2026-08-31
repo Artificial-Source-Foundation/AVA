@@ -162,6 +162,18 @@ std::string_view to_string(ChildMemberV1 value) noexcept
   return invalid_enum(value);
 }
 
+std::string_view to_string(PipeInterestV1 value) noexcept
+{
+  switch (value)
+  {
+    case PipeInterestV1::Readable:
+      return "readable";
+    case PipeInterestV1::Writable:
+      return "writable";
+  }
+  return invalid_enum(value);
+}
+
 PlatformSupportV1 platform_support_v1() noexcept
 {
 #if defined(_WIN32)

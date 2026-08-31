@@ -14,6 +14,8 @@ class SupervisorTestAccess final
  public:
   static void set_after_fork_before_release_hook(Supervisor& supervisor, std::function<void()> hook);
   static void clear_after_fork_before_release_hook(Supervisor& supervisor) noexcept;
+  static void set_after_completion_channel_create_hook(Supervisor& supervisor, std::function<void()> hook);
+  static void clear_after_completion_channel_create_hook(Supervisor& supervisor) noexcept;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

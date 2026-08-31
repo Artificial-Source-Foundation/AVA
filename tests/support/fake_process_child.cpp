@@ -153,6 +153,11 @@ int main(int argc, char** argv)
     return 0;
   if (mode == "nonzero")
     return 23;
+  if (mode == "signal-exit")
+  {
+    static_cast<void>(::raise(SIGUSR2));
+    return 125;
+  }
   if (mode == "exec-marker")
     return argc >= 3 ? create_exec_marker(argv[2]) : 2;
   if (mode == "ready-gate")
@@ -161,6 +166,16 @@ int main(int argc, char** argv)
       return 3;
     return 0;
   }
+  if (mode == "input-gate")
+    return read_control_byte(control_fd) ? 0 : 3;
+  if (mode == "staged-stdio")
+  {
+    if (!write_text(STDOUT_FILENO, "OUT\n") || !read_control_byte(control_fd) || !write_text(STDERR_FILENO, "ERR\n"))
+      return 3;
+    return read_control_byte(control_fd) ? 0 : 3;
+  }
+  if (mode == "buffered-hup")
+    return write_text(STDOUT_FILENO, "BUFFERED-BEFORE-HUP\n") ? 0 : 3;
   if (mode == "ignore-term")
   {
     ignore_term();
@@ -228,6 +243,16 @@ int main(int argc, char** argv)
     errno = 0;
     int const flags = descriptor < 0 ? 0 : ::fcntl(descriptor, F_GETFD);
     return write_text(status_fd, flags < 0 && errno == EBADF ? "CLOSED\n" : "OPEN\n") ? 0 : 3;
+  }
+  if (mode == "check-only-standard-fds")
+  {
+    bool clean = true;
+    for (int descriptor = STDERR_FILENO + 1; clean && descriptor < 4096; ++descriptor)
+    {
+      errno = 0;
+      clean = ::fcntl(descriptor, F_GETFD) < 0 && errno == EBADF;
+    }
+    return write_text(status_fd, clean ? "CLEAN\n" : "OPEN\n") ? (clean ? 0 : 6) : 3;
   }
   if (mode == "environment-clean")
   {

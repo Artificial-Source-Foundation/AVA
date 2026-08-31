@@ -894,17 +894,17 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   result.handle = ProcessHandle(std::move(handle_state));
   if (input_endpoint)
   {
-    input_endpoint->descriptor.reset(prepared->standard_input.parent_end.release());
+    input_endpoint->state->descriptor.reset(prepared->standard_input.parent_end.release());
     result.standard_input.emplace(PipeEndpoint(std::move(input_endpoint)));
   }
   if (output_endpoint)
   {
-    output_endpoint->descriptor.reset(prepared->standard_output.parent_end.release());
+    output_endpoint->state->descriptor.reset(prepared->standard_output.parent_end.release());
     result.standard_output.emplace(PipeEndpoint(std::move(output_endpoint)));
   }
   if (error_endpoint)
   {
-    error_endpoint->descriptor.reset(prepared->standard_error.parent_end.release());
+    error_endpoint->state->descriptor.reset(prepared->standard_error.parent_end.release());
     result.standard_error.emplace(PipeEndpoint(std::move(error_endpoint)));
   }
   return result;

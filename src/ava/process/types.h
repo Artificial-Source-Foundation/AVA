@@ -17,6 +17,7 @@ inline constexpr std::uint32_t kProcessSchemaVersionV1 = 1;
 inline constexpr std::size_t kMaxLiveProcessRecordsV1 = 256;
 inline constexpr std::size_t kMaxRetainedProcessRecordsV1 = 256;
 inline constexpr std::size_t kMaxOwnerSegmentBytesV1 = 64;
+inline constexpr std::size_t kMaxPipeWatchesV1 = 8;
 
 using ProcessDeadline = std::chrono::steady_clock::time_point;
 
@@ -101,6 +102,12 @@ enum class PipeIoStateV1
   EndOfStream,
 };
 
+enum class PipeInterestV1
+{
+  Readable,
+  Writable,
+};
+
 enum class AdoptionForkBranchV1
 {
   Parent,
@@ -153,6 +160,11 @@ enum class PlatformSupportV1
   return value >= ChildMemberV1::Leader && value <= ChildMemberV1::Sentinel;
 }
 
+[[nodiscard]] constexpr bool is_valid(PipeInterestV1 value) noexcept
+{
+  return value >= PipeInterestV1::Readable && value <= PipeInterestV1::Writable;
+}
+
 [[nodiscard]] std::string_view to_string(ProcessRoleV1 value) noexcept;
 [[nodiscard]] std::string_view to_string(ProcessStateV1 value) noexcept;
 [[nodiscard]] std::string_view to_string(TerminationReasonV1 value) noexcept;
@@ -161,6 +173,7 @@ enum class PlatformSupportV1
 [[nodiscard]] std::string_view to_string(StreamModeV1 value) noexcept;
 [[nodiscard]] std::string_view to_string(StreamKindV1 value) noexcept;
 [[nodiscard]] std::string_view to_string(ChildMemberV1 value) noexcept;
+[[nodiscard]] std::string_view to_string(PipeInterestV1 value) noexcept;
 
 struct LifecyclePolicyV1
 {
@@ -199,6 +212,26 @@ struct ExitStatusV1
   bool has_signal_number = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct PipeReadyV1
+{
+  std::uint32_t token = 0;
+  bool readable = false;
+  bool writable = false;
+  bool peer_closed = false;
+  bool error = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_ON
+};
+
+struct ProcessActivityV1
+{
+  bool process_finished = false;
+  bool deadline_expired = false;
+  std::vector<PipeReadyV1> ready;  // Bounded by kMaxPipeWatchesV1.
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct ProcessSnapshotRecordV1

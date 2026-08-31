@@ -119,12 +119,15 @@ a child. A reservation abandoned before fork releases capacity.
 
 `LifecyclePolicyV1` may contain an optional absolute `execution_deadline`. The value is
 immutable once reserved and is owned by the monitor rather than by a per-launch timer.
-A deadline already past is rejected before fork, and the final pre-fork check catches a
+At reservation the supervisor also fixes an overflow-safe cleanup horizon two seconds
+after that trigger; neither instant is reset by output, protocol progress, or retries. A
+deadline already past is rejected before fork, and the final pre-fork check catches a
 deadline that elapsed after reservation. If it becomes due after fork but before gate
 release, the monitor commits `deadline_expired` unless an earlier reason already won;
 in all cases it keeps the gate closed. If it becomes due after release, the monitor
-commits the same reason under the same first-reason rule, then cleans the group without
-creating a fresh relative budget.
+commits the same reason under the same first-reason rule, then cleans and exactly reaps
+the group within the reservation-time cleanup horizon. An earlier caller stop or
+application-shutdown deadline still shortens that horizon.
 
 For both launch paths, argv, the exact environment, cwd, descriptor actions, signal
 defaults, and the child-status channel are prepared before fork. The child creates a
@@ -213,14 +216,17 @@ what “idle without busy polling” means: there is no fixed-rate idle spin, gl
 
 Normal operation deadlines are absolute `steady_clock` values; no layer resets a
 relative timeout after progress. Expiry before gate release keeps the gate closed;
-expiry while running commits `deadline_expired` and cleanup shares that same absolute
-budget. If the budget cannot complete cleanup, the result is incomplete rather than
-silently extending the deadline. Application shutdown has one two-second monotonic
-budget shared by all records: request graceful stop for all groups in one sweep, wait
-within the common deadline, escalate all remaining verified groups in one sweep, and
-perform exact nonblocking reap attempts until that same deadline. It is never a fresh
-grace period per child. `ShutdownResultV1` reports a bounded incomplete count if the
-budget expires; destructors are no-throw and do not add an unbounded wait.
+expiry while running commits `deadline_expired` at the exact trigger, clips graceful
+termination to the fixed cleanup horizon, and reserves time for group proof and exact
+reaping. A natural exit or earlier caller cancellation keeps its own bounded cleanup
+deadline instead of being truncated merely because the execution trigger later passes.
+If the reservation-time cleanup horizon cannot complete cleanup, the result is
+incomplete rather than silently starting another budget. Application shutdown has one
+two-second monotonic budget shared by all records: request graceful stop for all groups
+in one sweep, wait within the common deadline, escalate all remaining verified groups
+in one sweep, and perform exact nonblocking reap attempts until that same deadline. It
+is never a fresh grace period per child. `ShutdownResultV1` reports a bounded incomplete
+count if the budget expires; destructors are no-throw and do not add an unbounded wait.
 
 ### Platform guarantee and non-guarantees
 
@@ -305,8 +311,9 @@ suspension, and that restoration failure is incomplete and rejects the draft res
 Browser opening launches the selected opener (`$BROWSER`, `xdg-open`, `gio open`,
 `open`, or `wslview`) once as a direct supervised child with `/dev/null` stdio. Its
 reservation requires an absolute execution deadline no later than ten seconds after
-the reservation instant. Success means the exec handshake succeeded; monitoring then
-continues under the application owner without blocking the OAuth flow. M1 removes the
+the reservation instant; forced cleanup may continue only to the fixed two-second
+reservation-time horizon described above. Success means the exec handshake succeeded;
+monitoring then continues under the application owner without blocking the OAuth flow. M1 removes the
 double-fork/`setsid` path. If an opener later daemonizes or calls `setsid`, that escaped
 process is outside the stated managed-group guarantee.
 

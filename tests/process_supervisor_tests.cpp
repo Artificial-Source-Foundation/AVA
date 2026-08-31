@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/process/environment_test_support.h"
 #include "ava/process/scope.h"
 #include "ava/process/supervisor.h"
 
@@ -37,10 +38,7 @@ ava::process::OwnerPathV1 make_operation(ava::process::OwnerPathV1 const& prefix
 
 ava::process::SpawnSpecV1 invalid_spawn_spec(std::string canary = {})
 {
-  return {.executable = "/bin/true",
-          .argv = {"/bin/true", std::move(canary)},
-          .environment = {{.name = "DUPLICATE", .value = "one"}, {.name = "DUPLICATE", .value = "two"}},
-          .cwd = "/"};
+  return {.executable = "/bin/true", .argv = {"/bin/true", std::move(canary), "DUPLICATE"}, .environment = {}, .cwd = "/"};
 }
 
 std::string snapshot_text(ava::process::ProcessSnapshotV1 const& snapshot)
@@ -147,11 +145,14 @@ void test_process_scope_hierarchy_and_inert_copying()
   bool const same_authority = &application->supervisor() == supervisor.get() && &first_session->supervisor() == supervisor.get() &&
                               &run->supervisor() == supervisor.get() && &operation->supervisor() == supervisor.get() &&
                               &recovered_application.supervisor() == supervisor.get();
+  bool const shared_host_capture =
+      ava::process::testing::EnvironmentTestAccess::shares_capture(application->host_environment(), operation->host_environment()) &&
+      ava::process::testing::EnvironmentTestAccess::shares_capture(application->host_environment(), recovered_application.host_environment());
   bool const recovered_root = same_owner(application->owner_prefix(), recovered_application.owner_prefix()) &&
                               operation->owner_prefix().matches_prefix(recovered_application.owner_prefix());
   expect(fresh_session && distinct_siblings, "generated sibling session scopes are distinct under one recovered application root");
-  expect(same_authority && recovered_root && same_owner(copied_session.owner_prefix(), first_session->owner_prefix()),
-         "derived and copied process scopes retain one supervisor and recover the original application owner without changing session identity");
+  expect(same_authority && shared_host_capture && recovered_root && same_owner(copied_session.owner_prefix(), first_session->owner_prefix()),
+         "derived and copied process scopes retain one supervisor and one immutable host capture while recovering the application owner");
 #ifdef CWDEBUG
   std::ostringstream debug_output;
   debug_output << *application;
@@ -242,24 +243,44 @@ void test_terminal_pruning_and_content_free_snapshot()
          "content canaries from argv, executable, cwd, and environment are absent from process snapshots");
 }
 
-void test_pre_fork_nul_and_environment_validation()
+void test_pre_fork_nul_and_environment_capability_validation()
 {
   ava::process::Supervisor supervisor;
   auto application = make_application_owner();
   auto reservation = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin);
-  auto specification =
-      ava::process::SpawnSpecV1{.executable = "/bin/true", .argv = {"/bin/true", std::string("bad\0argument", 12)}, .environment = {}, .cwd = "/"};
+  auto environment = ava::process::make_plugin_environment_v1("/");
+  ava::process::SpawnSpecV1 specification{.executable = "/bin/true", .argv = {"/bin/true", std::string("bad\0argument", 12)}, .environment = {}, .cwd = "/"};
+  if (environment)
+    specification.environment = std::move(*environment);
   auto result = reservation ? supervisor.spawn(std::move(*reservation), std::move(specification))
                             : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
   auto environment_reservation = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Mcp);
-  auto environment_result =
-      environment_reservation
-          ? supervisor.spawn(std::move(*environment_reservation),
-                             {.executable = "/bin/true", .argv = {"/bin/true"}, .environment = {{.name = "BAD", .value = std::string("x\0y", 3)}}, .cwd = "/"})
-          : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(environment_reservation.error()));
+  auto environment_result = environment_reservation ? supervisor.spawn(std::move(*environment_reservation),
+                                                                       {.executable = "/bin/true", .argv = {"/bin/true"}, .environment = {}, .cwd = "/"})
+                                                    : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(environment_reservation.error()));
+
+  constexpr std::string_view name_canary = "AVA_EXACT_ENV_NAME_CANARY_47f9";
+  constexpr std::string_view value_canary = "exact-env-value-canary-91c2";
+  auto canary_environment = ava::process::make_mcp_environment_v1("/", {{std::string(name_canary), std::string(value_canary)}});
+  auto canary_reservation = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Mcp);
+  ava::process::SpawnSpecV1 canary_specification{
+      .executable = "/bin/true", .argv = {"/bin/true", std::string("bad\0argument", 12)}, .environment = {}, .cwd = "/"};
+  if (canary_environment)
+    canary_specification.environment = std::move(*canary_environment);
+  auto canary_result = canary_reservation ? supervisor.spawn(std::move(*canary_reservation), std::move(canary_specification))
+                                          : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(canary_reservation.error()));
+
   auto snapshot = supervisor.snapshot();
-  expect(!result && !environment_result && !snapshot.monitor_started && snapshot.live_records == 0,
-         "argv and exact environment NUL validation rejects both launches before fork or monitor startup");
+  auto const snapshot_output = snapshot_text(snapshot);
+  bool settled_once = snapshot.records.size() == 3;
+  for (auto const& record : snapshot.records)
+    settled_once = settled_once && record.reason == ava::process::TerminationReasonV1::LaunchFailed &&
+                   record.exit_kind == ava::process::ExitKindV1::LaunchError && record.settlement_count == 1;
+  expect(environment && canary_environment && !result && !environment_result && !canary_result && settled_once && !snapshot.monitor_started &&
+             snapshot.live_records == 0,
+         "argv NUL and omitted exact-environment authority reject before fork with one launch-error settlement each");
+  expect(snapshot_output.find(name_canary) == std::string::npos && snapshot_output.find(value_canary) == std::string::npos,
+         "exact-environment name and value canaries are absent from content-free process snapshots");
 }
 
 void test_stop_accepting_shutdown_and_idempotence()
@@ -352,7 +373,7 @@ void run_process_supervisor_tests()
   test_startup_timeout_policy_validation();
   test_lazy_monitor_and_live_capacity();
   test_terminal_pruning_and_content_free_snapshot();
-  test_pre_fork_nul_and_environment_validation();
+  test_pre_fork_nul_and_environment_capability_validation();
   test_stop_accepting_shutdown_and_idempotence();
   test_concurrent_reservation_stop_race();
   test_reservation_shutdown_race();

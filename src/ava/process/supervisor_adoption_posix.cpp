@@ -113,6 +113,12 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
   if (!valid() || implementation_->leader > 1 || implementation_->child_branch)
     return std::unexpected(detail::invalid_error("secure adoption gate cannot fork another leader"));
   auto& gate = *implementation_;
+  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role))
+  {
+    detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
+    gate.record = 0;
+    return std::unexpected(detail::invalid_error("secure-adoption leader requires its retained exact-environment binding"));
+  }
   TerminationReasonV1 stopped_reason = TerminationReasonV1::LaunchFailed;
   {
     std::lock_guard lock(gate.state->mutex);
@@ -127,6 +133,14 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
         stopped_reason = TerminationReasonV1::ApplicationShutdown;
       return std::unexpected(detail::canceled_launch_error("secure-adoption leader launch", stopped_reason));
     }
+  }
+  // Revalidate the retained role/profile capability at the final pre-fork
+  // boundary. No adopted child is created from an invalid or mismatched gate.
+  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role))
+  {
+    detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
+    gate.record = 0;
+    return std::unexpected(detail::invalid_error("secure-adoption leader lost its exact-environment binding"));
   }
   pid_t const process = ::fork();
   if (process < 0)
@@ -162,7 +176,14 @@ ava::core::VoidResult AdoptionGate::fork_sentinel()
 #if defined(_WIN32)
   return std::unexpected(detail::unsupported_error());
 #else
-  if (!valid() || implementation_->child_branch || implementation_->leader <= 1 || implementation_->sentinel > 1)
+  if (!valid() || implementation_->child_branch)
+    return std::unexpected(detail::invalid_error("secure adoption sentinel requires one valid parent gate"));
+  if (implementation_->role != ProcessRoleV1::Bash || !detail::EnvironmentAccess::matches_secure_adoption(implementation_->environment, implementation_->role))
+  {
+    abandon();
+    return std::unexpected(detail::invalid_error("secure adoption sentinel is unavailable for this closed launch capability"));
+  }
+  if (implementation_->leader <= 1 || implementation_->sentinel > 1)
     return std::unexpected(detail::invalid_error("secure adoption sentinel requires exactly one gated parent leader"));
   {
     std::lock_guard lock(implementation_->state->mutex);
@@ -215,25 +236,36 @@ ava::core::VoidResult AdoptionGate::fork_sentinel()
 #endif
 }
 
-ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& reservation)
+ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& reservation, ExactEnvironmentV1 environment)
 {
   auto state = implementation_->state;
-#if defined(_WIN32)
   auto consumed = consume_reservation(reservation);
-  if (consumed)
-    detail::finish_unregistered(state, *consumed, TerminationReasonV1::LaunchFailed);
+  if (!consumed)
+    return std::unexpected(std::move(consumed.error()));
+  auto const identity = *consumed;
+  auto const role = detail::record_role(state, identity);
+  if (!role || !detail::EnvironmentAccess::matches_secure_adoption(environment, *role))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(detail::invalid_error("reserved secure adoption requires its matching exact-environment capability"));
+  }
+#if defined(_WIN32)
+  detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
   return std::unexpected(detail::unsupported_error());
 #else
   auto leader_status = detail::make_cloexec_pipe();
   if (!leader_status)
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(std::move(leader_status.error()));
+  }
   auto leader_control = detail::make_cloexec_pipe();
   if (!leader_control)
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(std::move(leader_control.error()));
-  auto consumed = consume_reservation(reservation);
-  if (!consumed)
-    return std::unexpected(std::move(consumed.error()));
-  auto const startup_deadline = detail::startup_deadline_for_record(state, *consumed);
+  }
+  auto const startup_deadline = detail::startup_deadline_for_record(state, identity);
   std::unique_ptr<AdoptionGate::Impl> implementation;
   try
   {
@@ -242,17 +274,19 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
   }
   catch (std::exception const& error)
   {
-    detail::finish_unregistered(state, *consumed, TerminationReasonV1::LaunchFailed);
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(
         detail::process_error(ava::core::ErrorCategory::Io, "failed to allocate secure-adoption capabilities").with_context("cause", error.what()));
   }
   catch (...)
   {
-    detail::finish_unregistered(state, *consumed, TerminationReasonV1::LaunchFailed);
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "failed to allocate secure-adoption capabilities"));
   }
   implementation->state = state;
-  implementation->record = *consumed;
+  implementation->record = identity;
+  implementation->role = *role;
+  implementation->environment = std::move(environment);
   implementation->startup_deadline = startup_deadline;
   implementation->leader_status = std::move(*leader_status);
   implementation->leader_control = std::move(*leader_control);

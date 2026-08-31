@@ -180,6 +180,15 @@ void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uin
   state->changed.notify_all();
 }
 
+std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept
+{
+  if (!state || identity == 0)
+    return std::nullopt;
+  std::lock_guard lock(state->mutex);
+  auto const found = state->records.find(identity);
+  return found == state->records.end() ? std::nullopt : std::optional(found->second->role);
+}
+
 void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback, CleanupStateV1 cleanup) noexcept
 {
   if (!state || identity == 0)

@@ -179,20 +179,6 @@ struct EnvironmentVariableV1
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
-struct SpawnSpecV1
-{
-  std::string executable;
-  std::vector<std::string> argv;
-  std::vector<EnvironmentVariableV1> environment;
-  std::string cwd;
-  StreamModeV1 stdin_mode = StreamModeV1::Discard;
-  StreamModeV1 stdout_mode = StreamModeV1::Capture;
-  StreamModeV1 stderr_mode = StreamModeV1::Capture;
-
-  // This type contains executable, argv, environment, and cwd content.
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
 struct PipeIoResultV1
 {
   std::size_t bytes = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/process/environment_internal.h"
 #include "ava/process/supervisor.h"
 #include "ava/core/error.h"
 
@@ -151,6 +152,7 @@ void publish_final_locked(Record& record, ExitStatusV1 status);
 void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 cleanup);
 [[nodiscard]] bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept;
 void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
+[[nodiscard]] std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
                          CleanupStateV1 cleanup = CleanupStateV1::NotRequired) noexcept;
 [[nodiscard]] ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
@@ -257,6 +259,8 @@ struct AdoptionGate::Impl
   std::shared_ptr<detail::SupervisorState> state;
   std::shared_ptr<detail::HandleState> handle;
   std::uint64_t record = 0;
+  ProcessRoleV1 role = ProcessRoleV1::Curl;
+  ExactEnvironmentV1 environment;
   ProcessDeadline startup_deadline{};
   bool child_branch = false;
   bool registered = false;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/process/environment.h"
 #include "ava/process/owner.h"
 #include "ava/process/types.h"
 #include "ava/core/result.h"
@@ -10,6 +11,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace ava::process {
 
@@ -23,6 +26,21 @@ class SupervisorTestAccess;
 }  // namespace testing
 
 class Supervisor;
+
+struct SpawnSpecV1
+{
+  std::string executable;
+  std::vector<std::string> argv;
+  ExactEnvironmentV1 environment;
+  std::string cwd;
+  StreamModeV1 stdin_mode = StreamModeV1::Discard;
+  StreamModeV1 stdout_mode = StreamModeV1::Capture;
+  StreamModeV1 stderr_mode = StreamModeV1::Capture;
+
+  // This type contains executable, argv, exact-environment authority, and cwd
+  // content. A default-constructed environment is an invalid pre-fork state.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
 
 // Native-handle-neutral ownership wrapper for one nonblocking parent pipe end.
 class PipeEndpoint
@@ -130,8 +148,9 @@ class AdoptionGate
   // finish with exec or _exit; it must not return to application code.
   [[nodiscard]] ava::core::Result<AdoptionForkBranchV1> fork_leader();
 
-  // Adds the one optional AVA-owned sentinel as an exact direct child. The
-  // sentinel joins the gated leader group and remains blocked until adoption.
+  // Adds the one optional AVA-owned Bash sentinel as an exact direct child.
+  // Other secure roles fail closed before a sentinel fork. The sentinel joins
+  // the gated leader group and remains blocked until adoption.
   [[nodiscard]] ava::core::VoidResult fork_sentinel();
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -159,7 +178,7 @@ class Supervisor
   [[nodiscard]] ava::core::Result<Reservation> reserve(OwnerPathV1 const& owner, ProcessRoleV1 role, LifecyclePolicyV1 policy = {});
   [[nodiscard]] ava::core::Result<SpawnResultV1> spawn(Reservation&& reservation, SpawnSpecV1 specification);
 
-  [[nodiscard]] ava::core::Result<AdoptionGate> begin_secure_adoption(Reservation&& reservation);
+  [[nodiscard]] ava::core::Result<AdoptionGate> begin_secure_adoption(Reservation&& reservation, ExactEnvironmentV1 environment);
   [[nodiscard]] ava::core::Result<ProcessHandle> adopt(AdoptionGate&& gate);
 
   void stop_accepting() noexcept;

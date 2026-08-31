@@ -321,7 +321,6 @@ using namespace std::chrono_literals;
 #if !defined(_WIN32)
 
 constexpr std::size_t kMaxArgumentCount = 256;
-constexpr std::size_t kMaxEnvironmentCount = 256;
 constexpr std::size_t kMaxPreparedBytes = 1024 * 1024;
 
 struct PreparedStream
@@ -450,14 +449,15 @@ ava::core::Result<PreparedStream> prepare_stream(StreamModeV1 mode, bool input)
   return result;
 }
 
-ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1 specification)
+ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
 {
   if (!is_valid(specification.stdin_mode) || !is_valid(specification.stdout_mode) || !is_valid(specification.stderr_mode))
     return std::unexpected(detail::invalid_error("process specification has an unknown stream mode"));
   if (specification.argv.empty() || specification.argv.size() > kMaxArgumentCount)
     return std::unexpected(detail::invalid_error("process argv count is outside the supported bound"));
-  if (specification.environment.size() > kMaxEnvironmentCount)
-    return std::unexpected(detail::invalid_error("process environment count is outside the supported bound"));
+  if (!detail::EnvironmentAccess::revalidate(specification.environment))
+    return std::unexpected(detail::invalid_error("process specification requires one valid exact-environment capability"));
+  auto const& exact_environment = detail::EnvironmentAccess::variables(specification.environment);
   if (specification.cwd.empty() || !specification.cwd.starts_with('/') || contains_nul(specification.cwd))
     return std::unexpected(detail::invalid_error("process cwd must be a NUL-free absolute path"));
 
@@ -476,21 +476,21 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1 specification)
   }
 
   std::vector<std::string> names;
-  names.reserve(specification.environment.size());
-  for (auto const& variable : specification.environment)
+  names.reserve(exact_environment.size());
+  for (auto const& variable : exact_environment)
   {
     if (variable.name.empty() || contains_nul(variable.name) || variable.name.find('=') != std::string::npos || contains_nul(variable.value))
       return std::unexpected(detail::invalid_error("process environment contains an invalid exact entry"));
     if (std::find(names.begin(), names.end(), variable.name) != names.end())
       return std::unexpected(detail::invalid_error("process environment contains a duplicate name"));
     names.push_back(variable.name);
-    auto const bytes = variable.name.size() + variable.value.size() + 1;
+    auto const bytes = variable.name.size() + variable.value.size() + 2;
     if (bytes > kMaxPreparedBytes - std::min(prepared_bytes, kMaxPreparedBytes))
       return std::unexpected(detail::invalid_error("process environment exceeds the aggregate byte bound"));
     prepared_bytes += bytes;
   }
 
-  auto executable = resolve_executable(specification.executable, specification.environment);
+  auto executable = resolve_executable(specification.executable, exact_environment);
   if (!executable)
     return std::unexpected(std::move(executable.error()));
 
@@ -522,9 +522,9 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1 specification)
   PreparedSpawn result;
   result.executable = std::move(*executable);
   result.argv_storage = std::move(specification.argv);
-  result.environment_storage.reserve(specification.environment.size());
-  for (auto& variable : specification.environment)
-    result.environment_storage.push_back(std::move(variable.name) + "=" + std::move(variable.value));
+  result.environment_storage.reserve(exact_environment.size());
+  for (auto const& variable : exact_environment)
+    result.environment_storage.push_back(variable.name + "=" + variable.value);
   result.cwd = UniqueFd(*moved_cwd);
   result.standard_input = std::move(*standard_input);
   result.standard_output = std::move(*standard_output);
@@ -536,11 +536,11 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1 specification)
   return result;
 }
 
-ava::core::Result<PreparedSpawn> prepare_spawn_checked(SpawnSpecV1 specification)
+ava::core::Result<PreparedSpawn> prepare_spawn_checked(SpawnSpecV1& specification)
 {
   try
   {
-    return prepare_spawn(std::move(specification));
+    return prepare_spawn(specification);
   }
   catch (std::exception const& error)
   {
@@ -689,13 +689,19 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   if (!consumed)
     return std::unexpected(std::move(consumed.error()));
   auto const identity = *consumed;
+  auto const role = detail::record_role(state, identity);
+  if (!role || !detail::EnvironmentAccess::matches_common_launch(specification.environment, *role))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(detail::invalid_error("reserved common process launch requires its matching exact-environment capability"));
+  }
   auto const startup_deadline = detail::startup_deadline_for_record(state, identity);
 #if defined(_WIN32)
   static_cast<void>(specification);
   detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
   return std::unexpected(detail::unsupported_error());
 #else
-  auto prepared = prepare_spawn_checked(std::move(specification));
+  auto prepared = prepare_spawn_checked(specification);
   if (!prepared)
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
@@ -744,6 +750,14 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   {
     detail::finish_unregistered(state, identity, stopped_reason);
     return std::unexpected(detail::canceled_launch_error("process launch", stopped_reason));
+  }
+
+  // Repeat the immutable capability and role/profile check at the final
+  // pre-fork boundary after every allocator-backed launch preparation.
+  if (!detail::EnvironmentAccess::matches_common_launch(specification.environment, *role))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(detail::invalid_error("prepared common process launch lost its exact-environment binding"));
   }
 
   pid_t const parent_group = ::getpgrp();

@@ -1,4 +1,5 @@
 add_library(ava_process
+  "environment.cpp"
   "owner.cpp"
   "scope.cpp"
   "supervisor.cpp"

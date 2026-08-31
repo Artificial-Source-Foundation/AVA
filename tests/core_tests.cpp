@@ -59,6 +59,7 @@ void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
 void run_plugin_ui_tests();
+void run_process_environment_tests();
 void run_process_supervisor_tests();
 void run_process_supervisor_posix_tests();
 void run_mcp_tests();
@@ -125,6 +126,7 @@ constexpr std::array kTestSuites{
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
     TestSuite{"plugin_ui", run_plugin_ui_tests},
+    TestSuite{"process_environment", run_process_environment_tests},
     TestSuite{"process_supervisor", run_process_supervisor_tests},
     TestSuite{"process_supervisor_posix", run_process_supervisor_posix_tests},
     TestSuite{"mcp", run_mcp_tests},

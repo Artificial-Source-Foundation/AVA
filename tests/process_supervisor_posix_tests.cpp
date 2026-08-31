@@ -1,5 +1,7 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/process/environment.h"
+#include "ava/process/environment_test_support.h"
 #include "ava/process/supervisor.h"
 #include "ava/process/supervisor_test_support.h"
 
@@ -77,6 +79,78 @@ ava::process::SpawnSpecV1 fake_spec(std::string mode, ava::process::StreamModeV1
           .stderr_mode = error};
 }
 
+std::vector<ava::process::EnvironmentVariableV1> sealed_bash_variables()
+{
+  return {{"LANG", "C.UTF-8"},
+          {"LC_ALL", "C.UTF-8"},
+          {"LC_CTYPE", "C.UTF-8"},
+          {"TZ", "UTC"},
+          {"USER", "ava-test"},
+          {"LOGNAME", "ava-test"},
+          {"PWD", "/"},
+          {"PATH", "/usr/bin:/bin"},
+          {"HOME", "/tmp/ava-process-home"},
+          {"XDG_CONFIG_HOME", "/tmp/ava-process-xdg-config"},
+          {"XDG_CACHE_HOME", "/tmp/ava-process-xdg-cache"},
+          {"XDG_DATA_HOME", "/tmp/ava-process-xdg-data"},
+          {"XDG_STATE_HOME", "/tmp/ava-process-xdg-state"},
+          {"TMPDIR", "/tmp/ava-process-tmp"}};
+}
+
+ava::process::ExactEnvironmentV1 environment_for_role(ava::process::ProcessRoleV1 role)
+{
+  auto capture_host = [] {
+    auto host = ava::process::testing::EnvironmentTestAccess::capture_host();
+    if (!host)
+      throw std::runtime_error(host.error().format());
+    return std::move(*host);
+  };
+
+  auto environment = [&]() -> ava::core::Result<ava::process::ExactEnvironmentV1> {
+    switch (role)
+    {
+      case ava::process::ProcessRoleV1::Curl: {
+        auto host = capture_host();
+        return ava::process::make_curl_environment_v1(host);
+      }
+      case ava::process::ProcessRoleV1::Bash:
+        return ava::process::validate_bash_environment_v1(ava::process::kBashEnvironmentProfileIdV1, "/", sealed_bash_variables());
+      case ava::process::ProcessRoleV1::Plugin:
+        return ava::process::make_plugin_environment_v1("/");
+      case ava::process::ProcessRoleV1::Mcp:
+        return ava::process::make_mcp_environment_v1("/", {});
+      case ava::process::ProcessRoleV1::Lsp: {
+        auto host = capture_host();
+        return ava::process::make_lsp_environment_v1(host, "/");
+      }
+      case ava::process::ProcessRoleV1::Mermaid:
+        return ava::process::make_mermaid_environment_v1();
+      case ava::process::ProcessRoleV1::BrowserOpener: {
+        auto host = capture_host();
+        return ava::process::make_browser_desktop_environment_v1(host);
+      }
+      case ava::process::ProcessRoleV1::ClipboardHelper: {
+        auto host = capture_host();
+        return ava::process::make_clipboard_desktop_environment_v1(host);
+      }
+      case ava::process::ProcessRoleV1::ExternalEditor: {
+        auto host = capture_host();
+        return ava::process::make_external_editor_environment_v1(host, "/tmp/ava-process-editor-draft");
+      }
+    }
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "invalid process role fixture"));
+  }();
+  if (!environment)
+    throw std::runtime_error(environment.error().format());
+  return std::move(*environment);
+}
+
+ava::process::SpawnSpecV1 with_role_environment(ava::process::ProcessRoleV1 role, ava::process::SpawnSpecV1 specification)
+{
+  specification.environment = environment_for_role(role);
+  return specification;
+}
+
 ava::core::Result<ava::process::SpawnResultV1> spawn_fake(ava::process::Supervisor& supervisor, ava::process::OwnerPathV1 const& owner,
                                                           ava::process::ProcessRoleV1 role, ava::process::SpawnSpecV1 spec,
                                                           ava::process::LifecyclePolicyV1 policy = {})
@@ -84,6 +158,7 @@ ava::core::Result<ava::process::SpawnResultV1> spawn_fake(ava::process::Supervis
   auto reservation = supervisor.reserve(owner, role, policy);
   if (!reservation)
     return std::unexpected(std::move(reservation.error()));
+  spec.environment = environment_for_role(role);
   return supervisor.spawn(std::move(*reservation), std::move(spec));
 }
 
@@ -294,8 +369,10 @@ void test_exec_gate_normal_nonzero_and_exec_failure()
   }
   static_cast<void>(::chmod(invalid_image.c_str(), 0700));
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::ClipboardHelper);
-  auto failed = reservation ? supervisor.spawn(std::move(*reservation),
-                                               {.executable = invalid_image.string(), .argv = {invalid_image.string()}, .environment = {}, .cwd = "/"})
+  auto failed_spec =
+      with_role_environment(ava::process::ProcessRoleV1::ClipboardHelper,
+                            ava::process::SpawnSpecV1{.executable = invalid_image.string(), .argv = {invalid_image.string()}, .environment = {}, .cwd = "/"});
+  auto failed = reservation ? supervisor.spawn(std::move(*reservation), std::move(failed_spec))
                             : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
   expect(!failed && failed.error().format().find("execute child image") != std::string::npos,
          "the CLOEXEC exec-error channel reports a typed post-gate exec failure instead of claiming launch success");
@@ -314,13 +391,14 @@ void test_natural_exit_does_not_pay_termination_grace()
   SupervisorFallback fallback(supervisor);
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::BrowserOpener, {.termination_grace = 5s});
   auto const begin = std::chrono::steady_clock::now();
-  auto child = reservation ? supervisor.spawn(std::move(*reservation), {.executable = "/bin/true",
-                                                                        .argv = {"/bin/true"},
-                                                                        .environment = {},
-                                                                        .cwd = "/",
-                                                                        .stdin_mode = ava::process::StreamModeV1::Discard,
-                                                                        .stdout_mode = ava::process::StreamModeV1::Discard,
-                                                                        .stderr_mode = ava::process::StreamModeV1::Discard})
+  auto specification = with_role_environment(ava::process::ProcessRoleV1::BrowserOpener, {.executable = "/bin/true",
+                                                                                          .argv = {"/bin/true"},
+                                                                                          .environment = {},
+                                                                                          .cwd = "/",
+                                                                                          .stdin_mode = ava::process::StreamModeV1::Discard,
+                                                                                          .stdout_mode = ava::process::StreamModeV1::Discard,
+                                                                                          .stderr_mode = ava::process::StreamModeV1::Discard});
+  auto child = reservation ? supervisor.spawn(std::move(*reservation), std::move(specification))
                            : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
   auto status = child ? supervisor.wait(child->handle, begin + 6s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
   auto const elapsed = std::chrono::steady_clock::now() - begin;
@@ -332,11 +410,11 @@ void test_natural_exit_does_not_pay_termination_grace()
 void test_exact_environment_signal_reset_and_descriptor_closure()
 {
   auto application = application_owner();
+  ScopedEnvVar ambient("AVA_PROCESS_AMBIENT_CANARY", "must-not-leak");
+  ScopedEnvVar home("HOME", "/must/not/leak");
   ava::process::Supervisor supervisor;
   SupervisorFallback fallback(supervisor);
 
-  ScopedEnvVar ambient("AVA_PROCESS_AMBIENT_CANARY", "must-not-leak");
-  ScopedEnvVar home("HOME", "/must/not/leak");
   auto environment = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin, fake_spec("environment-clean"));
   std::string environment_status;
   bool environment_clean = environment && environment->standard_output &&
@@ -489,7 +567,7 @@ void test_term_kill_first_reason_and_leader_first_cleanup()
   }
   expect(stopped_ready && stopped_status_ok, "a stopped child is continued and boundedly terminated with unsupported_suspension rather than hanging");
 
-  auto descendant = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Bash,
+  auto descendant = spawn_fake(supervisor, operation_owner(application), ava::process::ProcessRoleV1::Plugin,
                                fake_spec("in-group-descendant", ava::process::StreamModeV1::Capture), {.termination_grace = 75ms});
   std::string descendant_text;
   bool const tree_ready = descendant && descendant->standard_output &&
@@ -626,11 +704,13 @@ void test_registered_spawn_gate_cancellation_never_executes()
     std::thread launcher;
     if (reservation)
     {
-      launcher = std::thread([&supervisor, &launch, ticket = std::move(*reservation),
-                              specification = fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
-                                                        ava::process::StreamModeV1::Discard, {marker.string()})]() mutable {
-        launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
-      });
+      launcher =
+          std::thread([&supervisor, &launch, ticket = std::move(*reservation),
+                       specification = with_role_environment(ava::process::ProcessRoleV1::Plugin,
+                                                             fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
+                                                                       ava::process::StreamModeV1::Discard, {marker.string()}))]() mutable {
+            launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
+          });
     }
     bool const reached = reservation && latch->wait_until(std::chrono::steady_clock::now() + 2s);
     auto shutdown = reached ? supervisor.shutdown(std::chrono::steady_clock::now() + 2s) : ava::process::ShutdownResultV1{.complete = false};
@@ -666,11 +746,13 @@ void test_registered_spawn_gate_cancellation_never_executes()
     std::thread launcher;
     if (reservation)
     {
-      launcher = std::thread([&supervisor, &launch, ticket = std::move(*reservation),
-                              specification = fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
-                                                        ava::process::StreamModeV1::Discard, {marker.string()})]() mutable {
-        launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
-      });
+      launcher =
+          std::thread([&supervisor, &launch, ticket = std::move(*reservation),
+                       specification = with_role_environment(ava::process::ProcessRoleV1::Mcp,
+                                                             fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
+                                                                       ava::process::StreamModeV1::Discard, {marker.string()}))]() mutable {
+            launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
+          });
     }
     bool const reached = reservation && latch->wait_until(std::chrono::steady_clock::now() + 2s);
     auto stopped =
@@ -701,7 +783,7 @@ void test_secure_adoption_and_abandoned_ticket_cleanup()
   SupervisorFallback fallback(supervisor);
 
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation))
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), environment_for_role(ava::process::ProcessRoleV1::Bash))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
@@ -717,7 +799,7 @@ void test_secure_adoption_and_abandoned_ticket_cleanup()
   bool parent_branch = false;
   if (abandoned_reservation)
   {
-    auto abandoned_gate = supervisor.begin_secure_adoption(std::move(*abandoned_reservation));
+    auto abandoned_gate = supervisor.begin_secure_adoption(std::move(*abandoned_reservation), environment_for_role(ava::process::ProcessRoleV1::Mermaid));
     if (abandoned_gate)
     {
       auto abandoned_branch = abandoned_gate->fork_leader();
@@ -764,7 +846,7 @@ void test_gated_adoption_shutdown_race()
   auto const root = create_empty_root("process-supervisor-adoption-after-fork-shutdown");
   auto const marker = root / "executed";
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation))
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), environment_for_role(ava::process::ProcessRoleV1::Mermaid))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
@@ -772,9 +854,8 @@ void test_gated_adoption_shutdown_race()
     ::execl(AVA_FAKE_PROCESS_CHILD_PATH, AVA_FAKE_PROCESS_CHILD_PATH, "exec-marker", marker.c_str(), static_cast<char*>(nullptr));
     _exit(126);
   }
-  auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
-  expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent && sentinel, "shutdown-race fixture creates an exact gated leader and sentinel");
-  if (!gate || !branch || !sentinel)
+  expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent, "Mermaid secure adoption creates its one exact gated leader without a sentinel");
+  if (!gate || !branch)
     return;
 
   auto latch = std::make_shared<AfterForkReleaseLatch>();

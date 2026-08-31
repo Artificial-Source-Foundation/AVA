@@ -231,7 +231,12 @@ int main(int argc, char** argv)
   }
   if (mode == "environment-clean")
   {
-    bool const clean = std::getenv("AVA_PROCESS_AMBIENT_CANARY") == nullptr && std::getenv("HOME") == nullptr && std::getenv("PATH") == nullptr;
+    constexpr std::array<std::string_view, 4> expected{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8",
+                                                       "PWD=/"};
+    bool clean = std::getenv("AVA_PROCESS_AMBIENT_CANARY") == nullptr && std::getenv("HOME") == nullptr;
+    for (std::size_t index = 0; clean && index < expected.size(); ++index)
+      clean = ::environ[index] != nullptr && std::string_view(::environ[index]) == expected[index];
+    clean = clean && ::environ[expected.size()] == nullptr;
     return write_text(status_fd, clean ? "CLEAN\n" : "DIRTY\n") ? (clean ? 0 : 6) : 3;
   }
   if (mode == "signal-state")

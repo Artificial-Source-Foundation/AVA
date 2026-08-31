@@ -98,6 +98,7 @@ PROCESS_CLOSED_LABELS = {
     "supervised",
     "neutral_supervisor",
     "immediate_children_only",
+    "managed_group",
     "posix",
     "unsupported",
     "event_driven_posix",

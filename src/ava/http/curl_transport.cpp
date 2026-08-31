@@ -1,39 +1,53 @@
 #include "sys.h"
 #include "ava/http/curl_transport.h"
+#include "ava/http/curl_transport_test_support.h"
+#include "ava/process/environment.h"
+#include "ava/process/supervisor.h"
+#include "ava/core/error.h"
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <map>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
-#include <thread>
+#include <utility>
 #include <vector>
 #include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 namespace ava::http {
 namespace {
 
-constexpr char kTrustedExecPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+using Clock = std::chrono::steady_clock;
+using namespace std::chrono_literals;
+
 constexpr std::size_t kMaxCurlResponseBytes = 8 * 1024 * 1024;
 constexpr std::size_t kMaxCurlStderrBytes = 64 * 1024;
 constexpr std::string_view kStatusMarker = "\nAVA_HTTP_STATUS:";
+constexpr std::string_view kWriteOut = "\nAVA_HTTP_STATUS:%{http_code}";
 constexpr std::size_t kStatusTailReserve = kStatusMarker.size() + 3;
+constexpr auto kCleanupBudget = 2s;
+constexpr auto kSettlementObservationBudget = 250ms;
+constexpr std::uint32_t kInputWatch = 1;
+constexpr std::uint32_t kStdoutWatch = 2;
+constexpr std::uint32_t kStderrWatch = 3;
 
 class UniqueFd
 {
  public:
-  explicit UniqueFd(int fd = -1) : fd_(fd) { }
+  explicit UniqueFd(int descriptor = -1) noexcept : descriptor_(descriptor) { }
   UniqueFd(UniqueFd const&) = delete;
   UniqueFd& operator=(UniqueFd const&) = delete;
-  UniqueFd(UniqueFd&& other) noexcept : fd_(other.release()) { }
+  UniqueFd(UniqueFd&& other) noexcept : descriptor_(other.release()) { }
   UniqueFd& operator=(UniqueFd&& other) noexcept
   {
     if (this != &other)
@@ -42,22 +56,17 @@ class UniqueFd
   }
   ~UniqueFd() { reset(); }
 
-  [[nodiscard]] int get() const noexcept { return fd_; }
-  [[nodiscard]] int release() noexcept
+  [[nodiscard]] int get() const noexcept { return descriptor_; }
+  [[nodiscard]] int release() noexcept { return std::exchange(descriptor_, -1); }
+  void reset(int descriptor = -1) noexcept
   {
-    int const fd = fd_;
-    fd_ = -1;
-    return fd;
-  }
-  void reset(int fd = -1) noexcept
-  {
-    if (fd_ >= 0)
-      close(fd_);
-    fd_ = fd;
+    if (descriptor_ >= 0)
+      static_cast<void>(::close(descriptor_));
+    descriptor_ = descriptor;
   }
 
  private:
-  int fd_ = -1;
+  int descriptor_ = -1;
 };
 
 class TempBodyFile
@@ -84,50 +93,37 @@ class TempBodyFile
   [[nodiscard]] static ava::core::Result<TempBodyFile> create(std::string_view body)
   {
     std::error_code temp_error;
-    auto temp_dir = std::filesystem::temp_directory_path(temp_error);
+    auto const temp_dir = std::filesystem::temp_directory_path(temp_error);
     if (temp_error)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve temporary directory"));
+
+    std::string path_template = (temp_dir / "ava-request-body-XXXXXX").string();
+    int const descriptor = ::mkstemp(path_template.data());
+    if (descriptor < 0)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to create temporary request body file"));
+    UniqueFd file(descriptor);
+    if (::fchmod(file.get(), S_IRUSR | S_IWUSR) != 0)
     {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to resolve temporary directory");
-      error.with_context("cause", temp_error.message());
-      return std::unexpected(std::move(error));
-    }
-    std::string tmpl = (temp_dir / "ava-request-body-XXXXXX").string();
-    int const fd = mkstemp(tmpl.data());
-    if (fd < 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create temporary request body file");
-      error.with_context("cause", std::strerror(errno));
-      return std::unexpected(std::move(error));
-    }
-    UniqueFd file(fd);
-    if (fchmod(file.get(), S_IRUSR | S_IWUSR) != 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to secure temporary request body file");
-      error.with_context("path", tmpl);
-      error.with_context("cause", std::strerror(errno));
-      unlink(tmpl.c_str());
-      return std::unexpected(std::move(error));
+      static_cast<void>(::unlink(path_template.c_str()));
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to secure temporary request body file"));
     }
 
     std::size_t written = 0;
     while (written < body.size())
     {
-      auto const count = write(file.get(), body.data() + written, body.size() - written);
+      auto const count = ::write(file.get(), body.data() + written, body.size() - written);
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0)
       {
-        auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to write temporary request body file");
-        error.with_context("path", tmpl);
-        error.with_context("cause", count < 0 ? std::strerror(errno) : "short write");
-        unlink(tmpl.c_str());
-        return std::unexpected(std::move(error));
+        static_cast<void>(::unlink(path_template.c_str()));
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to write temporary request body file"));
       }
       written += static_cast<std::size_t>(count);
     }
 
     TempBodyFile result;
-    result.path_ = std::move(tmpl);
+    result.path_ = std::move(path_template);
     return result;
   }
 
@@ -136,7 +132,7 @@ class TempBodyFile
   {
     if (!path_.empty())
     {
-      unlink(path_.c_str());
+      static_cast<void>(::unlink(path_.c_str()));
       path_.clear();
     }
   }
@@ -144,50 +140,18 @@ class TempBodyFile
   std::string path_;
 };
 
-class ScopedSignalIgnore
+[[nodiscard]] Clock::time_point saturating_add(Clock::time_point value, Clock::duration duration) noexcept
 {
- public:
-  explicit ScopedSignalIgnore(int signal) : signal_(signal)
-  {
-    struct sigaction action{};
-    action.sa_handler = SIG_IGN;
-    sigemptyset(&action.sa_mask);
-    active_ = sigaction(signal_, &action, &previous_) == 0;
-  }
-  ScopedSignalIgnore(ScopedSignalIgnore const&) = delete;
-  ScopedSignalIgnore& operator=(ScopedSignalIgnore const&) = delete;
-  ~ScopedSignalIgnore()
-  {
-    if (active_)
-      sigaction(signal_, &previous_, nullptr);
-  }
-
- private:
-  int signal_ = 0;
-  bool active_ = false;
-  struct sigaction previous_{};
-};
-
-ava::core::Result<std::array<int, 2>> make_pipe()
-{
-  std::array<int, 2> pipe_fds{-1, -1};
-  if (pipe(pipe_fds.data()) != 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to create curl pipe");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  return pipe_fds;
+  if (duration <= Clock::duration::zero())
+    return value;
+  if (value.time_since_epoch() > Clock::time_point::max().time_since_epoch() - duration)
+    return Clock::time_point::max();
+  return value + duration;
 }
 
-void close_nonstandard_fds()
+[[nodiscard]] std::chrono::milliseconds bounded_timeout(int timeout_ms) noexcept
 {
-  long const open_max = sysconf(_SC_OPEN_MAX);
-  int const max_fd = open_max > 0 ? static_cast<int>(open_max) : 1024;
-  for (int fd = STDERR_FILENO + 1; fd < max_fd; ++fd)
-  {
-    close(fd);
-  }
+  return std::chrono::milliseconds(std::max(1, timeout_ms));
 }
 
 std::string curl_config_escape(std::string_view value)
@@ -222,95 +186,32 @@ std::string build_curl_config(HttpRequest const& request, std::string const& bod
   config += "url = \"" + curl_config_escape(request.url) + "\"\n";
   config += "request = \"" + curl_config_escape(request.method.empty() ? "POST" : request.method) + "\"\n";
   if (request.follow_redirects)
-  {
     config += "location\n";
-  }
   config += "max-redirs = \"5\"\n";
   config += "proto = \"=http,https\"\n";
   config += "proto-redir = \"=http,https\"\n";
   if (request.include_response_headers)
-  {
     config += "include\n";
-  }
   for (auto const& override : request.resolve_hosts)
-  {
     config += "resolve = \"" + curl_config_escape(override) + "\"\n";
-  }
   if (!request.resolve_hosts.empty())
-  {
     config += "noproxy = \"*\"\n";
-  }
   config += "silent\n";
   config += "show-error\n";
   config += "no-progress-meter\n";
   config += "max-time = \"" + std::to_string(static_cast<double>(std::max(1, request.timeout_ms)) / 1000.0) + "\"\n";
   for (auto const& [name, value] : request.headers)
-  {
     config += "header = \"" + curl_config_escape(name + ": " + value) + "\"\n";
-  }
   if (!request.body.empty())
-  {
     config += "data-binary = \"@" + curl_config_escape(body_path) + "\"\n";
-  }
   return config;
-}
-
-ssize_t read_retry(int fd, char* data, std::size_t size)
-{
-  while (true)
-  {
-    auto const bytes = read(fd, data, size);
-    if (bytes < 0 && errno == EINTR)
-      continue;
-    return bytes;
-  }
-}
-
-pid_t waitpid_retry(pid_t pid, int* status, int options)
-{
-  while (true)
-  {
-    auto const waited = waitpid(pid, status, options);
-    if (waited < 0 && errno == EINTR)
-      continue;
-    return waited;
-  }
-}
-
-void kill_and_wait(pid_t pid)
-{
-  kill(pid, SIGKILL);
-  int status = 0;
-  waitpid_retry(pid, &status, 0);
-}
-
-ava::core::VoidResult write_curl_config(int fd, pid_t pid, std::string_view config)
-{
-  ScopedSignalIgnore const ignore_sigpipe(SIGPIPE);
-  std::size_t written = 0;
-  while (written < config.size())
-  {
-    auto const count = write(fd, config.data() + written, config.size() - written);
-    if (count < 0 && errno == EINTR)
-      continue;
-    if (count <= 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to write curl configuration");
-      error.with_context("cause", count < 0 ? std::strerror(errno) : "short write");
-      kill_and_wait(pid);
-      return std::unexpected(std::move(error));
-    }
-    written += static_cast<std::size_t>(count);
-  }
-  return {};
 }
 
 void append_bounded(std::string& value, char const* data, std::size_t size, std::size_t limit)
 {
   if (value.size() >= limit)
     return;
-  auto const available = limit - value.size();
-  value.append(data, std::min(size, available));
+  value.append(data, std::min(size, limit - value.size()));
 }
 
 bool is_http_status_line(std::string_view line)
@@ -340,15 +241,15 @@ int http_status_line_code(std::string_view line)
 
 ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool include_response_headers)
 {
-  auto const marker_pos = output.rfind(kStatusMarker);
-  if (marker_pos == std::string::npos)
+  auto const marker_position = output.rfind(kStatusMarker);
+  if (marker_position == std::string::npos)
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response did not include an HTTP status");
     error.with_context("response_bytes", std::to_string(output.size()));
     return std::unexpected(std::move(error));
   }
 
-  auto const status_text = output.substr(marker_pos + kStatusMarker.size());
+  auto const status_text = output.substr(marker_position + kStatusMarker.size());
   int status = 0;
   for (char const ch : status_text)
   {
@@ -356,7 +257,7 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
       break;
     status = (status * 10) + (ch - '0');
   }
-  output.resize(marker_pos);
+  output.resize(marker_position);
 
   std::map<std::string, std::string> headers;
   while (include_response_headers && output.starts_with("HTTP/"))
@@ -382,7 +283,7 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
     bool first_line = true;
     while (line_start <= header_text.size())
     {
-      auto line_end = header_text.find('\n', line_start);
+      auto const line_end = header_text.find('\n', line_start);
       auto line = header_text.substr(line_start, line_end == std::string::npos ? std::string::npos : line_end - line_start);
       if (!line.empty() && line.back() == '\r')
         line.pop_back();
@@ -392,7 +293,8 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
         {
           auto name = line.substr(0, colon);
           auto value = line.substr(colon + 1);
-          while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(value.begin());
+          while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+            value.erase(value.begin());
           headers[std::move(name)] = std::move(value);
         }
       }
@@ -408,7 +310,495 @@ ava::core::Result<HttpResponse> parse_curl_output(std::string output, bool inclu
   return HttpResponse{.status_code = status, .headers = std::move(headers), .body = std::move(output)};
 }
 
+ava::core::Error generic_transport_error(ava::process::ExitStatusV1 const* status, std::uint64_t stdout_bytes, std::uint64_t stderr_bytes)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport failed");
+  if (status != nullptr)
+  {
+    error.with_context("exit_code", status->has_exit_code ? std::to_string(status->exit_code) : "signaled");
+    error.with_context("response_bytes", std::to_string(stdout_bytes));
+    error.with_context("stderr_bytes", std::to_string(stderr_bytes));
+  }
+  return error;
+}
+
+ava::core::Error canceled_error()
+{
+  return ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled");
+}
+
+ava::core::Error deadline_error()
+{
+  return ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport deadline expired");
+}
+
+ava::core::Error output_limit_error()
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response exceeded byte limit");
+  error.with_context("max_bytes", std::to_string(kMaxCurlResponseBytes));
+  return error;
+}
+
+ava::core::Error protocol_error(std::string message)
+{
+  return ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
+}
+
+struct RequestFailure
+{
+  ava::process::TerminationReasonV1 reason = ava::process::TerminationReasonV1::ProtocolFailure;
+  ava::core::Error error{ava::core::ErrorCategory::Io, "curl transport protocol failure"};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+[[nodiscard]] std::span<std::byte> writable_bytes(std::array<char, 4096>& buffer) noexcept
+{
+  return {reinterpret_cast<std::byte*>(buffer.data()), buffer.size()};
+}
+
+[[nodiscard]] std::span<std::byte const> readable_bytes(std::string_view value) noexcept
+{
+  return {reinterpret_cast<std::byte const*>(value.data()), value.size()};
+}
+
+class CurlRequest final
+{
+ public:
+  CurlRequest(ava::process::ProcessScopeV1 const& parent_scope, std::string_view executable, HttpRequest const& request, bool streaming,
+              Transport::BodyChunkSink body_sink, Transport::CancelCallback cancel_requested)
+      : parent_scope_(parent_scope),
+        executable_(executable),
+        request_(request),
+        streaming_(streaming),
+        body_sink_(std::move(body_sink)),
+        cancel_requested_(std::move(cancel_requested)),
+        request_deadline_(saturating_add(Clock::now(), bounded_timeout(request.timeout_ms))),
+        cleanup_deadline_(saturating_add(request_deadline_, kCleanupBudget)),
+        settlement_deadline_(saturating_add(cleanup_deadline_, kSettlementObservationBudget))
+  {
+  }
+
+  [[nodiscard]] ava::core::Result<HttpResponse> run()
+  {
+    auto operation = parent_scope_.operation();
+    if (!operation)
+      return std::unexpected(generic_transport_error(nullptr, 0, 0));
+    auto environment = ava::process::make_curl_environment_v1(operation->host_environment());
+    if (!environment)
+      return std::unexpected(generic_transport_error(nullptr, 0, 0));
+
+    auto body_file = TempBodyFile::create(request_.body);
+    if (!body_file)
+      return std::unexpected(std::move(body_file.error()));
+    auto config = build_curl_config(request_, body_file->path());
+
+    auto& supervisor = operation->supervisor();
+    auto reservation = supervisor.reserve(operation->owner_prefix(), ava::process::ProcessRoleV1::Curl,
+                                          {.termination_grace = 0ms, .startup_timeout = 2000ms, .execution_deadline = request_deadline_});
+    if (!reservation)
+      return std::unexpected(generic_transport_error(nullptr, 0, 0));
+
+    std::vector<std::string> arguments{"curl", "-q", "--config", "-", "--write-out", std::string(kWriteOut)};
+    if (streaming_)
+      arguments.emplace_back("--no-buffer");
+    auto spawned = supervisor.spawn(std::move(*reservation), {.executable = executable_.empty() ? std::string("curl") : std::string(executable_),
+                                                              .argv = std::move(arguments),
+                                                              .environment = std::move(*environment),
+                                                              .cwd = "/",
+                                                              .stdin_mode = ava::process::StreamModeV1::Capture,
+                                                              .stdout_mode = ava::process::StreamModeV1::Capture,
+                                                              .stderr_mode = ava::process::StreamModeV1::Capture});
+    if (!spawned)
+      return std::unexpected(generic_transport_error(nullptr, 0, 0));
+
+    if (!spawned->standard_input || !spawned->standard_output || !spawned->standard_error)
+    {
+      auto failure = RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure,
+                                    .error = protocol_error("curl transport did not receive its captured streams")};
+      return settle_without_streams(supervisor, *spawned, std::move(failure));
+    }
+
+    auto& input = *spawned->standard_input;
+    auto& output = *spawned->standard_output;
+    auto& error_output = *spawned->standard_error;
+    auto& handle = spawned->handle;
+    std::size_t config_offset = 0;
+    bool input_open = true;
+    bool output_open = true;
+    bool error_open = true;
+    std::optional<RequestFailure> failure;
+    std::optional<ava::process::ExitStatusV1> terminal_status;
+    bool stop_requested = false;
+
+    auto set_failure = [&](ava::process::TerminationReasonV1 reason, ava::core::Error error) {
+      if (!failure)
+        failure.emplace(RequestFailure{.reason = reason, .error = std::move(error)});
+    };
+    auto request_cleanup = [&] {
+      if (!failure || stop_requested)
+        return;
+      stop_requested = true;
+      if (input_open)
+      {
+        input.close();
+        input_open = false;
+      }
+      static_cast<void>(supervisor.request_stop(handle, failure->reason, cleanup_deadline_));
+    };
+
+    while (true)
+    {
+      auto const now = Clock::now();
+      if (!failure)
+      {
+        if (now >= request_deadline_)
+          set_failure(ava::process::TerminationReasonV1::DeadlineExpired, deadline_error());
+        else if (cancel_requested_ && cancel_requested_())
+          set_failure(ava::process::TerminationReasonV1::Canceled, canceled_error());
+      }
+      request_cleanup();
+
+      if (input_open && !failure)
+      {
+        while (config_offset < config.size())
+        {
+          auto const pending = readable_bytes(std::string_view(config).substr(config_offset));
+          auto wrote = input.write(pending);
+          if (!wrote)
+          {
+            set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
+            break;
+          }
+          if (wrote->state == ava::process::PipeIoStateV1::WouldBlock)
+            break;
+          if (wrote->state != ava::process::PipeIoStateV1::Progress || wrote->bytes == 0)
+          {
+            set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
+            break;
+          }
+          config_offset += wrote->bytes;
+        }
+        if (config_offset == config.size())
+        {
+          input.close();
+          input_open = false;
+        }
+      }
+      request_cleanup();
+
+      drain_stdout(supervisor, handle, output, output_open, failure);
+      drain_stderr(supervisor, handle, error_output, error_open, failure);
+      request_cleanup();
+
+      auto waited = supervisor.try_wait(handle);
+      if (!waited)
+      {
+        set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to observe curl process completion"));
+        request_cleanup();
+      }
+      else if (*waited)
+      {
+        terminal_status = **waited;
+      }
+
+      if (terminal_status && output_open)
+        drain_stdout(supervisor, handle, output, output_open, failure);
+      if (terminal_status && error_open)
+        drain_stderr(supervisor, handle, error_output, error_open, failure);
+      request_cleanup();
+
+      if (terminal_status && !output_open && !error_open)
+        break;
+
+      auto const loop_now = Clock::now();
+      if (failure && loop_now >= settlement_deadline_)
+        break;
+
+      std::vector<ava::process::PipeWatchV1> watches;
+      watches.reserve(3);
+      auto add_watch = [&](ava::process::PipeEndpoint& endpoint, ava::process::PipeInterestV1 interest, std::uint32_t token) {
+        auto watch = endpoint.watch(interest, token);
+        if (!watch)
+        {
+          set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to watch curl process streams"));
+          return;
+        }
+        watches.push_back(std::move(*watch));
+      };
+      if (input_open && !failure)
+        add_watch(input, ava::process::PipeInterestV1::Writable, kInputWatch);
+      if (output_open)
+        add_watch(output, ava::process::PipeInterestV1::Readable, kStdoutWatch);
+      if (error_open)
+        add_watch(error_output, ava::process::PipeInterestV1::Readable, kStderrWatch);
+      request_cleanup();
+
+      auto const observation_limit = failure ? settlement_deadline_ : request_deadline_;
+      auto const activity_deadline = std::min(observation_limit, saturating_add(Clock::now(), 100ms));
+      auto activity = supervisor.wait_for_activity(handle, watches, activity_deadline);
+      if (!activity)
+      {
+        set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed while waiting for curl process activity"));
+        request_cleanup();
+      }
+    }
+
+    if (input_open)
+      input.close();
+    auto settled = supervisor.wait(handle, settlement_deadline_);
+    if (settled)
+      terminal_status = *settled;
+    else
+    {
+      set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to settle curl process cleanup"));
+      request_cleanup();
+    }
+    while (output_open)
+    {
+      auto const progressed = drain_stdout(supervisor, handle, output, output_open, failure);
+      if (!progressed)
+        break;
+    }
+    while (error_open)
+    {
+      auto const progressed = drain_stderr(supervisor, handle, error_output, error_open, failure);
+      if (!progressed)
+        break;
+    }
+    if (output_open)
+      output.close();
+    if (error_open)
+      error_output.close();
+
+    if (failure)
+      return std::unexpected(std::move(failure->error));
+    if (!terminal_status)
+      return std::unexpected(generic_transport_error(nullptr, stdout_bytes_, stderr_bytes_));
+    if (terminal_status->reason != ava::process::TerminationReasonV1::NaturalExit)
+      return std::unexpected(error_for_status(*terminal_status));
+    if (terminal_status->cleanup != ava::process::CleanupStateV1::Complete || terminal_status->kind != ava::process::ExitKindV1::Exited ||
+        !terminal_status->has_exit_code || terminal_status->exit_code != 0)
+    {
+      return std::unexpected(generic_transport_error(&*terminal_status, stdout_bytes_, stderr_bytes_));
+    }
+
+    if (!parsed_response_)
+      return std::unexpected(protocol_error("curl response streams closed without a parsed result"));
+    if (streaming_)
+      parsed_response_->body = std::move(streamed_body_);
+    return std::move(*parsed_response_);
+  }
+
+ private:
+  [[nodiscard]] ava::core::Result<HttpResponse> settle_without_streams(ava::process::Supervisor& supervisor, ava::process::SpawnResultV1& spawned,
+                                                                       RequestFailure failure)
+  {
+    if (spawned.standard_input)
+      spawned.standard_input->close();
+    if (spawned.standard_output)
+      spawned.standard_output->close();
+    if (spawned.standard_error)
+      spawned.standard_error->close();
+    static_cast<void>(supervisor.request_stop(spawned.handle, failure.reason, cleanup_deadline_));
+    static_cast<void>(supervisor.wait(spawned.handle, settlement_deadline_));
+    return std::unexpected(std::move(failure.error));
+  }
+
+  [[nodiscard]] ava::core::Error error_for_status(ava::process::ExitStatusV1 const& status) const
+  {
+    switch (status.reason)
+    {
+      case ava::process::TerminationReasonV1::Canceled:
+        return canceled_error();
+      case ava::process::TerminationReasonV1::DeadlineExpired:
+        return deadline_error();
+      case ava::process::TerminationReasonV1::OutputLimit:
+        return output_limit_error();
+      case ava::process::TerminationReasonV1::ProtocolFailure:
+        return protocol_error("curl transport protocol failure");
+      default:
+        return generic_transport_error(&status, stdout_bytes_, stderr_bytes_);
+    }
+  }
+
+  [[nodiscard]] ava::core::VoidResult deliver_body(std::string_view chunk)
+  {
+    if (chunk.empty())
+      return {};
+    if (streamed_body_.size() > kMaxCurlResponseBytes || chunk.size() > kMaxCurlResponseBytes - streamed_body_.size())
+      return std::unexpected(output_limit_error());
+    streamed_body_.append(chunk);
+    if (!body_sink_)
+      return {};
+    try
+    {
+      return body_sink_(chunk);
+    }
+    catch (...)
+    {
+      return std::unexpected(protocol_error("curl streaming sink failed"));
+    }
+  }
+
+  bool drain_stdout(ava::process::Supervisor& supervisor, ava::process::ProcessHandle const& handle, ava::process::PipeEndpoint& endpoint, bool& open,
+                    std::optional<RequestFailure>& failure)
+  {
+    bool progressed = false;
+    std::array<char, 4096> buffer{};
+    while (open)
+    {
+      auto read = endpoint.read(writable_bytes(buffer));
+      if (!read)
+      {
+        if (!failure)
+          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to read curl output")});
+        endpoint.close();
+        open = false;
+        break;
+      }
+      if (read->state == ava::process::PipeIoStateV1::WouldBlock)
+        break;
+      if (read->state == ava::process::PipeIoStateV1::EndOfStream)
+      {
+        finalize_stdout(failure);
+        endpoint.close();
+        open = false;
+        progressed = true;
+        break;
+      }
+      if (read->bytes == 0)
+        break;
+      progressed = true;
+      auto const bytes = read->bytes;
+      bool truncated = failure.has_value();
+      stdout_bytes_ = stdout_bytes_ > std::numeric_limits<std::uint64_t>::max() - bytes ? std::numeric_limits<std::uint64_t>::max() : stdout_bytes_ + bytes;
+
+      if (!failure)
+      {
+        if (stdout_bytes_ > kMaxCurlResponseBytes + kStatusTailReserve)
+        {
+          truncated = true;
+          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::OutputLimit, .error = output_limit_error()});
+        }
+        else if (!streaming_)
+        {
+          stdout_output_.append(buffer.data(), bytes);
+        }
+        else
+        {
+          pending_stdout_.append(buffer.data(), bytes);
+          if (pending_stdout_.size() > kStatusTailReserve)
+          {
+            auto const emit_size = pending_stdout_.size() - kStatusTailReserve;
+            auto delivered = deliver_body(std::string_view(pending_stdout_).substr(0, emit_size));
+            if (!delivered)
+            {
+              failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(delivered.error())});
+            }
+            pending_stdout_.erase(0, emit_size);
+          }
+        }
+      }
+      if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardOutput, bytes, truncated); !accounted && !failure)
+      {
+        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to account curl output")});
+      }
+    }
+    return progressed;
+  }
+
+  void finalize_stdout(std::optional<RequestFailure>& failure)
+  {
+    if (stdout_finalized_ || failure)
+      return;
+    stdout_finalized_ = true;
+    auto parsed = parse_curl_output(streaming_ ? std::move(pending_stdout_) : std::move(stdout_output_), request_.include_response_headers && !streaming_);
+    if (!parsed)
+    {
+      failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(parsed.error())});
+      return;
+    }
+    if (streaming_)
+    {
+      auto delivered = deliver_body(parsed->body);
+      if (!delivered)
+      {
+        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(delivered.error())});
+        return;
+      }
+      parsed->body.clear();
+    }
+    parsed_response_ = std::move(*parsed);
+  }
+
+  bool drain_stderr(ava::process::Supervisor& supervisor, ava::process::ProcessHandle const& handle, ava::process::PipeEndpoint& endpoint, bool& open,
+                    std::optional<RequestFailure>& failure)
+  {
+    bool progressed = false;
+    std::array<char, 4096> buffer{};
+    while (open)
+    {
+      auto read = endpoint.read(writable_bytes(buffer));
+      if (!read)
+      {
+        if (!failure)
+          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to read curl stderr")});
+        endpoint.close();
+        open = false;
+        break;
+      }
+      if (read->state == ava::process::PipeIoStateV1::WouldBlock)
+        break;
+      if (read->state == ava::process::PipeIoStateV1::EndOfStream)
+      {
+        endpoint.close();
+        open = false;
+        progressed = true;
+        break;
+      }
+      if (read->bytes == 0)
+        break;
+      progressed = true;
+      auto const retained_before = stderr_output_.size();
+      append_bounded(stderr_output_, buffer.data(), read->bytes, kMaxCurlStderrBytes);
+      bool const truncated = retained_before + read->bytes > kMaxCurlStderrBytes;
+      stderr_bytes_ =
+          stderr_bytes_ > std::numeric_limits<std::uint64_t>::max() - read->bytes ? std::numeric_limits<std::uint64_t>::max() : stderr_bytes_ + read->bytes;
+      if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardError, read->bytes, truncated); !accounted && !failure)
+      {
+        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to account curl stderr")});
+      }
+    }
+    return progressed;
+  }
+
+  ava::process::ProcessScopeV1 const& parent_scope_;
+  std::string_view executable_;
+  HttpRequest const& request_;
+  bool streaming_ = false;
+  Transport::BodyChunkSink body_sink_;
+  Transport::CancelCallback cancel_requested_;
+  Clock::time_point request_deadline_;
+  Clock::time_point cleanup_deadline_;
+  Clock::time_point settlement_deadline_;
+  std::string stdout_output_;
+  std::string pending_stdout_;
+  std::string streamed_body_;
+  std::string stderr_output_;
+  std::optional<HttpResponse> parsed_response_;
+  std::uint64_t stdout_bytes_ = 0;
+  std::uint64_t stderr_bytes_ = 0;
+  bool stdout_finalized_ = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 }  // namespace
+
+CurlCliTransport::CurlCliTransport(ava::process::ProcessScopeV1 parent_scope) : parent_scope_(std::move(parent_scope))
+{
+}
 
 ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request)
 {
@@ -417,132 +807,7 @@ ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& reques
 
 ava::core::Result<HttpResponse> CurlCliTransport::send(HttpRequest const& request, CancelCallback cancel_requested)
 {
-  if (cancel_requested && cancel_requested())
-  {
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
-  }
-  auto body_file = TempBodyFile::create(request.body);
-  if (!body_file)
-    return std::unexpected(body_file.error());
-  auto const config = build_curl_config(request, body_file->path());
-
-  auto stdin_pipe = make_pipe();
-  if (!stdin_pipe)
-    return std::unexpected(stdin_pipe.error());
-  auto stdout_pipe = make_pipe();
-  if (!stdout_pipe)
-    return std::unexpected(stdout_pipe.error());
-
-  UniqueFd stdin_read((*stdin_pipe)[0]);
-  UniqueFd stdin_write((*stdin_pipe)[1]);
-  UniqueFd stdout_read((*stdout_pipe)[0]);
-  UniqueFd stdout_write((*stdout_pipe)[1]);
-
-  pid_t const pid = fork();
-  if (pid < 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork curl process");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-
-  if (pid == 0)
-  {
-    close(stdin_write.get());
-    close(stdout_read.get());
-    dup2(stdin_read.get(), STDIN_FILENO);
-    dup2(stdout_write.get(), STDOUT_FILENO);
-    dup2(stdout_write.get(), STDERR_FILENO);
-    close(stdin_read.get());
-    close(stdout_write.get());
-    close_nonstandard_fds();
-    if (setenv("PATH", kTrustedExecPath, 1) != 0)
-      _exit(127);
-    execlp("curl", "curl", "-q", "--config", "-", "--write-out", "\nAVA_HTTP_STATUS:%{http_code}", static_cast<char*>(nullptr));
-    _exit(127);
-  }
-
-  stdin_read.reset();
-  stdout_write.reset();
-
-  if (auto wrote_config = write_curl_config(stdin_write.get(), pid, config); !wrote_config)
-  {
-    return std::unexpected(std::move(wrote_config.error()));
-  }
-  stdin_write.reset();
-
-  std::string output;
-  std::array<char, 4096> buffer{};
-  bool stdout_open = true;
-  while (stdout_open)
-  {
-    if (cancel_requested && cancel_requested())
-    {
-      kill_and_wait(pid);
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
-    }
-
-    pollfd poll_fd{.fd = stdout_read.get(), .events = POLLIN, .revents = 0};
-    int const poll_result = poll(&poll_fd, 1, 100);
-    if (poll_result < 0 && errno == EINTR)
-      continue;
-    if (poll_result < 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to poll curl output");
-      error.with_context("cause", std::strerror(errno));
-      kill_and_wait(pid);
-      return std::unexpected(std::move(error));
-    }
-    if (poll_result == 0)
-      continue;
-    if ((poll_fd.revents & (POLLIN | POLLHUP | POLLERR)) == 0)
-      continue;
-
-    auto const count = read_retry(stdout_read.get(), buffer.data(), buffer.size());
-    if (count < 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read curl output");
-      error.with_context("cause", std::strerror(errno));
-      kill_and_wait(pid);
-      return std::unexpected(std::move(error));
-    }
-    if (count == 0)
-    {
-      stdout_open = false;
-      stdout_read.reset();
-      break;
-    }
-    output.append(buffer.data(), static_cast<std::size_t>(count));
-    if (output.size() > kMaxCurlResponseBytes)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response exceeded byte limit");
-      error.with_context("max_bytes", std::to_string(kMaxCurlResponseBytes));
-      kill_and_wait(pid);
-      return std::unexpected(std::move(error));
-    }
-  }
-
-  if (cancel_requested && cancel_requested())
-  {
-    kill_and_wait(pid);
-    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
-  }
-
-  int status = 0;
-  if (waitpid_retry(pid, &status, 0) < 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to wait for curl process");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport failed");
-    error.with_context("exit_code", WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "signaled");
-    error.with_context("response_bytes", std::to_string(output.size()));
-    return std::unexpected(std::move(error));
-  }
-  return parse_curl_output(std::move(output), request.include_response_headers);
+  return CurlRequest(parent_scope_, test_executable_, request, false, nullptr, std::move(cancel_requested)).run();
 }
 
 bool CurlCliTransport::supports_streaming() const noexcept
@@ -556,197 +821,18 @@ ava::core::Result<HttpResponse> CurlCliTransport::send_streaming(HttpRequest con
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "streaming curl transport does not support response headers"));
   }
-  auto body_file = TempBodyFile::create(request.body);
-  if (!body_file)
-    return std::unexpected(body_file.error());
-  auto const config = build_curl_config(request, body_file->path());
+  return CurlRequest(parent_scope_, test_executable_, request, true, std::move(on_body_chunk), std::move(cancel_requested)).run();
+}
 
-  auto stdin_pipe = make_pipe();
-  if (!stdin_pipe)
-    return std::unexpected(stdin_pipe.error());
-  auto stdout_pipe = make_pipe();
-  if (!stdout_pipe)
-    return std::unexpected(stdout_pipe.error());
-  auto stderr_pipe = make_pipe();
-  if (!stderr_pipe)
-    return std::unexpected(stderr_pipe.error());
-
-  UniqueFd stdin_read((*stdin_pipe)[0]);
-  UniqueFd stdin_write((*stdin_pipe)[1]);
-  UniqueFd stdout_read((*stdout_pipe)[0]);
-  UniqueFd stdout_write((*stdout_pipe)[1]);
-  UniqueFd stderr_read((*stderr_pipe)[0]);
-  UniqueFd stderr_write((*stderr_pipe)[1]);
-
-  pid_t const pid = fork();
-  if (pid < 0)
+ava::core::VoidResult testing::CurlTransportTestAccess::set_executable(CurlCliTransport& transport, std::filesystem::path const& executable)
+{
+  auto const value = executable.string();
+  if (!executable.is_absolute() || value.empty() || value.find('\0') != std::string::npos)
   {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to fork curl process");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "fake curl executable must be one absolute path"));
   }
-
-  if (pid == 0)
-  {
-    close(stdin_write.get());
-    close(stdout_read.get());
-    close(stderr_read.get());
-    dup2(stdin_read.get(), STDIN_FILENO);
-    dup2(stdout_write.get(), STDOUT_FILENO);
-    dup2(stderr_write.get(), STDERR_FILENO);
-    close(stdin_read.get());
-    close(stdout_write.get());
-    close(stderr_write.get());
-    close_nonstandard_fds();
-    if (setenv("PATH", kTrustedExecPath, 1) != 0)
-      _exit(127);
-    execlp("curl", "curl", "-q", "--no-buffer", "--config", "-", "--write-out", "\nAVA_HTTP_STATUS:%{http_code}", static_cast<char*>(nullptr));
-    _exit(127);
-  }
-
-  stdin_read.reset();
-  stdout_write.reset();
-  stderr_write.reset();
-
-  if (auto wrote_config = write_curl_config(stdin_write.get(), pid, config); !wrote_config)
-  {
-    return std::unexpected(std::move(wrote_config.error()));
-  }
-  stdin_write.reset();
-
-  std::string body;
-  std::string pending_stdout;
-  std::string stderr_output;
-  std::array<char, 4096> buffer{};
-  bool stdout_open = true;
-  bool stderr_open = true;
-
-  auto deliver_body = [&](std::string_view chunk) -> ava::core::VoidResult {
-    if (chunk.empty())
-      return {};
-    if (body.size() > kMaxCurlResponseBytes || chunk.size() > kMaxCurlResponseBytes - body.size())
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response exceeded byte limit");
-      error.with_context("max_bytes", std::to_string(kMaxCurlResponseBytes));
-      return std::unexpected(std::move(error));
-    }
-    body.append(chunk);
-    if (on_body_chunk)
-    {
-      if (auto delivered = on_body_chunk(chunk); !delivered)
-        return std::unexpected(std::move(delivered.error()));
-    }
-    return {};
-  };
-
-  while (stdout_open || stderr_open)
-  {
-    if (cancel_requested && cancel_requested())
-    {
-      kill_and_wait(pid);
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "transport request canceled"));
-    }
-
-    std::array<pollfd, 2> poll_fds{pollfd{.fd = stdout_open ? stdout_read.get() : -1, .events = POLLIN, .revents = 0},
-                                   pollfd{.fd = stderr_open ? stderr_read.get() : -1, .events = POLLIN, .revents = 0}};
-    int const poll_result = poll(poll_fds.data(), poll_fds.size(), 100);
-    if (poll_result < 0 && errno == EINTR)
-      continue;
-    if (poll_result < 0)
-    {
-      auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to poll curl output");
-      error.with_context("cause", std::strerror(errno));
-      kill_and_wait(pid);
-      return std::unexpected(std::move(error));
-    }
-    if (poll_result == 0)
-      continue;
-
-    if (stdout_open && (poll_fds[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
-    {
-      auto const count = read_retry(stdout_read.get(), buffer.data(), buffer.size());
-      if (count < 0)
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read curl output");
-        error.with_context("cause", std::strerror(errno));
-        kill_and_wait(pid);
-        return std::unexpected(std::move(error));
-      }
-      if (count == 0)
-      {
-        stdout_open = false;
-        stdout_read.reset();
-      }
-      else
-      {
-        pending_stdout.append(buffer.data(), static_cast<std::size_t>(count));
-        if (body.size() + pending_stdout.size() > kMaxCurlResponseBytes + kStatusTailReserve)
-        {
-          auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl response exceeded byte limit");
-          error.with_context("max_bytes", std::to_string(kMaxCurlResponseBytes));
-          kill_and_wait(pid);
-          return std::unexpected(std::move(error));
-        }
-        if (pending_stdout.size() > kStatusTailReserve)
-        {
-          auto const emit_size = pending_stdout.size() - kStatusTailReserve;
-          if (auto delivered = deliver_body(std::string_view(pending_stdout).substr(0, emit_size)); !delivered)
-          {
-            kill_and_wait(pid);
-            return std::unexpected(std::move(delivered.error()));
-          }
-          pending_stdout.erase(0, emit_size);
-        }
-      }
-    }
-
-    if (stderr_open && (poll_fds[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
-    {
-      auto const count = read_retry(stderr_read.get(), buffer.data(), buffer.size());
-      if (count < 0)
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to read curl stderr");
-        error.with_context("cause", std::strerror(errno));
-        kill_and_wait(pid);
-        return std::unexpected(std::move(error));
-      }
-      if (count == 0)
-      {
-        stderr_open = false;
-        stderr_read.reset();
-      }
-      else
-      {
-        append_bounded(stderr_output, buffer.data(), static_cast<std::size_t>(count), kMaxCurlStderrBytes);
-      }
-    }
-  }
-
-  int status = 0;
-  if (waitpid_retry(pid, &status, 0) < 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to wait for curl process");
-    error.with_context("cause", std::strerror(errno));
-    return std::unexpected(std::move(error));
-  }
-  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-  {
-    auto error = ava::core::Error(ava::core::ErrorCategory::Provider, "curl transport failed");
-    error.with_context("exit_code", WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "signaled");
-    error.with_context("stderr_bytes", std::to_string(stderr_output.size()));
-    return std::unexpected(std::move(error));
-  }
-
-  auto final = parse_curl_output(std::move(pending_stdout), false);
-  if (!final)
-  {
-    final.error().with_context("stderr_bytes", std::to_string(stderr_output.size()));
-    return std::unexpected(std::move(final.error()));
-  }
-  if (auto delivered = deliver_body(final->body); !delivered)
-    return std::unexpected(std::move(delivered.error()));
-  final->body = std::move(body);
-  return final;
+  transport.test_executable_ = value;
+  return {};
 }
 
 }  // namespace ava::http

@@ -136,7 +136,10 @@ struct AgentLoopOptions
   std::function<ava::core::Result<bool>(ava::session::SessionReadAuthority, std::string_view, std::vector<std::string> const& replayed_user_messages)>
       compact_context = nullptr;
   std::function<ava::core::Result<std::unique_ptr<ava::provider::Provider>>()> background_provider_factory = nullptr;
-  std::function<ava::core::Result<std::unique_ptr<ava::http::Transport>>()> background_transport_factory = nullptr;
+  // Retained by child loops so web tools continue to use the originating
+  // runtime session authority even after the scheduling run has ended.
+  ava::http::TransportFactory transport_factory = nullptr;
+  ava::http::TransportFactory background_transport_factory = nullptr;
   // Production and tests use one application-scoped coordinator as the sole
   // task-subagent owner. BackgroundJobRegistry remains an internal engine.
   std::shared_ptr<SubagentCoordinator> subagent_coordinator = nullptr;

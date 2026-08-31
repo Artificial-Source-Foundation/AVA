@@ -400,8 +400,8 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
         return fatal_error(2, "OpenAI OAuth flags require provider `openai`");
       }
       if (source == CredentialSource::BrowserOAuth)
-        return run_connect_openai_browser(paths, std::cout, std::cerr);
-      return run_connect_openai_headless(paths, std::cout, std::cerr);
+        return run_connect_openai_browser(paths, std::cout, std::cerr, application_process_scope);
+      return run_connect_openai_headless(paths, std::cout, std::cerr, application_process_scope);
     }
 
     if (source == CredentialSource::Stdin || source == CredentialSource::Env)
@@ -419,16 +419,16 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
     {
       return run_connect_provider_wizard(
           paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()}, std::cin,
-          std::cout, std::cerr);
+          std::cout, std::cerr, application_process_scope);
     }
 
     if (provider && *provider == "openai")
     {
       return run_connect_openai_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
-                                       std::cout, std::cerr);
+                                       std::cout, std::cerr, application_process_scope);
     }
     return run_connect_provider_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
-                                       std::cout, std::cerr);
+                                       std::cout, std::cerr, application_process_scope);
   };
 
   for (int index = 1; index < argc; ++index)

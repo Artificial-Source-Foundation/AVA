@@ -17,6 +17,7 @@
 
 #include <concepts>
 #include <iterator>
+#include <memory>
 #include <ostream>
 #include <string_view>
 #include <type_traits>
@@ -256,9 +257,18 @@ int run_print_mode(PrintModeOptions const& options, std::istream& in, std::ostre
 
   CRITICAL_AREA_BEGIN_W(session);
 
-  ava::http::CurlCliTransport default_transport;
-  ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
-  ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : static_cast<ava::http::Transport&>(default_transport);
+  std::unique_ptr<ava::http::Transport> default_transport;
+  if (!options.transport_override)
+  {
+    if (!session_w->session_process_scope())
+    {
+      err << "print mode process authority is unavailable\n";
+      return 1;
+    }
+    default_transport = std::make_unique<ava::http::CurlCliTransport>(*session_w->session_process_scope());
+  }
+  ava::http::Transport& transport = options.transport_override ? options.transport_override->get() : *default_transport;
+  ava::http::Transport& auth_transport = options.transport_override ? options.transport_override->get() : *default_transport;
   auto catalog = session_w->provider_catalog() ? session_w->provider_catalog()
                  : options.open_context.provider_catalog ? options.open_context.provider_catalog
                                                          : ava::provider::ProviderCatalog::build_builtins_only();

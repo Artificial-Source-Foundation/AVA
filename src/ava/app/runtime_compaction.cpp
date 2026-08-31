@@ -1,6 +1,5 @@
 #include "sys.h"
 #include "ava/event/events.h"
-#include "ava/http/curl_transport.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_credentials.h"
@@ -521,8 +520,7 @@ ava::core::Result<std::string> generate_compaction_summary_impl(ava::config::Xdg
     summary_options.credential_type = "bearer";
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
-    ava::http::CurlCliTransport auth_transport;
-    auto prepared = prepare_runtime_credentials(paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction", provider_catalog);
+    auto prepared = prepare_runtime_credentials(paths, effective_config->provider_id, std::move(summary_options), transport, "compaction", provider_catalog);
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);

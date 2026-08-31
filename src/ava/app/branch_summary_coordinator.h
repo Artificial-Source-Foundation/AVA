@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/http/transport.h"
 #include "ava/app/runtime/session_ts.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -23,10 +24,6 @@
 namespace ava::core {
 class AnchorSet;
 }  // namespace ava::core
-
-namespace ava::http {
-class Transport;
-}  // namespace ava::http
 
 namespace ava::provider {
 class ProviderCatalog;
@@ -62,7 +59,7 @@ struct BranchSummaryGenerationPrompt
 // reentrantly.
 using BranchSummaryGenerator =
     std::function<ava::core::Result<std::string>(BranchSummaryGenerationPrompt const&, std::stop_token, std::chrono::steady_clock::time_point)>;
-using BranchSummaryTransportFactory = std::function<std::unique_ptr<ava::http::Transport>()>;
+using BranchSummaryTransportFactory = ava::http::TransportFactory;
 
 // Narrow provider inputs copied on the frontend thread. Authentication remains
 // lazy: the production generator resolves credentials only after confirmation.

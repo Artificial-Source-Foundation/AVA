@@ -65,6 +65,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                               .ava_authority_roots = tool_execution.ava_authority_roots,
                               .exact_file_access = tool_execution.exact_file_access,
                               .command_executor = tool_execution.command_executor,
+                              .transport_factory = options_.transport_factory,
                               .lsp_diagnostics_provider = tool_resources.lsp_diagnostics_provider,
                               .plugin_global_plugins_dir = tool_resources.plugin_global_plugins_dir,
                               .plugin_project_plugins_dir = tool_resources.plugin_project_plugins_dir,

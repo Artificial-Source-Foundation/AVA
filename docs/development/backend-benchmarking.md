@@ -186,7 +186,7 @@ git worktree remove "$after_src"
 git worktree remove "$before_src"
 ```
 
-At this pre-migration commit every source-owned authority declaration is `legacy_local`. Stale cache entries and command-line values are removed during configuration and cannot assert migration. Changing a declaration to `supervised` without adapting its driver still reaches `refuse_false_supervised_claim` and returns structured `caller_not_migrated`; a valid migration must verify one correctly finished, exactly-once Supervisor record. Consequently, a comparison requested from this commit is expected to be unsupported rather than claim a false delta.
+At this source state Curl is source-owned `supervised`; Plugin, MCP, LSP, and Bash remain `legacy_local`. Stale cache entries and command-line values are removed during configuration and cannot assert migration. Curl's driver owns an explicit Supervisor/application scope, destroys the transport, performs bounded shutdown, and emits `supervisor_record_finished=true`, `supervisor_settlement_once=true`, and `cleanup_scope=managed_group` only after verifying exactly one finished Curl record with complete cleanup and `live_records == 0`. Changing any remaining declaration to `supervised` without adapting its driver still reaches `refuse_false_supervised_claim` and returns structured `caller_not_migrated`.
 
 ### Driver boundaries and cleanup evidence
 
@@ -199,7 +199,7 @@ Neutral process modes use only the public Supervisor and narrow test telemetry A
 
 After every measured process driver, endpoints and consumers are closed before Supervisor destruction, retained handles are waited, records are Finished with settlement count one, `live_records` is zero, shutdown is complete, and monitor resources are gone. Only then does the helper use `waitpid(-1, WNOHANG) == ECHILD` as an **immediate-child guard**. Descendant cleanup is evidenced by Supervisor settlement and inherited-endpoint EOF; the immediate-child guard is never presented as descendant evidence. Legacy family checks are explicitly labeled `immediate_children_only`.
 
-The fixed family boundaries are one stdlib-Python loopback Curl request; todo sample plugin initialize/call/shutdown; fake MCP initialize/tools-list/shutdown; fake LSP initialize/diagnostics/destruction; and a benign direct-argv command through normal sealed Bash planning and execution. They retain content-free compatibility checks only.
+The fixed family boundaries are one stdlib-Python loopback Curl request; todo sample plugin initialize/call/shutdown; fake MCP initialize/tools-list/shutdown; fake LSP initialize/diagnostics/destruction; and a benign direct-argv command through normal sealed Bash planning and execution. Curl now measures the supervised managed-group lifecycle; the other four retain their legacy immediate-child boundaries. All retain content-free compatibility checks only.
 
 ### Provenance, redaction, and comparison
 

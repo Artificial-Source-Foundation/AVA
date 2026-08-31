@@ -5,6 +5,8 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/app/rpc/input.h"
 #include "ava/app/rpc_mode.h"
 #include "ava/app/runtime.h"
@@ -21,6 +23,7 @@
 #include <filesystem>
 #include <ios>
 #include <istream>
+#include <memory>
 #include <mutex>
 #include <ostream>
 #include <sstream>
@@ -481,6 +484,12 @@ void test_app_rpc_mode_forwards_nonstdin_wake()
   options.open_context.current_dir = workspace;
   options.open_context.paths = app_test_paths(root);
   options.open_context.offline = true;
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto process_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(static_cast<bool>(process_scope), "RPC mode wake test creates explicit process authority");
+  if (!process_scope)
+    return;
+  options.open_context.application_process_scope = *process_scope;
   BlockingInputBuf input_buffer;
   std::istream in(&input_buffer);
   std::ostringstream out;

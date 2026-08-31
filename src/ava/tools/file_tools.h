@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
@@ -126,6 +127,9 @@ struct ToolContext
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<CommandExecutor const> command_executor = nullptr;
+  // Session-capturing process authority for web tools. Explicit per-call fake
+  // transports bypass this factory and require no process authority.
+  ava::http::TransportFactory transport_factory = nullptr;
   // An observer-only correlation ID. Provider call IDs remain product/session
   // data and must not cross the trace boundary.
   std::string trace_call_id = {};

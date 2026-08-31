@@ -94,7 +94,8 @@ std::string lower_ascii(std::string_view text)
 {
   std::string lowered;
   lowered.reserve(text.size());
-  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text)
+    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
@@ -208,7 +209,7 @@ ava::core::Result<std::string> resolve_connect_provider(runtime::session_ts& unl
     return args[0];
   auto answer = ask_connect_question(request, ava::agent::QuestionPrompt{.header = "Connect a provider",
                                                                          .question = "Select provider",
-                                                                          .options = provider_options(unlocked_session),
+                                                                         .options = provider_options(unlocked_session),
                                                                          .multiple = false,
                                                                          .allow_custom = true,
                                                                          .secret = false,
@@ -331,8 +332,7 @@ ava::core::VoidResult store_connect_credential(runtime::session_ts const& unlock
                                                                                        .source = "connect"});
 }
 
-ava::core::Result<std::string> store_openai_oauth_result(runtime::session_ts const& unlocked_session,
-                                                         ava::config::OpenAICredential const& credential)
+ava::core::Result<std::string> store_openai_oauth_result(runtime::session_ts const& unlocked_session, ava::config::OpenAICredential const& credential)
 {
   auto const paths = runtime::session_ts::crat(unlocked_session)->paths();
   auto stored = ava::config::store_openai_credential(paths, credential);
@@ -341,13 +341,26 @@ ava::core::Result<std::string> store_openai_oauth_result(runtime::session_ts con
   return "Stored OpenAI OAuth credential at " + paths.auth_file.string();
 }
 
+ava::core::Result<ava::process::ProcessScopeV1> connect_process_scope(runtime::session_ts const& unlocked_session)
+{
+  SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+  if (!session_r->session_process_scope())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Configuration, "session connect process authority is unavailable"));
+  }
+  return *session_r->session_process_scope();
+}
+
 ava::core::Result<std::string> run_openai_browser_oauth(runtime::session_ts const& unlocked_session, CommandRequest const& request)
 {
+  auto process_scope = connect_process_scope(unlocked_session);
+  if (!process_scope)
+    return std::unexpected(std::move(process_scope.error()));
   auto oauth_session = ava::config::make_openai_oauth_session();
   if (!oauth_session)
     return std::unexpected(std::move(oauth_session.error()));
 
-  ava::http::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport(*process_scope);
   std::atomic_bool prompt_cancelled{false};
   auto cancel_requested = [&]() { return prompt_cancelled.load() || (request.cancel_requested && request.cancel_requested()); };
   auto credential_future = ava::core::make_async(
@@ -375,7 +388,10 @@ ava::core::Result<std::string> run_openai_browser_oauth(runtime::session_ts cons
 
 ava::core::Result<std::string> run_openai_headless_oauth(runtime::session_ts const& unlocked_session, CommandRequest const& request)
 {
-  ava::http::CurlCliTransport transport;
+  auto process_scope = connect_process_scope(unlocked_session);
+  if (!process_scope)
+    return std::unexpected(std::move(process_scope.error()));
+  ava::http::CurlCliTransport transport(*process_scope);
   auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
   if (!authorization)
     return std::unexpected(std::move(authorization.error()));

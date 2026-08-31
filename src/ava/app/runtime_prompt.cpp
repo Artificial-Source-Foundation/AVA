@@ -381,7 +381,17 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   auto run_store = session_r->store;
   auto const paths_copy = session_r->paths();
   auto const provider_catalog_copy = session_r->provider_catalog();
+  auto const session_process_scope_copy = session_r->session_process_scope();
   CRITICAL_AREA_END_R(session);
+
+  ava::http::TransportFactory session_transport_factory;
+  if (session_process_scope_copy)
+  {
+    session_transport_factory = [scope = *session_process_scope_copy]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+      std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>(scope);
+      return transport;
+    };
+  }
 
   std::optional<ava::agent::AgentLoop> loop;
   {
@@ -498,10 +508,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
             return std::unexpected(std::move(ensured.error()));
           return (*ensured)->create(provider_id);
         },
-        .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
-          std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
-          return transport;
-        },
+        .transport_factory = session_transport_factory,
+        .background_transport_factory = session_transport_factory,
         .subagent_coordinator = session_r->subagent_coordinator(),
         .append_entry = append_route,
         .append_batch = std::move(append_batch_route),

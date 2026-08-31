@@ -53,13 +53,15 @@ struct SessionTitleGenerationRequest
   std::string account_id;
   bool openai_oauth = false;
   bool offline = false;
+  // Captured from the exact runtime session at scheduling time.
+  ava::http::TransportFactory transport_factory = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 using SessionTitleGenerator =
     std::function<ava::core::Result<std::string>(SessionTitleGenerationRequest&, std::stop_token, std::chrono::steady_clock::time_point)>;
-using SessionTitleTransportFactory = std::function<std::unique_ptr<ava::http::Transport>()>;
+using SessionTitleTransportFactory = ava::http::TransportFactory;
 
 struct SessionTitleCatalogChanges
 {

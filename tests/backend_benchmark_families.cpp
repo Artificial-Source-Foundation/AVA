@@ -1,6 +1,8 @@
 #include "sys.h"
 #include "tests/backend_benchmark_cases.h"
 #include "ava/http/curl_transport.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/tools/bash_tool.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/runner.h"
@@ -153,6 +155,10 @@ void emit_family(std::string_view benchmark_case, double elapsed, bool protocol_
   auto const authority = authority_for(options.benchmark_case);
   if (authority != "supervised")
     return false;
+#if defined(AVA_BENCHMARK_CURL_AUTHORITY_SUPERVISED)
+  if (options.benchmark_case == "family-curl-lifecycle")
+    return false;
+#endif
   emit_helper_unsupported(options.benchmark_case, "lifecycle_ns", "ns", "caller_not_migrated", kCallerNotMigratedReason, family_case_metrics(authority));
   return true;
 }
@@ -166,6 +172,59 @@ void benchmark_curl(BackendBenchmarkOptions const& options)
     return;
   }
   bool const clean_before = no_waitable_children();
+#if defined(AVA_BENCHMARK_CURL_AUTHORITY_SUPERVISED)
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
+  if (!application_scope)
+    fail(application_scope.error().format());
+  ava::core::Result<ava::http::HttpResponse> response = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "curl benchmark was not run"));
+  auto const started = Clock::now();
+  {
+    ava::http::CurlCliTransport transport(*application_scope);
+    response = transport.send(ava::http::HttpRequest{.method = "GET",
+                                                     .url = "http://127.0.0.1:" + std::to_string(options.loopback_port) + "/benchmark",
+                                                     .headers = {{"Accept", "text/plain"}},
+                                                     .body = {},
+                                                     .timeout_ms = 5000,
+                                                     .follow_redirects = false,
+                                                     .include_response_headers = false,
+                                                     .resolve_hosts = {}});
+  }
+  auto const elapsed = elapsed_nanoseconds(started);
+  supervisor->stop_accepting();
+  auto const shutdown = supervisor->shutdown(Clock::now() + 2s);
+  auto const snapshot = supervisor->snapshot();
+  std::size_t curl_records = 0;
+  bool record_finished = false;
+  bool settlement_once = false;
+  for (auto const& record : snapshot.records)
+  {
+    if (record.role != ava::process::ProcessRoleV1::Curl)
+      continue;
+    ++curl_records;
+    record_finished = record.state == ava::process::ProcessStateV1::Finished && record.cleanup == ava::process::CleanupStateV1::Complete;
+    settlement_once = record.settlement_count == 1;
+  }
+  bool const supervisor_verified = shutdown.complete && snapshot.live_records == 0 && curl_records == 1 && record_finished && settlement_once;
+  if (!supervisor_verified)
+    fail("supervised curl benchmark did not produce one completely settled managed-group record");
+  bool const expected = response && response->status_code == 200 && response->body == "ava-backend-benchmark\n";
+  bool const clean_after = no_waitable_children();
+  emit_helper_measurement(options.benchmark_case, "lifecycle_ns", "ns",
+                          {{.ordinal = 1,
+                            .value = elapsed,
+                            .metrics = {},
+                            .checks = {{"protocol_compatible", static_cast<bool>(response)},
+                                       {"expected_response", expected},
+                                       {"shutdown_complete", shutdown.complete},
+                                       {"immediate_child_guard", clean_before && clean_after},
+                                       {"supervisor_record_finished", true},
+                                       {"supervisor_settlement_once", true}}}},
+                          {{"authority", std::string("supervised")},
+                           {"supervisor_record_finished", true},
+                           {"supervisor_settlement_once", true},
+                           {"cleanup_scope", std::string("managed_group")}});
+#else
   ava::http::CurlCliTransport transport;
   auto const started = Clock::now();
   auto response = transport.send(ava::http::HttpRequest{.method = "GET",
@@ -180,6 +239,7 @@ void benchmark_curl(BackendBenchmarkOptions const& options)
   bool const expected = response && response->status_code == 200 && response->body == "ava-backend-benchmark\n";
   bool const clean_after = no_waitable_children();
   emit_family(options.benchmark_case, elapsed, static_cast<bool>(response), expected, true, clean_before && clean_after);
+#endif
 }
 
 void benchmark_plugin(BackendBenchmarkOptions const& options)

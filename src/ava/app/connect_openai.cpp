@@ -228,7 +228,8 @@ std::string lower_ascii(std::string_view text)
 {
   std::string lowered;
   lowered.reserve(text.size());
-  for (char const ch : text) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  for (char const ch : text)
+    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   return lowered;
 }
 
@@ -620,8 +621,14 @@ ava::core::Result<ava::config::OpenAICredential> wait_for_openai_device_oauth(av
   return std::unexpected(connect_error(ava::core::ErrorCategory::Io, "timed out waiting for OpenAI device OAuth"));
 }
 
-int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err)
+int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err,
+                               std::optional<ava::process::ProcessScopeV1> process_scope)
 {
+  if (!process_scope)
+  {
+    err << "OpenAI OAuth process authority is unavailable\n";
+    return 1;
+  }
   auto session = ava::config::make_openai_oauth_session();
   if (!session)
   {
@@ -639,7 +646,7 @@ int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream&
   }
   out << "Waiting for browser callback on http://localhost:1455/auth/callback ...\n";
 
-  ava::http::CurlCliTransport transport;
+  ava::http::CurlCliTransport transport(*process_scope);
   auto credential = complete_openai_browser_oauth(*session, transport, unix_time_seconds());
   if (!credential)
   {
@@ -656,9 +663,15 @@ int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream&
   return 0;
 }
 
-int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err)
+int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err,
+                                std::optional<ava::process::ProcessScopeV1> process_scope)
 {
-  ava::http::CurlCliTransport transport;
+  if (!process_scope)
+  {
+    err << "OpenAI OAuth process authority is unavailable\n";
+    return 1;
+  }
+  ava::http::CurlCliTransport transport(*process_scope);
   auto authorization = ava::config::start_openai_oauth_device_authorization(transport);
   if (!authorization)
   {
@@ -685,20 +698,20 @@ int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream
   return 0;
 }
 
-int run_connect_openai(ava::config::XdgPaths const& paths)
+int run_connect_openai(ava::config::XdgPaths const& paths, std::optional<ava::process::ProcessScopeV1> process_scope)
 {
-  return run_connect_openai_browser(paths, std::cout, std::cerr);
+  return run_connect_openai_browser(paths, std::cout, std::cerr, std::move(process_scope));
 }
 
 int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options, std::istream& in, std::ostream& out,
-                              std::ostream& err)
+                              std::ostream& err, std::optional<ava::process::ProcessScopeV1> process_scope)
 {
   if (options.credential_type)
   {
     return run_connect_provider_wizard(
         paths,
         ConnectProviderWizardOptions{.provider_id = std::string("openai"), .credential_type = options.credential_type, .stdin_is_tty = options.stdin_is_tty},
-        in, out, err);
+        in, out, err, process_scope);
   }
 
   if (!options.stdin_is_tty)
@@ -727,21 +740,21 @@ int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProvide
   switch (*method)
   {
     case OpenAIConnectMethod::BrowserOAuth:
-      return run_connect_openai_browser(paths, out, err);
+      return run_connect_openai_browser(paths, out, err, process_scope);
     case OpenAIConnectMethod::HeadlessOAuth:
-      return run_connect_openai_headless(paths, out, err);
+      return run_connect_openai_headless(paths, out, err, process_scope);
     case OpenAIConnectMethod::ApiKey:
       return run_connect_provider_wizard(
           paths,
           ConnectProviderWizardOptions{
               .provider_id = std::string("openai"), .credential_type = ConnectCredentialType::ApiKey, .stdin_is_tty = options.stdin_is_tty},
-          in, out, err);
+          in, out, err, process_scope);
   }
   return 2;
 }
 
 int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options, std::istream& in, std::ostream& out,
-                                std::ostream& err)
+                                std::ostream& err, std::optional<ava::process::ProcessScopeV1> process_scope)
 {
   if (!options.stdin_is_tty)
   {
@@ -779,12 +792,10 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
     }
     if ((*catalog)->provider_auth_is_none(provider_id))
     {
-      out << ava::tui::sanitize_terminal_text((*catalog)->display_name(provider_id))
-          << " requires no credential (auth:none). auth.json was not modified.\n";
+      out << ava::tui::sanitize_terminal_text((*catalog)->display_name(provider_id)) << " requires no credential (auth:none). auth.json was not modified.\n";
       return 0;
     }
-    if ((*catalog)->provider_is_user_defined(provider_id) && options.credential_type &&
-        *options.credential_type != ConnectCredentialType::ApiKey)
+    if ((*catalog)->provider_is_user_defined(provider_id) && options.credential_type && *options.credential_type != ConnectCredentialType::ApiKey)
     {
       err << "user-defined providers only support API key credentials\n";
       return 2;
@@ -792,7 +803,8 @@ int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProvi
   }
   if (provider_id == "openai" && !options.credential_type)
   {
-    return run_connect_openai_wizard(paths, ConnectProviderWizardOptions{.provider_id = provider_id, .stdin_is_tty = options.stdin_is_tty}, in, out, err);
+    return run_connect_openai_wizard(paths, ConnectProviderWizardOptions{.provider_id = provider_id, .stdin_is_tty = options.stdin_is_tty}, in, out, err,
+                                     std::move(process_scope));
   }
 
   ConnectCredentialType credential_type = ConnectCredentialType::ApiKey;

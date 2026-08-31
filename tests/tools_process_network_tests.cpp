@@ -1060,6 +1060,15 @@ void test_websearch_tool()
              transport.requests[0].timeout_ms == 7000 && transport.requests[0].follow_redirects,
          "websearch requires permission, queries a bounded search endpoint, and parses structured results");
 
+  auto missing_factory_context = context;
+  missing_factory_context.permission_resolver =
+      [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto missing_factory = ava::tools::websearch(missing_factory_context, "factory authority");
+  expect(!missing_factory && missing_factory.error().message() == "websearch transport process authority is unavailable",
+         "websearch without an explicit fake or session transport factory fails before process reservation");
+
   StaticTransport unused_transport(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "{}"});
   auto invalid_query = ava::tools::websearch(context, "\n", ava::tools::WebSearchOptions{.transport = &unused_transport});
   expect(!invalid_query && unused_transport.requests.empty(), "websearch rejects empty/control queries before transport use");

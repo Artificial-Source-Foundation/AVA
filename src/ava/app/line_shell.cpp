@@ -368,9 +368,9 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
   runtime::session_ts& unlocked_session = state.unlocked_session;
   auto const session_snapshot = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->is_offline(), session_r->model().provider_id, session_r->paths()};
+    return std::tuple{session_r->is_offline(), session_r->model().provider_id, session_r->session_process_scope()};
   }();
-  auto const& [offline, model_provider_id, paths] = session_snapshot;
+  auto const& [offline, model_provider_id, session_process_scope] = session_snapshot;
 
   LineResult line_result;
   if (offline)
@@ -379,7 +379,12 @@ LineResult with_provider_runtime(ShellState& state, std::string_view offline_suf
     return line_result;
   }
   auto const provider_id = provider_override.empty() ? std::string_view(model_provider_id) : provider_override;
-  ava::http::CurlCliTransport transport;
+  if (!session_process_scope)
+  {
+    add_output(line_result, "prompt process authority is unavailable" + std::string(offline_suffix));
+    return line_result;
+  }
+  ava::http::CurlCliTransport transport(*session_process_scope);
   CRITICAL_AREA_BEGIN_R(session);
   auto ensured_provider_catalog = session_r->ensure_provider_catalog();
   ava::app::runtime::RunOptions run_options;

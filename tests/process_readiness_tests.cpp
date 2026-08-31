@@ -658,8 +658,12 @@ void test_completion_descriptor_hygiene_and_bounds()
                             : ava::core::Result<ProcessActivityV1>(std::unexpected(child.error()));
       records_ok = records_ok && status && activity && activity->process_finished;
     }
+    auto const cycle = ava::process::testing::SupervisorTestAccess::pulse_monitor(supervisor);
+    static_cast<void>(ava::process::testing::SupervisorTestAccess::wait_for_monitor_cycle(supervisor, cycle, std::chrono::steady_clock::now() + 1s));
+    auto monitor = ava::process::testing::SupervisorTestAccess::monitor_snapshot(supervisor);
     auto after_records = descriptor_count();
-    no_record_growth = !baseline || !after_records || (*baseline == *after_records && records_ok);
+    no_record_growth = !baseline || !after_records ||
+                       (*after_records == *baseline + monitor.counters.current_wake_descriptors && monitor.counters.current_watches == 0 && records_ok);
   }
   auto after_supervisor = descriptor_count();
   bool const teardown_clean = !baseline || !after_supervisor || *baseline == *after_supervisor;

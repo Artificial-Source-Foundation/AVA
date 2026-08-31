@@ -723,9 +723,10 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     record.sentinel = ticket.sentinel;
     record.cleanup = CleanupStateV1::Pending;
     record.state = record.reason ? ProcessStateV1::StopRequested : ProcessStateV1::Launching;
+    detail::register_record_members_locked(*state, record, Clock::now());
     ticket.registered = true;
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
 
   auto fail_registered = [&](TerminationReasonV1 reason, ava::core::Error error) -> ava::core::Result<ProcessHandle> {
     ticket.leader_control.write_end.reset();
@@ -734,7 +735,7 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     if (ticket.sentinel_control)
       ticket.sentinel_control->write_end.reset();
     auto const cleanup_deadline = detail::fail_registered_launch(state, identity, reason);
-    state->changed.notify_all();
+    detail::notify_monitor_state(state);
     detail::await_internal_settlement(handle_state, cleanup_deadline);
     ticket.record = 0;
     return std::unexpected(std::move(error));
@@ -749,7 +750,7 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     // One commit linearizes adoption before either exact child is released.
     release_decision = detail::commit_gate_release_locked(*state, identity, ticket.startup_deadline);
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   if (!release_decision.committed)
   {
     ticket.leader_control.write_end.reset();
@@ -819,7 +820,7 @@ ava::core::Result<ProcessHandle> Supervisor::adopt(AdoptionGate&& gate)
     else
       found->second->startup_handshake_complete = true;
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   if (stopped_reason)
     return fail_registered(TerminationReasonV1::LaunchFailed, detail::startup_stopped_error("secure adoption", *stopped_reason));
 

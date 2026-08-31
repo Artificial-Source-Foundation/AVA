@@ -155,22 +155,26 @@ ava::core::Result<ProcessActivityV1> Supervisor::wait_for_activity(ProcessHandle
           std::swap(unique_endpoints[index], unique_endpoints[next]);
       }
     }
-    std::array<std::unique_lock<std::mutex>, kMaxPipeWatchesV1> endpoint_locks{};
-    for (std::size_t index = 0; index < unique_count; ++index)
-      endpoint_locks[index] = std::unique_lock(unique_endpoints[index]->mutex);
-
-    for (std::size_t index = 0; index < watches.size(); ++index)
+    std::array<int, kMaxPipeWatchesV1> endpoint_descriptors{};
     {
-      auto const& item = resolved[index];
-      if (item.endpoint->descriptor.get() < 0)
-        return std::unexpected(detail::invalid_error("process pipe watch endpoint is closed"));
-      if (item.interest == PipeInterestV1::Readable && !item.endpoint->readable)
-        return std::unexpected(detail::invalid_error("process pipe watch does not match a readable endpoint"));
-      if (item.interest == PipeInterestV1::Writable && !item.endpoint->writable)
-        return std::unexpected(detail::invalid_error("process pipe watch does not match a writable endpoint"));
+      std::array<std::unique_lock<std::mutex>, kMaxPipeWatchesV1> endpoint_locks{};
+      for (std::size_t index = 0; index < unique_count; ++index)
+        endpoint_locks[index] = std::unique_lock(unique_endpoints[index]->mutex);
+
+      for (std::size_t index = 0; index < watches.size(); ++index)
+      {
+        auto const& item = resolved[index];
+        if (item.endpoint->descriptor.get() < 0)
+          return std::unexpected(detail::invalid_error("process pipe watch endpoint is closed"));
+        if (item.interest == PipeInterestV1::Readable && !item.endpoint->readable)
+          return std::unexpected(detail::invalid_error("process pipe watch does not match a readable endpoint"));
+        if (item.interest == PipeInterestV1::Writable && !item.endpoint->writable)
+          return std::unexpected(detail::invalid_error("process pipe watch does not match a writable endpoint"));
+        endpoint_descriptors[index] = item.endpoint->descriptor.get();
+      }
     }
 
-    auto waiter = detail::register_active_waiter(state);
+    auto waiter = detail::register_active_waiter(state, handle_state->record);
     if (!waiter)
       return std::unexpected(std::move(waiter.error()));
 
@@ -181,27 +185,27 @@ ava::core::Result<ProcessActivityV1> Supervisor::wait_for_activity(ProcessHandle
     }
 
     int completion_descriptor = -1;
+    bool channel_created = false;
     bool process_finished_before_poll = false;
     {
       std::lock_guard handle_lock(handle_state->mutex);
-      bool channel_created = false;
       auto completion = ensure_completion_channel_locked(*handle_state, channel_created);
       if (!completion)
         return std::unexpected(std::move(completion.error()));
       completion_descriptor = *completion;
-      if (channel_created)
-      {
-        auto hook_result = invoke_completion_channel_hook(channel_hook);
-        if (!hook_result)
-          return std::unexpected(std::move(hook_result.error()));
-      }
       process_finished_before_poll = handle_state->final_status.has_value();
+    }
+    if (channel_created)
+    {
+      auto hook_result = invoke_completion_channel_hook(channel_hook);
+      if (!hook_result)
+        return std::unexpected(std::move(hook_result.error()));
     }
 
     std::array<pollfd, kMaxPipeWatchesV1 + 1> descriptors{};
     for (std::size_t index = 0; index < watches.size(); ++index)
     {
-      descriptors[index].fd = resolved[index].endpoint->descriptor.get();
+      descriptors[index].fd = endpoint_descriptors[index];
       descriptors[index].events = resolved[index].interest == PipeInterestV1::Readable ? POLLIN : POLLOUT;
     }
     descriptors[watches.size()].fd = completion_descriptor;

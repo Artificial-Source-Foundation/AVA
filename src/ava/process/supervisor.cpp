@@ -83,54 +83,6 @@ std::uint64_t elapsed_milliseconds(Clock::time_point begin, Clock::time_point en
   return value <= 0 ? 0 : static_cast<std::uint64_t>(value);
 }
 
-ActiveWaiterRegistration::ActiveWaiterRegistration(std::shared_ptr<SupervisorState> state) noexcept : state_(std::move(state))
-{
-}
-
-ActiveWaiterRegistration::ActiveWaiterRegistration(ActiveWaiterRegistration&& other) noexcept : state_(std::move(other.state_))
-{
-}
-
-ActiveWaiterRegistration& ActiveWaiterRegistration::operator=(ActiveWaiterRegistration&& other) noexcept
-{
-  if (this != &other)
-  {
-    release();
-    state_ = std::move(other.state_);
-  }
-  return *this;
-}
-
-ActiveWaiterRegistration::~ActiveWaiterRegistration()
-{
-  release();
-}
-
-void ActiveWaiterRegistration::release() noexcept
-{
-  if (!state_)
-    return;
-  {
-    std::lock_guard lock(state_->mutex);
-    if (state_->active_waiters > 0)
-      --state_->active_waiters;
-  }
-  state_->changed.notify_all();
-  state_.reset();
-}
-
-ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state)
-{
-  {
-    std::lock_guard lock(state->mutex);
-    if (state->active_waiters == std::numeric_limits<std::size_t>::max())
-      return std::unexpected(process_error(ava::core::ErrorCategory::Io, "process supervisor active-waiter capacity is exhausted"));
-    ++state->active_waiters;
-  }
-  state->changed.notify_all();
-  return ActiveWaiterRegistration(state);
-}
-
 void release_owner_alias_locked(SupervisorState& state, Record const& record)
 {
   auto found = state.owner_aliases.find(record.owner_key);
@@ -206,6 +158,11 @@ void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 clea
 {
   if (record.state == ProcessStateV1::Finished)
     return;
+#if !defined(_WIN32)
+  // Detach authoritative record ownership before terminal retention. Any
+  // in-flight poll batch keeps its shared descriptor identities alive.
+  detach_record_watches_locked(record);
+#endif
   if (!record.reason)
     record.reason = TerminationReasonV1::LaunchFailed;
   record.cleanup = cleanup;
@@ -334,13 +291,18 @@ GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint
     return GateReleaseDecision{.committed = true, .reason = TerminationReasonV1::LaunchFailed, .cleanup_deadline = startup_deadline};
   }
 
-  if (!record.reason)
-    static_cast<void>(commit_reason_locked(record, state.shutting_down ? TerminationReasonV1::ApplicationShutdown : TerminationReasonV1::LaunchFailed));
+  bool const new_reason =
+      !record.reason && commit_reason_locked(record, state.shutting_down ? TerminationReasonV1::ApplicationShutdown : TerminationReasonV1::LaunchFailed);
   mark_launch_error_locked(record);
   if (record.state != ProcessStateV1::Finished)
   {
-    if (!record.stop_deadline)
+    bool const new_deadline = !record.stop_deadline;
+    if (new_deadline)
       record.stop_deadline = now + kDefaultCleanupBudget;
+#if !defined(_WIN32)
+    if (new_reason || new_deadline)
+      reset_record_probe_schedule_locked(record, now);
+#endif
     if (record.registered && record.state != ProcessStateV1::Reaping)
       record.state = ProcessStateV1::StopRequested;
   }
@@ -373,10 +335,15 @@ ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& s
   auto& record = *found->second;
   if (record.state == ProcessStateV1::Finished)
     return now;
-  static_cast<void>(commit_reason_locked(record, fallback));
+  bool const new_reason = commit_reason_locked(record, fallback);
   mark_launch_error_locked(record);
-  if (!record.stop_deadline)
+  bool const new_deadline = !record.stop_deadline;
+  if (new_deadline)
     record.stop_deadline = now + kDefaultCleanupBudget;
+#if !defined(_WIN32)
+  if (new_reason || new_deadline)
+    reset_record_probe_schedule_locked(record, now);
+#endif
   if (record.registered && record.state != ProcessStateV1::Reaping)
     record.state = ProcessStateV1::StopRequested;
   return std::min(*record.stop_deadline, now + kDefaultCleanupBudget);
@@ -698,16 +665,22 @@ ava::core::Result<StopResultV1> Supervisor::request_stop(ProcessHandle const& ha
     auto& record = *found->second;
     if (record.state != ProcessStateV1::Finished)
     {
-      result.newly_requested += detail::commit_reason_locked(record, reason) ? 1U : 0U;
-      if (!record.stop_deadline || deadline < *record.stop_deadline)
+      bool const new_reason = detail::commit_reason_locked(record, reason);
+      result.newly_requested += new_reason ? 1U : 0U;
+      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
+      if (earlier_deadline)
         record.stop_deadline = deadline;
+#if !defined(_WIN32)
+      if (new_reason || earlier_deadline)
+        detail::reset_record_probe_schedule_locked(record, Clock::now());
+#endif
       if (record.registered && record.state != ProcessStateV1::Reaping)
         record.state = ProcessStateV1::StopRequested;
       else if (!record.registered)
         detail::finalize_locked(*state, record, CleanupStateV1::NotRequired);
     }
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   return result;
 }
 
@@ -730,16 +703,22 @@ ava::core::Result<StopResultV1> Supervisor::request_stop(OwnerPathV1 const& owne
       ++result.matched;
       if (record.state == ProcessStateV1::Finished)
         continue;
-      result.newly_requested += detail::commit_reason_locked(record, reason) ? 1U : 0U;
-      if (!record.stop_deadline || deadline < *record.stop_deadline)
+      bool const new_reason = detail::commit_reason_locked(record, reason);
+      result.newly_requested += new_reason ? 1U : 0U;
+      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
+      if (earlier_deadline)
         record.stop_deadline = deadline;
+#if !defined(_WIN32)
+      if (new_reason || earlier_deadline)
+        detail::reset_record_probe_schedule_locked(record, Clock::now());
+#endif
       if ((record.registered || record.state == ProcessStateV1::Launching) && record.state != ProcessStateV1::Reaping)
         record.state = ProcessStateV1::StopRequested;
       else if (!record.registered && record.state != ProcessStateV1::Reaping)
         detail::finalize_locked(*state, record, CleanupStateV1::NotRequired);
     }
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   return result;
 }
 
@@ -749,7 +728,7 @@ ava::core::Result<ExitStatusV1> Supervisor::wait(ProcessHandle const& handle, Pr
   if (!handle.valid() || handle.state_->supervisor.lock().get() != state.get())
     return std::unexpected(detail::invalid_error("process handle does not belong to this supervisor"));
   auto handle_state = handle.state_;
-  auto waiter = detail::register_active_waiter(state);
+  auto waiter = detail::register_active_waiter(state, handle_state->record);
   if (!waiter)
     return std::unexpected(std::move(waiter.error()));
   std::unique_lock lock(handle_state->mutex);
@@ -854,10 +833,13 @@ ShutdownResultV1 Supervisor::shutdown(ProcessDeadline deadline) noexcept
       if (record.state == ProcessStateV1::Finished)
         continue;
       record.included_in_shutdown = true;
-      static_cast<void>(detail::commit_reason_locked(record, TerminationReasonV1::ApplicationShutdown));
-      if (!record.stop_deadline || deadline < *record.stop_deadline)
+      bool const new_reason = detail::commit_reason_locked(record, TerminationReasonV1::ApplicationShutdown);
+      bool const earlier_deadline = !record.stop_deadline || deadline < *record.stop_deadline;
+      if (earlier_deadline)
         record.stop_deadline = deadline;
 #if !defined(_WIN32)
+      if (new_reason || earlier_deadline)
+        detail::reset_record_probe_schedule_locked(record, Clock::now());
       if (record.registered)
       {
         detail::begin_stop_locked(record, Clock::now());
@@ -870,7 +852,7 @@ ShutdownResultV1 Supervisor::shutdown(ProcessDeadline deadline) noexcept
         detail::finalize_locked(*state, record, CleanupStateV1::NotRequired);
     }
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
 
   {
     std::unique_lock lock(state->mutex);
@@ -930,47 +912,11 @@ ShutdownResultV1 Supervisor::shutdown(ProcessDeadline deadline) noexcept
                                                         .settled_count = state->settled_records - settled_before};
     state->stop_monitor = true;
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
 #if !defined(_WIN32)
   detail::join_monitor(state);
 #endif
   return implementation_->shutdown_result;
 }
-
-namespace testing {
-
-void SupervisorTestAccess::set_after_fork_before_release_hook(Supervisor& supervisor, std::function<void()> hook)
-{
-  auto owned_hook = std::make_shared<detail::AfterForkBeforeReleaseHook>(std::move(hook));
-  std::lock_guard lock(supervisor.implementation_->state->mutex);
-  supervisor.implementation_->state->after_fork_before_release_for_test = std::move(owned_hook);
-}
-
-void SupervisorTestAccess::clear_after_fork_before_release_hook(Supervisor& supervisor) noexcept
-{
-  std::lock_guard lock(supervisor.implementation_->state->mutex);
-  supervisor.implementation_->state->after_fork_before_release_for_test.reset();
-}
-
-void SupervisorTestAccess::set_after_completion_channel_create_hook(Supervisor& supervisor, std::function<void()> hook)
-{
-  auto owned_hook = std::make_shared<detail::AfterForkBeforeReleaseHook>(std::move(hook));
-  std::lock_guard lock(supervisor.implementation_->state->mutex);
-  supervisor.implementation_->state->after_completion_channel_create_for_test = std::move(owned_hook);
-}
-
-void SupervisorTestAccess::clear_after_completion_channel_create_hook(Supervisor& supervisor) noexcept
-{
-  std::lock_guard lock(supervisor.implementation_->state->mutex);
-  supervisor.implementation_->state->after_completion_channel_create_for_test.reset();
-}
-
-void SupervisorTestAccess::fail_next_common_child_working_directory(Supervisor& supervisor) noexcept
-{
-  std::lock_guard lock(supervisor.implementation_->state->mutex);
-  supervisor.implementation_->state->fail_next_common_child_working_directory_for_test = true;
-}
-
-}  // namespace testing
 
 }  // namespace ava::process

@@ -4,6 +4,8 @@
 #include "ava/process/supervisor.h"
 #include "ava/core/error.h"
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -30,7 +32,10 @@ namespace ava::process::detail {
 using Clock = std::chrono::steady_clock;
 using AfterForkBeforeReleaseHook = std::function<void()>;
 
-inline constexpr auto kMonitorPollInterval = std::chrono::milliseconds(10);
+inline constexpr auto kFallbackInitialInterval = std::chrono::milliseconds(10);
+inline constexpr auto kFallbackMaximumInterval = std::chrono::seconds(1);
+inline constexpr auto kWaitedFallbackMaximumInterval = std::chrono::milliseconds(50);
+inline constexpr auto kShortStopProbeInterval = std::chrono::milliseconds(10);
 inline constexpr auto kPostKillObservation = std::chrono::milliseconds(20);
 inline constexpr auto kDefaultCleanupBudget = std::chrono::seconds(2);
 inline constexpr auto kMaximumStartupTimeout = std::chrono::seconds(30);
@@ -78,6 +83,112 @@ struct Pipe
 {
   UniqueFd read_end;
   UniqueFd write_end;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+enum class MonitorBackendMode
+{
+  Automatic,
+  ForceFallbackUnavailable,
+  ForceFallbackDenied,
+};
+
+enum class PidfdFailureClass
+{
+  None,
+  Unavailable,
+  Denied,
+  Resource,
+  Other,
+};
+
+struct MonitorTelemetry
+{
+  std::atomic<std::uint64_t> wake_attempts{0};
+  std::atomic<std::uint64_t> wake_drains{0};
+  std::atomic<std::uint64_t> wake_coalesces{0};
+  std::atomic<std::uint64_t> wake_failures{0};
+  std::atomic<std::uint64_t> poll_calls{0};
+  std::atomic<std::uint64_t> poll_timeouts{0};
+  std::atomic<std::uint64_t> poll_peak_entries{0};
+  std::atomic<std::uint64_t> pidfd_attempts{0};
+  std::atomic<std::uint64_t> pidfd_successes{0};
+  std::atomic<std::uint64_t> pidfd_unavailable_failures{0};
+  std::atomic<std::uint64_t> pidfd_denied_failures{0};
+  std::atomic<std::uint64_t> pidfd_resource_failures{0};
+  std::atomic<std::uint64_t> pidfd_other_failures{0};
+  std::atomic<std::uint64_t> exact_probes{0};
+  std::atomic<std::uint64_t> fallback_probes{0};
+  std::atomic<std::uint64_t> short_probes{0};
+  std::array<std::atomic<std::uint64_t>, 8> fallback_delay_buckets{};
+  std::atomic<std::uint64_t> group_observations{0};
+  std::atomic<std::uint64_t> quiet_group_proofs{0};
+  std::atomic<std::uint64_t> current_watches{0};
+  std::atomic<std::uint64_t> peak_watches{0};
+  std::atomic<std::uint64_t> stale_events{0};
+  std::atomic<std::uint64_t> pollnval_events{0};
+  std::atomic<std::uint64_t> cloexec_checks{0};
+  std::atomic<std::uint64_t> cloexec_failures{0};
+  std::atomic<std::uint64_t> nonblocking_checks{0};
+  std::atomic<std::uint64_t> nonblocking_failures{0};
+  std::atomic<std::uint64_t> current_wake_descriptors{0};
+  std::atomic<std::uint64_t> peak_wake_descriptors{0};
+  std::atomic<std::uint64_t> current_monitor_threads{0};
+  std::atomic<std::uint64_t> peak_monitor_threads{0};
+  std::atomic<std::uint64_t> monitor_cycles{0};
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct PidfdWatch
+{
+  PidfdWatch(UniqueFd descriptor_value, std::shared_ptr<MonitorTelemetry> telemetry_value) noexcept;
+  ~PidfdWatch();
+
+  UniqueFd descriptor;
+  std::shared_ptr<MonitorTelemetry> telemetry;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct MonitorWake
+{
+  MonitorWake(UniqueFd read_descriptor, UniqueFd write_descriptor, bool uses_eventfd, std::shared_ptr<MonitorTelemetry> telemetry_value) noexcept;
+  ~MonitorWake();
+
+  [[nodiscard]] int poll_descriptor() const noexcept { return read_end.get(); }
+  [[nodiscard]] int signal_descriptor() const noexcept { return eventfd ? read_end.get() : write_end.get(); }
+  [[nodiscard]] std::size_t descriptor_count() const noexcept { return eventfd ? 1U : 2U; }
+
+  UniqueFd read_end;
+  UniqueFd write_end;
+  bool eventfd = false;
+  std::shared_ptr<MonitorTelemetry> telemetry;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct PidfdOpenResult
+{
+  std::shared_ptr<PidfdWatch> watch;
+  PidfdFailureClass failure = PidfdFailureClass::None;
+  bool cache_runtime_unavailable = false;
+  bool prompt_exact_probe = false;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
+struct MemberMonitorState
+{
+  std::shared_ptr<PidfdWatch> watch;
+  std::uint64_t generation = 0;
+  std::chrono::milliseconds fallback_interval{kFallbackInitialInterval};
+  Clock::time_point next_exact_probe{};
+  std::uint64_t probe_count = 0;
+  std::uint64_t reset_count = 0;
+  bool fallback_enabled = false;
+  bool readiness_due = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -142,11 +253,13 @@ struct Record
   std::optional<Clock::time_point> finished;
   std::optional<ProcessDeadline> stop_deadline;
   std::optional<Clock::time_point> kill_due;
-  std::optional<Clock::time_point> post_kill_due;
+  std::optional<Clock::time_point> group_observation_due;
+  std::optional<Clock::time_point> short_stop_probe_due;
   std::shared_ptr<HandleState> handle;
   std::uint64_t stdout_bytes = 0;
   std::uint64_t stderr_bytes = 0;
   std::uint32_t settlement_count = 0;
+  std::size_t active_waiters = 0;
   int exit_code = 0;
   int signal_number = 0;
   bool stdout_truncated = false;
@@ -161,10 +274,14 @@ struct Record
   bool term_sent = false;
   bool kill_sent = false;
   bool cleanup_failed = false;
+  bool natural_group_observation_started = false;
+  bool post_kill_group_observation_started = false;
   std::uint8_t quiet_group_observations = 0;
 #if !defined(_WIN32)
   pid_t leader = -1;
   pid_t sentinel = -1;
+  MemberMonitorState leader_monitor;
+  MemberMonitorState sentinel_monitor;
   bool leader_observed = false;
   bool sentinel_observed = false;
   bool leader_reaped = false;
@@ -196,12 +313,27 @@ struct SupervisorState
   std::uint64_t next_owner_alias = 1;
   std::size_t live_records = 0;
   std::size_t settled_records = 0;
-  std::size_t active_waiters = 0;
   bool accepting = true;
   bool shutting_down = false;
   bool monitor_started = false;
   bool stop_monitor = false;
   bool monitor_joined = false;
+#if !defined(_WIN32)
+  MonitorBackendMode monitor_backend_mode = MonitorBackendMode::Automatic;
+  bool pidfd_runtime_unavailable = false;
+  std::uint64_t next_monitor_generation = 1;
+  std::uint64_t test_control_generation = 0;
+  std::shared_ptr<MonitorTelemetry> monitor_telemetry = std::make_shared<MonitorTelemetry>();
+  std::shared_ptr<MonitorWake> monitor_wake;
+  std::shared_ptr<AfterForkBeforeReleaseHook> after_poll_snapshot_for_test;
+#endif
+
+  // Process lock order is strict:
+  // 1. shutdown mutex -> state, with state released before monitor join;
+  // 2. monitor lifecycle mutex -> state, never state -> lifecycle;
+  // 3. state -> handle only for final-value publication;
+  // 4. endpoint mutexes in stable pointer order, never endpoint -> state;
+  // 5. poll, wake I/O, and test hooks run without state, handle, or endpoint locks.
   std::mutex monitor_lifecycle_mutex;
   std::thread monitor;
 
@@ -221,15 +353,17 @@ class ActiveWaiterRegistration final
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
-  explicit ActiveWaiterRegistration(std::shared_ptr<SupervisorState> state) noexcept;
+  ActiveWaiterRegistration(std::shared_ptr<SupervisorState> state, std::uint64_t record) noexcept;
   void release() noexcept;
 
   std::shared_ptr<SupervisorState> state_;
+  std::uint64_t record_ = 0;
 
-  friend ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state);
+  friend ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state, std::uint64_t record);
 };
 
-[[nodiscard]] ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state);
+[[nodiscard]] ava::core::Result<ActiveWaiterRegistration> register_active_waiter(std::shared_ptr<SupervisorState> const& state, std::uint64_t record);
+void notify_monitor_state(std::shared_ptr<SupervisorState> const& state) noexcept;
 void release_owner_alias_locked(SupervisorState& state, Record const& record);
 void prune_terminal_locked(SupervisorState& state);
 void await_internal_settlement(std::shared_ptr<HandleState> const& handle, ProcessDeadline deadline) noexcept;
@@ -279,12 +413,19 @@ void close_nonstandard_descriptors_except(std::span<int const> preserved, int ma
 [[nodiscard]] int descriptor_limit() noexcept;
 
 void observe_status(Record& record, siginfo_t const& information) noexcept;
-[[nodiscard]] bool observe_member(pid_t process, bool& observed, Record& record, bool leader) noexcept;
+[[nodiscard]] bool observe_member(pid_t process, bool& observed, Record& record, bool leader, bool detect_stops = true) noexcept;
 [[nodiscard]] bool reap_member(pid_t process, bool observed, bool& reaped, Record& record) noexcept;
 [[nodiscard]] bool signal_verified_group(Record& record, int signal_number) noexcept;
 [[nodiscard]] std::optional<bool> verified_group_has_live_member(pid_t group) noexcept;
+[[nodiscard]] ava::core::Result<std::shared_ptr<MonitorWake>> make_monitor_wake(std::shared_ptr<MonitorTelemetry> const& telemetry);
+void signal_monitor_wake(std::shared_ptr<MonitorWake> const& wake) noexcept;
+void drain_monitor_wake(std::shared_ptr<MonitorWake> const& wake) noexcept;
+[[nodiscard]] PidfdOpenResult open_pidfd_watch(pid_t process, MonitorBackendMode mode, bool runtime_unavailable,
+                                               std::shared_ptr<MonitorTelemetry> const& telemetry) noexcept;
+void register_record_members_locked(SupervisorState& state, Record& record, Clock::time_point now) noexcept;
+void reset_record_probe_schedule_locked(Record& record, Clock::time_point now) noexcept;
+void detach_record_watches_locked(Record& record) noexcept;
 void begin_stop_locked(Record& record, Clock::time_point now);
-void monitor_record_locked(SupervisorState& state, Record& record, Clock::time_point now);
 void monitor_main(std::shared_ptr<SupervisorState> state) noexcept;
 [[nodiscard]] ava::core::VoidResult ensure_monitor_started(std::shared_ptr<SupervisorState> const& state);
 void join_monitor(std::shared_ptr<SupervisorState> const& state) noexcept;

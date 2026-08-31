@@ -180,6 +180,7 @@ set(AVA_TESTS_SOURCES
   "process_adoption_posix_tests.cpp"
   "process_environment_tests.cpp"
   "process_launch_protocol_posix_tests.cpp"
+  "process_monitor_tests.cpp"
   "process_readiness_tests.cpp"
   "process_supervisor_tests.cpp"
   "process_supervisor_posix_tests.cpp"
@@ -308,6 +309,7 @@ set(AVA_TEST_SUITES
   process_adoption_posix
   process_environment
   process_launch_protocol_posix
+  process_monitor
   process_readiness
   process_supervisor
   process_supervisor_posix
@@ -339,6 +341,7 @@ set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 7
 set_tests_properties(ava_tests.process_adoption_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;adoption;offline")
 set_tests_properties(ava_tests.process_environment PROPERTIES LABELS "process;offline")
 set_tests_properties(ava_tests.process_launch_protocol_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 15 LABELS "process;posix;offline")
+set_tests_properties(ava_tests.process_monitor PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;monitor;offline")
 set_tests_properties(ava_tests.process_readiness PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;readiness;offline")
 set_tests_properties(ava_tests.process_supervisor_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;offline")
 set_tests_properties(ava_tests.containment PROPERTIES SKIP_RETURN_CODE 77)

@@ -6,8 +6,11 @@ add_library(ava_process
   "supervisor.cpp"
   "supervisor_activity_posix.cpp"
   "supervisor_adoption_posix.cpp"
+  "supervisor_backend_posix.cpp"
   "supervisor_monitor_posix.cpp"
   "supervisor_spawn_posix.cpp"
+  "supervisor_test_support.cpp"
+  "supervisor_waiter.cpp"
   "types.cpp"
 )
 

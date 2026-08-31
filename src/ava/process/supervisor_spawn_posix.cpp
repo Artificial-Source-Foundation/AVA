@@ -793,6 +793,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
       record.leader = child;
       record.cleanup = CleanupStateV1::Pending;
       record.state = record.reason ? ProcessStateV1::StopRequested : ProcessStateV1::Launching;
+      detail::register_record_members_locked(*state, record, Clock::now());
     }
   }
   if (reservation_ended)
@@ -801,13 +802,13 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     static_cast<void>(detail::exact_provisional_cleanup(child, -1, Clock::now() + 500ms));
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process reservation ended during launch"));
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
 
   if (auto hook = detail::invoke_after_fork_before_release_hook(state); !hook)
   {
     prepared->gate.write_end.reset();
     auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
-    state->changed.notify_all();
+    detail::notify_monitor_state(state);
     detail::await_internal_settlement(handle_state, cleanup_deadline);
     return std::unexpected(std::move(hook.error()));
   }
@@ -817,7 +818,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     std::lock_guard lock(state->mutex);
     release_decision = detail::commit_gate_release_locked(*state, identity, startup_deadline);
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   if (!release_decision.committed)
   {
     prepared->gate.write_end.reset();
@@ -830,7 +831,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   {
     prepared->gate.write_end.reset();
     auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
-    state->changed.notify_all();
+    detail::notify_monitor_state(state);
     detail::await_internal_settlement(handle_state, cleanup_deadline);
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "failed to release the registered process exec gate"));
   }
@@ -842,7 +843,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     auto const fallback_reason =
         confirmation.disposition == detail::LaunchProtocolDispositionV1::ExecFailed ? TerminationReasonV1::ExecFailed : TerminationReasonV1::LaunchFailed;
     auto const cleanup_deadline = detail::fail_registered_launch(state, identity, fallback_reason);
-    state->changed.notify_all();
+    detail::notify_monitor_state(state);
     detail::await_internal_settlement(handle_state, cleanup_deadline);
     return std::unexpected(detail::launch_protocol_error(confirmation, "process"));
   }
@@ -858,7 +859,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     else
       found->second->startup_handshake_complete = true;
   }
-  state->changed.notify_all();
+  detail::notify_monitor_state(state);
   if (startup_stop_reason)
   {
     auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);

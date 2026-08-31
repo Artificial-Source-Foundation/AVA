@@ -209,24 +209,81 @@ void test_stream_separation_hup_and_callbacks()
   }
 }
 
+void test_prelaunch_checkpoints_and_empty_body()
+{
+  {
+    CurlFixture fixture;
+    auto response = fixture.transport.send(request_for("/cancel", 60000), [] { return true; });
+    fixture.capture_snapshot();
+    expect(!response && response.error().message() == "transport request canceled" && fixture.snapshot.records.empty() && fixture.snapshot.live_records == 0 &&
+               !fixture.snapshot.monitor_started,
+           "immediate curl cancellation returns before operation reservation and starts no process monitor");
+  }
+  {
+    CurlFixture fixture;
+    unsigned callback_calls = 0;
+    auto response = fixture.transport.send(request_for("/cancel", 60000), [&callback_calls] { return ++callback_calls == 3; });
+    fixture.capture_snapshot();
+    expect(!response && response.error().message() == "transport request canceled" && callback_calls == 3 && fixture.snapshot.records.empty() &&
+               fixture.snapshot.live_records == 0 && !fixture.snapshot.monitor_started,
+           "curl cancellation immediately before spawn abandons its reservation without a process record or monitor");
+  }
+  {
+    CurlFixture fixture;
+    std::optional<ava::core::Result<ava::http::HttpResponse>> response;
+    bool callback_unwound = false;
+    try
+    {
+      response.emplace(fixture.transport.send(request_for("/cancel", 60000), []() -> bool { throw std::runtime_error("PRELAUNCH_CANCEL_CALLBACK_SECRET"); }));
+    }
+    catch (...)
+    {
+      callback_unwound = true;
+    }
+    fixture.capture_snapshot();
+    auto const formatted = response && !*response ? response->error().format() : std::string{};
+    expect(!callback_unwound && response && !*response && response->error().message() == "curl cancellation callback failed" &&
+               formatted.find("PRELAUNCH_CANCEL_CALLBACK_SECRET") == std::string::npos && fixture.snapshot.records.empty() &&
+               fixture.snapshot.live_records == 0 && !fixture.snapshot.monitor_started,
+           "prelaunch cancellation callback exceptions become content-free errors without process authority use");
+  }
+  {
+    CurlFixture fixture;
+    auto request = request_for("/success", 1);
+    request.body.assign(16U * 1024U * 1024U, 'd');
+    auto response = fixture.transport.send(request);
+    fixture.capture_snapshot();
+    expect(!response && response.error().message() == "curl transport deadline expired" && fixture.snapshot.records.empty() &&
+               fixture.snapshot.live_records == 0 && !fixture.snapshot.monitor_started,
+           "deadline expiry during parent-side body preparation returns before reservation and spawn");
+  }
+  {
+    EnvironmentRestore restore({"TMPDIR"});
+    auto const missing_temp = "/tmp/ava-curl-missing-temp-" + std::to_string(::getpid());
+    std::error_code remove_error;
+    std::filesystem::remove_all(missing_temp, remove_error);
+    static_cast<void>(::setenv("TMPDIR", missing_temp.c_str(), 1));
+    CurlFixture fixture;
+    auto response = fixture.transport.send(request_for("/success"));
+    fixture.capture_snapshot();
+    expect(
+        response && response->body.find("body=") != std::string::npos && settled_record(fixture.only_record(), ava::process::TerminationReasonV1::NaturalExit),
+        "an empty curl request body preserves config behavior without requiring a temporary file");
+  }
+}
+
 void test_stop_reasons_and_limits()
 {
   {
     CurlFixture fixture;
-    auto response = fixture.transport.send(request_for("/cancel"), [] { return true; });
-    fixture.capture_snapshot();
-    expect(!response && response.error().message() == "transport request canceled" &&
-               settled_record(fixture.only_record(), ava::process::TerminationReasonV1::Canceled),
-           "pre-deadline cancellation requests supervised Canceled cleanup and preserves the cancellation message");
-  }
-  {
-    CurlFixture fixture;
-    auto response = fixture.transport.send(request_for("/output-limit", 5000));
+    auto const started = std::chrono::steady_clock::now();
+    auto response = fixture.transport.send(request_for("/output-limit", 60000));
+    auto const elapsed = std::chrono::steady_clock::now() - started;
     fixture.capture_snapshot();
     auto const* record = fixture.only_record();
-    expect(!response && response.error().message() == "curl response exceeded byte limit" &&
+    expect(!response && response.error().message() == "curl response exceeded byte limit" && elapsed < 5s &&
                settled_record(record, ava::process::TerminationReasonV1::OutputLimit) && record->stdout_truncated && record->stdout_bytes > 8U * 1024U * 1024U,
-           "curl stdout hard cap requests OutputLimit while continuing raw output accounting");
+           "curl stdout hard cap starts cleanup at failure, remains below its elapsed ceiling, and accounts raw output");
   }
   {
     CurlFixture fixture;
@@ -240,13 +297,41 @@ void test_stop_reasons_and_limits()
   }
   {
     CurlFixture fixture;
-    auto response = fixture.transport.send_streaming(request_for("/stream"), [](std::string_view) -> ava::core::VoidResult {
+    auto const started = std::chrono::steady_clock::now();
+    auto response = fixture.transport.send_streaming(request_for("/stream", 60000), [](std::string_view) -> ava::core::VoidResult {
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "original sink failure"));
     });
+    auto const elapsed = std::chrono::steady_clock::now() - started;
     fixture.capture_snapshot();
     expect(!response && response.error().category() == ava::core::ErrorCategory::Tool && response.error().message() == "original sink failure" &&
+               elapsed < 5s && settled_record(fixture.only_record(), ava::process::TerminationReasonV1::ProtocolFailure),
+           "stream sink failure starts bounded cleanup at failure and returns the original error below its elapsed ceiling");
+  }
+  {
+    CurlFixture fixture;
+    unsigned callback_calls = 0;
+    std::optional<ava::core::Result<ava::http::HttpResponse>> response;
+    bool callback_unwound = false;
+    auto const started = std::chrono::steady_clock::now();
+    try
+    {
+      response.emplace(fixture.transport.send(request_for("/term-refusal", 60000), [&callback_calls]() -> bool {
+        if (++callback_calls == 4)
+          throw std::runtime_error("POSTSPAWN_CANCEL_CALLBACK_SECRET");
+        return false;
+      }));
+    }
+    catch (...)
+    {
+      callback_unwound = true;
+    }
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    fixture.capture_snapshot();
+    auto const formatted = response && !*response ? response->error().format() : std::string{};
+    expect(!callback_unwound && response && !*response && response->error().message() == "curl cancellation callback failed" && callback_calls == 4 &&
+               formatted.find("POSTSPAWN_CANCEL_CALLBACK_SECRET") == std::string::npos && elapsed < 5s &&
                settled_record(fixture.only_record(), ava::process::TerminationReasonV1::ProtocolFailure),
-           "stream sink failure returns the original error after supervised ProtocolFailure cleanup");
+           "post-spawn cancellation callback exceptions request bounded ProtocolFailure cleanup without unwinding");
   }
   {
     CurlFixture fixture;
@@ -281,10 +366,11 @@ void test_group_cleanup_and_stderr_truncation()
   {
     CurlFixture fixture;
     auto const started = std::chrono::steady_clock::now();
-    auto response = fixture.transport.send(request_for("/term-refusal"), [started] { return std::chrono::steady_clock::now() - started > 100ms; });
+    auto response = fixture.transport.send(request_for("/term-refusal", 60000), [started] { return std::chrono::steady_clock::now() - started > 100ms; });
+    auto const elapsed = std::chrono::steady_clock::now() - started;
     fixture.capture_snapshot();
-    expect(!response && settled_record(fixture.only_record(), ava::process::TerminationReasonV1::Canceled) && no_waitable_immediate_child(),
-           "curl cancellation escalates a TERM-refusing group and leaves no waitable child");
+    expect(!response && elapsed < 5s && settled_record(fixture.only_record(), ava::process::TerminationReasonV1::Canceled) && no_waitable_immediate_child(),
+           "curl cancellation starts bounded cleanup at failure, escalates a TERM-refusing group, and leaves no waitable child");
   }
   {
     CurlFixture fixture;
@@ -377,6 +463,7 @@ void run_curl_transport_process_tests()
   test_exact_argv_config_body_and_success();
   test_exact_environment_capture();
   test_stream_separation_hup_and_callbacks();
+  test_prelaunch_checkpoints_and_empty_body();
   test_stop_reasons_and_limits();
   test_group_cleanup_and_stderr_truncation();
   test_natural_failures_exec_failure_and_redaction();

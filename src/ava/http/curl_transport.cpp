@@ -344,6 +344,11 @@ ava::core::Error protocol_error(std::string message)
   return ava::core::Error(ava::core::ErrorCategory::Io, std::move(message));
 }
 
+ava::core::Error cancellation_callback_error()
+{
+  return protocol_error("curl cancellation callback failed");
+}
+
 struct RequestFailure
 {
   ava::process::TerminationReasonV1 reason = ava::process::TerminationReasonV1::ProtocolFailure;
@@ -374,13 +379,16 @@ class CurlRequest final
         body_sink_(std::move(body_sink)),
         cancel_requested_(std::move(cancel_requested)),
         request_deadline_(saturating_add(Clock::now(), bounded_timeout(request.timeout_ms))),
-        cleanup_deadline_(saturating_add(request_deadline_, kCleanupBudget)),
-        settlement_deadline_(saturating_add(cleanup_deadline_, kSettlementObservationBudget))
+        reservation_cleanup_deadline_(saturating_add(request_deadline_, kCleanupBudget)),
+        reservation_settlement_deadline_(saturating_add(reservation_cleanup_deadline_, kSettlementObservationBudget))
   {
   }
 
   [[nodiscard]] ava::core::Result<HttpResponse> run()
   {
+    if (auto checkpoint = prelaunch_checkpoint(); !checkpoint)
+      return std::unexpected(std::move(checkpoint.error()));
+
     auto operation = parent_scope_.operation();
     if (!operation)
       return std::unexpected(generic_transport_error(nullptr, 0, 0));
@@ -388,10 +396,20 @@ class CurlRequest final
     if (!environment)
       return std::unexpected(generic_transport_error(nullptr, 0, 0));
 
-    auto body_file = TempBodyFile::create(request_.body);
-    if (!body_file)
-      return std::unexpected(std::move(body_file.error()));
-    auto config = build_curl_config(request_, body_file->path());
+    std::optional<TempBodyFile> body_file;
+    std::string body_path;
+    if (!request_.body.empty())
+    {
+      auto created = TempBodyFile::create(request_.body);
+      if (!created)
+        return std::unexpected(std::move(created.error()));
+      body_file.emplace(std::move(*created));
+      body_path = body_file->path();
+    }
+    auto config = build_curl_config(request_, body_path);
+
+    if (auto checkpoint = prelaunch_checkpoint(); !checkpoint)
+      return std::unexpected(std::move(checkpoint.error()));
 
     auto& supervisor = operation->supervisor();
     auto reservation = supervisor.reserve(operation->owner_prefix(), ava::process::ProcessRoleV1::Curl,
@@ -402,6 +420,10 @@ class CurlRequest final
     std::vector<std::string> arguments{"curl", "-q", "--config", "-", "--write-out", std::string(kWriteOut)};
     if (streaming_)
       arguments.emplace_back("--no-buffer");
+
+    if (auto checkpoint = prelaunch_checkpoint(); !checkpoint)
+      return std::unexpected(std::move(checkpoint.error()));
+
     auto spawned = supervisor.spawn(std::move(*reservation), {.executable = executable_.empty() ? std::string("curl") : std::string(executable_),
                                                               .argv = std::move(arguments),
                                                               .environment = std::move(*environment),
@@ -431,10 +453,6 @@ class CurlRequest final
     std::optional<ava::process::ExitStatusV1> terminal_status;
     bool stop_requested = false;
 
-    auto set_failure = [&](ava::process::TerminationReasonV1 reason, ava::core::Error error) {
-      if (!failure)
-        failure.emplace(RequestFailure{.reason = reason, .error = std::move(error)});
-    };
     auto request_cleanup = [&] {
       if (!failure || stop_requested)
         return;
@@ -444,19 +462,12 @@ class CurlRequest final
         input.close();
         input_open = false;
       }
-      static_cast<void>(supervisor.request_stop(handle, failure->reason, cleanup_deadline_));
+      static_cast<void>(supervisor.request_stop(handle, failure->reason, failure_cleanup_deadline()));
     };
 
     while (true)
     {
-      auto const now = Clock::now();
-      if (!failure)
-      {
-        if (now >= request_deadline_)
-          set_failure(ava::process::TerminationReasonV1::DeadlineExpired, deadline_error());
-        else if (cancel_requested_ && cancel_requested_())
-          set_failure(ava::process::TerminationReasonV1::Canceled, canceled_error());
-      }
+      observe_cancellation(failure);
       request_cleanup();
 
       if (input_open && !failure)
@@ -467,14 +478,14 @@ class CurlRequest final
           auto wrote = input.write(pending);
           if (!wrote)
           {
-            set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
+            set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
             break;
           }
           if (wrote->state == ava::process::PipeIoStateV1::WouldBlock)
             break;
           if (wrote->state != ava::process::PipeIoStateV1::Progress || wrote->bytes == 0)
           {
-            set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
+            set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to write curl configuration"));
             break;
           }
           config_offset += wrote->bytes;
@@ -494,7 +505,7 @@ class CurlRequest final
       auto waited = supervisor.try_wait(handle);
       if (!waited)
       {
-        set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to observe curl process completion"));
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to observe curl process completion"));
         request_cleanup();
       }
       else if (*waited)
@@ -512,7 +523,7 @@ class CurlRequest final
         break;
 
       auto const loop_now = Clock::now();
-      if (failure && loop_now >= settlement_deadline_)
+      if (failure && loop_now >= failure_settlement_deadline())
         break;
 
       std::vector<ava::process::PipeWatchV1> watches;
@@ -521,7 +532,7 @@ class CurlRequest final
         auto watch = endpoint.watch(interest, token);
         if (!watch)
         {
-          set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to watch curl process streams"));
+          set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to watch curl process streams"));
           return;
         }
         watches.push_back(std::move(*watch));
@@ -534,24 +545,24 @@ class CurlRequest final
         add_watch(error_output, ava::process::PipeInterestV1::Readable, kStderrWatch);
       request_cleanup();
 
-      auto const observation_limit = failure ? settlement_deadline_ : request_deadline_;
+      auto const observation_limit = failure ? failure_settlement_deadline() : request_deadline_;
       auto const activity_deadline = std::min(observation_limit, saturating_add(Clock::now(), 100ms));
       auto activity = supervisor.wait_for_activity(handle, watches, activity_deadline);
       if (!activity)
       {
-        set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed while waiting for curl process activity"));
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed while waiting for curl process activity"));
         request_cleanup();
       }
     }
 
     if (input_open)
       input.close();
-    auto settled = supervisor.wait(handle, settlement_deadline_);
+    auto settled = supervisor.wait(handle, failure ? failure_settlement_deadline() : reservation_settlement_deadline_);
     if (settled)
       terminal_status = *settled;
     else
     {
-      set_failure(ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to settle curl process cleanup"));
+      set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to settle curl process cleanup"));
       request_cleanup();
     }
     while (output_open)
@@ -591,17 +602,95 @@ class CurlRequest final
   }
 
  private:
+  [[nodiscard]] ava::core::VoidResult prelaunch_checkpoint()
+  {
+    if (Clock::now() >= request_deadline_)
+      return std::unexpected(deadline_error());
+    if (!cancel_requested_)
+      return {};
+
+    bool canceled = false;
+    try
+    {
+      canceled = cancel_requested_();
+    }
+    catch (...)
+    {
+      return std::unexpected(cancellation_callback_error());
+    }
+    if (Clock::now() >= request_deadline_)
+      return std::unexpected(deadline_error());
+    if (canceled)
+      return std::unexpected(canceled_error());
+    return {};
+  }
+
+  void establish_failure_deadlines() noexcept
+  {
+    if (failure_cleanup_deadline_)
+      return;
+    // A deadline failure observes now >= request_deadline_, so this minimum
+    // preserves its reservation-time cleanup horizon. Earlier failures start
+    // their cleanup budget now without ever extending that policy cap.
+    failure_cleanup_deadline_ = std::min(reservation_cleanup_deadline_, saturating_add(Clock::now(), kCleanupBudget));
+    failure_settlement_deadline_ = saturating_add(*failure_cleanup_deadline_, kSettlementObservationBudget);
+  }
+
+  [[nodiscard]] Clock::time_point failure_cleanup_deadline() const noexcept { return failure_cleanup_deadline_.value_or(reservation_cleanup_deadline_); }
+
+  [[nodiscard]] Clock::time_point failure_settlement_deadline() const noexcept
+  {
+    return failure_settlement_deadline_.value_or(reservation_settlement_deadline_);
+  }
+
+  void set_failure(std::optional<RequestFailure>& failure, ava::process::TerminationReasonV1 reason, ava::core::Error error)
+  {
+    if (failure)
+      return;
+    establish_failure_deadlines();
+    failure.emplace(RequestFailure{.reason = reason, .error = std::move(error)});
+  }
+
+  void observe_cancellation(std::optional<RequestFailure>& failure)
+  {
+    if (failure)
+      return;
+    if (Clock::now() >= request_deadline_)
+    {
+      set_failure(failure, ava::process::TerminationReasonV1::DeadlineExpired, deadline_error());
+      return;
+    }
+    if (!cancel_requested_)
+      return;
+
+    bool canceled = false;
+    try
+    {
+      canceled = cancel_requested_();
+    }
+    catch (...)
+    {
+      set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, cancellation_callback_error());
+      return;
+    }
+    if (Clock::now() >= request_deadline_)
+      set_failure(failure, ava::process::TerminationReasonV1::DeadlineExpired, deadline_error());
+    else if (canceled)
+      set_failure(failure, ava::process::TerminationReasonV1::Canceled, canceled_error());
+  }
+
   [[nodiscard]] ava::core::Result<HttpResponse> settle_without_streams(ava::process::Supervisor& supervisor, ava::process::SpawnResultV1& spawned,
                                                                        RequestFailure failure)
   {
+    establish_failure_deadlines();
     if (spawned.standard_input)
       spawned.standard_input->close();
     if (spawned.standard_output)
       spawned.standard_output->close();
     if (spawned.standard_error)
       spawned.standard_error->close();
-    static_cast<void>(supervisor.request_stop(spawned.handle, failure.reason, cleanup_deadline_));
-    static_cast<void>(supervisor.wait(spawned.handle, settlement_deadline_));
+    static_cast<void>(supervisor.request_stop(spawned.handle, failure.reason, failure_cleanup_deadline()));
+    static_cast<void>(supervisor.wait(spawned.handle, failure_settlement_deadline()));
     return std::unexpected(std::move(failure.error));
   }
 
@@ -651,8 +740,7 @@ class CurlRequest final
       auto read = endpoint.read(writable_bytes(buffer));
       if (!read)
       {
-        if (!failure)
-          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to read curl output")});
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to read curl output"));
         endpoint.close();
         open = false;
         break;
@@ -679,7 +767,7 @@ class CurlRequest final
         if (stdout_bytes_ > kMaxCurlResponseBytes + kStatusTailReserve)
         {
           truncated = true;
-          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::OutputLimit, .error = output_limit_error()});
+          set_failure(failure, ava::process::TerminationReasonV1::OutputLimit, output_limit_error());
         }
         else if (!streaming_)
         {
@@ -693,17 +781,13 @@ class CurlRequest final
             auto const emit_size = pending_stdout_.size() - kStatusTailReserve;
             auto delivered = deliver_body(std::string_view(pending_stdout_).substr(0, emit_size));
             if (!delivered)
-            {
-              failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(delivered.error())});
-            }
+              set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, std::move(delivered.error()));
             pending_stdout_.erase(0, emit_size);
           }
         }
       }
       if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardOutput, bytes, truncated); !accounted && !failure)
-      {
-        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to account curl output")});
-      }
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to account curl output"));
     }
     return progressed;
   }
@@ -716,7 +800,7 @@ class CurlRequest final
     auto parsed = parse_curl_output(streaming_ ? std::move(pending_stdout_) : std::move(stdout_output_), request_.include_response_headers && !streaming_);
     if (!parsed)
     {
-      failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(parsed.error())});
+      set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, std::move(parsed.error()));
       return;
     }
     if (streaming_)
@@ -724,7 +808,7 @@ class CurlRequest final
       auto delivered = deliver_body(parsed->body);
       if (!delivered)
       {
-        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = std::move(delivered.error())});
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, std::move(delivered.error()));
         return;
       }
       parsed->body.clear();
@@ -742,8 +826,7 @@ class CurlRequest final
       auto read = endpoint.read(writable_bytes(buffer));
       if (!read)
       {
-        if (!failure)
-          failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to read curl stderr")});
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to read curl stderr"));
         endpoint.close();
         open = false;
         break;
@@ -766,9 +849,7 @@ class CurlRequest final
       stderr_bytes_ =
           stderr_bytes_ > std::numeric_limits<std::uint64_t>::max() - read->bytes ? std::numeric_limits<std::uint64_t>::max() : stderr_bytes_ + read->bytes;
       if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardError, read->bytes, truncated); !accounted && !failure)
-      {
-        failure.emplace(RequestFailure{.reason = ava::process::TerminationReasonV1::ProtocolFailure, .error = protocol_error("failed to account curl stderr")});
-      }
+        set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to account curl stderr"));
     }
     return progressed;
   }
@@ -780,8 +861,10 @@ class CurlRequest final
   Transport::BodyChunkSink body_sink_;
   Transport::CancelCallback cancel_requested_;
   Clock::time_point request_deadline_;
-  Clock::time_point cleanup_deadline_;
-  Clock::time_point settlement_deadline_;
+  Clock::time_point reservation_cleanup_deadline_;
+  Clock::time_point reservation_settlement_deadline_;
+  std::optional<Clock::time_point> failure_cleanup_deadline_;
+  std::optional<Clock::time_point> failure_settlement_deadline_;
   std::string stdout_output_;
   std::string pending_stdout_;
   std::string streamed_body_;

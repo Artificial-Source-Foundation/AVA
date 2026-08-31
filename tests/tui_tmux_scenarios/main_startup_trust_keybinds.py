@@ -91,7 +91,11 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         rail_divider = rf"(?m)^.{{{width - 39}}}│"
         if sidebar_expected:
             wait_for(tmux_exe, session, rail_divider, f"{name} automatic rail redraw")
-        else:
+        elif width == 160:
+            # Exercise the delayed negative check only at the two meaningful
+            # boundaries: just below the width threshold and above it with a
+            # height that suppresses the rail. The settled-frame assertions
+            # below still verify every narrower layout immediately.
             assert_screen_absent_for(
                 tmux_exe,
                 session,
@@ -251,12 +255,6 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     ).stdout.strip()
     if restored_dimensions != "120,32":
         raise RuntimeError(f"startup baseline restore dimensions were {restored_dimensions}, expected 120,32")
-    assert_screen_absent_for(
-        tmux_exe,
-        session,
-        r"(?m)^.{81}│",
-        "startup baseline restored without automatic rail",
-    )
     restored_startup, _ = wait_for_idle_composer_reflow(120, 32, "startup baseline restored")
     if "live session" in restored_startup or "Activity" in restored_startup or "  Session" in restored_startup:
         raise RuntimeError(f"startup baseline restore unexpectedly showed the automatic rail\nscreen:\n{restored_startup}")

@@ -157,8 +157,6 @@ def main() -> int:
             private_file(override_rcfile, "channels_on = notice runtime\n")
 
             base_env = os.environ.copy()
-            # Keep routing cases hermetic when the invoking developer has globally opted into debug output.
-            base_env.pop("AVA_DEBUG_OUTPUT", None)
             base_env.update(
                 {
                     "LIBCWD_RCFILE_NAME": str(base_rcfile),
@@ -171,6 +169,7 @@ def main() -> int:
                 }
             )
             base_env.pop("AVA_DEBUG_OUTPUT_DIR", None)
+            base_env.pop("AVA_DEBUG_OUTPUT", None)
 
             default_result = run(ava, ["core_mode"], base_env, root)
             require(default_result.returncode == 0, f"default run failed: {default_result.stderr}")

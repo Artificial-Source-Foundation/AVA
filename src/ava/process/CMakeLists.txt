@@ -1,6 +1,9 @@
 add_library(ava_process
   "owner.cpp"
   "supervisor.cpp"
+  "supervisor_adoption_posix.cpp"
+  "supervisor_monitor_posix.cpp"
+  "supervisor_spawn_posix.cpp"
   "types.cpp"
 )
 

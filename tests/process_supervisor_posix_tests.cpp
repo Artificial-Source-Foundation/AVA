@@ -1,18 +1,22 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/process/supervisor.h"
+#include "ava/process/supervisor_test_support.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -91,6 +95,41 @@ class SupervisorFallback final
 
  private:
   ava::process::Supervisor& supervisor_;
+};
+
+class AfterForkReleaseLatch final
+{
+ public:
+  ~AfterForkReleaseLatch() { release(); }
+
+  void arrive_and_wait()
+  {
+    std::unique_lock lock(mutex_);
+    reached_ = true;
+    changed_.notify_all();
+    changed_.wait(lock, [&] { return released_; });
+  }
+
+  bool wait_until(std::chrono::steady_clock::time_point deadline)
+  {
+    std::unique_lock lock(mutex_);
+    return changed_.wait_until(lock, deadline, [&] { return reached_; });
+  }
+
+  void release() noexcept
+  {
+    {
+      std::lock_guard lock(mutex_);
+      released_ = true;
+    }
+    changed_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  bool reached_ = false;
+  bool released_ = false;
 };
 
 class ExactChildFallback final
@@ -266,6 +305,28 @@ void test_exec_gate_normal_nonzero_and_exec_failure()
   for (auto const& record : snapshot.records)
     saw_exec_failure = saw_exec_failure || record.reason == ava::process::TerminationReasonV1::ExecFailed;
   expect(saw_exec_failure && snapshot.monitor_started, "exec failure is first-reason classified and the monitor starts only after an actual registered child");
+}
+
+void test_natural_exit_does_not_pay_termination_grace()
+{
+  auto application = application_owner();
+  ava::process::Supervisor supervisor;
+  SupervisorFallback fallback(supervisor);
+  auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::BrowserOpener, {.termination_grace = 5s});
+  auto const begin = std::chrono::steady_clock::now();
+  auto child = reservation ? supervisor.spawn(std::move(*reservation), {.executable = "/bin/true",
+                                                                        .argv = {"/bin/true"},
+                                                                        .environment = {},
+                                                                        .cwd = "/",
+                                                                        .stdin_mode = ava::process::StreamModeV1::Discard,
+                                                                        .stdout_mode = ava::process::StreamModeV1::Discard,
+                                                                        .stderr_mode = ava::process::StreamModeV1::Discard})
+                           : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
+  auto status = child ? supervisor.wait(child->handle, begin + 6s) : ava::core::Result<ava::process::ExitStatusV1>(std::unexpected(child.error()));
+  auto const elapsed = std::chrono::steady_clock::now() - begin;
+  expect(child && status && status->reason == ava::process::TerminationReasonV1::NaturalExit && status->kind == ava::process::ExitKindV1::Exited &&
+             status->exit_code == 0 && status->cleanup == ava::process::CleanupStateV1::Complete && elapsed < 2500ms,
+         "a naturally exited leader with a proven quiet group skips a deliberately long termination grace");
 }
 
 void test_exact_environment_signal_reset_and_descriptor_closure()
@@ -549,6 +610,90 @@ void test_cancel_deadline_owner_isolation_and_unrelated_child()
          "exact-PID monitoring never steals or globally waits for an unrelated direct child");
 }
 
+void test_registered_spawn_gate_cancellation_never_executes()
+{
+  {
+    auto application = application_owner();
+    ava::process::Supervisor supervisor;
+    SupervisorFallback fallback(supervisor);
+    auto const root = create_empty_root("process-supervisor-after-fork-shutdown");
+    auto const marker = root / "executed";
+    auto latch = std::make_shared<AfterForkReleaseLatch>();
+    ava::process::testing::SupervisorTestAccess::set_after_fork_before_release_hook(supervisor, [latch] { latch->arrive_and_wait(); });
+
+    auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Plugin);
+    std::optional<ava::core::Result<ava::process::SpawnResultV1>> launch;
+    std::thread launcher;
+    if (reservation)
+    {
+      launcher = std::thread([&supervisor, &launch, ticket = std::move(*reservation),
+                              specification = fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
+                                                        ava::process::StreamModeV1::Discard, {marker.string()})]() mutable {
+        launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
+      });
+    }
+    bool const reached = reservation && latch->wait_until(std::chrono::steady_clock::now() + 2s);
+    auto shutdown = reached ? supervisor.shutdown(std::chrono::steady_clock::now() + 2s) : ava::process::ShutdownResultV1{.complete = false};
+    latch->release();
+    if (launcher.joinable())
+      launcher.join();
+    ava::process::testing::SupervisorTestAccess::clear_after_fork_before_release_hook(supervisor);
+
+    auto snapshot = supervisor.snapshot();
+    bool settled_once = snapshot.records.size() == 1 && snapshot.records.front().settlement_count == 1 &&
+                        snapshot.records.front().reason == ava::process::TerminationReasonV1::ApplicationShutdown &&
+                        snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete;
+    bool const canceled_error = launch && !launch->has_value() && launch->error().format().find("canceled before") != std::string::npos;
+    expect(reached && shutdown.complete && canceled_error && settled_once && !std::filesystem::exists(marker),
+           "application shutdown ordered before the registered spawn gate commit closes the gate and prevents observable exec");
+  }
+
+  {
+    auto application = application_owner();
+    auto session = application.session();
+    expect(session.has_value(), "owner-cancellation gate fixture creates a generated session prefix");
+    if (!session)
+      return;
+    ava::process::Supervisor supervisor;
+    SupervisorFallback fallback(supervisor);
+    auto const root = create_empty_root("process-supervisor-after-fork-owner-cancel");
+    auto const marker = root / "executed";
+    auto latch = std::make_shared<AfterForkReleaseLatch>();
+    ava::process::testing::SupervisorTestAccess::set_after_fork_before_release_hook(supervisor, [latch] { latch->arrive_and_wait(); });
+
+    auto reservation = supervisor.reserve(operation_owner(*session), ava::process::ProcessRoleV1::Mcp);
+    std::optional<ava::core::Result<ava::process::SpawnResultV1>> launch;
+    std::thread launcher;
+    if (reservation)
+    {
+      launcher = std::thread([&supervisor, &launch, ticket = std::move(*reservation),
+                              specification = fake_spec("exec-marker", ava::process::StreamModeV1::Discard, ava::process::StreamModeV1::Discard,
+                                                        ava::process::StreamModeV1::Discard, {marker.string()})]() mutable {
+        launch.emplace(supervisor.spawn(std::move(ticket), std::move(specification)));
+      });
+    }
+    bool const reached = reservation && latch->wait_until(std::chrono::steady_clock::now() + 2s);
+    auto stopped =
+        reached
+            ? supervisor.request_stop(*session, ava::process::TerminationReasonV1::Canceled, std::chrono::steady_clock::now() + 2s)
+            : ava::core::Result<ava::process::StopResultV1>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "launch did not reach test gate")));
+    latch->release();
+    if (launcher.joinable())
+      launcher.join();
+    ava::process::testing::SupervisorTestAccess::clear_after_fork_before_release_hook(supervisor);
+    auto shutdown = supervisor.shutdown(std::chrono::steady_clock::now() + 2s);
+
+    auto snapshot = supervisor.snapshot();
+    bool settled_once = snapshot.records.size() == 1 && snapshot.records.front().settlement_count == 1 &&
+                        snapshot.records.front().reason == ava::process::TerminationReasonV1::Canceled &&
+                        snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete;
+    bool const canceled_error = launch && !launch->has_value() && launch->error().format().find("canceled before") != std::string::npos;
+    expect(reached && stopped && stopped->matched == 1 && stopped->newly_requested == 1 && shutdown.complete && canceled_error && settled_once &&
+               !std::filesystem::exists(marker),
+           "owner-prefix cancellation ordered before the registered spawn gate commit wins once and prevents observable exec");
+  }
+}
+
 void test_secure_adoption_and_abandoned_ticket_cleanup()
 {
   auto application = application_owner();
@@ -616,41 +761,40 @@ void test_gated_adoption_shutdown_race()
   auto application = application_owner();
   ava::process::Supervisor supervisor;
   SupervisorFallback fallback(supervisor);
+  auto const root = create_empty_root("process-supervisor-adoption-after-fork-shutdown");
+  auto const marker = root / "executed";
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
   auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
-    _exit(0);
-  expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent, "shutdown-race fixture creates an exact gated provisional leader");
-  if (!gate || !branch)
+  {
+    ::execl(AVA_FAKE_PROCESS_CHILD_PATH, AVA_FAKE_PROCESS_CHILD_PATH, "exec-marker", marker.c_str(), static_cast<char*>(nullptr));
+    _exit(126);
+  }
+  auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
+  expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent && sentinel, "shutdown-race fixture creates an exact gated leader and sentinel");
+  if (!gate || !branch || !sentinel)
     return;
 
+  auto latch = std::make_shared<AfterForkReleaseLatch>();
+  ava::process::testing::SupervisorTestAccess::set_after_fork_before_release_hook(supervisor, [latch] { latch->arrive_and_wait(); });
   std::optional<ava::core::Result<ava::process::ProcessHandle>> adoption;
-  std::atomic<bool> start{false};
   auto parent_gate = std::move(*gate);
-  std::thread adopter([&supervisor, &adoption, &start, ticket = std::move(parent_gate)]() mutable {
-    while (!start.load(std::memory_order_acquire))
-      std::this_thread::yield();
-    adoption.emplace(supervisor.adopt(std::move(ticket)));
-  });
-  start.store(true, std::memory_order_release);
-  auto shutdown = supervisor.shutdown(std::chrono::steady_clock::now() + 2s);
+  std::thread adopter([&supervisor, &adoption, ticket = std::move(parent_gate)]() mutable { adoption.emplace(supervisor.adopt(std::move(ticket))); });
+  bool const reached = latch->wait_until(std::chrono::steady_clock::now() + 2s);
+  auto shutdown = reached ? supervisor.shutdown(std::chrono::steady_clock::now() + 2s) : ava::process::ShutdownResultV1{.complete = false};
+  latch->release();
   adopter.join();
+  ava::process::testing::SupervisorTestAccess::clear_after_fork_before_release_hook(supervisor);
 
-  bool final_status = true;
-  if (adoption && *adoption)
-  {
-    auto status = supervisor.wait(**adoption, std::chrono::steady_clock::now() + 100ms);
-    final_status =
-        status && status->reason == ava::process::TerminationReasonV1::ApplicationShutdown && status->cleanup == ava::process::CleanupStateV1::Complete;
-  }
   auto snapshot = supervisor.snapshot();
-  bool settled_once = snapshot.live_records == 0;
-  for (auto const& record : snapshot.records)
-    settled_once = settled_once && record.settlement_count == 1;
-  expect(shutdown.complete && final_status && settled_once,
-         "reservation/gate versus shutdown either commits one supervised child or performs exact provisional cleanup, with one settlement");
+  bool const settled_once = snapshot.live_records == 0 && snapshot.records.size() == 1 && snapshot.records.front().settlement_count == 1 &&
+                            snapshot.records.front().reason == ava::process::TerminationReasonV1::ApplicationShutdown &&
+                            snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete;
+  bool const canceled_error = adoption && !adoption->has_value() && adoption->error().format().find("canceled before") != std::string::npos;
+  expect(reached && shutdown.complete && canceled_error && settled_once && !std::filesystem::exists(marker),
+         "shutdown ordered before secure-adoption commit closes both exact-child gates and prevents leader exec");
 }
 
 void test_mixed_shared_budget_shutdown()
@@ -699,10 +843,12 @@ void run_process_supervisor_posix_tests()
   ava::tests::request_skip("process supervisor POSIX lifecycle backend is compile-time unsupported");
 #else
   test_exec_gate_normal_nonzero_and_exec_failure();
+  test_natural_exit_does_not_pay_termination_grace();
   test_exact_environment_signal_reset_and_descriptor_closure();
   test_closed_pipes_and_flood_draining();
   test_term_kill_first_reason_and_leader_first_cleanup();
   test_cancel_deadline_owner_isolation_and_unrelated_child();
+  test_registered_spawn_gate_cancellation_never_executes();
   test_secure_adoption_and_abandoned_ticket_cleanup();
   test_destructor_fallback_cleanup();
   test_gated_adoption_shutdown_race();

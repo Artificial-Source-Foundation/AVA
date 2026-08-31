@@ -98,6 +98,24 @@ void test_generated_owner_hierarchy()
          "owner prefix matching selects descendants without conflating independently generated applications");
 }
 
+void test_startup_timeout_policy_validation()
+{
+  ava::process::Supervisor supervisor;
+  auto application = make_application_owner();
+  auto zero = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 0ms});
+  auto negative = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = -1ms});
+  auto excessive = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1h});
+  bool accepted_bounded = false;
+  {
+    auto bounded = supervisor.reserve(make_operation(application), ava::process::ProcessRoleV1::Plugin, {.startup_timeout = 1ms});
+    accepted_bounded = bounded.has_value();
+  }
+  auto snapshot = supervisor.snapshot();
+  expect(ava::process::LifecyclePolicyV1{}.startup_timeout == 2s && !zero && !negative && !excessive && accepted_bounded && snapshot.live_records == 0 &&
+             !snapshot.monitor_started,
+         "startup timeout defaults to two seconds and rejects zero, negative, and excessive policies before fork");
+}
+
 void test_lazy_monitor_and_live_capacity()
 {
   ava::process::Supervisor supervisor;
@@ -264,6 +282,7 @@ void run_process_supervisor_tests()
 {
   test_closed_vocabulary();
   test_generated_owner_hierarchy();
+  test_startup_timeout_policy_validation();
   test_lazy_monitor_and_live_capacity();
   test_terminal_pruning_and_content_free_snapshot();
   test_pre_fork_nul_and_environment_validation();

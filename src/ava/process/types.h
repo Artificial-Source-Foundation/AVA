@@ -165,6 +165,7 @@ enum class PlatformSupportV1
 struct LifecyclePolicyV1
 {
   std::chrono::milliseconds termination_grace{100};
+  std::chrono::milliseconds startup_timeout{2000};
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

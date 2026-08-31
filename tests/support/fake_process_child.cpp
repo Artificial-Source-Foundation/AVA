@@ -117,6 +117,16 @@ int run_flood(int stdout_fd, int stderr_fd, int bytes) noexcept
   return 0;
 }
 
+int create_exec_marker(char const* path) noexcept
+{
+  int const descriptor = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (descriptor < 0)
+    return 7;
+  bool const written = write_text(descriptor, "EXECUTED\n");
+  bool const closed = ::close(descriptor) == 0;
+  return written && closed ? 0 : 7;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -143,6 +153,8 @@ int main(int argc, char** argv)
     return 0;
   if (mode == "nonzero")
     return 23;
+  if (mode == "exec-marker")
+    return argc >= 3 ? create_exec_marker(argv[2]) : 2;
   if (mode == "ready-gate")
   {
     if (!write_text(status_fd, "READY\n") || !read_control_byte(control_fd) || !write_text(status_fd, "RELEASED\n"))

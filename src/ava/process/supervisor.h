@@ -18,6 +18,10 @@ struct HandleState;
 struct SupervisorState;
 }  // namespace detail
 
+namespace testing {
+class SupervisorTestAccess;
+}  // namespace testing
+
 class Supervisor;
 
 // Native-handle-neutral ownership wrapper for one nonblocking parent pipe end.
@@ -174,6 +178,8 @@ class Supervisor
 
   struct Impl;
   std::unique_ptr<Impl> implementation_;
+
+  friend class testing::SupervisorTestAccess;
 };
 
 }  // namespace ava::process

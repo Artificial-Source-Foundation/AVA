@@ -6,8 +6,8 @@ AVA can delegate a bounded unit of work to a `task` subagent and run it in a sep
 
 AVA always provides two built-ins:
 
-- `general` inherits the parent's visible tools, except that recursive `task` delegation is hidden.
-- `explore` is read-only: it exposes `read_file`, `list_directory`, `glob`, and `grep`, and hides mutation, shell, network, LSP, and recursive `task` tools.
+- `general` inherits the parent's visible tools, except that `task`, `job`, and `todowrite` are hidden.
+- `explore` is a read-only preset: it exposes `read_file`, `list_directory`, `glob`, and `grep`, and hides mutation, shell, network, LSP, `task`, `job`, and `todowrite`.
 
 Trusted custom subagents are Markdown definitions with frontmatter plus an instruction body. Global definitions come from AVA, Agents, and Claude configuration roots; project definitions are loaded only for a trusted project. See [CONFIG.md](configuration.md#subagents) for exact paths and fields, and [context-resources.md](context-resources.md#subagents) for discovery, prompt visibility, trust, and reload behavior. Those references, rather than this operational page, define the file grammar.
 

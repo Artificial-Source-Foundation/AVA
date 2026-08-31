@@ -32,7 +32,7 @@ AVA stores user configuration and state under the XDG paths documented in [`docs
 - [`docs/core/custom-providers.md`](docs/core/custom-providers.md): bounded user-defined provider and model configuration.
 - [`docs/core/providers.md`](docs/core/providers.md): current provider/model support, authentication, compatibility, and evidence status.
 - [`docs/core/context-resources.md`](docs/core/context-resources.md): prompts, instructions, commands, skills, subagents, extensions, project trust, and reload behavior.
-- [`docs/core/subagents.md`](docs/core/subagents.md): foreground/background delegation, job controls, permissions, completion delivery, durability, limits, and lifecycle.
+- [`docs/core/subagents.md`](docs/core/subagents.md): `--agent` primary selection, foreground/background delegation, job controls, permissions, completion delivery, durability, limits, and lifecycle.
 - [`docs/core/thinking-modes.md`](docs/core/thinking-modes.md): provider reasoning controls and visible-thinking behavior.
 - [`docs/session-format.md`](docs/session-format.md): append-only session format, validation, and recovery boundaries.
 

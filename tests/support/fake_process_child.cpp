@@ -264,6 +264,41 @@ int main(int argc, char** argv)
     clean = clean && ::environ[expected.size()] == nullptr;
     return write_text(status_fd, clean ? "CLEAN\n" : "DIRTY\n") ? (clean ? 0 : 6) : 3;
   }
+  if (mode == "adoption-environment")
+  {
+    constexpr std::array<std::string_view, 14> expected{"LANG=C.UTF-8",
+                                                        "LC_ALL=C.UTF-8",
+                                                        "LC_CTYPE=C.UTF-8",
+                                                        "TZ=UTC",
+                                                        "USER=ava-test",
+                                                        "LOGNAME=ava-test",
+                                                        "PWD=/",
+                                                        "PATH=/usr/bin:/bin",
+                                                        "HOME=/tmp/ava-process-home",
+                                                        "XDG_CONFIG_HOME=/tmp/ava-process-xdg-config",
+                                                        "XDG_CACHE_HOME=/tmp/ava-process-xdg-cache",
+                                                        "XDG_DATA_HOME=/tmp/ava-process-xdg-data",
+                                                        "XDG_STATE_HOME=/tmp/ava-process-xdg-state",
+                                                        "TMPDIR=/tmp/ava-process-tmp"};
+    bool clean = std::getenv("AVA_PROCESS_AMBIENT_CANARY") == nullptr;
+    for (std::size_t index = 0; clean && index < expected.size(); ++index)
+      clean = ::environ[index] != nullptr && std::string_view(::environ[index]) == expected[index];
+    clean = clean && ::environ[expected.size()] == nullptr;
+    return write_text(status_fd, clean ? "CLEAN\n" : "DIRTY\n") ? (clean ? 0 : 6) : 3;
+  }
+  if (mode == "check-retained-and-closed")
+  {
+    if (argc < 4)
+      return 2;
+    int const retained = parse_positive(argv[2], -1);
+    int const unrelated = parse_positive(argv[3], -1);
+    errno = 0;
+    bool const retained_open = retained > STDERR_FILENO && ::fcntl(retained, F_GETFD) >= 0;
+    errno = 0;
+    bool const unrelated_closed = unrelated > STDERR_FILENO && ::fcntl(unrelated, F_GETFD) < 0 && errno == EBADF;
+    bool const clean = retained_open && unrelated_closed;
+    return write_text(status_fd, clean ? "CLEAN\n" : "DIRTY\n") ? (clean ? 0 : 6) : 3;
+  }
   if (mode == "signal-state")
   {
     sigset_t mask{};

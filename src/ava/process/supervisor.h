@@ -67,6 +67,17 @@ struct SpawnSpecV1
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
+struct SecureAdoptionSpecV1
+{
+  ExactEnvironmentV1 environment;
+  std::string cwd;
+  BashContainmentHandshakeV1 bash_containment = BashContainmentHandshakeV1::None;
+
+  // Exact environment and cwd content are intentionally excluded from debug
+  // output. The containment selector is a closed role-bound policy value.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 // Native-handle-neutral ownership wrapper for one nonblocking parent pipe end.
 class PipeEndpoint
 {
@@ -181,6 +192,13 @@ class AdoptionGate
   // the gated leader group and remains blocked until adoption.
   [[nodiscard]] ava::core::VoidResult fork_sentinel();
 
+  // These methods are available only on the child copy returned by
+  // fork_leader. They use only state prepared before fork and never return to
+  // application code after a failed launch or exec attempt.
+  [[noreturn]] void child_launch_failed(AdoptionChildFailureStageV1 stage, int errno_value) noexcept;
+  void child_bash_containment_applied() noexcept;
+  [[noreturn]] void child_exec_descriptor(int executable_descriptor, char* const argv[], std::span<int const> retained_script_descriptors = {}) noexcept;
+
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
@@ -206,7 +224,7 @@ class Supervisor
   [[nodiscard]] ava::core::Result<Reservation> reserve(OwnerPathV1 const& owner, ProcessRoleV1 role, LifecyclePolicyV1 policy = {});
   [[nodiscard]] ava::core::Result<SpawnResultV1> spawn(Reservation&& reservation, SpawnSpecV1 specification);
 
-  [[nodiscard]] ava::core::Result<AdoptionGate> begin_secure_adoption(Reservation&& reservation, ExactEnvironmentV1 environment);
+  [[nodiscard]] ava::core::Result<AdoptionGate> begin_secure_adoption(Reservation&& reservation, SecureAdoptionSpecV1 specification);
   [[nodiscard]] ava::core::Result<ProcessHandle> adopt(AdoptionGate&& gate);
 
   void stop_accepting() noexcept;

@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/process/launch_protocol_posix.h"
 #include "ava/process/supervisor_internal.h"
 
 #include <algorithm>
@@ -281,19 +282,56 @@ bool child_write_all(int descriptor, void const* data, std::size_t size) noexcep
 
 void close_nonstandard_descriptors(int preserved, int maximum) noexcept
 {
+  std::array<int, 1> const preserved_descriptors{preserved};
+  close_nonstandard_descriptors_except(preserved_descriptors, maximum);
+}
+
+void close_nonstandard_descriptors_except(std::span<int const> preserved, int maximum) noexcept
+{
+  constexpr std::size_t kMaximumPreservedDescriptors = kMaxRetainedScriptDescriptorsV1 + 2;
+  std::array<int, kMaximumPreservedDescriptors> ordered{};
+  std::size_t count = 0;
+  for (int descriptor : preserved)
+  {
+    if (descriptor <= STDERR_FILENO || count == ordered.size())
+      continue;
+    bool duplicate = false;
+    for (std::size_t index = 0; index < count; ++index)
+      duplicate = duplicate || ordered[index] == descriptor;
+    if (duplicate)
+      continue;
+    std::size_t position = count;
+    while (position > 0 && ordered[position - 1] > descriptor)
+    {
+      ordered[position] = ordered[position - 1];
+      --position;
+    }
+    ordered[position] = descriptor;
+    ++count;
+  }
+
 #if defined(__linux__) && defined(SYS_close_range)
   bool ranges_closed = true;
-  if (preserved > STDERR_FILENO + 1)
+  unsigned int first = static_cast<unsigned int>(STDERR_FILENO + 1);
+  for (std::size_t index = 0; index < count; ++index)
   {
-    ranges_closed = ::syscall(SYS_close_range, static_cast<unsigned int>(STDERR_FILENO + 1), static_cast<unsigned int>(preserved - 1), 0U) == 0;
+    auto const kept = static_cast<unsigned int>(ordered[index]);
+    if (first < kept && ::syscall(SYS_close_range, first, kept - 1, 0U) != 0)
+      ranges_closed = false;
+    if (kept < std::numeric_limits<unsigned int>::max())
+      first = kept + 1;
   }
-  ranges_closed = (::syscall(SYS_close_range, static_cast<unsigned int>(preserved + 1), std::numeric_limits<unsigned int>::max(), 0U) == 0) && ranges_closed;
+  if (::syscall(SYS_close_range, first, std::numeric_limits<unsigned int>::max(), 0U) != 0)
+    ranges_closed = false;
   if (ranges_closed)
     return;
 #endif
   for (int descriptor = STDERR_FILENO + 1; descriptor < maximum; ++descriptor)
   {
-    if (descriptor != preserved)
+    bool keep = false;
+    for (std::size_t index = 0; index < count; ++index)
+      keep = keep || ordered[index] == descriptor;
+    if (!keep)
       static_cast<void>(::close(descriptor));
   }
 }
@@ -345,8 +383,9 @@ struct PreparedSpawn
   PreparedStream standard_output;
   PreparedStream standard_error;
   Pipe gate;
-  Pipe exec_error;
+  Pipe launch_status;
   int maximum_descriptor = 4096;
+  bool fail_working_directory_for_test = false;
 
   void build_pointers()
   {
@@ -513,10 +552,10 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
   auto gate = detail::make_cloexec_pipe();
   if (!gate)
     return std::unexpected(std::move(gate.error()));
-  auto exec_error = detail::make_cloexec_pipe();
-  if (!exec_error)
-    return std::unexpected(std::move(exec_error.error()));
-  if (auto nonblocking = detail::set_nonblocking(exec_error->read_end.get()); !nonblocking)
+  auto launch_status = detail::make_cloexec_pipe();
+  if (!launch_status)
+    return std::unexpected(std::move(launch_status.error()));
+  if (auto nonblocking = detail::set_nonblocking(launch_status->read_end.get()); !nonblocking)
     return std::unexpected(std::move(nonblocking.error()));
 
   PreparedSpawn result;
@@ -530,7 +569,7 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
   result.standard_output = std::move(*standard_output);
   result.standard_error = std::move(*standard_error);
   result.gate = std::move(*gate);
-  result.exec_error = std::move(*exec_error);
+  result.launch_status = std::move(*launch_status);
   result.maximum_descriptor = detail::descriptor_limit();
   result.build_pointers();
   return result;
@@ -553,42 +592,23 @@ ava::core::Result<PreparedSpawn> prepare_spawn_checked(SpawnSpecV1& specificatio
   }
 }
 
-enum class ChildFailureStage : std::uint8_t
+[[noreturn]] void child_fail(int descriptor, detail::LaunchFailureStageV1 stage, int error_number) noexcept
 {
-  SignalReset,
-  ProcessGroup,
-  Gate,
-  Streams,
-  Cwd,
-  Execute,
-};
-
-struct ChildFailure
-{
-  ChildFailureStage stage;
-  int error_number;
-
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-
-[[noreturn]] void child_fail(int descriptor, ChildFailureStage stage, int error_number) noexcept
-{
-  ChildFailure const failure{.stage = stage, .error_number = error_number};
-  static_cast<void>(detail::child_write_all(descriptor, &failure, sizeof(failure)));
+  static_cast<void>(detail::child_write_launch_failed(descriptor, stage, error_number));
   _exit(127);
 }
 
-void child_duplicate_stream(PreparedStream const& stream, int target, int exec_error) noexcept
+void child_duplicate_stream(PreparedStream const& stream, int target, int launch_status) noexcept
 {
   if (stream.mode != StreamModeV1::Inherit && ::dup2(stream.child_end.get(), target) < 0)
-    child_fail(exec_error, ChildFailureStage::Streams, errno);
+    child_fail(launch_status, detail::LaunchFailureStageV1::Streams, errno);
 }
 
 [[noreturn]] void spawn_child(PreparedSpawn const& prepared) noexcept
 {
-  int const error_descriptor = prepared.exec_error.write_end.get();
+  int const status_descriptor = prepared.launch_status.write_end.get();
   static_cast<void>(::close(prepared.gate.write_end.get()));
-  static_cast<void>(::close(prepared.exec_error.read_end.get()));
+  static_cast<void>(::close(prepared.launch_status.read_end.get()));
   if (prepared.standard_input.parent_end.get() >= 0)
     static_cast<void>(::close(prepared.standard_input.parent_end.get()));
   if (prepared.standard_output.parent_end.get() >= 0)
@@ -597,85 +617,28 @@ void child_duplicate_stream(PreparedStream const& stream, int target, int exec_e
     static_cast<void>(::close(prepared.standard_error.parent_end.get()));
 
   if (!detail::reset_child_signal_state())
-    child_fail(error_descriptor, ChildFailureStage::SignalReset, errno == 0 ? EIO : errno);
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::SignalReset, errno == 0 ? EIO : errno);
   if (::setpgid(0, 0) != 0)
-    child_fail(error_descriptor, ChildFailureStage::ProcessGroup, errno);
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::ProcessGroup, errno);
   char release = '\0';
-  if (detail::child_read_retry(prepared.gate.read_end.get(), &release, 1) != 1 || release != 'G')
-    child_fail(error_descriptor, ChildFailureStage::Gate, errno == 0 ? EIO : errno);
+  auto const release_count = detail::child_read_retry(prepared.gate.read_end.get(), &release, 1);
+  if (release_count != 1 || release != 'G')
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::Gate, release_count < 0 && errno > 0 ? errno : EIO);
 
-  child_duplicate_stream(prepared.standard_input, STDIN_FILENO, error_descriptor);
-  child_duplicate_stream(prepared.standard_output, STDOUT_FILENO, error_descriptor);
-  child_duplicate_stream(prepared.standard_error, STDERR_FILENO, error_descriptor);
+  child_duplicate_stream(prepared.standard_input, STDIN_FILENO, status_descriptor);
+  child_duplicate_stream(prepared.standard_output, STDOUT_FILENO, status_descriptor);
+  child_duplicate_stream(prepared.standard_error, STDERR_FILENO, status_descriptor);
+  if (prepared.fail_working_directory_for_test)
+    static_cast<void>(::close(prepared.cwd.get()));
   if (::fchdir(prepared.cwd.get()) != 0)
-    child_fail(error_descriptor, ChildFailureStage::Cwd, errno);
-  detail::close_nonstandard_descriptors(error_descriptor, prepared.maximum_descriptor);
+    child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, errno);
+  detail::close_nonstandard_descriptors(status_descriptor, prepared.maximum_descriptor);
+  if (!detail::child_write_exec_attempt(status_descriptor))
+    _exit(127);
   ::execve(prepared.executable.c_str(), prepared.argv.data(), prepared.environment.data());
-  child_fail(error_descriptor, ChildFailureStage::Execute, errno);
-}
-
-ava::core::Result<std::optional<ChildFailure>> await_exec_result(int descriptor, ProcessDeadline deadline)
-{
-  std::array<std::byte, sizeof(ChildFailure)> bytes{};
-  std::size_t count = 0;
-  while (true)
-  {
-    auto ready = detail::wait_descriptor(descriptor, POLLIN, deadline);
-    if (!ready)
-      return std::unexpected(std::move(ready.error()));
-    if (!*ready)
-      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process exec handshake timed out"));
-    auto const result = ::read(descriptor, bytes.data() + count, bytes.size() - count);
-    if (result > 0)
-    {
-      count += static_cast<std::size_t>(result);
-      if (count == bytes.size())
-      {
-        ChildFailure failure{};
-        std::memcpy(&failure, bytes.data(), sizeof(failure));
-        return failure;
-      }
-      continue;
-    }
-    if (result == 0)
-    {
-      if (count == 0)
-        return std::optional<ChildFailure>{};
-      return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "process exec handshake was truncated"));
-    }
-    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-      continue;
-    return std::unexpected(detail::io_error("failed to read the process exec handshake", errno));
-  }
-}
-
-ava::core::Error child_failure_error(ChildFailure const& failure)
-{
-  std::string operation;
-  switch (failure.stage)
-  {
-    case ChildFailureStage::SignalReset:
-      operation = "reset child signals";
-      break;
-    case ChildFailureStage::ProcessGroup:
-      operation = "establish child process group";
-      break;
-    case ChildFailureStage::Gate:
-      operation = "wait for registry gate";
-      break;
-    case ChildFailureStage::Streams:
-      operation = "apply child stream actions";
-      break;
-    case ChildFailureStage::Cwd:
-      operation = "enter child cwd";
-      break;
-    case ChildFailureStage::Execute:
-      operation = "execute child image";
-      break;
-  }
-  auto error = detail::io_error("process failed in its closed pre-exec sequence", failure.error_number);
-  error.with_context("operation", std::move(operation));
-  return error;
+  int const execute_error = errno == 0 ? EIO : errno;
+  static_cast<void>(detail::child_write_exec_failed(status_descriptor, execute_error));
+  _exit(127);
 }
 
 #endif
@@ -751,6 +714,11 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     detail::finish_unregistered(state, identity, stopped_reason);
     return std::unexpected(detail::canceled_launch_error("process launch", stopped_reason));
   }
+  {
+    std::lock_guard lock(state->mutex);
+    prepared->fail_working_directory_for_test = state->fail_next_common_child_working_directory_for_test;
+    state->fail_next_common_child_working_directory_for_test = false;
+  }
 
   // Repeat the immutable role/profile/logical-cwd capability check at the
   // final pre-fork boundary after every allocator-backed launch preparation.
@@ -772,7 +740,7 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     spawn_child(*prepared);
 
   prepared->gate.read_end.reset();
-  prepared->exec_error.write_end.reset();
+  prepared->launch_status.write_end.reset();
   prepared->standard_input.child_end.reset();
   prepared->standard_output.child_end.reset();
   prepared->standard_error.child_end.reset();
@@ -870,25 +838,35 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   }
   prepared->gate.write_end.reset();
 
-  auto exec_result = await_exec_result(prepared->exec_error.read_end.get(), startup_deadline);
-  if (!exec_result || *exec_result)
+  auto const confirmation = detail::await_launch_exec_confirmation(prepared->launch_status.read_end.get(), startup_deadline, false);
+  if (confirmation.disposition != detail::LaunchProtocolDispositionV1::ExecConfirmed)
   {
-    auto const cleanup_deadline =
-        detail::fail_registered_launch(state, identity, exec_result && *exec_result ? TerminationReasonV1::ExecFailed : TerminationReasonV1::LaunchFailed);
+    auto const fallback_reason =
+        confirmation.disposition == detail::LaunchProtocolDispositionV1::ExecFailed ? TerminationReasonV1::ExecFailed : TerminationReasonV1::LaunchFailed;
+    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, fallback_reason);
     state->changed.notify_all();
     detail::await_internal_settlement(handle_state, cleanup_deadline);
-    if (!exec_result)
-      return std::unexpected(std::move(exec_result.error()));
-    return std::unexpected(child_failure_error(**exec_result));
+    return std::unexpected(detail::launch_protocol_error(confirmation, "process"));
   }
 
+  std::optional<TerminationReasonV1> startup_stop_reason;
   {
     std::lock_guard lock(state->mutex);
     auto found = state->records.find(identity);
-    if (found != state->records.end())
+    if (found == state->records.end())
+      startup_stop_reason = TerminationReasonV1::LaunchFailed;
+    else if (found->second->state == ProcessStateV1::Finished || found->second->reason)
+      startup_stop_reason = found->second->reason.value_or(TerminationReasonV1::LaunchFailed);
+    else
       found->second->startup_handshake_complete = true;
   }
   state->changed.notify_all();
+  if (startup_stop_reason)
+  {
+    auto const cleanup_deadline = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
+    detail::await_internal_settlement(handle_state, cleanup_deadline);
+    return std::unexpected(detail::startup_stopped_error("process", *startup_stop_reason));
+  }
 
   SpawnResultV1 result;
   result.handle = ProcessHandle(std::move(handle_state));

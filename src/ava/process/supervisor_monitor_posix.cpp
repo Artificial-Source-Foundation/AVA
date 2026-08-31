@@ -87,6 +87,11 @@ bool finish_proven_quiet_natural_exit_locked(SupervisorState& state, Record& rec
 
 void observe_status(Record& record, siginfo_t const& information) noexcept
 {
+  // Launch framing is the authoritative status for a failed setup or returned
+  // exec syscall; implementation exit 127 and cleanup signals are not child
+  // image outcomes and must not replace it.
+  if (record.exit_kind == ExitKindV1::LaunchError)
+    return;
   if (information.si_code == CLD_EXITED)
   {
     record.exit_kind = ExitKindV1::Exited;
@@ -298,9 +303,9 @@ void monitor_record_locked(SupervisorState& state, Record& record, Clock::time_p
 {
   if (!record.registered || record.state == ProcessStateV1::Finished)
     return;
-  // The spawning thread owns the CLOEXEC exec-error handshake. Do not let an
-  // immediately failing image race natural-exit classification ahead of the
-  // typed ExecFailed reason; shutdown reasons still wake and stop a launch.
+  // The launching thread owns the versioned CLOEXEC status handshake. Do not
+  // let an immediately failing image race framing classification ahead of the
+  // typed launch reason; shutdown reasons still wake and stop a launch.
   if (!record.startup_handshake_complete && !record.reason)
     return;
 

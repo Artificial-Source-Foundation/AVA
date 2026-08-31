@@ -1,5 +1,6 @@
 add_library(ava_process
   "environment.cpp"
+  "launch_protocol_posix.cpp"
   "owner.cpp"
   "scope.cpp"
   "supervisor.cpp"

@@ -18,6 +18,7 @@ inline constexpr std::size_t kMaxLiveProcessRecordsV1 = 256;
 inline constexpr std::size_t kMaxRetainedProcessRecordsV1 = 256;
 inline constexpr std::size_t kMaxOwnerSegmentBytesV1 = 64;
 inline constexpr std::size_t kMaxPipeWatchesV1 = 8;
+inline constexpr std::size_t kMaxRetainedScriptDescriptorsV1 = 8;
 
 using ProcessDeadline = std::chrono::steady_clock::time_point;
 
@@ -114,6 +115,20 @@ enum class AdoptionForkBranchV1
   Child,
 };
 
+enum class BashContainmentHandshakeV1
+{
+  None,
+  Required,
+};
+
+enum class AdoptionChildFailureStageV1
+{
+  Streams,
+  WorkingDirectory,
+  Containment,
+  DescriptorValidation,
+};
+
 enum class PlatformSupportV1
 {
   Posix,
@@ -163,6 +178,16 @@ enum class PlatformSupportV1
 [[nodiscard]] constexpr bool is_valid(PipeInterestV1 value) noexcept
 {
   return value >= PipeInterestV1::Readable && value <= PipeInterestV1::Writable;
+}
+
+[[nodiscard]] constexpr bool is_valid(BashContainmentHandshakeV1 value) noexcept
+{
+  return value >= BashContainmentHandshakeV1::None && value <= BashContainmentHandshakeV1::Required;
+}
+
+[[nodiscard]] constexpr bool is_valid(AdoptionChildFailureStageV1 value) noexcept
+{
+  return value >= AdoptionChildFailureStageV1::Streams && value <= AdoptionChildFailureStageV1::DescriptorValidation;
 }
 
 [[nodiscard]] std::string_view to_string(ProcessRoleV1 value) noexcept;

@@ -695,10 +695,11 @@ bool EnvironmentAccess::matches_common_launch(ExactEnvironmentV1 const& environm
          (!environment.implementation_->logical_cwd || *environment.implementation_->logical_cwd == cwd);
 }
 
-bool EnvironmentAccess::matches_secure_adoption(ExactEnvironmentV1 const& environment, ProcessRoleV1 role) noexcept
+bool EnvironmentAccess::matches_secure_adoption(ExactEnvironmentV1 const& environment, ProcessRoleV1 role, std::string_view cwd) noexcept
 {
   return is_secure_role(role) && revalidate(environment) && environment.implementation_->role == role &&
-         profile_matches_role(environment.implementation_->profile, role);
+         profile_matches_role(environment.implementation_->profile, role) && environment.implementation_->logical_cwd &&
+         *environment.implementation_->logical_cwd == cwd;
 }
 
 }  // namespace detail

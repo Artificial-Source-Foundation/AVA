@@ -239,6 +239,17 @@ bool commit_reason_locked(Record& record, TerminationReasonV1 reason) noexcept
   return true;
 }
 
+static void mark_launch_error_locked(Record& record) noexcept
+{
+  if (record.reason != TerminationReasonV1::LaunchFailed && record.reason != TerminationReasonV1::ExecFailed)
+    return;
+  record.exit_kind = ExitKindV1::LaunchError;
+  record.exit_code = 0;
+  record.signal_number = 0;
+  record.has_exit_code = false;
+  record.has_signal_number = false;
+}
+
 void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept
 {
   if (!state || identity == 0)
@@ -325,6 +336,7 @@ GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint
 
   if (!record.reason)
     static_cast<void>(commit_reason_locked(record, state.shutting_down ? TerminationReasonV1::ApplicationShutdown : TerminationReasonV1::LaunchFailed));
+  mark_launch_error_locked(record);
   if (record.state != ProcessStateV1::Finished)
   {
     if (!record.stop_deadline)
@@ -344,6 +356,13 @@ ava::core::Error canceled_launch_error(std::string operation, TerminationReasonV
   return error;
 }
 
+ava::core::Error startup_stopped_error(std::string operation, TerminationReasonV1 reason)
+{
+  auto error = process_error(ava::core::ErrorCategory::Io, std::move(operation) + " stopped before exec confirmation");
+  error.with_context("reason", std::string(to_string(reason)));
+  return error;
+}
+
 ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback) noexcept
 {
   auto const now = Clock::now();
@@ -355,6 +374,7 @@ ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& s
   if (record.state == ProcessStateV1::Finished)
     return now;
   static_cast<void>(commit_reason_locked(record, fallback));
+  mark_launch_error_locked(record);
   if (!record.stop_deadline)
     record.stop_deadline = now + kDefaultCleanupBudget;
   if (record.registered && record.state != ProcessStateV1::Reaping)
@@ -943,6 +963,12 @@ void SupervisorTestAccess::clear_after_completion_channel_create_hook(Supervisor
 {
   std::lock_guard lock(supervisor.implementation_->state->mutex);
   supervisor.implementation_->state->after_completion_channel_create_for_test.reset();
+}
+
+void SupervisorTestAccess::fail_next_common_child_working_directory(Supervisor& supervisor) noexcept
+{
+  std::lock_guard lock(supervisor.implementation_->state->mutex);
+  supervisor.implementation_->state->fail_next_common_child_working_directory_for_test = true;
 }
 
 }  // namespace testing

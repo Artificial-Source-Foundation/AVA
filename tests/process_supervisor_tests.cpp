@@ -67,8 +67,10 @@ void test_closed_vocabulary()
   expect(is_valid(TerminationReasonV1::NaturalExit) && is_valid(TerminationReasonV1::UnsupportedSuspension) && !is_valid(static_cast<TerminationReasonV1>(999)),
          "process termination reasons reject unknown serialized values");
   expect(is_valid(CleanupStateV1::Incomplete) && !is_valid(static_cast<CleanupStateV1>(999)) && is_valid(ExitKindV1::CleanupIncomplete) &&
-             !is_valid(static_cast<ExitKindV1>(999)) && is_valid(StreamModeV1::Discard) && !is_valid(static_cast<StreamModeV1>(999)),
-         "cleanup, exit, and stream values are closed and validated");
+             !is_valid(static_cast<ExitKindV1>(999)) && is_valid(StreamModeV1::Discard) && !is_valid(static_cast<StreamModeV1>(999)) &&
+             is_valid(BashContainmentHandshakeV1::Required) && !is_valid(static_cast<BashContainmentHandshakeV1>(999)) &&
+             is_valid(AdoptionChildFailureStageV1::DescriptorValidation) && !is_valid(static_cast<AdoptionChildFailureStageV1>(999)),
+         "cleanup, exit, stream, containment, and adoption child-stage values are closed and validated");
   expect(to_string(ProcessRoleV1::Mcp) == "mcp" && to_string(TerminationReasonV1::DeadlineExpired) == "deadline_expired" &&
              to_string(static_cast<ProcessRoleV1>(999)) == "invalid",
          "closed process vocabulary has bounded canonical names and an invalid sentinel");

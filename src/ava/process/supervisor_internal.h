@@ -14,9 +14,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <signal.h>
@@ -187,6 +189,7 @@ struct SupervisorState
   std::map<std::string, OwnerAliasEntry> owner_aliases;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_fork_before_release_for_test;
   std::shared_ptr<AfterForkBeforeReleaseHook> after_completion_channel_create_for_test;
+  bool fail_next_common_child_working_directory_for_test = false;
   std::uint64_t next_record = 1;
   std::uint64_t next_owner_alias = 1;
   std::size_t live_records = 0;
@@ -252,6 +255,7 @@ struct GateReleaseDecision
 // point; physical gate writes happen afterward without the supervisor lock.
 [[nodiscard]] GateReleaseDecision commit_gate_release_locked(SupervisorState& state, std::uint64_t identity, ProcessDeadline startup_deadline) noexcept;
 [[nodiscard]] ava::core::Error canceled_launch_error(std::string operation, TerminationReasonV1 reason);
+[[nodiscard]] ava::core::Error startup_stopped_error(std::string operation, TerminationReasonV1 reason);
 [[nodiscard]] ProcessDeadline fail_registered_launch(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity,
                                                      TerminationReasonV1 fallback) noexcept;
 
@@ -269,6 +273,7 @@ struct GateReleaseDecision
 [[nodiscard]] ssize_t child_read_retry(int descriptor, void* data, std::size_t size) noexcept;
 [[nodiscard]] bool child_write_all(int descriptor, void const* data, std::size_t size) noexcept;
 void close_nonstandard_descriptors(int preserved, int maximum) noexcept;
+void close_nonstandard_descriptors_except(std::span<int const> preserved, int maximum) noexcept;
 [[nodiscard]] int descriptor_limit() noexcept;
 
 void observe_status(Record& record, siginfo_t const& information) noexcept;
@@ -307,14 +312,23 @@ struct AdoptionGate::Impl
   std::uint64_t record = 0;
   ProcessRoleV1 role = ProcessRoleV1::Curl;
   ExactEnvironmentV1 environment;
+  std::string cwd;
+  std::vector<std::string> environment_storage;
+  std::vector<char*> environment_pointers;
+  BashContainmentHandshakeV1 bash_containment = BashContainmentHandshakeV1::None;
   ProcessDeadline startup_deadline{};
   bool child_branch = false;
+  bool child_api_ready = false;
+  bool containment_applied = false;
   bool registered = false;
 #if !defined(_WIN32)
-  detail::Pipe leader_status;
+  detail::UniqueFd cwd_descriptor;
+  detail::Pipe launch_status;
   detail::Pipe leader_control;
+  detail::Pipe containment_control;
   std::optional<detail::Pipe> sentinel_status;
   std::optional<detail::Pipe> sentinel_control;
+  int maximum_descriptor = 4096;
   pid_t leader = -1;
   pid_t sentinel = -1;
 #endif

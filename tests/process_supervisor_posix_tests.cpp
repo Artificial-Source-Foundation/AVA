@@ -151,6 +151,12 @@ ava::process::SpawnSpecV1 with_role_environment(ava::process::ProcessRoleV1 role
   return specification;
 }
 
+ava::process::SecureAdoptionSpecV1 adoption_spec(ava::process::ProcessRoleV1 role, std::string cwd = "/",
+                                                 ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None)
+{
+  return {.environment = environment_for_role(role), .cwd = std::move(cwd), .bash_containment = containment};
+}
+
 ava::core::Result<ava::process::SpawnResultV1> spawn_fake(ava::process::Supervisor& supervisor, ava::process::OwnerPathV1 const& owner,
                                                           ava::process::ProcessRoleV1 role, ava::process::SpawnSpecV1 spec,
                                                           ava::process::LifecyclePolicyV1 policy = {})
@@ -374,14 +380,34 @@ void test_exec_gate_normal_nonzero_and_exec_failure()
                             ava::process::SpawnSpecV1{.executable = invalid_image.string(), .argv = {invalid_image.string()}, .environment = {}, .cwd = "/"});
   auto failed = reservation ? supervisor.spawn(std::move(*reservation), std::move(failed_spec))
                             : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(reservation.error()));
-  expect(!failed && failed.error().format().find("execute child image") != std::string::npos,
-         "the CLOEXEC exec-error channel reports a typed post-gate exec failure instead of claiming launch success");
+  expect(!failed && failed.error().format().find("exec syscall returned") != std::string::npos,
+         "the versioned CLOEXEC status channel reports a typed post-attempt exec failure instead of claiming launch success");
+
+  auto const setup_root = create_empty_root("process-supervisor-child-setup-failure");
+  auto setup_environment = ava::process::make_plugin_environment_v1(setup_root);
+  auto setup_reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Plugin);
+  auto setup_specification = fake_spec("normal");
+  setup_specification.cwd = setup_root.string();
+  if (setup_environment)
+    setup_specification.environment = std::move(*setup_environment);
+  ava::process::testing::SupervisorTestAccess::fail_next_common_child_working_directory(supervisor);
+  auto setup_failed = setup_reservation ? supervisor.spawn(std::move(*setup_reservation), std::move(setup_specification))
+                                        : ava::core::Result<ava::process::SpawnResultV1>(std::unexpected(setup_reservation.error()));
+  expect(setup_environment && !setup_failed && setup_failed.error().format().find("working_directory") != std::string::npos,
+         "a typed common child setup failure is classified before any exec attempt");
 
   auto snapshot = supervisor.snapshot();
   bool saw_exec_failure = false;
+  bool saw_setup_failure = false;
   for (auto const& record : snapshot.records)
-    saw_exec_failure = saw_exec_failure || record.reason == ava::process::TerminationReasonV1::ExecFailed;
-  expect(saw_exec_failure && snapshot.monitor_started, "exec failure is first-reason classified and the monitor starts only after an actual registered child");
+  {
+    saw_exec_failure = saw_exec_failure || (record.reason == ava::process::TerminationReasonV1::ExecFailed &&
+                                            record.exit_kind == ava::process::ExitKindV1::LaunchError && record.settlement_count == 1);
+    saw_setup_failure = saw_setup_failure || (record.reason == ava::process::TerminationReasonV1::LaunchFailed &&
+                                              record.exit_kind == ava::process::ExitKindV1::LaunchError && record.settlement_count == 1);
+  }
+  expect(saw_exec_failure && saw_setup_failure && snapshot.monitor_started,
+         "typed setup and exec failures preserve one launch-error settlement after exact monitor cleanup");
 }
 
 void test_matching_common_logical_cwd_executes()
@@ -804,12 +830,18 @@ void test_secure_adoption_and_abandoned_ticket_cleanup()
   ava::process::Supervisor supervisor;
   SupervisorFallback fallback(supervisor);
 
+  int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
+  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
+  std::array<char, 7> mode_argument{"normal"};
+  std::array<char*, 3> argv{executable_argument.data(), mode_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), environment_for_role(ava::process::ProcessRoleV1::Bash))
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), adoption_spec(ava::process::ProcessRoleV1::Bash))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
-    _exit(0);
+    gate->child_exec_descriptor(executable, argv.data());
+  if (executable >= 0)
+    static_cast<void>(::close(executable));
   auto sentinel = gate ? gate->fork_sentinel() : ava::core::VoidResult(std::unexpected(gate.error()));
   auto adopted = gate ? supervisor.adopt(std::move(*gate)) : ava::core::Result<ava::process::ProcessHandle>(std::unexpected(gate.error()));
   auto adopted_status = adopted ? wait_for(supervisor, *adopted) : std::nullopt;
@@ -821,7 +853,7 @@ void test_secure_adoption_and_abandoned_ticket_cleanup()
   bool parent_branch = false;
   if (abandoned_reservation)
   {
-    auto abandoned_gate = supervisor.begin_secure_adoption(std::move(*abandoned_reservation), environment_for_role(ava::process::ProcessRoleV1::Mermaid));
+    auto abandoned_gate = supervisor.begin_secure_adoption(std::move(*abandoned_reservation), adoption_spec(ava::process::ProcessRoleV1::Mermaid));
     if (abandoned_gate)
     {
       auto abandoned_branch = abandoned_gate->fork_leader();
@@ -867,15 +899,19 @@ void test_gated_adoption_shutdown_race()
   SupervisorFallback fallback(supervisor);
   auto const root = create_empty_root("process-supervisor-adoption-after-fork-shutdown");
   auto const marker = root / "executed";
+  int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
+  std::array<char, sizeof(AVA_FAKE_PROCESS_CHILD_PATH)> executable_argument{AVA_FAKE_PROCESS_CHILD_PATH};
+  std::array<char, 12> mode_argument{"exec-marker"};
+  auto marker_argument = marker.string();
+  std::array<char*, 4> argv{executable_argument.data(), mode_argument.data(), marker_argument.data(), nullptr};
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Mermaid);
-  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), environment_for_role(ava::process::ProcessRoleV1::Mermaid))
+  auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), adoption_spec(ava::process::ProcessRoleV1::Mermaid))
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
   auto branch = gate ? gate->fork_leader() : ava::core::Result<ava::process::AdoptionForkBranchV1>(std::unexpected(gate.error()));
   if (branch && *branch == ava::process::AdoptionForkBranchV1::Child)
-  {
-    ::execl(AVA_FAKE_PROCESS_CHILD_PATH, AVA_FAKE_PROCESS_CHILD_PATH, "exec-marker", marker.c_str(), static_cast<char*>(nullptr));
-    _exit(126);
-  }
+    gate->child_exec_descriptor(executable, argv.data());
+  if (executable >= 0)
+    static_cast<void>(::close(executable));
   expect(branch && *branch == ava::process::AdoptionForkBranchV1::Parent, "Mermaid secure adoption creates its one exact gated leader without a sentinel");
   if (!gate || !branch)
     return;

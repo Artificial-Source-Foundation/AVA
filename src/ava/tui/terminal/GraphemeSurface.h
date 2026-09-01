@@ -25,7 +25,6 @@ class GraphemeSurface
   {
     height_ += block_row.height();
     width_ = std::max(width_, block_row.width());
-    Dout(dc::always, "width_ is now " << width_ << " [" << this << "]");
     blocks_rows_.emplace_back(std::move(block_row));
   }
 

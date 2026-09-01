@@ -236,7 +236,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             {
                 "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
                 "aicxx": "15c31e10fd36d522719552ce75d06a02017ad1d3",
-                "utils": "73335590a13f14f2b7182fb51f72e1e8335e9f7e",
+                "utils": "07c67a53ea799ad70c673a0f191b4777eaed0be0",
                 "memory": "4ddb41469f323e32c170637aa413a132e83727be",
                 "threadsafe": "76c3ccab0ef913f6c472175eb3994b20b5b40a0e",
                 "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",

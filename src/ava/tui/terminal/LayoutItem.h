@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Box.h"
+#include "GraphemeBlock.h"
 #include "HorizontalAlignment.h"
 
 #include <cstdint>
@@ -14,8 +15,6 @@ namespace ava::tui::terminal {
 using columns_t = uint32_t;
 
 // Forward declarations.
-class BasicWindow;
-class Rendition;
 class Width;
 Width operator-(Width w1, Width w2);
 
@@ -167,14 +166,11 @@ class LayoutItem
     return assigned_width_;
   }
 
-  // Rendering
-
-  // Write assigned_width_ spaces, using rendition.
-  void write_spaces_to(BasicWindow& basic_window, Rendition const& rendition) const;
-
-  // Write this LayoutItem to a BasicWindow at the current cursor position.
-  // Can not be used for a Paragraph.
-  virtual void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const = 0;
+  // Convert this item to a GraphemeBlock at the width assigned by HorizontalLayout::set_width.
+  //
+  // The returned block always contains at least one row and retains views into this item where
+  // applicable. The item must therefore outlive the block and any surface containing it.
+  virtual GraphemeBlock create_grapheme_block() const = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

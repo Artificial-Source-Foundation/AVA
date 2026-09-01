@@ -183,6 +183,15 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& run)
   return std::move(run);
 }
 
+GraphemeSpan::GraphemeSpan(TextSpan const& source, columns_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), right_align_excluding_trailing_whitespace_(false), columns_(0), columns_excluding_trailing_whitespace_(0)
+{
+  // The GraphemeSpan exists of a single (possibly clipped) GraphemeRun.
+  grapheme_runs_.emplace_back(source, max_columns);
+  auto [columns, columns_excluding_trailing_whitespace] = grapheme_runs_.back().get_columns();
+  columns_ = columns;
+  columns_excluding_trailing_whitespace_ = columns_excluding_trailing_whitespace;
+}
+
 // Write one GraphemeSpan into the ncurses handle `basic_window` at the current cursor position.
 //
 // Every addstr call continues right after where the previous one ended; the GraphemeRun's are simply concatenated.
@@ -219,7 +228,10 @@ void GraphemeSpan::write_to(BasicWindow& basic_window, Rendition const& default_
 
   std::size_t leading_spaces = 0;
   if (alignment_ == HorizontalAlignment::right)
-    leading_spaces = columns_excluding_trailing_whitespace_ < max_columns_ ? max_columns_ - columns_excluding_trailing_whitespace_ : 0;
+  {
+    columns_t const aligned_columns = right_align_excluding_trailing_whitespace_ ? columns_excluding_trailing_whitespace_ : columns_;
+    leading_spaces = aligned_columns < max_columns_ ? max_columns_ - aligned_columns : 0;
+  }
 
   bool row_full = false;          // Set once a character was clipped; from then on only white-space may follow.
   columns_t remaining_columns = max_columns_ - leading_spaces;

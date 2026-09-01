@@ -2,7 +2,9 @@
 #include "terminal/BasicWindow.h"
 #include "terminal/ColorPair.h"
 #include "terminal/Context.h"
+#include "terminal/GraphemeBlockRow.h"
 #include "terminal/HorizontalLayout.h"
+#include "terminal/Pad.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Spacer.h"
 #include "terminal/TextSpan.h"
@@ -164,19 +166,17 @@ void test_mixed_width_text_span_rendering()
     horizontal_layout.append(std::move(item0));
     horizontal_layout.append(std::move(item2));
     horizontal_layout.append(std::move(item1));
-    horizontal_layout.set_width(32);
-
-    terminal::BasicWindow pad = terminal::BasicWindow::newpad({1, 34});
-    horizontal_layout.write_to({0, 0}, pad, terminal::Rendition{terminal::ColorPair{}});
-    terminal::Position const cursor = pad.getyx();
-    expect(cursor.row() == 0 && cursor.col() == 32, "a 32-column HorizontalLayout assignment must advance the ncurses cursor by exactly 32 columns");
+    terminal::Pad pad;
+    pad.append(std::move(horizontal_layout));
+    pad.generate(32, false);
+    expect(pad.dimension().height() == 1 && pad.dimension().width() == 32, "a one-row HorizontalLayout assignment must generate a 1 x 32 pad");
     std::wstring expected_output = L"   abcdefghijklmαβ😀γδ 123456789";
     terminal::columns_t col = 0;
     for (size_t i = 0; i != expected_output.size(); ++i)
     {
       std::ostringstream oss;
       oss << "left-aligned mixed-width output must put expected_output[" << i << "] in column " << col;
-      expect_character(pad, {0, col}, expected_output[i], oss.str());
+      expect_character(pad.basic_window(), {0, col}, expected_output[i], oss.str());
       col += (expected_output[i] == L'😀') ? 2 : 1;
     }
   }
@@ -228,6 +228,92 @@ void test_mixed_width_text_span_rendering()
       expect_character(pad, {0, 4}, L'β', "right-aligned mixed-width output must put beta in column 2");
       expect_character(pad, {0, 5}, L'😀', "right-aligned mixed-width output must put the two-column emoji in column 3");
     }
+  }
+
+  {
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(terminal::TextSpan::create(u8"ab  ", {.alignment = terminal::HorizontalAlignment::right}));
+    terminal::Pad pad;
+    pad.append(std::move(horizontal_layout));
+    pad.generate(6, false);
+
+    expect_character(pad.basic_window(), {0, 0}, L' ', "a right-aligned standalone TextSpan must begin with filler space");
+    expect_character(pad.basic_window(), {0, 1}, L' ', "a right-aligned standalone TextSpan must use all leading filler space");
+    expect_character(pad.basic_window(), {0, 2}, L'a', "a right-aligned standalone TextSpan must align its retained content");
+    expect_character(pad.basic_window(), {0, 4}, L' ', "a right-aligned standalone TextSpan must retain source trailing space");
+    expect_character(pad.basic_window(), {0, 5}, L' ', "a right-aligned standalone TextSpan must retain all source trailing space");
+  }
+
+  {
+    auto wrapping = terminal::Paragraph::create({.minimum_width = 2});
+    wrapping->append(terminal::TextSpan::create(u8"aa aa"));
+    wrapping->initialize_cached_natural_width();
+
+    terminal::HorizontalLayout first_row;
+    first_row.append(std::move(wrapping));
+    first_row.append(terminal::TextSpan::create(u8"B", {.minimum_width = 1}));
+    first_row.append(terminal::Spacer::create({.minimum_width = 1}));
+
+    auto ending = terminal::Paragraph::create({.minimum_width = 1});
+    ending->append(terminal::TextSpan::create(u8"end"));
+    ending->initialize_cached_natural_width();
+    terminal::HorizontalLayout second_row;
+    second_row.append(std::move(ending));
+
+    terminal::Pad pad;
+    pad.append(std::move(first_row));
+    pad.append(std::move(second_row));
+    pad.generate(5);
+
+    expect(pad.dimension().height() == 4 && pad.dimension().width() == 5,
+           "two HorizontalLayout block rows must include their tallest blocks and one separating blank row");
+    expect_character(pad.basic_window(), {0, 0}, L'a', "the first block row must contain the first wrapped paragraph row");
+    expect_character(pad.basic_window(), {0, 3}, L'B', "an adjacent one-row item must be written on the first surface row");
+    expect_character(pad.basic_window(), {1, 0}, L'a', "the taller block must continue on the next surface row");
+    expect_character(pad.basic_window(), {1, 3}, L' ', "space must fill below a shorter adjacent block");
+    expect_character(pad.basic_window(), {2, 0}, L' ', "Pad must leave a blank row between GraphemeBlockRows");
+    expect_character(pad.basic_window(), {3, 0}, L'e', "the second block row must follow the separating blank row");
+  }
+
+  {
+    terminal::HorizontalLayout narrower;
+    narrower.append(terminal::TextSpan::create(u8"a", {.minimum_width = 1}));
+    narrower.append(terminal::TextSpan::create(u8"b", {.minimum_width = 1}));
+    terminal::HorizontalLayout wider;
+    wider.append(terminal::Spacer::create({.minimum_width = 9}));
+
+    terminal::Pad pad;
+    pad.append(std::move(narrower));
+    pad.append(std::move(wider));
+    pad.generate(2, false);
+    expect(pad.dimension().height() == 2 && pad.dimension().width() == 9,
+           "Pad must size itself to the widest block row, got " + std::to_string(pad.dimension().height()) + " x " + std::to_string(pad.dimension().width()));
+  }
+
+  {
+    terminal::Rendition const short_rendition{terminal::ColorPair{}, terminal::Attribute::bold};
+    terminal::Rendition const tall_rendition{terminal::ColorPair{}, terminal::Attribute::underline};
+    auto short_paragraph = terminal::Paragraph::create(short_rendition, {.minimum_width = 1});
+    short_paragraph->append(terminal::TextSpan::create(u8"x"));
+    short_paragraph->initialize_cached_natural_width();
+    auto tall_paragraph = terminal::Paragraph::create(tall_rendition, {.minimum_width = 1});
+    tall_paragraph->append(terminal::TextSpan::create(u8"y y"));
+    tall_paragraph->initialize_cached_natural_width();
+
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(std::move(short_paragraph));
+    horizontal_layout.append(std::move(tall_paragraph));
+    terminal::GraphemeBlockRow block_row = horizontal_layout.create_grapheme_block_row(3);
+    expect(block_row.blocks()[0].size() == 1 && block_row.blocks()[1].size() == 2,
+           "GraphemeBlockRow must not extend a shorter GraphemeBlock with synthetic rows");
+    terminal::Pad pad;
+    pad.append(std::move(horizontal_layout));
+    pad.generate(3, false);
+
+    terminal::ComplexChar cell;
+    pad.basic_window().in_wch({1, 0}, cell);
+    expect(cell.cell_character().data()[0] == L' ' && cell.rendition().attributes().mask() == terminal::Attributes{}.mask(),
+           "empty space below a short Paragraph must use the BasicWindow default rendition");
   }
 
   static_cast<void>(std::fclose(input));

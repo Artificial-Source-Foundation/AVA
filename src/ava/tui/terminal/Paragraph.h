@@ -1,49 +1,13 @@
 #pragma once
 
-#include "GraphemeSpan.h"
+#include "GraphemeBlock.h"
 #include "LayoutItem.h"
 #include "TextSpan.h"
-#include "utils/Vector.h"
 
 #include <memory>
 #include <vector>
 
 namespace ava::tui::terminal {
-
-// GraphemeBlock
-//
-// A list of one or more GraphemeSpan's of the same width (GraphemeSpan::max_columns())
-// Any GraphemeBlock must exist of at least one GraphemeSpan (otherwise the width is unknown).
-//
-//           GraphemeBlock::front().max_columns()
-//   ┊◄-----------------------------------------------►┊
-//   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━┯━━┓
-//   ┃  GraphemeSpan 0                         ╎ WS │🯟🯝┃
-//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━┯━┷━━╉───────┐
-//   ┃  GraphemeSpan 1                            ╎ whitespace │
-//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━━━━━┯━┷━━━━╉───────┘
-//   ┃  GraphemeSpan 2                 ╎   WS   │🯟🯝🯟🯝🯟🯝┃
-//   ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━━━━━━━┷┯━━━━━┫
-//   ┃  GraphemeSpan 3                           ╎  WS ┃
-//   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━━━━┛
-//                   ^
-//           GraphemeBlockIndex (the index into a GraphemeBlock, giving a GraphemeSpan).
-//
-struct GraphemeBlockCategory
-{
-  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
-};
-using GraphemeBlockIndex = utils::VectorIndex<GraphemeBlockCategory>;
-using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex>;
-
-inline uint32_t height_of(GraphemeBlock const& block)
-{
-  return static_cast<uint32_t>(block.size());
-}
-inline columns_t width_of(GraphemeBlock const& block)
-{
-  return block.front().max_columns();
-}
 
 // class Paragraph
 //
@@ -94,13 +58,7 @@ class Paragraph : public LayoutItem
 
   // Wrap this Paragraph to `columns` terminal columns, returning the GraphemeSpans corresponding to that width.
   GraphemeBlock create_grapheme_block(columns_t columns) const;
-  GraphemeBlock create_grapheme_block() const { return create_grapheme_block(assigned_width().columns()); }
-
-  void write_to(BasicWindow& UNUSED_ARG(basic_window), Rendition const& UNUSED_ARG(default_rendition)) const override
-  {
-    // You can't call this method of a Paragraph. See HorizontalLayout::write_to for code that has the work around.
-    ASSERT(false);
-  }
+  GraphemeBlock create_grapheme_block() const override { return create_grapheme_block(assigned_width().columns()); }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

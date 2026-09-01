@@ -6,9 +6,7 @@
 
 namespace ava::tui::terminal {
 
-class BasicWindow;
-class Rendition;
-class Position;
+class GraphemeBlockRow;
 
 // class HorizontalLayout
 //
@@ -24,10 +22,15 @@ class HorizontalLayout
 
   void append(std::unique_ptr<LayoutItem>&& layout_item) { layout_items_.push_back(std::move(layout_item)); }
 
-  void set_width(columns_t columns);
+  // Assign widths to all child items according to their sizing properties, so that the total width becomes `columns` terminal columns.
+  // The assigned total can exceed `columns` when the sum of the child minimum widths is larger.
+  void set_width(columns_t columns) const;
 
-  // Write this HorizontalLayout to a BasicWindow starting at pos.
-  void write_to(Position pos, BasicWindow& basic_window, Rendition const& default_rendition) const;
+  // Fit this HorizontalLayout into `columns` terminal columns, returning the GraphemeBlockRow corresponding to that width.
+  GraphemeBlockRow create_grapheme_block_row(columns_t columns) const;
+
+  // Return the LayoutItem objects in their horizontal display order.
+  std::vector<std::unique_ptr<LayoutItem>> const& layout_items() const { return layout_items_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

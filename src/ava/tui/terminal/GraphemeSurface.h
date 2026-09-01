@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Dimension.h"
 #include "GraphemeBlockRow.h"
 
 namespace ava::tui::terminal {
@@ -14,7 +15,7 @@ class GraphemeSurface
  private:
   std::vector<GraphemeBlockRow> blocks_rows_;
   uint32_t height_{};                           // The height of the surface, in terminal rows.
-  columns_t width_{};                           // The width of the surface, in terminal columns.
+  columns_t width_{};                           // The width of the widest block row, in terminal columns.
 
  public:
   // Construct an empty GraphemeSurface pre-allocating a capacity of `reserve_blocks` GraphemeBlockRow's.
@@ -22,10 +23,8 @@ class GraphemeSurface
 
   void append(GraphemeBlockRow&& block_row)
   {
-    // The width of each added block row must be the same.
-    ASSERT(width_ == 0 || width_ == block_row.width());
     height_ += block_row.height();
-    width_ = block_row.width();
+    width_ = std::max(width_, block_row.width());
     Dout(dc::always, "width_ is now " << width_ << " [" << this << "]");
     blocks_rows_.emplace_back(std::move(block_row));
   }

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "terminal/Context.h"
 #include "terminal/HorizontalLayout.h"
+#include "terminal/Pad.h"
 #include "terminal/Paragraph.h"
 #include "terminal/Spacer.h"
 
@@ -20,8 +21,6 @@ int main()
 #endif
 
   terminal::Context terminal_context;
-  terminal::BasicWindow& stdscr = terminal_context.stdscr();
-
   terminal::HorizontalLayout horizontal_layout1;
 
   {
@@ -42,7 +41,10 @@ int main()
     Dout(dc::notice, "horizontal_layout1 = " << horizontal_layout1);
   }
 
-  horizontal_layout1.write_to({5, 5}, stdscr, terminal_context.default_rendition());
+  terminal::Pad pad;
+  pad.append(std::move(horizontal_layout1));
+  pad.generate(17, false);
+  pad.prefresh({0, 0}, {5, 5}, pad.dimension());
 
   //... allow resizing with keyboard
 

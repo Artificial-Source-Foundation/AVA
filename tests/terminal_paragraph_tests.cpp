@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "support/terminal_test_support.h"
 #include "terminal/Attributes.h"
 #include "terminal/BasicScreen.h"
 #include "terminal/BasicWindow.h"
@@ -11,7 +12,6 @@
 #include "terminal/Rendition.h"
 #include "terminal/TextSpan.h"
 #include "tests/support/test_harness.h"
-#include "support/terminal_test_support.h"
 
 #include <array>
 #include <clocale>
@@ -31,7 +31,7 @@ namespace {
 // terminals default fore- and background.
 std::unique_ptr<terminal::Paragraph> make_comment_paragraph(terminal::Rendition const& styled_rendition)
 {
-  auto paragraph = terminal::Paragraph::create({.minimum_width = 16});
+  auto paragraph = terminal::Paragraph::create({.minimum_width = 1});
   paragraph->append(terminal::TextSpan::create(u8"AAAAAAAAAAA ", styled_rendition));
   paragraph->append(terminal::TextSpan::create(u8" bbb ccc ddd "));
   paragraph->append(terminal::TextSpan::create(u8"EEEEEEEE FFFFF  GGGGG", styled_rendition));
@@ -327,7 +327,7 @@ void test_text_span_compact_cluster_metadata()
 // be split into two fragments that happen to remain on the same logical row.
 void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t columns, std::size_t expected_first_row_columns, std::string_view name)
 {
-  auto paragraph = terminal::Paragraph::create({.minimum_width = 1});
+  auto paragraph = terminal::Paragraph::create({});
   paragraph->append(terminal::TextSpan::create(text));
   paragraph->initialize_cached_natural_width();
 

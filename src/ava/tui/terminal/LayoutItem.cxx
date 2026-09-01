@@ -1,6 +1,5 @@
 #include "sys.h"
 #include "LayoutItem.h"
-#include "BasicWindow.h"
 
 namespace ava::tui::terminal {
 
@@ -55,13 +54,5 @@ void Width::print_on(std::ostream& os) const
   os << '}';
 }
 #endif
-
-void LayoutItem::write_spaces_to(BasicWindow& basic_window, Rendition const& rendition) const
-{
-  basic_window.attr_set(rendition);
-  columns_t number_of_spaces = assigned_width().columns();
-  std::wstring const spaces(number_of_spaces, L' ');
-  basic_window.addstr(spaces.data(), number_of_spaces);
-}
 
 } // namespace ava::tui::terminal

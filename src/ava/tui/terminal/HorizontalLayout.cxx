@@ -1,7 +1,6 @@
 #include "sys.h"
-#include "BasicWindow.h"
+#include "GraphemeBlockRow.h"
 #include "HorizontalLayout.h"
-#include "Paragraph.h"
 #include "utils/macros.h"
 
 #include <algorithm>
@@ -238,7 +237,7 @@ void distribute(columns_t columns, std::span<Item> items)
 // to be interpreted as the minimum-width lower bound values at which we need
 // to switch to a lower priority.
 //
-void HorizontalLayout::set_width(columns_t columns)
+void HorizontalLayout::set_width(columns_t columns) const
 {
   std::size_t const number_of_items = layout_items_.size();
   if (number_of_items == 0)
@@ -350,56 +349,20 @@ void HorizontalLayout::set_width(columns_t columns)
     ordered_items[i].ptr->assigned_width_ = ordered_items[i].assigned_width;
 }
 
-void HorizontalLayout::write_to(Position pos, BasicWindow& basic_window, Rendition const& default_rendition) const
+GraphemeBlockRow HorizontalLayout::create_grapheme_block_row(columns_t columns) const
 {
-  DoutEntering(dc::terminal, "HorizontalLayout::write_to(" << pos << ", " << basic_window << ", " << default_rendition << ")");
+  DoutEntering(dc::terminal, "HorizontalLayout::create_grapheme_block_row(" << columns << ")");
 
   std::size_t const number_of_items = layout_items_.size();
 
   // You can't write an empty HorizontalLayout. Use the `append` member function to fill it.
   ASSERT(number_of_items > 0);
 
-  std::vector<GraphemeBlock> paragraph_grapheme_blocks;
-  GraphemeBlockIndex max_paragraph_rows;
-  max_paragraph_rows.set_to_zero();
-  basic_window.move(pos);
-
-  // Write the top lines of all items.
-  for (std::size_t i = 0; i < number_of_items; ++i)
-  {
-    LayoutItem const* layout_item = layout_items_[i].get();
-    // Paragraph's need special treatment.
-    if (Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_item))
-    {
-      paragraph_grapheme_blocks.emplace_back(paragraph->create_grapheme_block());
-      max_paragraph_rows = std::max(max_paragraph_rows, paragraph_grapheme_blocks.back().iend());
-      paragraph_grapheme_blocks.back().front().write_to(basic_window, paragraph->default_rendition());
-    }
-    // The rest is assumed to exist of only a single grapheme run.
-    else
-      layout_item->write_to(basic_window, default_rendition);
-  }
-
-  // Write the remaining lines if any.
-  constexpr std::size_t first_remaining_row = 1;
-  for (GraphemeBlockIndex row{first_remaining_row}; row < max_paragraph_rows; ++row)
-  {
-    pos.advance_row();
-    basic_window.move(pos);
-    std::size_t paragraph_index = 0;
-    for (std::size_t i = 0; i < number_of_items; ++i)
-    {
-      LayoutItem const* layout_item = layout_items_[i].get();
-      Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_item);
-      if (paragraph && row < paragraph_grapheme_blocks[paragraph_index].iend())
-      {
-        paragraph_grapheme_blocks[paragraph_index][row].write_to(basic_window, paragraph->default_rendition());
-        ++paragraph_index;
-      }
-      else
-        layout_item->write_spaces_to(basic_window, default_rendition);
-    }
-  }
+  set_width(columns);
+  GraphemeBlockRow block_row(number_of_items);
+  for (std::unique_ptr<LayoutItem> const& layout_item : layout_items_)
+    block_row.append(layout_item->create_grapheme_block());
+  return block_row;
 }
 
 } // namespace ava::tui::terminal

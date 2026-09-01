@@ -1,28 +1,28 @@
 #pragma once
 
-#include "Paragraph.h"  // GraphemeBlock
+#include "GraphemeBlock.h"
 
 namespace ava::tui::terminal {
 
 // class GraphemeBlockRow
 //
-// A band of rows of a GraphemeSurface, over the full width.
-// The number of rows is given by `height`, in terminal rows.
+// A horizontal band in a GraphemeSurface. Its width is the sum of its horizontally stacked
+// GraphemeBlock widths, and its height is the largest height of any block.
 //
 //                                   width_
 // ┊◄----------------------------------------------------------------------►┊
 // ┏━━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━━┓ ┄
-// ┃                 │                                 │                    ┃ ▲
-// ┃                 │                                 │                    ┃ ┆
-// ┃ GraphemeBlock 0 │         GraphemeBlock 1         │   GraphemeBlock 2  ┃ ┆ height_
-// ┃                 │                                 │                    ┃ ┆
-// ┃                 │                                 │                    ┃ ▼
+// ┃                 │                                 │   GraphemeBlock 2  ┃ ▲
+// ┃ GraphemeBlock 0 │                                 ├────────────────────┨ ┆
+// ┃                 │         GraphemeBlock 1         │╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲┃ ┆ height_
+// ┠─────────────────┤                                 │╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲┃ ┆
+// ┃╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲│                                 │╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲╲┃ ▼
 // ┗━━━━━━━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━┛ ┄
 //
 class GraphemeBlockRow
 {
  private:
-  std::vector<GraphemeBlock> blocks_;           // Horizontally stacked GraphemeBlock's spanning the full width of the containing GraphemeSurface.
+  std::vector<GraphemeBlock> blocks_;           // Horizontally stacked GraphemeBlock's spanning width_ terminal columns.
   uint32_t height_{};                           // The height of the block row; the largest height of any block.
   columns_t width_{};                           // The width of the block row, in terminal columns.
 
@@ -33,7 +33,7 @@ class GraphemeBlockRow
   // Construct a GraphemeBlockRow from one or more horizontally stacked GraphemeBlock's.
   GraphemeBlockRow(std::vector<GraphemeBlock>&& blocks) : blocks_(std::move(blocks))
   {
-    // There must be at least one block (otherwise this can impossibly span the full width of the containing GraphemeSurface).
+    // Pass at least one GraphemeBlock so this GraphemeBlockRow has a known width.
     ASSERT(!blocks_.empty());
     for (GraphemeBlock const& block : blocks_)
     {

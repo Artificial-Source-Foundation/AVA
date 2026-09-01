@@ -46,22 +46,32 @@ class GraphemeSpan
  private:
   columns_t const max_columns_;                         // The maximum number of terminal columns in this row, ignoring trailing white-space.
   HorizontalAlignment const alignment_;                 // Where filler spaces need to go if max_columns_ is larger than the number of columns this span uses.
+  bool const right_align_excluding_trailing_whitespace_;// Whether right alignment clips trailing whitespace part of the last GraphemeRun(s). True for Paragraph rows.
   columns_t columns_;                                   // The current number of terminal columns in this row, including trailing white-space.
   // Columns from the start through the last non-white-space grapheme, excluding only trailing white-space.
   columns_t columns_excluding_trailing_whitespace_;
   std::vector<GraphemeRun> grapheme_runs_;              // A list of GraphemeRun's that make up the row.
 
  public:
-  // Construct an empty GraphemeSpan.
+  // Construct an empty GraphemeSpan with maximum width `max_columns`, horizontal `alignment`, and
+  // optional right-alignment behavior that ignores retained trailing whitespace.
   GraphemeSpan(columns_t max_columns, HorizontalAlignment alignment)
-      : max_columns_(max_columns), alignment_(alignment), columns_(0), columns_excluding_trailing_whitespace_(0)
+      : max_columns_(max_columns),
+        alignment_(alignment),
+        right_align_excluding_trailing_whitespace_(true),
+        columns_(0),
+        columns_excluding_trailing_whitespace_(0)
   {
   }
+
+  // Construct a GraphemeSpan from `source` clipped to `max_columns`.
+  GraphemeSpan(TextSpan const& source, columns_t max_columns, HorizontalAlignment alignment);
 
   // Move constructor.
   GraphemeSpan(GraphemeSpan&& collector)
       : max_columns_(collector.max_columns_),
         alignment_(collector.alignment_),
+        right_align_excluding_trailing_whitespace_(collector.right_align_excluding_trailing_whitespace_),
         columns_(collector.columns_),
         columns_excluding_trailing_whitespace_(collector.columns_excluding_trailing_whitespace_),
         grapheme_runs_(std::move(collector.grapheme_runs_))

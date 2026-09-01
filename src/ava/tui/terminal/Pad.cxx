@@ -1,10 +1,8 @@
 #include "sys.h"
-#include "GraphemeRun.h"
-#include "Pad.h"
 #include "GraphemeSurface.h"
-#include "utils/macros.h"
+#include "Pad.h"
 
-#include <vector>
+#include <iterator>
 #include "debug.h"
 
 namespace ava::tui::terminal {
@@ -13,22 +11,15 @@ GraphemeSurface Pad::generate_grapheme_surface(columns_t columns)
 {
   // Pass at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
-  // Do not call `generate` unless this Pad contains at least one Paragraph.
-  ASSERT(!paragraphs_.empty());
+  // Append at least one HorizontalLayout before generating this Pad.
+  ASSERT(!horizontal_layouts_.empty());
 
-  // Wrap every Paragraph first: the total number of wrapped rows (plus one blank row between
-  // consecutive Paragraph's) determines the height of the ncurses pad, which must be known when
-  // the pad is created. The wrapped rows only contain views into the TextSpan's of the Paragraph's,
-  // so keeping them around until the end is cheap apart from the wide characters and meta data.
-  //
-  // Reserve paragraphs_.size() number of GraphemeBlockRow's for the surface.
-  GraphemeSurface wrapped_paragraphs(paragraphs_.size());
-  for (std::unique_ptr<Paragraph> const& paragraph : paragraphs_)
-  {
-    GraphemeBlockRow block_row(paragraph->create_grapheme_block(columns));
-    wrapped_paragraphs.append(std::move(block_row));
-  }
-  return wrapped_paragraphs;
+  // Fit every HorizontalLayout first. GraphemeSurface records the widest resulting block row so
+  // narrower rows can remain composed entirely of their real LayoutItem content.
+  GraphemeSurface fitted_horizontal_layouts(horizontal_layouts_.size());
+  for (HorizontalLayout const& horizontal_layout : horizontal_layouts_)
+    fitted_horizontal_layouts.append(horizontal_layout.create_grapheme_block_row(columns));
+  return fitted_horizontal_layouts;
 }
 
 void Pad::generate(columns_t columns, bool blank_line_between_block_rows)
@@ -38,24 +29,43 @@ void Pad::generate(columns_t columns, bool blank_line_between_block_rows)
   // (Re)create the ncurses pad; the assignment destroys the previously generated pad, if any.
   pad_ = BasicWindow::newpad({surface.height() + (blank_line_between_block_rows ? surface.number_of_blocks_rows() - 1 : 0), surface.width()});
 
-  // Write all wrapped rows into the new pad.
-  auto paragraph_iter = paragraphs_.begin();
-  uint32_t row = 0;
-  for (GraphemeBlockRow const& block_row : surface.blocks_rows())
+  // Existing Paragraph rows use their Paragraph default rendition, including alignment filler.
+  // Standalone items, missing rows below shorter blocks, and space to the right of a narrower block
+  // row use the rendition of the newly created pad.
+  Rendition const pad_default_rendition = pad_->current_rendition();
+  uint32_t pad_row = 0;
+  auto horizontal_layout = horizontal_layouts_.begin();
+  auto const& block_rows = surface.blocks_rows();
+  for (auto block_row = block_rows.begin(); block_row != block_rows.end(); ++block_row, ++horizontal_layout)
   {
-    // There is only one block in each block row in this case.
-    GraphemeBlock const& block = block_row.blocks().front();
-    for (GraphemeSpan const& grapheme_span : block)
+    auto const& blocks = block_row->blocks();
+    auto const& layout_items = horizontal_layout->layout_items();
+    // Every generated block corresponds to exactly one source LayoutItem in display order.
+    ASSERT(blocks.size() == layout_items.size());
+
+    for (uint32_t row_in_block = 0; row_in_block < block_row->height(); ++row_in_block)
     {
-      // Paranoia check: all GraphemeSpan's were constructed by passing `columns`.
-      ASSERT(grapheme_span.max_columns() == columns);
-      pad_->move(Position{row, 0});
-      grapheme_span.write_to(*pad_, (*paragraph_iter)->default_rendition());
-      ++row;
+      pad_->move(Position{pad_row, 0});
+      for (std::size_t block_index = 0; block_index < blocks.size(); ++block_index)
+      {
+        GraphemeBlock const& block = blocks[block_index];
+        GraphemeBlockIndex const grapheme_row{row_in_block};
+        if (grapheme_row < block.iend())
+        {
+          Paragraph const* paragraph = dynamic_cast<Paragraph const*>(layout_items[block_index].get());
+          Rendition const& default_rendition = paragraph ? paragraph->default_rendition() : pad_default_rendition;
+          block[grapheme_row].write_to(*pad_, default_rendition);
+        }
+        else
+          pad_->addspaces(width_of(block), pad_default_rendition);
+      }
+      if (block_row->width() < surface.width())
+        pad_->addspaces(surface.width() - block_row->width(), pad_default_rendition);
+      ++pad_row;
     }
-    if (blank_line_between_block_rows)
-      ++row;            // Leave one blank row between consecutive Paragraph's.
-    ++paragraph_iter;
+
+    if (blank_line_between_block_rows && std::next(block_row) != block_rows.end())
+      ++pad_row;
   }
 }
 

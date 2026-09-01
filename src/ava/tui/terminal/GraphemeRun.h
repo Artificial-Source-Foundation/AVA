@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <limits>
 #include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
@@ -78,6 +79,27 @@ class GraphemeRun
     metadata_.push_back(character_meta);
   }
 
+  columns_t remove_last_cluster()
+  {
+    // Don't call this function if there is nothing to remove.
+    ASSERT(!empty());
+    columns_t removed_columns = 0;
+    bool combining;
+    auto str_tail = str_.end();
+    auto metadata_tail = metadata_.end();
+    do
+    {
+      --str_tail;
+      --metadata_tail;
+      combining = metadata_tail->combining;
+      removed_columns += metadata_tail->columns;
+    }
+    while (combining);
+    str_.erase(str_tail, str_.end());
+    metadata_.erase(metadata_tail, metadata_.end());
+    return removed_columns;
+  }
+
   size_t utf8_size() const
   {
     size_t size = 0;
@@ -92,12 +114,13 @@ class GraphemeRun
   std::vector<Metadata> const& metadata() const { return metadata_; }
 
   bool empty() const { return str_.empty(); }
+  std::pair<columns_t, columns_t> get_columns() const;
 
   // Construct an empty GraphemeRun.
   GraphemeRun() : text_span_(nullptr) { }
 
-  // Construct a GraphemeRun that covers the whole parent.
-  GraphemeRun(TextSpan const& parent);
+  // Construct a GraphemeRun that covers `parent` up till a maximum of `max_columns` (clipping between whole clusters).
+  GraphemeRun(TextSpan const& parent, columns_t max_columns = std::numeric_limits<int>::max());
 
   // Accessors.
   TextSpan const* text_span() const { return text_span_; }

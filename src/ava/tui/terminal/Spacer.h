@@ -22,8 +22,8 @@ class Spacer final : public LayoutItem
     return std::unique_ptr<Spacer>(new Spacer(layout_properties));
   }
 
-  // Write assigned_width_ spaces to the current cursor position of `basic_window`.
-  void write_to(BasicWindow& basic_window, Rendition const& default_rendition) const override;
+  // Convert this Spacer to one empty GraphemeSpan having its assigned width.
+  GraphemeBlock create_grapheme_block() const override;
 
   AVA_DEBUG_PRINT_MEMBERS_ON_BASE(LayoutItem)
 };

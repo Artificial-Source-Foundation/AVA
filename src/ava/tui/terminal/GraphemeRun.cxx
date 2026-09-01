@@ -100,8 +100,11 @@ class CompactClusterState
 
 } // namespace
 
-GraphemeRun::GraphemeRun(TextSpan const& text_span) : text_span_(&text_span)
+GraphemeRun::GraphemeRun(TextSpan const& text_span, columns_t max_columns) : text_span_(&text_span)
 {
+  // Do not try to construct a GrapheRun clipped to zero columns.
+  ASSERT(max_columns > 0);
+
   // Pre-allocate sufficient space.
   str_.reserve(text_span.text().size());
   metadata_.reserve(text_span.text().size());
@@ -111,6 +114,7 @@ GraphemeRun::GraphemeRun(TextSpan const& text_span) : text_span_(&text_span)
   std::mbstate_t state{};
   std::size_t offset = 0;
   CompactClusterState cluster_state;
+  columns_t columns = 0;
 
   while (offset != text_span_text.size())
   {
@@ -136,6 +140,27 @@ GraphemeRun::GraphemeRun(TextSpan const& text_span) : text_span_(&text_span)
     // If this fails then this character is probably one of '\t', '\f', '\n', '\r' or '\v', and those should be handled separately.
     ASSERT(!whitespace || width == 1);
 
+    columns += width;
+    if (columns > max_columns)
+    {
+      columns -= width;
+      // Each cluster exists of one non-combining [NC] wchar_t plus zero or more combining ones [C]:
+      //       current value
+      //             |
+      //             v
+      // [NC][NC][C][C][NC][C][NC][NC][C]...
+      //     ~~~~~~~
+      //           \_ incorrectly added; need to be removed.
+      //
+      // If the current one doesn't fit anymore, then we have to back up and remove
+      // any previous [C]'s and the last [NC].
+      if (combining)
+        columns -= remove_last_cluster();
+      if (columns == 0)
+        throw std::runtime_error("Zero width GraphemeRun");
+      return;
+    }
+
     push_back({.utf8_begin = offset,
                .columns = static_cast<uint32_t>(width),
                .utf8_size = static_cast<uint8_t>(size),        // The maximum value is MB_CUR_MAX = 6 with the used locale.
@@ -145,6 +170,19 @@ GraphemeRun::GraphemeRun(TextSpan const& text_span) : text_span_(&text_span)
 
     offset += size;
   }
+}
+
+std::pair<columns_t, columns_t> GraphemeRun::get_columns() const
+{
+  columns_t columns = 0;
+  columns_t columns_excluding_trailing_whitespace = 0;
+  for (Metadata const& metadata : metadata_)
+  {
+    columns += metadata.columns;
+    if (!metadata.whitespace)
+      columns_excluding_trailing_whitespace = columns;
+  }
+  return std::make_pair(columns, columns_excluding_trailing_whitespace);
 }
 
 #ifdef CWDEBUG

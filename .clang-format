@@ -15,6 +15,7 @@ BraceWrapping:
   AfterControlStatement: Always
   BeforeElse: true
   BeforeCatch: true
+  BeforeWhile: true
   AfterNamespace: false
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortIfStatementsOnASingleLine: Never

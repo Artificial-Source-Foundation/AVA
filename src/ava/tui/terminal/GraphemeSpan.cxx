@@ -7,6 +7,7 @@
 #include "utils/macros.h"
 
 #include <iterator>
+#include <stdexcept>
 
 namespace ava::tui::terminal {
 
@@ -183,10 +184,23 @@ GraphemeRun GraphemeSpan::append(GraphemeRun&& run)
   return std::move(run);
 }
 
-GraphemeSpan::GraphemeSpan(TextSpan const& source, columns_t max_columns, HorizontalAlignment alignment) : max_columns_(max_columns), alignment_(alignment), right_align_excluding_trailing_whitespace_(false), columns_(0), columns_excluding_trailing_whitespace_(0)
+GraphemeSpan::GraphemeSpan(TextSpan const& source, columns_t max_columns, HorizontalAlignment alignment)
+    : max_columns_(max_columns),
+      alignment_(alignment),
+      right_align_excluding_trailing_whitespace_(false),
+      columns_(0),
+      columns_excluding_trailing_whitespace_(0)
 {
-  // The GraphemeSpan exists of a single (possibly clipped) GraphemeRun.
-  grapheme_runs_.emplace_back(source, max_columns);
+  try
+  {
+    // The GraphemeSpan exists of a single (possibly clipped) GraphemeRun.
+    grapheme_runs_.emplace_back(source, max_columns);
+  }
+  catch (std::runtime_error const& exception)
+  {
+    Dout(dc::warning, "Unable to render a TextSpan as a GraphemeRun; treating it as empty: " << exception.what());
+    return;
+  }
   auto [columns, columns_excluding_trailing_whitespace] = grapheme_runs_.back().get_columns();
   columns_ = columns;
   columns_excluding_trailing_whitespace_ = columns_excluding_trailing_whitespace;

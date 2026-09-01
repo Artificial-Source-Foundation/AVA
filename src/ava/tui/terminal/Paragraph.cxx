@@ -1,7 +1,8 @@
 #include "sys.h"
-#include "Paragraph.h"
 #include "GraphemeRun.h"
+#include "Paragraph.h"
 
+#include <stdexcept>
 #include "debug.h"
 
 namespace ava::tui::terminal {
@@ -69,22 +70,32 @@ GraphemeBlock Paragraph::create_grapheme_block(columns_t columns) const
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)
   {
-    // Feed this whole TextSpan to GraphemeSpan::append, starting a new GraphemeSpan for
-    // whatever didn't fit anymore, until the TextSpan is fully consumed.
-    GraphemeRun grapheme_run{*text_span};
-    while (!grapheme_run.empty())
+    try
     {
-      GraphemeRun remainder = grapheme_span.append(std::move(grapheme_run));
-      if (remainder.empty())
-        break;
-      grapheme_block.emplace_back(std::move(grapheme_span));
-      // Note: the grapheme_span is now in the same state as it was immediately after the above construction.
+      // Feed this whole TextSpan to GraphemeSpan::append, starting a new GraphemeSpan for
+      // whatever didn't fit anymore, until the TextSpan is fully consumed.
+      GraphemeRun grapheme_run{*text_span};
+      while (!grapheme_run.empty())
+      {
+        GraphemeRun remainder = grapheme_span.append(std::move(grapheme_run));
+        if (remainder.empty())
+          break;
+        grapheme_block.emplace_back(std::move(grapheme_span));
+        // Note: the grapheme_span is now in the same state as it was immediately after the above construction.
 
-      grapheme_run = std::move(remainder);
+        grapheme_run = std::move(remainder);
+      }
+    }
+    catch (std::runtime_error const& exception)
+    {
+      Dout(dc::warning, "Unable to wrap a TextSpan as a GraphemeRun; skipping it: " << exception.what());
     }
   }
 
   if (!grapheme_span.grapheme_runs().empty())
+    grapheme_block.emplace_back(std::move(grapheme_span));
+  else if (grapheme_block.empty())
+    // Preserve a renderable blank row when none of the Paragraph's TextSpans could be converted.
     grapheme_block.emplace_back(std::move(grapheme_span));
 
   // There must be at least one GraphemeSpan in a GraphemeBlock, otherwise we don't know its width.

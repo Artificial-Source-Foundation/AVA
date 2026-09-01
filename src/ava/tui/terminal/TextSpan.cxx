@@ -4,6 +4,8 @@
 #include "utils/macros.h"
 
 #include <iterator>
+#include <optional>
+#include <stdexcept>
 #include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
@@ -26,10 +28,20 @@ Hyperlink TextSpan::hyperlink() const
 Width TextSpan::obtain_natural_width() const
 {
   // FIXME: this seems inefficient; can't this be delayed until the GraphemeRun is required anyway?
-  GraphemeRun grapheme_run(*this);      // Use GraphemeRun to get the number of terminal columns occupied by each character.
+  std::optional<GraphemeRun> grapheme_run;
+  try
+  {
+    // Use GraphemeRun to get the number of terminal columns occupied by each character.
+    grapheme_run.emplace(*this);
+  }
+  catch (std::runtime_error const& exception)
+  {
+    Dout(dc::warning, "Unable to measure a TextSpan as a GraphemeRun; treating it as empty: " << exception.what());
+    return 0;
+  }
 
   uint32_t natural_width = 0;
-  auto const& characters_metadata = grapheme_run.metadata();
+  auto const& characters_metadata = grapheme_run->metadata();
   auto first_non_whitespace_character = characters_metadata.begin();
   while (first_non_whitespace_character != characters_metadata.end() && first_non_whitespace_character->whitespace)
     ++first_non_whitespace_character;

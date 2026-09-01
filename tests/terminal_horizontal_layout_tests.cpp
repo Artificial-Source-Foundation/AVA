@@ -245,6 +245,30 @@ void test_mixed_width_text_span_rendering()
   }
 
   {
+    terminal::HorizontalLayout horizontal_layout;
+    horizontal_layout.append(terminal::TextSpan::create(u8"🚀", {.minimum_width = 1}));
+    terminal::Pad pad;
+    pad.append(std::move(horizontal_layout));
+    pad.generate(1, false);
+
+    expect_character(pad.basic_window(), {0, 0}, L' ', "a standalone TextSpan whose first cluster does not fit must render as empty space");
+  }
+
+  {
+    std::u8string invalid_utf8{static_cast<char8_t>(0xff)};
+    auto paragraph = terminal::Paragraph::create({.minimum_width = 1});
+    paragraph->append(terminal::TextSpan::create(invalid_utf8));
+    paragraph->initialize_cached_natural_width();
+
+    terminal::Pad pad;
+    pad.append(std::move(paragraph));
+    pad.generate(3, false);
+
+    expect(pad.dimension().height() == 1 && pad.dimension().width() == 3, "a Paragraph containing only an invalid TextSpan must remain a renderable blank row");
+    expect_character(pad.basic_window(), {0, 0}, L' ', "an invalid TextSpan in a Paragraph must render as empty space");
+  }
+
+  {
     auto wrapping = terminal::Paragraph::create({.minimum_width = 2});
     wrapping->append(terminal::TextSpan::create(u8"aa aa"));
     wrapping->initialize_cached_natural_width();

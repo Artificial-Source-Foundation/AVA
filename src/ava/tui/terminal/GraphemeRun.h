@@ -1,9 +1,9 @@
 #pragma once
 
-#include <string>
-#include <vector>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <vector>
 #include "debug.h"      // ASSERT
 
 namespace ava::tui::terminal {
@@ -119,7 +119,9 @@ class GraphemeRun
   // Construct an empty GraphemeRun.
   GraphemeRun() : text_span_(nullptr) { }
 
-  // Construct a GraphemeRun that covers `parent` up till a maximum of `max_columns` (clipping between whole clusters).
+  // Construct a GraphemeRun from `parent`, clipping before the first whole cluster that would exceed `max_columns`.
+  //
+  // Throws std::runtime_error when the text is invalid or non-printable, or when no whole cluster fits.
   GraphemeRun(TextSpan const& parent, columns_t max_columns = std::numeric_limits<int>::max());
 
   // Accessors.

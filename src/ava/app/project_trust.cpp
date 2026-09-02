@@ -75,7 +75,8 @@ std::optional<bool> bool_field(std::string_view object, std::string_view key)
   if (!start)
     return std::nullopt;
   auto const valid_terminator = [](std::string_view value, std::size_t offset) {
-    while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0) ++offset;
+    while (offset < value.size() && std::isspace(static_cast<unsigned char>(value[offset])) != 0)
+      ++offset;
     return offset >= value.size() || value[offset] == ',' || value[offset] == '}';
   };
   if (object.substr(*start, 4) == "true" && valid_terminator(object, *start + 4))
@@ -231,6 +232,60 @@ ava::core::Result<std::vector<TrustRecord>> load_records_for_write(std::filesyst
 
 }  // namespace
 
+struct StagedProjectTrustMutation::Impl
+{
+  std::filesystem::path trust_file;
+  std::vector<TrustRecord> records;
+  ProjectTrustState effective_state;
+  bool write_required = false;
+  bool committed = false;
+};
+
+StagedProjectTrustMutation::StagedProjectTrustMutation(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+{
+}
+
+StagedProjectTrustMutation::~StagedProjectTrustMutation() = default;
+StagedProjectTrustMutation::StagedProjectTrustMutation(StagedProjectTrustMutation&& other) noexcept = default;
+StagedProjectTrustMutation& StagedProjectTrustMutation::operator=(StagedProjectTrustMutation&& other) noexcept = default;
+
+ProjectTrustState const& StagedProjectTrustMutation::effective_state() const
+{
+  return impl_->effective_state;
+}
+
+ava::core::VoidResult StagedProjectTrustMutation::commit()
+{
+  if (!impl_ || impl_->committed)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "project trust mutation is unavailable"));
+  if (impl_->write_required)
+  {
+    if (auto written = write_trust_records(impl_->trust_file, impl_->records); !written)
+      return written;
+  }
+  impl_->committed = true;
+  return {};
+}
+
+namespace {
+
+ProjectTrustState effective_staged_state(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
+                                         std::vector<TrustRecord> const& records)
+{
+  ProjectTrustState state;
+  state.workspace_dir = normalized_absolute_path(workspace_dir);
+  state.trust_file = project_trust_file(paths);
+  state.protected_resources = discover_protected_resources(state.workspace_dir);
+  if (auto matched = closest_matching_record(records, state.workspace_dir))
+  {
+    state.decision = matched->trusted ? ProjectTrustDecision::Trusted : ProjectTrustDecision::Denied;
+    state.matched_path = matched->path;
+  }
+  return state;
+}
+
+}  // namespace
+
 std::string_view to_string(ProjectTrustDecision decision)
 {
   switch (decision)
@@ -280,7 +335,8 @@ ProjectTrustState load_project_trust_state(ava::config::XdgPaths const& paths, s
   return state;
 }
 
-ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir, bool trusted)
+ava::core::Result<StagedProjectTrustMutation> stage_set_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir,
+                                                                               bool trusted)
 {
   auto const trust_path = project_trust_file(paths);
   auto records = load_records_for_write(trust_path);
@@ -293,10 +349,16 @@ ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& pa
   else
     existing->trusted = trusted;
   std::ranges::sort(*records, [](TrustRecord const& left, TrustRecord const& right) { return left.path.string() < right.path.string(); });
-  return write_trust_records(trust_path, *records);
+
+  auto impl = std::make_unique<StagedProjectTrustMutation::Impl>();
+  impl->trust_file = trust_path;
+  impl->effective_state = effective_staged_state(paths, workspace, *records);
+  impl->records = std::move(*records);
+  impl->write_required = true;
+  return StagedProjectTrustMutation(std::move(impl));
 }
 
-ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
+ava::core::Result<StagedProjectTrustMutation> stage_clear_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
 {
   auto const trust_path = project_trust_file(paths);
   auto records = load_records_for_write(trust_path);
@@ -305,9 +367,29 @@ ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& 
   auto const workspace = normalized_absolute_path(workspace_dir);
   auto const old_size = records->size();
   records->erase(std::remove_if(records->begin(), records->end(), [&](TrustRecord const& record) { return record.path == workspace; }), records->end());
-  if (records->size() == old_size)
-    return {};
-  return write_trust_records(trust_path, *records);
+
+  auto impl = std::make_unique<StagedProjectTrustMutation::Impl>();
+  impl->trust_file = trust_path;
+  impl->effective_state = effective_staged_state(paths, workspace, *records);
+  impl->records = std::move(*records);
+  impl->write_required = impl->records.size() != old_size;
+  return StagedProjectTrustMutation(std::move(impl));
+}
+
+ava::core::VoidResult set_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir, bool trusted)
+{
+  auto staged = stage_set_project_trust_decision(paths, workspace_dir, trusted);
+  if (!staged)
+    return std::unexpected(std::move(staged.error()));
+  return staged->commit();
+}
+
+ava::core::VoidResult clear_project_trust_decision(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace_dir)
+{
+  auto staged = stage_clear_project_trust_decision(paths, workspace_dir);
+  if (!staged)
+    return std::unexpected(std::move(staged.error()));
+  return staged->commit();
 }
 
 }  // namespace ava::app

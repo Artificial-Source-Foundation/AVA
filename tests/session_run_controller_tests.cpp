@@ -101,7 +101,8 @@ void test_session_run_controller_concurrent_admit_wake_stop()
         ++accepted;
     }));
   }
-  for (auto& thread : threads) thread.join();
+  for (auto& thread : threads)
+    thread.join();
   expect(accepted == 8 && controller.snapshot().queued_commands == 8, "concurrent wake calls retain ordered bounded commands");
   auto stopped = controller.request_stop();
   expect(stopped && *stopped && guard.stop_requested(), "stop interrupts the active guard and reports accepted arbitration");
@@ -629,7 +630,8 @@ void test_session_run_controller_shutdown_during_recovery_and_queued_append()
           }
           ava::core::JoinThread second = ava::core::JoinThread::create("second", [&] { queued_result.emplace(owner(append_entry("shutdown-queued"))); });
           auto const queue_deadline = ava::tests::now_plus_seconds(3);
-          while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
+          while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+            std::this_thread::yield();
           ava::core::JoinThread shutdown = ava::core::JoinThread::create("shutdown", [&] { controller.shutdown(); });
           auto const close_deadline = ava::tests::now_plus_seconds(3);
           while (controller.inspect_admission({.request_id = "closing"}) != ava::app::AdmissionDisposition::RejectClosing &&
@@ -1656,13 +1658,15 @@ void test_session_run_controller_concurrent_fifo_appends()
       if ((i % 2 ? active : owner)(append_entry("fifo-" + std::to_string(i))))
         ++accepted;
     }));
-  for (auto& worker : workers) worker.join();
+  for (auto& worker : workers)
+    worker.join();
   auto entries = store->load();
   expect(accepted == 16 && entries && entries->size() == 16, "concurrent owner and generation appends retain every accepted record");
   if (entries)
   {
     std::vector<std::string> ids;
-    for (auto const& entry : *entries) ids.push_back(entry.id);
+    for (auto const& entry : *entries)
+      ids.push_back(entry.id);
     std::sort(ids.begin(), ids.end());
     expect(std::ranges::adjacent_find(ids) == ids.end(), "concurrent accepted entries retain unique ids");
   }
@@ -1819,7 +1823,8 @@ void test_session_run_controller_exclusive_maintenance_reservation()
         }
         std::jthread queued_writer([&] { queued_result.emplace(owner(append_entry("maintenance-queued"))); });
         auto const queue_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-        while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline) std::this_thread::yield();
+        while (controller.snapshot().queued_appends < 2 && std::chrono::steady_clock::now() < queue_deadline)
+          std::this_thread::yield();
         expect(controller.snapshot().queued_appends == 2 && !controller.reserve_maintenance().has_value(),
                "queued and in-flight owner appends jointly prevent maintenance reservation acquisition");
         {
@@ -1855,6 +1860,43 @@ void test_session_run_controller_exclusive_maintenance_reservation()
       }
     }
   }
+}
+
+void test_session_run_controller_authority_retirement_is_permanent()
+{
+  ava::app::SessionRunController controller(ephemeral_controller_target());
+  auto pre_retirement = controller.admit({.request_id = "capture-stale-routes"});
+  expect(pre_retirement.has_value(), "retirement fixture admits one generation before maintenance");
+  if (!pre_retirement)
+    return;
+  auto stale_append = pre_retirement->append_route();
+  auto stale_batch = pre_retirement->append_batch_route();
+  auto stale_compaction = pre_retirement->compaction_append_route();
+  auto owner_append = controller.owner_append_route();
+  auto owner_batch = controller.owner_append_batch_route();
+  pre_retirement = {};
+
+  auto reservation = controller.reserve_maintenance();
+  expect(reservation && controller.retire_authority(*reservation), "exclusive maintenance permanently retires controller authority");
+  auto during = controller.admit({.request_id = "during-retirement"});
+  auto during_owner = owner_append(append_entry("retired-owner-during"));
+  expect(!during && !during_owner && during.error().message() == "runtime session authority was retired" &&
+             during.error().format().find("reopen the session") != std::string::npos &&
+             during.error().format().find("capture-stale-routes") == std::string::npos,
+         "retired admission and copied owner routes return bounded content-free reopen guidance before reservation release");
+
+  reservation = {};
+  auto after = controller.admit({.request_id = "after-retirement"});
+  auto after_owner_batch = owner_batch({append_entry("retired-owner-batch")});
+  auto after_stale = stale_append(append_entry("retired-generation"));
+  auto after_stale_batch = stale_batch({append_entry("retired-generation-batch")});
+  auto after_stale_compaction = stale_compaction(compaction_entry("retired-compaction"), {}, nullptr);
+  auto snapshot = controller.snapshot();
+  expect(controller.authority_retired() && snapshot.authority_retired && !snapshot.maintenance_reserved &&
+             controller.inspect_admission({.request_id = "inspection"}) == ava::app::AdmissionDisposition::RejectRetiredAuthority &&
+             ava::app::to_string(ava::app::AdmissionDisposition::RejectRetiredAuthority) == "rejected_retired_authority" && !after && !after_owner_batch &&
+             !after_stale && !after_stale_batch && !after_stale_compaction,
+         "releasing maintenance cannot reactivate retired run, owner, batch, generation, or compaction authority");
 }
 
 void test_session_run_controller_compaction_compare_and_append()
@@ -2347,6 +2389,7 @@ void run_session_run_controller_tests()
   test_session_run_controller_concurrent_fifo_appends();
   test_session_run_controller_routes_release_target_on_shutdown();
   test_session_run_controller_exclusive_maintenance_reservation();
+  test_session_run_controller_authority_retirement_is_permanent();
   test_session_run_controller_compaction_compare_and_append();
   test_session_run_controller_compaction_snapshot_lane();
   test_session_run_controller_bounds_and_reentrant_snapshot();

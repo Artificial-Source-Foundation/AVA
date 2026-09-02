@@ -68,6 +68,13 @@ ava::core::Error maintenance_reservation_error(std::string_view reason)
   return error;
 }
 
+ava::core::Error retired_authority_error()
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "runtime session authority was retired");
+  error.with_context("recovery", "reopen the session before running or writing");
+  return error;
+}
+
 bool legal_transition(RunPhase from, RunPhase to)
 {
   if (from == to)
@@ -211,6 +218,7 @@ struct ActiveRunGuard::State
   std::stop_source stop_source;
   bool active = false;
   bool maintenance_reserved = false;
+  bool authority_retired = false;
   bool closing = false;
   bool shutting_down = false;
   std::uint64_t generation = 0;
@@ -320,6 +328,8 @@ void SessionRunController::shutdown() noexcept
 AdmissionDisposition SessionRunController::inspect_admission(RunRequest const& request) const
 {
   std::lock_guard lock(state_->mutex);
+  if (state_->authority_retired)
+    return AdmissionDisposition::RejectRetiredAuthority;
   if (state_->shutting_down || !state_->append_target)
     return AdmissionDisposition::RejectClosing;
   if (state_->persistence_failure)
@@ -336,6 +346,8 @@ ava::core::Result<ActiveRunGuard> SessionRunController::admit(RunRequest request
   if (request.request_id.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "run request id is required"));
   std::lock_guard lock(state_->mutex);
+  if (state_->authority_retired)
+    return std::unexpected(retired_authority_error());
   if (state_->shutting_down || !state_->append_target)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session is closing"));
   if (state_->persistence_failure)
@@ -374,6 +386,8 @@ ava::core::Result<SessionMaintenanceReservation> SessionRunController::reserve_m
     return std::unexpected(maintenance_reservation_error("append_queued_or_in_flight"));
 
   std::lock_guard state_lock(state->mutex);
+  if (state->authority_retired)
+    return std::unexpected(retired_authority_error());
   if (state->shutting_down || !state->append_target)
     return std::unexpected(maintenance_reservation_error("closing"));
   if (state->persistence_failure)
@@ -388,6 +402,40 @@ ava::core::Result<SessionMaintenanceReservation> SessionRunController::reserve_m
   state->maintenance_reserved = true;
   ++state->maintenance_generation;
   return SessionMaintenanceReservation(state, state->maintenance_generation);
+}
+
+ava::core::VoidResult SessionRunController::retire_authority(SessionMaintenanceReservation const& reservation)
+{
+  auto state = state_;
+  if (!state || reservation.state_ != state)
+    return std::unexpected(maintenance_reservation_error("reservation_mismatch"));
+  std::shared_ptr<ava::session::SessionAppendTarget> released_target;
+  {
+    std::lock_guard lock(state->mutex);
+    if (!state->maintenance_reserved || state->maintenance_generation != reservation.generation_)
+      return std::unexpected(maintenance_reservation_error("reservation_unavailable"));
+    if (state->active || !state->appends.empty())
+      return std::unexpected(maintenance_reservation_error("work_active"));
+    state->authority_retired = true;
+    state->closing = true;
+    state->commands.clear();
+    released_target = std::move(state->append_target);
+  }
+  // The fresh controller already duplicated this shared target before old
+  // authority retirement. Releasing the old reference here prevents stale
+  // route copies from retaining a session lease while remaining permanently
+  // unable to append.
+  released_target.reset();
+  return {};
+}
+
+bool SessionRunController::authority_retired() const noexcept
+{
+  auto state = state_;
+  if (!state)
+    return true;
+  std::lock_guard lock(state->mutex);
+  return state->authority_retired;
 }
 
 ava::core::Result<RunOutcome> SessionRunController::wait_outcome(std::string_view correlation_id)
@@ -411,6 +459,8 @@ ava::core::VoidResult SessionRunController::wake(RunCommand command)
   if (command.message.size() > kMaxSessionRunCommandBytes)
     return std::unexpected(queue_limit_error("commands", kMaxSessionRunCommandBytes));
   std::lock_guard lock(state_->mutex);
+  if (state_->authority_retired)
+    return std::unexpected(retired_authority_error());
   if (!state_->active || state_->closing)
     return std::unexpected(inactive_error());
   if (!command.correlation_id.empty() && command.correlation_id != state_->run_id)
@@ -426,6 +476,8 @@ ava::core::VoidResult SessionRunController::wake(RunCommand command)
 ava::core::Result<std::deque<RunCommand>> SessionRunController::take_commands(std::string_view correlation_id, RunCommand::Kind kind)
 {
   std::lock_guard lock(state_->mutex);
+  if (state_->authority_retired)
+    return std::unexpected(retired_authority_error());
   if (!state_->active)
     return std::unexpected(inactive_error());
   std::deque<RunCommand> selected, remaining;
@@ -447,6 +499,8 @@ ava::core::Result<bool> SessionRunController::request_stop(StopReason reason)
   std::stop_source source;
   {
     std::lock_guard lock(state_->mutex);
+    if (state_->authority_retired)
+      return std::unexpected(retired_authority_error());
     if (!state_->active || state_->closing || state_->phase == RunPhase::Completing || state_->requested_stop)
       return false;
     state_->requested_stop = reason;
@@ -462,6 +516,7 @@ RunSnapshot SessionRunController::snapshot() const
   std::lock_guard lock(state_->mutex);
   return {.active = state_->active,
           .maintenance_reserved = state_->maintenance_reserved,
+          .authority_retired = state_->authority_retired,
           .run_id = state_->run_id,
           .phase = state_->phase,
           .stop_requested = state_->stop_source.stop_requested(),
@@ -504,6 +559,8 @@ ava::core::VoidResult SessionRunController::append_for_generation(std::shared_pt
   item->cancel_requested = std::move(cancel_requested);
   {
     std::lock_guard lock(state->mutex);
+    if (state->authority_retired)
+      return std::unexpected(retired_authority_error());
     if (state->persistence_failure)
       return std::unexpected(*state->persistence_failure);
     if (state->maintenance_reserved)
@@ -872,7 +929,9 @@ ava::core::VoidResult SessionRunController::reset_persistence_failure()
   ava::core::VoidResult result;
   {
     std::lock_guard lock(state->mutex);
-    if (state->active || state->maintenance_reserved || !state->appends.empty())
+    if (state->authority_retired)
+      result = std::unexpected(retired_authority_error());
+    else if (state->active || state->maintenance_reserved || !state->appends.empty())
       result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover append failure during active run or maintenance"));
     else if (state->shutting_down || !state->append_target)
       result = std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot recover persistence for a closing runtime session"));
@@ -1177,8 +1236,13 @@ std::string_view to_string(StopReason reason)
 
 std::string_view to_string(AdmissionDisposition disposition)
 {
-  constexpr std::string_view names[] = {
-      "admit", "join_existing_outcome", "rejected_different_prompt", "rejected_maintenance_reservation", "rejected_closing", "rejected_persistence_failure"};
+  constexpr std::string_view names[] = {"admit",
+                                        "join_existing_outcome",
+                                        "rejected_different_prompt",
+                                        "rejected_maintenance_reservation",
+                                        "rejected_closing",
+                                        "rejected_persistence_failure",
+                                        "rejected_retired_authority"};
   return names[static_cast<std::size_t>(disposition)];
 }
 

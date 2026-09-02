@@ -28,6 +28,13 @@ constexpr std::size_t kMaxAccountingValue = 1024U * 1024U;
 constexpr std::size_t kMaxIdentityGenerationAttempts = 8;
 constexpr std::string_view kPublicationCommitStateContext = "subagent_publication_commit_state";
 
+ava::core::Error coordinator_maintenance_error(std::string_view conflict)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::Tool, "subagent workspace maintenance is unavailable");
+  error.with_context("maintenance_conflict", std::string(conflict));
+  return error;
+}
+
 ava::core::Error interaction_unavailable(std::string_view interaction, bool background)
 {
   auto error =
@@ -423,10 +430,78 @@ SubagentCoordinator::~SubagentCoordinator()
   shutdown();
 }
 
+SubagentCoordinatorMaintenanceReservation::SubagentCoordinatorMaintenanceReservation(std::shared_ptr<SubagentCoordinator> coordinator,
+                                                                                     std::vector<std::string> parent_session_ids, std::uint64_t generation)
+    : coordinator_(std::move(coordinator)), parent_session_ids_(std::move(parent_session_ids)), generation_(generation)
+{
+}
+
+SubagentCoordinatorMaintenanceReservation::~SubagentCoordinatorMaintenanceReservation()
+{
+  release();
+}
+
+SubagentCoordinatorMaintenanceReservation::SubagentCoordinatorMaintenanceReservation(SubagentCoordinatorMaintenanceReservation&& other) noexcept
+    : coordinator_(std::move(other.coordinator_)), parent_session_ids_(std::move(other.parent_session_ids_)), generation_(std::exchange(other.generation_, 0))
+{
+}
+
+SubagentCoordinatorMaintenanceReservation& SubagentCoordinatorMaintenanceReservation::operator=(SubagentCoordinatorMaintenanceReservation&& other) noexcept
+{
+  if (this != &other)
+  {
+    release();
+    coordinator_ = std::move(other.coordinator_);
+    parent_session_ids_ = std::move(other.parent_session_ids_);
+    generation_ = std::exchange(other.generation_, 0);
+  }
+  return *this;
+}
+
+bool SubagentCoordinatorMaintenanceReservation::active() const noexcept
+{
+  if (!coordinator_ || generation_ == 0)
+    return false;
+  std::lock_guard lock(coordinator_->mutex_);
+  return std::ranges::all_of(parent_session_ids_, [&](auto const& parent) {
+    auto found = coordinator_->maintenance_parents_.find(parent);
+    return found != coordinator_->maintenance_parents_.end() && found->second == generation_;
+  });
+}
+
+void SubagentCoordinatorMaintenanceReservation::release() noexcept
+{
+  if (!coordinator_ || generation_ == 0)
+    return;
+  try
+  {
+    std::lock_guard lock(coordinator_->mutex_);
+    for (auto const& parent : parent_session_ids_)
+    {
+      auto found = coordinator_->maintenance_parents_.find(parent);
+      if (found != coordinator_->maintenance_parents_.end() && found->second == generation_)
+        coordinator_->maintenance_parents_.erase(found);
+    }
+    coordinator_->admission_changed_.notify_all();
+  }
+  catch (...)
+  {
+  }
+  coordinator_.reset();
+  parent_session_ids_.clear();
+  generation_ = 0;
+}
+
 SubagentCoordinator::StartAdmission::~StartAdmission()
 {
   std::lock_guard lock(coordinator_.mutex_);
   --coordinator_.active_starts_;
+  auto found = coordinator_.active_starts_by_parent_.find(*parent_session_id_);
+  if (found != coordinator_.active_starts_by_parent_.end())
+  {
+    if (--found->second == 0)
+      coordinator_.active_starts_by_parent_.erase(found);
+  }
   coordinator_.admission_changed_.notify_all();
 }
 
@@ -547,9 +622,16 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start(Sub
       mark_unpublished(error);
       return std::unexpected(std::move(error));
     }
+    if (maintenance_parents_.contains(parent_session_id))
+    {
+      auto error = coordinator_maintenance_error("start_reserved");
+      mark_unpublished(error);
+      return std::unexpected(std::move(error));
+    }
+    ++active_starts_by_parent_[parent_session_id];
     ++active_starts_;
   }
-  StartAdmission admission(*this);
+  StartAdmission admission(*this, parent_session_id);
 
   auto require_capacity_locked = [&]() -> ava::core::VoidResult {
     prune_eligible_locked();
@@ -714,6 +796,39 @@ ava::core::Result<SubagentCoordinatorJobSnapshot> SubagentCoordinator::start_bac
                                                                                         std::shared_ptr<SubagentLiveInspectionSource> inspection_source)
 {
   return start(std::move(parent_session_id), SubagentJobMode::Background, std::move(options), std::move(worker), nullptr, std::move(inspection_source));
+}
+
+ava::core::Result<SubagentCoordinatorMaintenanceReservation> SubagentCoordinator::reserve_parent_maintenance(std::vector<std::string> parent_session_ids)
+{
+  std::ranges::sort(parent_session_ids);
+  auto const unique = std::ranges::unique(parent_session_ids);
+  parent_session_ids.erase(unique.begin(), unique.end());
+
+  std::lock_guard lock(mutex_);
+  if (!accepting_)
+    return std::unexpected(coordinator_maintenance_error("coordinator_unavailable"));
+  for (auto const& parent : parent_session_ids)
+  {
+    if (maintenance_parents_.contains(parent))
+      return std::unexpected(coordinator_maintenance_error("already_reserved"));
+    if (auto active = active_starts_by_parent_.find(parent); active != active_starts_by_parent_.end() && active->second > 0)
+      return std::unexpected(coordinator_maintenance_error("start_in_progress"));
+  }
+  for (auto const& [_, state] : jobs_)
+  {
+    std::lock_guard state_lock(state->mutex);
+    if (!std::ranges::binary_search(parent_session_ids, state->snapshot.identity.parent_session_id))
+      continue;
+    if (state->snapshot.execution == SubagentExecutionState::Starting || state->snapshot.execution == SubagentExecutionState::Running)
+      return std::unexpected(coordinator_maintenance_error("job_active"));
+  }
+
+  auto const generation = next_maintenance_generation_++;
+  if (next_maintenance_generation_ == 0)
+    next_maintenance_generation_ = 1;
+  for (auto const& parent : parent_session_ids)
+    maintenance_parents_.emplace(parent, generation);
+  return SubagentCoordinatorMaintenanceReservation(shared_from_this(), std::move(parent_session_ids), generation);
 }
 
 BackgroundJobCompletion SubagentCoordinator::complete(std::shared_ptr<JobState> const& state, BackgroundJobCompletion completion)

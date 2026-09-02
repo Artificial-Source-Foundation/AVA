@@ -1447,6 +1447,78 @@ void test_live_inspection_eviction_and_freeze_failure()
          "failed terminal freeze with no prior frame surfaces stable unavailable");
 }
 
+void test_parent_maintenance_serializes_start_and_live_jobs()
+{
+  auto coordinator = coordinator_with();
+  if (!coordinator)
+    return;
+
+  {
+    auto maintenance = coordinator->reserve_parent_maintenance({"parent_maintenance", "parent_maintenance"});
+    std::atomic<bool> worker_called = false;
+    auto rejected = coordinator->start_background("parent_maintenance", {.child_session_id = "child_blocked"}, [&](auto const&) {
+      worker_called.store(true, std::memory_order_release);
+      return ava::agent::BackgroundJobCompletion{};
+    });
+    expect(maintenance && maintenance->active() && !rejected && !worker_called.load(std::memory_order_acquire) &&
+               ava::agent::subagent_publication_commit_state(rejected.error()) == ava::agent::SubagentPublicationCommitState::ProvenUnpublished &&
+               rejected.error().format().find("parent_maintenance") == std::string::npos,
+           "parent maintenance deduplicates private identities and rejects a racing start without worker publication or identity disclosure");
+  }
+
+  struct StartBarrier
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool reached = false;
+    bool release = false;
+  };
+  auto start_barrier = std::make_shared<StartBarrier>();
+  ava::agent::SubagentCoordinatorOptions starting_options;
+  starting_options.id_generator = [start_barrier](std::string_view prefix) {
+    if (prefix == "job")
+    {
+      std::unique_lock lock(start_barrier->mutex);
+      start_barrier->reached = true;
+      start_barrier->changed.notify_all();
+      start_barrier->changed.wait(lock, [&] { return start_barrier->release; });
+    }
+    return prefix == "job" ? std::string("job_start_barrier") : std::string("delivery_start_barrier");
+  };
+  auto starting_coordinator = coordinator_with(std::move(starting_options));
+  std::optional<ava::core::Result<ava::agent::SubagentCoordinatorJobSnapshot>> starting_result;
+  std::jthread starter([&] {
+    starting_result.emplace(starting_coordinator->start_background("parent_starting_maintenance", {.child_session_id = "child_starting"}, [](auto const&) {
+      return ava::agent::BackgroundJobCompletion{.state = ava::agent::BackgroundJobState::Completed, .final_text = "started", .stop_reason = "completed"};
+    }));
+  });
+  {
+    std::unique_lock lock(start_barrier->mutex);
+    expect(start_barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return start_barrier->reached; }),
+           "starting-job fixture pauses before registry publication");
+  }
+  auto during_start = starting_coordinator->reserve_parent_maintenance({"parent_starting_maintenance"});
+  {
+    std::lock_guard lock(start_barrier->mutex);
+    start_barrier->release = true;
+  }
+  start_barrier->changed.notify_all();
+  starter.join();
+  expect(!during_start && starting_result && starting_result->has_value(),
+         "a start already in progress wins maintenance arbitration and publishes normally after maintenance rejection");
+
+  auto worker = std::make_shared<BlockingWorker>();
+  auto running = coordinator->start_background("parent_maintenance", {.child_session_id = "child_running"},
+                                               [worker](auto const& context) { return worker->run(context); });
+  expect(running && worker->wait_started() && !coordinator->reserve_parent_maintenance({"parent_maintenance"}),
+         "a running background job prevents parent maintenance acquisition");
+  worker->finish();
+  if (running)
+    static_cast<void>(coordinator->wait("parent_maintenance", running->job.identity.job_id, std::chrono::seconds(2)));
+  auto after = coordinator->reserve_parent_maintenance({"parent_maintenance"});
+  expect(after && after->active(), "parent maintenance becomes available after the running job reaches terminal state");
+}
+
 void test_safe_bounds_attempt_validation_and_shutdown()
 {
   auto coordinator = coordinator_with();
@@ -1507,5 +1579,6 @@ void run_subagent_coordinator_tests()
   test_live_inspection_two_client_lost_response_and_sink();
   test_live_inspection_path_free_refresh_failures();
   test_live_inspection_eviction_and_freeze_failure();
+  test_parent_maintenance_serializes_start_and_live_jobs();
   test_safe_bounds_attempt_validation_and_shutdown();
 }

@@ -1,11 +1,11 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_job.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
-#include "ava/debug/print_members_on.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ava::agent {
@@ -117,7 +118,38 @@ struct SubagentCoordinatorOptions
 // process-locally published. The application sink must be nonblocking.
 using SubagentTerminalSink = std::function<void(SubagentCoordinatorJobSnapshot const&)>;
 
-class SubagentCoordinator final
+class SubagentCoordinator;
+
+// Move-only process-local barrier for a bounded set of parent session
+// identities. It blocks new starts and is granted only when no start is being
+// published and no starting/running job exists for those parents. Identities
+// remain private and are never included in maintenance errors or snapshots.
+class SubagentCoordinatorMaintenanceReservation
+{
+ public:
+  SubagentCoordinatorMaintenanceReservation() = default;
+  ~SubagentCoordinatorMaintenanceReservation();
+  SubagentCoordinatorMaintenanceReservation(SubagentCoordinatorMaintenanceReservation&& other) noexcept;
+  SubagentCoordinatorMaintenanceReservation& operator=(SubagentCoordinatorMaintenanceReservation&& other) noexcept;
+  SubagentCoordinatorMaintenanceReservation(SubagentCoordinatorMaintenanceReservation const&) = delete;
+  SubagentCoordinatorMaintenanceReservation& operator=(SubagentCoordinatorMaintenanceReservation const&) = delete;
+
+  [[nodiscard]] bool active() const noexcept;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  SubagentCoordinatorMaintenanceReservation(std::shared_ptr<SubagentCoordinator> coordinator, std::vector<std::string> parent_session_ids,
+                                            std::uint64_t generation);
+  void release() noexcept;
+
+  std::shared_ptr<SubagentCoordinator> coordinator_;
+  std::vector<std::string> parent_session_ids_;
+  std::uint64_t generation_ = 0;
+  friend class SubagentCoordinator;
+};
+
+class SubagentCoordinator final : public std::enable_shared_from_this<SubagentCoordinator>
 {
  public:
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SubagentCoordinator>> create(SubagentCoordinatorOptions options = {});
@@ -139,6 +171,10 @@ class SubagentCoordinator final
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> start_background(std::string parent_session_id, BackgroundJobStartOptions options,
                                                                                    BackgroundJobWorker worker,
                                                                                    std::shared_ptr<SubagentLiveInspectionSource> inspection_source = nullptr);
+  // Nonblocking process-local authority barrier used by the application
+  // workspace transaction. Parent identities are accepted as opaque keys and
+  // are never surfaced by the resulting errors.
+  [[nodiscard]] ava::core::Result<SubagentCoordinatorMaintenanceReservation> reserve_parent_maintenance(std::vector<std::string> parent_session_ids);
   [[nodiscard]] std::vector<SubagentCoordinatorJobSnapshot> list(std::string_view parent_session_id) const;
   [[nodiscard]] ava::core::Result<std::vector<SubagentCoordinatorJobSnapshot>> pending_deliveries(std::string_view parent_session_id);
   [[nodiscard]] ava::core::Result<SubagentCoordinatorJobSnapshot> snapshot(std::string_view parent_session_id, std::string_view job_id);
@@ -173,7 +209,10 @@ class SubagentCoordinator final
   class StartAdmission final
   {
    public:
-    explicit StartAdmission(SubagentCoordinator& coordinator) : coordinator_(coordinator) { }
+    StartAdmission(SubagentCoordinator& coordinator, std::string const& parent_session_id) noexcept
+        : coordinator_(coordinator), parent_session_id_(&parent_session_id)
+    {
+    }
     ~StartAdmission();
     StartAdmission(StartAdmission const&) = delete;
     StartAdmission& operator=(StartAdmission const&) = delete;
@@ -182,6 +221,7 @@ class SubagentCoordinator final
 
    private:
     SubagentCoordinator& coordinator_;
+    std::string const* parent_session_id_;
   };
 
   explicit SubagentCoordinator(SubagentCoordinatorOptions options);
@@ -199,11 +239,16 @@ class SubagentCoordinator final
   mutable std::mutex mutex_;
   std::condition_variable admission_changed_;
   std::size_t active_starts_ = 0;
+  std::unordered_map<std::string, std::size_t> active_starts_by_parent_;
+  std::unordered_map<std::string, std::uint64_t> maintenance_parents_;
+  std::uint64_t next_maintenance_generation_ = 1;
   bool accepting_ = true;
   bool shutdown_complete_ = false;
   std::size_t next_job_sequence_ = 1;
   std::unordered_map<std::string, std::shared_ptr<JobState>> jobs_;
   SubagentTerminalSink terminal_sink_ = nullptr;
+
+  friend class SubagentCoordinatorMaintenanceReservation;
 };
 
 }  // namespace ava::agent

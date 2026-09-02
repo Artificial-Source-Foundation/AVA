@@ -2,6 +2,7 @@
 
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime_credentials.h"
+#include "ava/app/session_run_controller.h"
 #include "ava/agent/subagent_coordinator.h"
 #include "ava/core/result.h"
 #include "ava/core/thread.h"
@@ -40,6 +41,11 @@ struct SubagentDeliveryManagerOptions
   // controller locks after an idle controller is observed but before delivery
   // attempt recording or admission. It must unblock when stop is requested.
   std::function<void(std::stop_token)> admission_preflight = nullptr;
+  // Deterministic test-only revocation seams. Production leaves these empty.
+  // Both run without manager/session/controller locks while workspace
+  // maintenance remains reserved. Hooks must not issue manager I/O.
+  std::function<ava::core::VoidResult()> revocation_before_publication_for_test = nullptr;
+  std::function<void()> revocation_after_retirement_for_test = nullptr;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -51,6 +57,85 @@ struct SubagentDeliveryManagerOptions
 class SubagentDeliveryManager final : public std::enable_shared_from_this<SubagentDeliveryManager>
 {
  public:
+  // Process-local, manager-scoped trust writer serialization. This deliberately
+  // makes no singleton or cross-process coordination claim.
+  class TrustMutationReservation
+  {
+   public:
+    TrustMutationReservation() = default;
+    ~TrustMutationReservation();
+    TrustMutationReservation(TrustMutationReservation&& other) noexcept;
+    TrustMutationReservation& operator=(TrustMutationReservation&& other) noexcept;
+    TrustMutationReservation(TrustMutationReservation const&) = delete;
+    TrustMutationReservation& operator=(TrustMutationReservation const&) = delete;
+    [[nodiscard]] bool active() const noexcept;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+   private:
+    struct Impl;
+    explicit TrustMutationReservation(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+    friend class SubagentDeliveryManager;
+  };
+
+  // Short publication barrier used by Session::replace_with. It prevents a
+  // navigation from crossing an authority retirement/publication boundary.
+  class WorkspaceNavigationReservation
+  {
+   public:
+    WorkspaceNavigationReservation() = default;
+    ~WorkspaceNavigationReservation();
+    WorkspaceNavigationReservation(WorkspaceNavigationReservation&& other) noexcept;
+    WorkspaceNavigationReservation& operator=(WorkspaceNavigationReservation&& other) noexcept;
+    WorkspaceNavigationReservation(WorkspaceNavigationReservation const&) = delete;
+    WorkspaceNavigationReservation& operator=(WorkspaceNavigationReservation const&) = delete;
+    [[nodiscard]] bool active() const noexcept;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+   private:
+    struct Impl;
+    explicit WorkspaceNavigationReservation(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+    friend class SubagentDeliveryManager;
+  };
+
+  // All-controller workspace barrier for an effective untrusted transition.
+  // Acquisition is nonblocking and all-or-nothing. Once persistence is marked
+  // committed, destruction fail-closes by retiring old/fresh controllers and
+  // purging stale delivery state unless commit_after_publication completed.
+  class WorkspaceMaintenanceReservation
+  {
+   public:
+    WorkspaceMaintenanceReservation() = default;
+    ~WorkspaceMaintenanceReservation();
+    WorkspaceMaintenanceReservation(WorkspaceMaintenanceReservation&& other) noexcept;
+    WorkspaceMaintenanceReservation& operator=(WorkspaceMaintenanceReservation&& other) noexcept;
+    WorkspaceMaintenanceReservation(WorkspaceMaintenanceReservation const&) = delete;
+    WorkspaceMaintenanceReservation& operator=(WorkspaceMaintenanceReservation const&) = delete;
+
+    [[nodiscard]] bool active() const noexcept;
+    [[nodiscard]] ava::core::Result<std::shared_ptr<SessionRunController>> prepare_fresh_controller(
+        std::shared_ptr<ava::session::SessionAppendTarget> append_target);
+    void mark_persistence_committed() noexcept;
+    [[nodiscard]] ava::core::VoidResult retire_registered_controllers();
+    [[nodiscard]] ava::core::VoidResult run_before_publication_test_hook();
+    // Call only after the current Session atomically publishes the prepared
+    // fresh controller and fail-closed trust/prompt/tool state.
+    [[nodiscard]] ava::core::VoidResult commit_after_publication(std::string_view current_session_id);
+    // Idempotent post-persistence failure path.
+    void fail_closed() noexcept;
+
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+   private:
+    struct Impl;
+    explicit WorkspaceMaintenanceReservation(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+    friend class SubagentDeliveryManager;
+  };
+
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SubagentDeliveryManager>> create(SubagentDeliveryManagerOptions options);
   ~SubagentDeliveryManager();
 
@@ -58,6 +143,16 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   SubagentDeliveryManager& operator=(SubagentDeliveryManager const&) = delete;
 
   [[nodiscard]] std::shared_ptr<ava::agent::SubagentCoordinator> const& coordinator() const noexcept;
+
+  // Register one manager-associated runtime controller under a normalized,
+  // path-private workspace key. Entries are weak, deduplicated, and pruned.
+  [[nodiscard]] ava::core::VoidResult register_workspace_controller(std::filesystem::path const& workspace_identity, std::string_view session_id,
+                                                                    std::shared_ptr<SessionRunController> const& controller);
+  [[nodiscard]] ava::core::Result<TrustMutationReservation> reserve_trust_mutation(std::filesystem::path const& workspace_identity);
+  [[nodiscard]] ava::core::Result<WorkspaceMaintenanceReservation> reserve_workspace_maintenance(
+      TrustMutationReservation const& trust_reservation, std::filesystem::path const& workspace_identity, std::string_view current_session_id,
+      std::shared_ptr<SessionRunController> const& current_controller);
+  [[nodiscard]] ava::core::Result<WorkspaceNavigationReservation> reserve_workspace_navigation(std::filesystem::path const& workspace_identity);
 
   // Refreshes the exact parent capsule before each ordinary user prompt.
   // Callback-bearing fields are intentionally not copied.
@@ -81,9 +176,8 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   //
   // On success found is true and the result owns the detached session. When no retained session exists, found is false and callers must ignore the
   // sentinel error result. All genuine lookup or attachment errors set found to true and remain available through the result.
-  [[nodiscard]] ava::core::Result<runtime::session_ts> retained_session(std::string_view session_id,
-                                                                         std::filesystem::path const& workspace_identity, bool& found,
-                                                                         bool exact_session_id = false);
+  [[nodiscard]] ava::core::Result<runtime::session_ts> retained_session(std::string_view session_id, std::filesystem::path const& workspace_identity,
+                                                                        bool& found, bool exact_session_id = false);
 
   void shutdown() noexcept;
 
@@ -91,12 +185,14 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
 
  private:
   struct ParentCapsule;
+  struct WorkspaceRecord;
   explicit SubagentDeliveryManager(SubagentDeliveryManagerOptions options);
   void start();
   void enqueue(ava::agent::SubagentCoordinatorJobSnapshot const& snapshot) noexcept;
   void worker_loop(std::stop_token stop_token);
   void deliver(ava::agent::SubagentCoordinatorJobSnapshot snapshot, std::shared_ptr<ParentCapsule> const& capsule, std::stop_token stop_token);
   [[nodiscard]] bool parent_needed(std::string_view session_id) const;
+  void finish_in_flight_delivery(std::string const& workspace_key) noexcept;
 
   SubagentDeliveryManagerOptions options_;
   std::shared_ptr<ava::agent::SubagentCoordinator> coordinator_;
@@ -105,6 +201,13 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
   std::unordered_map<std::string, std::shared_ptr<ParentCapsule>> parents_;
   std::unordered_set<std::string> detached_parents_;
   std::deque<ava::agent::SubagentCoordinatorJobSnapshot> queue_;
+  // All workspace keys and parent mappings are private normalized path data;
+  // they are never exposed in snapshots, errors, or debug printing.
+  std::unordered_map<std::string, std::shared_ptr<WorkspaceRecord>> workspaces_;
+  std::unordered_map<std::string, std::string> session_workspaces_;
+  std::unordered_set<std::string> unavailable_deliveries_;
+  bool trust_mutation_active_ = false;
+  std::uint64_t next_workspace_generation_ = 1;
   bool accepting_ = true;
   CapsuleGeneration next_generation_ = 1;
   ava::core::JoinThread worker_;

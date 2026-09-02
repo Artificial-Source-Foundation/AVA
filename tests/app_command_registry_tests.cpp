@@ -551,6 +551,29 @@ void test_project_trust_gates_project_resource_commands()
     std::error_code restore_error;
     std::filesystem::remove(global_append, restore_error);
     write_app_test_file(global_append, "Global append instruction.\n");
+
+    auto trusted_again = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/trust project"});
+    std::error_code second_symlink_error;
+    std::filesystem::remove(global_append, second_symlink_error);
+    second_symlink_error.clear();
+    std::filesystem::create_symlink(symlink_target, global_append, second_symlink_error);
+    if (!second_symlink_error)
+    {
+      auto denied_for_all = ava::app::set_project_trust_decision(paths, workspace, false);
+      auto reload_all = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/reload all"});
+      expect(trusted_again && denied_for_all && reload_all && reload_all->handled && !reload_all->output.empty() &&
+                 reload_all->output[0].find("trust: error") != std::string::npos &&
+                 reload_all->output[0].find("prompts: included-with-trust") != std::string::npos &&
+                 reload_all->output[0].find("prompts: loaded") == std::string::npos && project_trust().decision == ava::app::ProjectTrustDecision::Denied &&
+                 system_prompt().empty(),
+             "/reload all uses the untrusted transaction, reports fail-closed prompt reconstruction, and never reports a later stale prompt reload");
+      std::filesystem::remove(global_append, restore_error);
+      write_app_test_file(global_append, "Global append instruction.\n");
+    }
+    else
+    {
+      write_app_test_file(global_append, "Global append instruction.\n");
+    }
   }
   else
   {

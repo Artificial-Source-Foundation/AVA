@@ -603,10 +603,21 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                                             .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
   TrustState trust_state{.project_trust = std::move(project_trust)};
+  std::shared_ptr<SessionRunController> run_controller;
+  try
+  {
+    run_controller = std::make_shared<SessionRunController>(*append_target);
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to allocate the runtime session controller"));
+  }
+  if (auto registered = delivery_manager->register_workspace_controller(workspace_dir, store.session_id(), run_controller); !registered)
+    return std::unexpected(std::move(registered.error()));
   SessionResources resources{.lease = std::move(lease),
                              .session_process_scope = std::move(session_process_scope),
                              .anchor_set = std::move(anchor_set),
-                             .run_controller = std::make_shared<SessionRunController>(*append_target),
+                             .run_controller = std::move(run_controller),
                              .append_target = std::move(*append_target),
                              .subagent_coordinator = delivery_manager->coordinator(),
                              .subagent_delivery_manager = std::move(delivery_manager),
@@ -699,6 +710,48 @@ ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, sessio
 
   if (&unlocked_current == &unlocked_replacement)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot replace a session with itself"));
+
+  struct NavigationSnapshot
+  {
+    std::shared_ptr<SubagentDeliveryManager> manager;
+    std::filesystem::path workspace;
+    std::shared_ptr<SessionRunController> controller;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  };
+  NavigationSnapshot current_navigation;
+  NavigationSnapshot replacement_navigation;
+  {
+    SCOPED_CRITICAL_AREA_R(current_r, unlocked_current);
+    current_navigation = {
+        .manager = current_r->subagent_delivery_manager(), .workspace = current_r->workspace_dir(), .controller = current_r->run_controller()};
+  }
+  {
+    SCOPED_CRITICAL_AREA_R(replacement_r, unlocked_replacement);
+    replacement_navigation = {
+        .manager = replacement_r->subagent_delivery_manager(), .workspace = replacement_r->workspace_dir(), .controller = replacement_r->run_controller()};
+  }
+  std::vector<SubagentDeliveryManager::WorkspaceNavigationReservation> navigation_reservations;
+  if (current_navigation.manager)
+  {
+    auto reserved = current_navigation.manager->reserve_workspace_navigation(current_navigation.workspace);
+    if (!reserved)
+      return std::unexpected(std::move(reserved.error()));
+    navigation_reservations.push_back(std::move(*reserved));
+  }
+  if (replacement_navigation.manager)
+  {
+    auto reserved = replacement_navigation.manager->reserve_workspace_navigation(replacement_navigation.workspace);
+    if (!reserved)
+      return std::unexpected(std::move(reserved.error()));
+    navigation_reservations.push_back(std::move(*reserved));
+  }
+  if (!current_navigation.controller || !replacement_navigation.controller || current_navigation.controller->authority_retired() ||
+      replacement_navigation.controller->authority_retired())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "runtime session authority was retired");
+    error.with_context("recovery", "reopen the session before navigating");
+    return std::unexpected(std::move(error));
+  }
 
   // We can't destroy any resources while holding session locks; therefore keep a store for them outside the critical area.
   SessionResources old_resources;

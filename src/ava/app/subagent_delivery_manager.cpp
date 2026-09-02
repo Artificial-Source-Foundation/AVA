@@ -2,9 +2,9 @@
 #ifdef CWDEBUG
 #include "ava/debug/debug_ostream_operators.h"
 #endif
-#include "ava/core/thread.h"
 #include "ava/http/transport.h"
 #include "ava/app/headless_policy.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime/session_ts.h"
@@ -15,6 +15,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/core/path.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -91,6 +92,25 @@ bool execution_live(ava::agent::SubagentExecutionState state)
 std::filesystem::path normalized_workspace_identity(std::filesystem::path const& workspace)
 {
   return ava::core::normalized_absolute_path(workspace);
+}
+
+std::string normalized_workspace_key(std::filesystem::path const& workspace)
+{
+  return normalized_workspace_identity(workspace).generic_string();
+}
+
+ava::core::Error workspace_transaction_error(std::string_view conflict)
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "workspace authority transaction is unavailable");
+  error.with_context("workspace_conflict", std::string(conflict));
+  return error;
+}
+
+ava::core::Error reopen_required_error()
+{
+  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "retained runtime authority is no longer current");
+  error.with_context("recovery", "reopen the session");
+  return error;
 }
 
 ava::core::Error retained_owner_not_found(std::string_view session_id)
@@ -211,16 +231,59 @@ std::optional<std::string> committed_delivery_turn(std::vector<ava::session::Ses
 
 struct SubagentDeliveryManager::ParentCapsule
 {
-  ParentCapsule(runtime::Session_aggregate_base&& detached_state, runtime::RunOptions options_in, CapsuleGeneration generation_in)
-      : unlocked_session(std::move(detached_state)), run_options(std::move(options_in)), generation(generation_in)
+  ParentCapsule(runtime::Session_aggregate_base&& detached_state, runtime::RunOptions options_in, CapsuleGeneration generation_in, std::string workspace_key_in)
+      : unlocked_session(std::move(detached_state)), run_options(std::move(options_in)), generation(generation_in), workspace_key(std::move(workspace_key_in))
   {
   }
   // Background delivery retains only this detached, independently leased copy; every access below is scoped through rat/wat guards.
   runtime::session_ts unlocked_session;
   runtime::RunOptions run_options;
   CapsuleGeneration generation = 0;
+  std::string workspace_key;
 
   ~ParentCapsule() { clear_secret(run_options.access_token); }
+};
+
+struct SubagentDeliveryManager::WorkspaceRecord
+{
+  struct ControllerRegistration
+  {
+    std::weak_ptr<SessionRunController> controller;
+    std::string session_id;
+  };
+
+  std::vector<ControllerRegistration> controllers;
+  bool maintenance_reserved = false;
+  std::uint64_t maintenance_generation = 0;
+  std::size_t navigation_reservations = 0;
+  std::size_t in_flight_deliveries = 0;
+};
+
+struct SubagentDeliveryManager::TrustMutationReservation::Impl
+{
+  std::shared_ptr<SubagentDeliveryManager> manager;
+  std::string workspace_key;
+};
+
+struct SubagentDeliveryManager::WorkspaceNavigationReservation::Impl
+{
+  std::shared_ptr<SubagentDeliveryManager> manager;
+  std::string workspace_key;
+};
+
+struct SubagentDeliveryManager::WorkspaceMaintenanceReservation::Impl
+{
+  std::shared_ptr<SubagentDeliveryManager> manager;
+  std::string workspace_key;
+  std::uint64_t generation = 0;
+  std::vector<std::string> parent_session_ids;
+  std::vector<std::shared_ptr<SessionRunController>> controllers;
+  std::vector<SessionMaintenanceReservation> controller_reservations;
+  std::optional<ava::agent::SubagentCoordinatorMaintenanceReservation> coordinator_reservation;
+  std::shared_ptr<SessionRunController> fresh_controller;
+  std::optional<SessionMaintenanceReservation> fresh_reservation;
+  bool persistence_committed = false;
+  bool manager_state_committed = false;
 };
 
 SubagentDeliveryManager::SubagentDeliveryManager(SubagentDeliveryManagerOptions options) : options_(std::move(options)), coordinator_(options_.coordinator)
@@ -263,12 +326,484 @@ std::shared_ptr<ava::agent::SubagentCoordinator> const& SubagentDeliveryManager:
   return coordinator_;
 }
 
+SubagentDeliveryManager::TrustMutationReservation::TrustMutationReservation(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+{
+}
+
+SubagentDeliveryManager::TrustMutationReservation::~TrustMutationReservation()
+{
+  if (!impl_)
+    return;
+  try
+  {
+    std::lock_guard lock(impl_->manager->mutex_);
+    impl_->manager->trust_mutation_active_ = false;
+    impl_->manager->changed_.notify_all();
+  }
+  catch (...)
+  {
+  }
+}
+
+SubagentDeliveryManager::TrustMutationReservation::TrustMutationReservation(TrustMutationReservation&& other) noexcept = default;
+SubagentDeliveryManager::TrustMutationReservation& SubagentDeliveryManager::TrustMutationReservation::operator=(TrustMutationReservation&& other) noexcept
+{
+  if (this != &other)
+  {
+    TrustMutationReservation replacement(std::move(other));
+    impl_.swap(replacement.impl_);
+  }
+  return *this;
+}
+
+bool SubagentDeliveryManager::TrustMutationReservation::active() const noexcept
+{
+  if (!impl_)
+    return false;
+  std::lock_guard lock(impl_->manager->mutex_);
+  return impl_->manager->trust_mutation_active_;
+}
+
+SubagentDeliveryManager::WorkspaceNavigationReservation::WorkspaceNavigationReservation(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+{
+}
+
+SubagentDeliveryManager::WorkspaceNavigationReservation::~WorkspaceNavigationReservation()
+{
+  if (!impl_)
+    return;
+  try
+  {
+    std::lock_guard lock(impl_->manager->mutex_);
+    auto found = impl_->manager->workspaces_.find(impl_->workspace_key);
+    if (found != impl_->manager->workspaces_.end() && found->second->navigation_reservations > 0)
+      --found->second->navigation_reservations;
+    impl_->manager->changed_.notify_all();
+  }
+  catch (...)
+  {
+  }
+}
+
+SubagentDeliveryManager::WorkspaceNavigationReservation::WorkspaceNavigationReservation(WorkspaceNavigationReservation&& other) noexcept = default;
+SubagentDeliveryManager::WorkspaceNavigationReservation& SubagentDeliveryManager::WorkspaceNavigationReservation::operator=(
+    WorkspaceNavigationReservation&& other) noexcept
+{
+  if (this != &other)
+  {
+    WorkspaceNavigationReservation replacement(std::move(other));
+    impl_.swap(replacement.impl_);
+  }
+  return *this;
+}
+
+bool SubagentDeliveryManager::WorkspaceNavigationReservation::active() const noexcept
+{
+  if (!impl_)
+    return false;
+  std::lock_guard lock(impl_->manager->mutex_);
+  auto found = impl_->manager->workspaces_.find(impl_->workspace_key);
+  return found != impl_->manager->workspaces_.end() && found->second->navigation_reservations > 0;
+}
+
+SubagentDeliveryManager::WorkspaceMaintenanceReservation::WorkspaceMaintenanceReservation(std::unique_ptr<Impl> impl) : impl_(std::move(impl))
+{
+}
+
+SubagentDeliveryManager::WorkspaceMaintenanceReservation::~WorkspaceMaintenanceReservation()
+{
+  if (!impl_)
+    return;
+  if (impl_->persistence_committed && !impl_->manager_state_committed)
+    fail_closed();
+
+  // Fresh authority is released only after commit/fail-closed purged every
+  // stale capsule and queue entry for this workspace.
+  impl_->fresh_reservation.reset();
+  impl_->controller_reservations.clear();
+  impl_->coordinator_reservation.reset();
+  try
+  {
+    std::lock_guard lock(impl_->manager->mutex_);
+    auto found = impl_->manager->workspaces_.find(impl_->workspace_key);
+    if (found != impl_->manager->workspaces_.end() && found->second->maintenance_reserved && found->second->maintenance_generation == impl_->generation)
+      found->second->maintenance_reserved = false;
+    impl_->manager->changed_.notify_all();
+  }
+  catch (...)
+  {
+  }
+}
+
+SubagentDeliveryManager::WorkspaceMaintenanceReservation::WorkspaceMaintenanceReservation(WorkspaceMaintenanceReservation&& other) noexcept = default;
+SubagentDeliveryManager::WorkspaceMaintenanceReservation& SubagentDeliveryManager::WorkspaceMaintenanceReservation::operator=(
+    WorkspaceMaintenanceReservation&& other) noexcept
+{
+  if (this != &other)
+  {
+    WorkspaceMaintenanceReservation replacement(std::move(other));
+    impl_.swap(replacement.impl_);
+  }
+  return *this;
+}
+
+bool SubagentDeliveryManager::WorkspaceMaintenanceReservation::active() const noexcept
+{
+  if (!impl_)
+    return false;
+  std::lock_guard lock(impl_->manager->mutex_);
+  auto found = impl_->manager->workspaces_.find(impl_->workspace_key);
+  return found != impl_->manager->workspaces_.end() && found->second->maintenance_reserved && found->second->maintenance_generation == impl_->generation;
+}
+
+ava::core::Result<std::shared_ptr<SessionRunController>> SubagentDeliveryManager::WorkspaceMaintenanceReservation::prepare_fresh_controller(
+    std::shared_ptr<ava::session::SessionAppendTarget> append_target)
+{
+  if (!impl_ || !active() || !append_target)
+    return std::unexpected(workspace_transaction_error("fresh_controller_unavailable"));
+  if (impl_->fresh_controller)
+    return std::unexpected(workspace_transaction_error("fresh_controller_already_prepared"));
+  try
+  {
+    auto controller = std::make_shared<SessionRunController>(std::move(append_target));
+    auto reserved = controller->reserve_maintenance();
+    if (!reserved)
+      return std::unexpected(workspace_transaction_error("fresh_controller_reservation_failed"));
+    impl_->fresh_controller = controller;
+    impl_->fresh_reservation.emplace(std::move(*reserved));
+    return controller;
+  }
+  catch (...)
+  {
+    return std::unexpected(workspace_transaction_error("fresh_controller_allocation_failed"));
+  }
+}
+
+void SubagentDeliveryManager::WorkspaceMaintenanceReservation::mark_persistence_committed() noexcept
+{
+  if (impl_)
+    impl_->persistence_committed = true;
+}
+
+ava::core::VoidResult SubagentDeliveryManager::WorkspaceMaintenanceReservation::retire_registered_controllers()
+{
+  if (!impl_ || !impl_->persistence_committed)
+    return std::unexpected(workspace_transaction_error("persistence_not_committed"));
+  bool failed = false;
+  for (std::size_t index = 0; index < impl_->controllers.size(); ++index)
+  {
+    if (index >= impl_->controller_reservations.size() || !impl_->controllers[index]->retire_authority(impl_->controller_reservations[index]))
+      failed = true;
+  }
+  if (failed)
+    return std::unexpected(workspace_transaction_error("controller_retirement_failed"));
+  if (impl_->manager->options_.revocation_after_retirement_for_test)
+  {
+    try
+    {
+      impl_->manager->options_.revocation_after_retirement_for_test();
+    }
+    catch (...)
+    {
+      return std::unexpected(workspace_transaction_error("retirement_hook_failed"));
+    }
+  }
+  return {};
+}
+
+ava::core::VoidResult SubagentDeliveryManager::WorkspaceMaintenanceReservation::run_before_publication_test_hook()
+{
+  if (!impl_ || !impl_->persistence_committed)
+    return std::unexpected(workspace_transaction_error("persistence_not_committed"));
+  if (!impl_->manager->options_.revocation_before_publication_for_test)
+    return {};
+  try
+  {
+    auto result = impl_->manager->options_.revocation_before_publication_for_test();
+    if (!result)
+      return std::unexpected(workspace_transaction_error("publication_rejected"));
+    return {};
+  }
+  catch (...)
+  {
+    return std::unexpected(workspace_transaction_error("publication_rejected"));
+  }
+}
+
+ava::core::VoidResult SubagentDeliveryManager::register_workspace_controller(std::filesystem::path const& workspace_identity, std::string_view session_id,
+                                                                             std::shared_ptr<SessionRunController> const& controller)
+{
+  if (!controller || controller->authority_retired())
+    return std::unexpected(reopen_required_error());
+  auto const workspace_key = normalized_workspace_key(workspace_identity);
+  std::lock_guard lock(mutex_);
+  if (!accepting_)
+    return std::unexpected(workspace_transaction_error("manager_unavailable"));
+  auto& record = workspaces_[workspace_key];
+  if (!record)
+    record = std::make_shared<WorkspaceRecord>();
+  if (record->maintenance_reserved)
+    return std::unexpected(workspace_transaction_error("maintenance_reserved"));
+  std::erase_if(record->controllers, [](auto const& registration) { return registration.controller.expired(); });
+  if (!session_id.empty())
+  {
+    auto existing = session_workspaces_.find(std::string(session_id));
+    if (existing != session_workspaces_.end() && existing->second != workspace_key)
+      return std::unexpected(workspace_transaction_error("session_workspace_mismatch"));
+  }
+  auto duplicate = std::ranges::any_of(record->controllers, [&](auto const& registration) {
+    auto retained = registration.controller.lock();
+    return retained == controller && registration.session_id == session_id;
+  });
+  if (!duplicate)
+    record->controllers.push_back({.controller = controller, .session_id = std::string(session_id)});
+  if (!session_id.empty())
+    session_workspaces_.insert_or_assign(std::string(session_id), workspace_key);
+  return {};
+}
+
+ava::core::Result<SubagentDeliveryManager::TrustMutationReservation> SubagentDeliveryManager::reserve_trust_mutation(
+    std::filesystem::path const& workspace_identity)
+{
+  auto const workspace_key = normalized_workspace_key(workspace_identity);
+  std::lock_guard lock(mutex_);
+  if (!accepting_)
+    return std::unexpected(workspace_transaction_error("manager_unavailable"));
+  if (trust_mutation_active_)
+    return std::unexpected(workspace_transaction_error("trust_mutation_active"));
+  trust_mutation_active_ = true;
+  auto impl = std::make_unique<TrustMutationReservation::Impl>();
+  impl->manager = shared_from_this();
+  impl->workspace_key = workspace_key;
+  return TrustMutationReservation(std::move(impl));
+}
+
+ava::core::Result<SubagentDeliveryManager::WorkspaceNavigationReservation> SubagentDeliveryManager::reserve_workspace_navigation(
+    std::filesystem::path const& workspace_identity)
+{
+  auto const workspace_key = normalized_workspace_key(workspace_identity);
+  std::lock_guard lock(mutex_);
+  if (!accepting_)
+    return std::unexpected(workspace_transaction_error("manager_unavailable"));
+  auto& record = workspaces_[workspace_key];
+  if (!record)
+    record = std::make_shared<WorkspaceRecord>();
+  if (record->maintenance_reserved)
+    return std::unexpected(workspace_transaction_error("maintenance_reserved"));
+  ++record->navigation_reservations;
+  auto impl = std::make_unique<WorkspaceNavigationReservation::Impl>();
+  impl->manager = shared_from_this();
+  impl->workspace_key = workspace_key;
+  return WorkspaceNavigationReservation(std::move(impl));
+}
+
+ava::core::Result<SubagentDeliveryManager::WorkspaceMaintenanceReservation> SubagentDeliveryManager::reserve_workspace_maintenance(
+    TrustMutationReservation const& trust_reservation, std::filesystem::path const& workspace_identity, std::string_view current_session_id,
+    std::shared_ptr<SessionRunController> const& current_controller)
+{
+  auto const workspace_key = normalized_workspace_key(workspace_identity);
+  if (!trust_reservation.impl_ || trust_reservation.impl_->manager.get() != this || trust_reservation.impl_->workspace_key != workspace_key ||
+      !current_controller || current_controller->authority_retired())
+    return std::unexpected(workspace_transaction_error("trust_reservation_mismatch"));
+
+  auto impl = std::make_unique<WorkspaceMaintenanceReservation::Impl>();
+  impl->manager = shared_from_this();
+  impl->workspace_key = workspace_key;
+  {
+    std::lock_guard lock(mutex_);
+    if (!accepting_ || !trust_mutation_active_)
+      return std::unexpected(workspace_transaction_error("manager_unavailable"));
+    auto& record = workspaces_[workspace_key];
+    if (!record)
+      record = std::make_shared<WorkspaceRecord>();
+    std::erase_if(record->controllers, [](auto const& registration) { return registration.controller.expired(); });
+    auto current_registered = std::ranges::any_of(record->controllers, [&](auto const& registration) {
+      return registration.controller.lock() == current_controller && registration.session_id == current_session_id;
+    });
+    if (!current_registered)
+      record->controllers.push_back({.controller = current_controller, .session_id = std::string(current_session_id)});
+    if (record->maintenance_reserved || record->navigation_reservations > 0 || record->in_flight_deliveries > 0)
+      return std::unexpected(workspace_transaction_error(record->in_flight_deliveries > 0 ? "delivery_in_flight" : "workspace_busy"));
+
+    record->maintenance_reserved = true;
+    record->maintenance_generation = next_workspace_generation_++;
+    if (next_workspace_generation_ == 0)
+      next_workspace_generation_ = 1;
+    impl->generation = record->maintenance_generation;
+    for (auto const& registration : record->controllers)
+    {
+      auto controller = registration.controller.lock();
+      if (!controller)
+        continue;
+      if (!std::ranges::contains(impl->controllers, controller))
+        impl->controllers.push_back(std::move(controller));
+      if (!registration.session_id.empty() && !std::ranges::contains(impl->parent_session_ids, registration.session_id))
+        impl->parent_session_ids.push_back(registration.session_id);
+    }
+    for (auto const& [parent_id, capsule] : parents_)
+      if (capsule->workspace_key == workspace_key && !std::ranges::contains(impl->parent_session_ids, parent_id))
+        impl->parent_session_ids.push_back(parent_id);
+    for (auto const& queued : queue_)
+    {
+      auto mapped = session_workspaces_.find(queued.job.identity.parent_session_id);
+      if (mapped != session_workspaces_.end() && mapped->second == workspace_key &&
+          !std::ranges::contains(impl->parent_session_ids, queued.job.identity.parent_session_id))
+        impl->parent_session_ids.push_back(queued.job.identity.parent_session_id);
+    }
+  }
+
+  WorkspaceMaintenanceReservation reservation(std::move(impl));
+  auto coordinator_reservation = coordinator_->reserve_parent_maintenance(reservation.impl_->parent_session_ids);
+  if (!coordinator_reservation)
+    return std::unexpected(std::move(coordinator_reservation.error()));
+  reservation.impl_->coordinator_reservation.emplace(std::move(*coordinator_reservation));
+  reservation.impl_->controller_reservations.reserve(reservation.impl_->controllers.size());
+  for (auto const& controller : reservation.impl_->controllers)
+  {
+    auto controller_reservation = controller->reserve_maintenance();
+    if (!controller_reservation)
+      return std::unexpected(std::move(controller_reservation.error()));
+    reservation.impl_->controller_reservations.push_back(std::move(*controller_reservation));
+  }
+  return ava::core::Result<WorkspaceMaintenanceReservation>(std::in_place, std::move(reservation));
+}
+
+ava::core::VoidResult SubagentDeliveryManager::WorkspaceMaintenanceReservation::commit_after_publication(std::string_view current_session_id)
+{
+  if (!impl_ || !impl_->persistence_committed || !impl_->fresh_controller || !impl_->fresh_reservation || !impl_->fresh_reservation->active())
+    return std::unexpected(workspace_transaction_error("fresh_authority_unavailable"));
+
+  std::vector<ava::agent::SubagentCoordinatorJobSnapshot> pending;
+  for (auto const& parent : impl_->parent_session_ids)
+  {
+    auto parent_pending = impl_->manager->coordinator_->pending_deliveries(parent);
+    if (parent_pending)
+      pending.insert(pending.end(), parent_pending->begin(), parent_pending->end());
+  }
+
+  std::unordered_map<std::string, std::shared_ptr<ParentCapsule>> released;
+  try
+  {
+    std::lock_guard lock(impl_->manager->mutex_);
+    auto record_it = impl_->manager->workspaces_.find(impl_->workspace_key);
+    if (record_it == impl_->manager->workspaces_.end() || !record_it->second->maintenance_reserved ||
+        record_it->second->maintenance_generation != impl_->generation)
+      return std::unexpected(workspace_transaction_error("maintenance_lost"));
+
+    for (auto const& snapshot : pending)
+      impl_->manager->unavailable_deliveries_.insert(snapshot.job.identity.delivery_id);
+    std::erase_if(impl_->manager->queue_, [&](auto const& queued) {
+      auto mapped = impl_->manager->session_workspaces_.find(queued.job.identity.parent_session_id);
+      bool const matches = mapped != impl_->manager->session_workspaces_.end() && mapped->second == impl_->workspace_key;
+      if (matches)
+        impl_->manager->unavailable_deliveries_.insert(queued.job.identity.delivery_id);
+      return matches;
+    });
+    for (auto parent = impl_->manager->parents_.begin(); parent != impl_->manager->parents_.end();)
+    {
+      if (parent->second->workspace_key != impl_->workspace_key)
+      {
+        ++parent;
+        continue;
+      }
+      released.emplace(parent->first, std::move(parent->second));
+      impl_->manager->detached_parents_.erase(parent->first);
+      parent = impl_->manager->parents_.erase(parent);
+    }
+    for (auto const& parent : impl_->parent_session_ids)
+    {
+      impl_->manager->detached_parents_.erase(parent);
+      impl_->manager->session_workspaces_.erase(parent);
+    }
+    record_it->second->controllers.clear();
+    record_it->second->controllers.push_back({.controller = impl_->fresh_controller, .session_id = std::string(current_session_id)});
+    if (!current_session_id.empty())
+      impl_->manager->session_workspaces_.insert_or_assign(std::string(current_session_id), impl_->workspace_key);
+    impl_->manager_state_committed = true;
+    impl_->manager->changed_.notify_all();
+  }
+  catch (...)
+  {
+    return std::unexpected(workspace_transaction_error("manager_publication_failed"));
+  }
+
+  // Destroy purged capsules (and their detached leases) outside the manager
+  // lock before the freshly published controller can accept work.
+  released.clear();
+  impl_->fresh_reservation.reset();
+  return {};
+}
+
+void SubagentDeliveryManager::WorkspaceMaintenanceReservation::fail_closed() noexcept
+{
+  if (!impl_ || impl_->manager_state_committed)
+    return;
+  try
+  {
+    for (std::size_t index = 0; index < impl_->controllers.size() && index < impl_->controller_reservations.size(); ++index)
+      static_cast<void>(impl_->controllers[index]->retire_authority(impl_->controller_reservations[index]));
+    if (impl_->fresh_controller && impl_->fresh_reservation)
+      static_cast<void>(impl_->fresh_controller->retire_authority(*impl_->fresh_reservation));
+
+    std::vector<ava::agent::SubagentCoordinatorJobSnapshot> pending;
+    for (auto const& parent : impl_->parent_session_ids)
+    {
+      auto parent_pending = impl_->manager->coordinator_->pending_deliveries(parent);
+      if (parent_pending)
+        pending.insert(pending.end(), parent_pending->begin(), parent_pending->end());
+    }
+
+    std::unordered_map<std::string, std::shared_ptr<ParentCapsule>> released;
+    {
+      std::lock_guard lock(impl_->manager->mutex_);
+      for (auto const& snapshot : pending)
+        impl_->manager->unavailable_deliveries_.insert(snapshot.job.identity.delivery_id);
+      std::erase_if(impl_->manager->queue_, [&](auto const& queued) {
+        auto mapped = impl_->manager->session_workspaces_.find(queued.job.identity.parent_session_id);
+        bool const matches = mapped != impl_->manager->session_workspaces_.end() && mapped->second == impl_->workspace_key;
+        if (matches)
+          impl_->manager->unavailable_deliveries_.insert(queued.job.identity.delivery_id);
+        return matches;
+      });
+      for (auto parent = impl_->manager->parents_.begin(); parent != impl_->manager->parents_.end();)
+      {
+        if (parent->second->workspace_key != impl_->workspace_key)
+        {
+          ++parent;
+          continue;
+        }
+        released.emplace(parent->first, std::move(parent->second));
+        impl_->manager->detached_parents_.erase(parent->first);
+        parent = impl_->manager->parents_.erase(parent);
+      }
+      for (auto const& parent : impl_->parent_session_ids)
+      {
+        impl_->manager->detached_parents_.erase(parent);
+        impl_->manager->session_workspaces_.erase(parent);
+      }
+      auto record = impl_->manager->workspaces_.find(impl_->workspace_key);
+      if (record != impl_->manager->workspaces_.end())
+        record->second->controllers.clear();
+      impl_->manager_state_committed = true;
+      impl_->manager->changed_.notify_all();
+    }
+    released.clear();
+    impl_->fresh_reservation.reset();
+  }
+  catch (...)
+  {
+    // Every controller retirement happens before fallible container cleanup.
+    // Even an allocation failure therefore leaves all captured authority
+    // permanently unrunnable and reopen-required.
+  }
+}
+
 ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryManager::refresh_parent(runtime::session_ts const& unlocked_session,
                                                                                                       runtime::RunOptions const& options)
 {
   DoutEntering(dc::notice, "SubagentDeliveryManager::refresh_parent()");
 #ifdef CWDEBUG
-  auto&& f = at_scope_end([]{ Dout(dc::notice, "Leaving SubagentDeliveryManager::refresh_parent()"); });
+  auto&& f = at_scope_end([] { Dout(dc::notice, "Leaving SubagentDeliveryManager::refresh_parent()"); });
 #endif
 
   CRITICAL_AREA_BEGIN_CR(session);
@@ -290,21 +825,29 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
 
   auto safe_options = detached_run_options(options);
   auto const session_id = session_r->store.session_id();
+  auto const workspace_dir = session_r->workspace_dir();
+  auto const controller = session_r->run_controller();
 
   CRITICAL_AREA_END_R(session);
 
+  if (auto registered = register_workspace_controller(workspace_dir, session_id, controller); !registered)
+    return std::unexpected(std::move(registered.error()));
+  auto const workspace_key = normalized_workspace_key(workspace_dir);
   CapsuleGeneration published_generation = 0;
   {
     std::lock_guard lock(mutex_);
     if (!accepting_)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "subagent delivery manager is shutting down"));
+    auto workspace = workspaces_.find(workspace_key);
+    if (workspace == workspaces_.end() || workspace->second->maintenance_reserved)
+      return std::unexpected(workspace_transaction_error("maintenance_reserved"));
     auto found = parents_.find(session_id);
     if (found == parents_.end() && parents_.size() >= options_.max_retained_parents)
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Tool, "automatic subagent delivery parent retention limit reached"));
     published_generation = next_generation_++;
     if (next_generation_ == 0)
       next_generation_ = 1;
-    auto refreshed = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(safe_options), published_generation);
+    auto refreshed = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(safe_options), published_generation, workspace_key);
     if (found == parents_.end())
       parents_.emplace(session_id, std::move(refreshed));
     else
@@ -317,7 +860,8 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
   }
   auto pending = coordinator_->pending_deliveries(session_id);
   if (pending)
-    for (auto const& delivery : *pending) enqueue(delivery);
+    for (auto const& delivery : *pending)
+      enqueue(delivery);
   changed_.notify_all();
   return published_generation;
 }
@@ -337,6 +881,7 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
 
   CRITICAL_AREA_BEGIN_CR(session);
   auto const session_id = session_r->store.session_id();
+  auto const workspace_key = normalized_workspace_key(session_r->workspace_dir());
   CRITICAL_AREA_END_R(session);
 
   std::shared_ptr<ParentCapsule> retained;
@@ -345,6 +890,9 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
     auto found = parents_.find(session_id);
     if (found == parents_.end())
       return {};
+    auto workspace = workspaces_.find(workspace_key);
+    if (workspace == workspaces_.end() || workspace->second->maintenance_reserved)
+      return std::unexpected(workspace_transaction_error("maintenance_reserved"));
     retained = found->second;
   }
 
@@ -375,7 +923,13 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
     auto const generation = next_generation_++;
     if (next_generation_ == 0)
       next_generation_ = 1;
-    found->second = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(retained_options), generation);
+    auto workspace = workspaces_.find(workspace_key);
+    if (workspace == workspaces_.end() || workspace->second->maintenance_reserved)
+    {
+      clear_secret(retained_options.access_token);
+      return std::unexpected(workspace_transaction_error("maintenance_reserved"));
+    }
+    found->second = std::make_shared<ParentCapsule>(std::move(detached_state), std::move(retained_options), generation, workspace_key);
   }
   changed_.notify_all();
   return {};
@@ -435,13 +989,20 @@ void SubagentDeliveryManager::release_detached_parent(std::string_view parent_se
     release_parent_if_unused(parent_session_id, *generation);
 }
 
-ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session(std::string_view session_id,
-                                                                                  std::filesystem::path const& workspace_identity, bool& found,
-                                                                                  bool exact_session_id)
+ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session(std::string_view session_id, std::filesystem::path const& workspace_identity,
+                                                                                 bool& found, bool exact_session_id)
 {
   found = false;
+  auto navigation = reserve_workspace_navigation(workspace_identity);
+  if (!navigation)
+  {
+    found = true;
+    return std::unexpected(std::move(navigation.error()));
+  }
+
   std::shared_ptr<ParentCapsule> capsule;
   auto const expected_workspace = normalized_workspace_identity(workspace_identity);
+  auto const expected_workspace_key = normalized_workspace_key(workspace_identity);
   bool saw_foreign_owner = false;
   {
     std::lock_guard lock(mutex_);
@@ -451,8 +1012,7 @@ ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session
     if (retained != parents_.end())
     {
       found = true;
-      SCOPED_CRITICAL_AREA_R(session_r, retained->second->unlocked_session);
-      if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
+      if (retained->second->workspace_key != expected_workspace_key)
         return std::unexpected(retained_owner_not_found(session_id));
       capsule = retained->second;
     }
@@ -462,8 +1022,7 @@ ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session
       {
         if (!retained_id.starts_with(session_id))
           continue;
-        SCOPED_CRITICAL_AREA_R(session_r, retained->unlocked_session);
-        if (normalized_workspace_identity(session_r->workspace_dir()) != expected_workspace)
+        if (retained->workspace_key != expected_workspace_key)
         {
           saw_foreign_owner = true;
           continue;
@@ -488,6 +1047,37 @@ ava::core::Result<runtime::session_ts> SubagentDeliveryManager::retained_session
       return std::unexpected(retained_owner_not_found(session_id));
     }
   }
+
+  ava::config::XdgPaths paths;
+  ProjectTrustState retained_trust;
+  std::shared_ptr<SessionRunController> controller;
+  std::filesystem::path retained_workspace;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
+    paths = session_r->paths();
+    retained_trust = session_r->project_trust();
+    controller = session_r->run_controller();
+    retained_workspace = session_r->workspace_dir();
+  }
+  auto const disk_trust = load_project_trust_state(paths, retained_workspace);
+  bool const trust_is_current = disk_trust.decision == retained_trust.decision && disk_trust.matched_path == retained_trust.matched_path;
+  if (!controller || controller->authority_retired() || !trust_is_current || normalized_workspace_identity(retained_workspace) != expected_workspace)
+  {
+    std::shared_ptr<ParentCapsule> released;
+    {
+      std::lock_guard lock(mutex_);
+      auto retained = std::ranges::find_if(parents_, [&](auto const& entry) { return entry.second == capsule; });
+      if (retained != parents_.end())
+      {
+        released = std::move(retained->second);
+        detached_parents_.erase(retained->first);
+        parents_.erase(retained);
+      }
+    }
+    found = false;
+    return std::unexpected(retained_owner_not_found(session_id));
+  }
+
   auto detached_state_result = [&]() -> ava::core::Result<runtime::Session_aggregate_base> {
     SCOPED_CRITICAL_AREA_R(session_r, capsule->unlocked_session);
     auto authority = session_r->read_authority_1();
@@ -518,7 +1108,7 @@ void SubagentDeliveryManager::enqueue(ava::agent::SubagentCoordinatorJobSnapshot
   try
   {
     std::lock_guard lock(mutex_);
-    if (!accepting_ || !delivery_pending(snapshot.job))
+    if (!accepting_ || !delivery_pending(snapshot.job) || unavailable_deliveries_.contains(snapshot.job.identity.delivery_id))
       return;
     auto duplicate = std::ranges::any_of(queue_, [&](auto const& queued) { return queued.job.identity.delivery_id == snapshot.job.identity.delivery_id; });
     if (!duplicate)
@@ -545,21 +1135,41 @@ void SubagentDeliveryManager::worker_loop(std::stop_token stop_token)
   {
     ava::agent::SubagentCoordinatorJobSnapshot snapshot;
     std::shared_ptr<ParentCapsule> capsule;
+    std::string in_flight_workspace_key;
     {
       std::unique_lock lock(mutex_);
-      changed_.wait(lock, stop_token, [&] {
-        return !accepting_ || std::ranges::any_of(queue_, [&](auto const& queued) { return parents_.contains(queued.job.identity.parent_session_id); });
-      });
+      auto selectable = [&](auto const& queued) {
+        if (unavailable_deliveries_.contains(queued.job.identity.delivery_id))
+          return false;
+        auto parent = parents_.find(queued.job.identity.parent_session_id);
+        if (parent == parents_.end())
+          return false;
+        auto workspace = workspaces_.find(parent->second->workspace_key);
+        return workspace != workspaces_.end() && !workspace->second->maintenance_reserved;
+      };
+      changed_.wait(lock, stop_token, [&] { return !accepting_ || std::ranges::any_of(queue_, selectable); });
       if (!accepting_ || stop_token.stop_requested())
         break;
-      auto found = std::ranges::find_if(queue_, [&](auto const& queued) { return parents_.contains(queued.job.identity.parent_session_id); });
+      auto found = std::ranges::find_if(queue_, selectable);
       if (found == queue_.end())
         continue;
       snapshot = *found;
       capsule = parents_.at(snapshot.job.identity.parent_session_id);
+      in_flight_workspace_key = capsule->workspace_key;
+      auto workspace = workspaces_.find(in_flight_workspace_key);
+      if (workspace == workspaces_.end() || workspace->second->maintenance_reserved)
+        continue;
+      ++workspace->second->in_flight_deliveries;
       queue_.erase(found);
     }
-    deliver(std::move(snapshot), capsule, stop_token);
+    try
+    {
+      deliver(std::move(snapshot), capsule, stop_token);
+    }
+    catch (...)
+    {
+    }
+    finish_in_flight_delivery(in_flight_workspace_key);
 
     // A full bounded queue may have omitted a notification. Once one slot is
     // consumed, rediscover durable pending work from retained parents rather
@@ -568,15 +1178,32 @@ void SubagentDeliveryManager::worker_loop(std::stop_token stop_token)
     {
       std::lock_guard lock(mutex_);
       parents.reserve(parents_.size());
-      for (auto const& [parent, _] : parents_) parents.push_back(parent);
+      for (auto const& [parent, _] : parents_)
+        parents.push_back(parent);
     }
     for (auto const& parent : parents)
     {
       auto pending = coordinator_->pending_deliveries(parent);
       if (!pending)
         continue;
-      for (auto const& delivery : *pending) enqueue(delivery);
+      for (auto const& delivery : *pending)
+        enqueue(delivery);
     }
+  }
+}
+
+void SubagentDeliveryManager::finish_in_flight_delivery(std::string const& workspace_key) noexcept
+{
+  try
+  {
+    std::lock_guard lock(mutex_);
+    auto workspace = workspaces_.find(workspace_key);
+    if (workspace != workspaces_.end() && workspace->second->in_flight_deliveries > 0)
+      --workspace->second->in_flight_deliveries;
+    changed_.notify_all();
+  }
+  catch (...)
+  {
   }
 }
 
@@ -649,7 +1276,8 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
     auto admission = selected_controller->inspect_admission(RunRequest{.request_id = delivery_run_id});
     if (admission == AdmissionDisposition::Admit)
       break;
-    if (admission == AdmissionDisposition::RejectClosing || admission == AdmissionDisposition::RejectPersistenceFailure)
+    if (admission == AdmissionDisposition::RejectClosing || admission == AdmissionDisposition::RejectPersistenceFailure ||
+        admission == AdmissionDisposition::RejectRetiredAuthority)
       return;
     std::this_thread::sleep_for(options_.admission_retry_interval);
   }
@@ -694,7 +1322,8 @@ void SubagentDeliveryManager::deliver(ava::agent::SubagentCoordinatorJobSnapshot
       break;
     }
     auto admission = selected_controller->inspect_admission(RunRequest{.request_id = delivery_run_id});
-    if (admission == AdmissionDisposition::RejectClosing || admission == AdmissionDisposition::RejectPersistenceFailure)
+    if (admission == AdmissionDisposition::RejectClosing || admission == AdmissionDisposition::RejectPersistenceFailure ||
+        admission == AdmissionDisposition::RejectRetiredAuthority)
       return;
     std::this_thread::sleep_for(options_.admission_retry_interval);
   }
@@ -785,7 +1414,8 @@ void SubagentDeliveryManager::shutdown() noexcept
     }
     // Stop callbacks may reenter application code. Never invoke them while the
     // manager mutex protects capsule/queue teardown.
-    for (auto const& controller : controllers) static_cast<void>(controller->request_stop(StopReason::UserCanceled));
+    for (auto const& controller : controllers)
+      static_cast<void>(controller->request_stop(StopReason::UserCanceled));
     coordinator_->set_terminal_sink(nullptr);
     changed_.notify_all();
     if (worker_.joinable())

@@ -26,7 +26,7 @@ import sys
 import tempfile
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
 
 SCHEMA_VERSION = "ava.backend-benchmark.v2"
@@ -107,14 +107,48 @@ PROCESS_CLOSED_LABELS = {
     "posix_fallback",
     PROCESS_CONTRACT_VERSION,
 }
-PROCESS_FAMILY_SOURCE_PATHS = {
-    "curl": ("src/ava/http", ("src/ava/http/curl_transport.cpp", "src/ava/http/curl_transport.h")),
-    "plugin": ("src/ava/plugin", ("src/ava/plugin/runner.cpp", "src/ava/plugin/runner.h")),
-    "mcp": ("src/ava/mcp", ("src/ava/mcp/stdio_client.cpp", "src/ava/mcp/stdio_client.h")),
-    "lsp": ("src/ava/lsp", ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h")),
-    "bash": ("src/ava/tools", ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h")),
+PROCESS_PRODUCTION_SOURCE_PATHS = ("src", "CMakeLists.txt", "cmake", "config.h.in")
+PROCESS_FAMILY_SOURCE_SCOPES = {
+    "curl": {
+        "scope_kind": "recursive_git_pathspec",
+        "canonical_paths": (),
+        "canonical_pathspecs": (":(glob)src/ava/http/curl_transport*",),
+    },
+    "plugin": {
+        "scope_kind": "recursive_tree",
+        "canonical_paths": ("src/ava/plugin",),
+        "canonical_pathspecs": (),
+    },
+    "mcp": {
+        "scope_kind": "recursive_tree",
+        "canonical_paths": ("src/ava/mcp",),
+        "canonical_pathspecs": (),
+    },
+    "lsp": {
+        "scope_kind": "recursive_tree",
+        "canonical_paths": ("src/ava/lsp",),
+        "canonical_pathspecs": (),
+    },
+    "bash": {
+        "scope_kind": "recursive_git_pathspec",
+        "canonical_paths": (),
+        "canonical_pathspecs": (":(glob)src/ava/tools/bash_tool*",),
+    },
 }
-PROCESS_FAMILY_NAMES = tuple(PROCESS_FAMILY_SOURCE_PATHS)
+PROCESS_SHARED_SOURCE_SCOPE = {
+    "scope_kind": "recursive_git_pathspec",
+    "canonical_paths": ("CMakeLists.txt", "config.h.in"),
+    "canonical_pathspecs": (
+        ":(glob)src/**",
+        ":(glob)cmake/**",
+        ":(exclude)src/ava/plugin",
+        ":(exclude)src/ava/mcp",
+        ":(exclude)src/ava/lsp",
+        ":(exclude,glob)src/ava/http/curl_transport*",
+        ":(exclude,glob)src/ava/tools/bash_tool*",
+    ),
+}
+PROCESS_FAMILY_NAMES = tuple(PROCESS_FAMILY_SOURCE_SCOPES)
 PROCESS_AUTHORITY_SOURCE_PATH = "tests/backend_benchmark_authorities.cmake"
 PROCESS_PROVENANCE_SPLIT_FIELDS = (
     ("measured_checkout", "repository"),
@@ -123,6 +157,7 @@ PROCESS_PROVENANCE_SPLIT_FIELDS = (
 )
 FULL_GIT_OBJECT_ID = re.compile(r"^[0-9a-f]{40}$")
 FULL_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+GIT_ENTRY_MODE = re.compile(r"^[0-7]{6}$")
 
 
 def positive_int(value: str) -> int:
@@ -1691,7 +1726,7 @@ def process_source_provenance(
     checkout = git_identity(measured_source_root)
     harness = git_identity(harness_repository)
     harness_script = harness_repository / "scripts" / "benchmark-backend.py"
-    production_paths = ("src", "CMakeLists.txt", "cmake", "config.h.in")
+    production_paths = PROCESS_PRODUCTION_SOURCE_PATHS
     reference_commit = _git(measured_source_root, "rev-parse", f"{runtime_reference}^{{commit}}")
     reference_tree = (
         _git(measured_source_root, "rev-parse", f"{runtime_reference}^{{tree}}")
@@ -1736,22 +1771,167 @@ def process_source_provenance(
     }
 
 
-def family_source_identities(repository: Path) -> dict[str, Any]:
-    identities: dict[str, Any] = {}
-    for family, (tree_path, blob_paths) in PROCESS_FAMILY_SOURCE_PATHS.items():
-        identities[family] = {
-            "tree_path": tree_path,
-            "tree_object": _git(repository, "rev-parse", f"HEAD:{tree_path}"),
-            "blobs": [
-                {"path": path, "object": _git(repository, "rev-parse", f"HEAD:{path}")} for path in blob_paths
-            ],
-        }
-    return identities
+def _scope_entries_from_git(
+    repository: Path,
+    revision: str,
+    canonical_paths: Sequence[str],
+    canonical_pathspecs: Sequence[str],
+) -> list[dict[str, str]]:
+    with tempfile.TemporaryDirectory(prefix="ava-benchmark-git-index-") as temporary:
+        index_path = Path(temporary) / "index"
+        environment = dict(os.environ)
+        environment["GIT_INDEX_FILE"] = str(index_path)
+        try:
+            read_tree = subprocess.run(
+                ["git", "-C", str(repository), "read-tree", revision],
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+            )
+            if read_tree.returncode != 0:
+                raise RuntimeError(f"cannot resolve source scope revision {revision}")
+            listed = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "ls-files",
+                    "--stage",
+                    "-z",
+                    "--",
+                    *canonical_paths,
+                    *canonical_pathspecs,
+                ],
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError("cannot resolve source scope entries") from error
+    if listed.returncode != 0:
+        raise RuntimeError("cannot resolve source scope entries")
+
+    entries: list[dict[str, str]] = []
+    for record in listed.stdout.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            mode, object_id, stage = metadata.decode("ascii").split()
+            path = raw_path.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise RuntimeError("Git returned an invalid source scope entry") from error
+        if stage != "0":
+            raise RuntimeError("Git returned an unmerged source scope entry")
+        entries.append(
+            {
+                "mode": mode,
+                "type": "commit" if mode == "160000" else "blob",
+                "object": object_id,
+                "path": path,
+            }
+        )
+    entries.sort(key=lambda entry: entry["path"])
+    if len({entry["path"] for entry in entries}) != len(entries):
+        raise RuntimeError("Git returned duplicate source scope entries")
+    return entries
 
 
-def family_authority_source_identity(repository: Path) -> dict[str, Any]:
-    source = repository / PROCESS_AUTHORITY_SOURCE_PATH
-    text = source.read_text(encoding="utf-8")
+def _source_scope_digest(
+    scope_kind: str,
+    canonical_paths: Sequence[str],
+    canonical_pathspecs: Sequence[str],
+    entries: Sequence[dict[str, str]],
+) -> str:
+    payload = {
+        "scope_kind": scope_kind,
+        "canonical_paths": list(canonical_paths),
+        "canonical_pathspecs": list(canonical_pathspecs),
+        "entries": list(entries),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def source_scope_identity(
+    repository: Path,
+    declaration: dict[str, Any],
+    revision: str = "HEAD",
+) -> dict[str, Any]:
+    scope_kind = declaration["scope_kind"]
+    canonical_paths = declaration["canonical_paths"]
+    canonical_pathspecs = declaration["canonical_pathspecs"]
+    entries = _scope_entries_from_git(repository, revision, canonical_paths, canonical_pathspecs)
+    if not entries:
+        raise RuntimeError(f"source scope {scope_kind} resolved no entries")
+    return {
+        "scope_kind": scope_kind,
+        "canonical_paths": list(canonical_paths),
+        "canonical_pathspecs": list(canonical_pathspecs),
+        "entry_count": len(entries),
+        "entries": entries,
+        "scope_digest_sha256": _source_scope_digest(
+            scope_kind, canonical_paths, canonical_pathspecs, entries
+        ),
+    }
+
+
+def family_source_identities(repository: Path, revision: str = "HEAD") -> dict[str, Any]:
+    return {
+        family: source_scope_identity(repository, declaration, revision)
+        for family, declaration in PROCESS_FAMILY_SOURCE_SCOPES.items()
+    }
+
+
+def shared_process_source_identity(repository: Path, revision: str = "HEAD") -> dict[str, Any]:
+    return source_scope_identity(repository, PROCESS_SHARED_SOURCE_SCOPE, revision)
+
+
+def process_source_scope_identities(
+    repository: Path, revision: str = "HEAD"
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    families = family_source_identities(repository, revision)
+    shared = shared_process_source_identity(repository, revision)
+    scopes = [*families.values(), shared]
+    selected_paths = [entry["path"] for scope in scopes for entry in scope["entries"]]
+    if len(set(selected_paths)) != len(selected_paths):
+        raise RuntimeError("process source ownership scopes overlap")
+
+    production_entries = _scope_entries_from_git(
+        repository, revision, PROCESS_PRODUCTION_SOURCE_PATHS, ()
+    )
+    if {entry["path"] for entry in production_entries} != set(selected_paths):
+        raise RuntimeError("process source ownership scopes do not cover the production source paths")
+    return families, shared
+
+
+def family_authority_source_identity(repository: Path, revision: str = "HEAD") -> dict[str, Any]:
+    if revision == "HEAD":
+        source = repository / PROCESS_AUTHORITY_SOURCE_PATH
+        text = source.read_text(encoding="utf-8")
+        source_sha256 = sha256_file(source)
+    else:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), "show", f"{revision}:{PROCESS_AUTHORITY_SOURCE_PATH}"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError("cannot resolve benchmark family authority source") from error
+        if completed.returncode != 0:
+            raise RuntimeError("cannot resolve benchmark family authority source")
+        try:
+            text = completed.stdout.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RuntimeError("benchmark family authority source is not UTF-8") from error
+        source_sha256 = hashlib.sha256(completed.stdout).hexdigest()
     matches = re.findall(
         r"^set\(AVA_BENCHMARK_(CURL|PLUGIN|MCP|LSP|BASH)_AUTHORITY +(legacy_local|supervised)\)$",
         text,
@@ -1762,8 +1942,8 @@ def family_authority_source_identity(repository: Path) -> dict[str, Any]:
         raise RuntimeError("benchmark family authority source must declare each family exactly once in canonical order")
     return {
         "path": PROCESS_AUTHORITY_SOURCE_PATH,
-        "object": _git(repository, "rev-parse", f"HEAD:{PROCESS_AUTHORITY_SOURCE_PATH}"),
-        "sha256": sha256_file(source),
+        "object": _git(repository, "rev-parse", f"{revision}:{PROCESS_AUTHORITY_SOURCE_PATH}"),
+        "sha256": source_sha256,
         "authorities": {name.lower(): authority for name, authority in matches},
     }
 
@@ -2214,7 +2394,9 @@ def execute_process(args: argparse.Namespace) -> dict[str, Any]:
         except OSError:
             host["load_at_end"] = [0.0, 0.0, 0.0]
         source = process_source_provenance(measured_source_root, harness_repository, args.runtime_reference)
-        source["family_sources"] = family_source_identities(measured_source_root)
+        family_sources, shared_process_source = process_source_scope_identities(measured_source_root)
+        source["family_sources"] = family_sources
+        source["shared_process_source"] = shared_process_source
         authority_source = family_authority_source_identity(measured_source_root)
         source["family_authorities"] = authority_source
         source["build"] = process_build_provenance(
@@ -2290,6 +2472,121 @@ def _has_process_provenance_split(provenance: dict[str, Any]) -> bool:
     return all(field in provenance.get(section, {}) for section, field in PROCESS_PROVENANCE_SPLIT_FIELDS)
 
 
+def _has_complete_process_source_scopes(provenance: dict[str, Any]) -> bool:
+    families = provenance.get("family_sources")
+    shared = provenance.get("shared_process_source")
+    return (
+        isinstance(families, dict)
+        and set(families) == set(PROCESS_FAMILY_NAMES)
+        and all(
+            isinstance(families.get(family), dict)
+            and "scope_kind" in families[family]
+            for family in PROCESS_FAMILY_NAMES
+        )
+        and isinstance(shared, dict)
+        and "scope_kind" in shared
+    )
+
+
+def _canonical_scope_entry_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and path.as_posix() == value
+        and value != "."
+        and all(part not in ("", ".", "..") for part in path.parts)
+    )
+
+
+def _validate_source_scope_identity(
+    identity: Any,
+    declaration: dict[str, Any],
+    description: str,
+) -> None:
+    expected_fields = {
+        "scope_kind",
+        "canonical_paths",
+        "canonical_pathspecs",
+        "entry_count",
+        "entries",
+        "scope_digest_sha256",
+    }
+    if not isinstance(identity, dict) or set(identity) != expected_fields:
+        raise ValueError(f"process {description} source scope must be a complete identity object")
+    scope_kind = declaration["scope_kind"]
+    canonical_paths = list(declaration["canonical_paths"])
+    canonical_pathspecs = list(declaration["canonical_pathspecs"])
+    if identity.get("scope_kind") != scope_kind:
+        raise ValueError(f"process {description} source scope has the wrong kind")
+    if identity.get("canonical_paths") != canonical_paths:
+        raise ValueError(f"process {description} source scope has noncanonical paths")
+    if identity.get("canonical_pathspecs") != canonical_pathspecs:
+        raise ValueError(f"process {description} source scope has noncanonical pathspecs")
+
+    entries = identity.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"process {description} source scope has no entries")
+    if identity.get("entry_count") != len(entries):
+        raise ValueError(f"process {description} source scope has the wrong entry count")
+    previous_path: str | None = None
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or set(entry) != {"mode", "type", "object", "path"}:
+            raise ValueError(f"process {description} source scope entry {index} is invalid")
+        mode = entry["mode"]
+        entry_type = entry["type"]
+        path = entry["path"]
+        if not isinstance(mode, str) or GIT_ENTRY_MODE.fullmatch(mode) is None:
+            raise ValueError(f"process {description} source scope entry {index} has an invalid mode")
+        if entry_type != ("commit" if mode == "160000" else "blob"):
+            raise ValueError(f"process {description} source scope entry {index} has an invalid type")
+        if not _is_full_git_object_id(entry["object"]):
+            raise ValueError(f"process {description} source scope entry {index} has an invalid object")
+        if not _canonical_scope_entry_path(path):
+            raise ValueError(f"process {description} source scope entry {index} has a noncanonical path")
+        if previous_path is not None and path <= previous_path:
+            raise ValueError(f"process {description} source scope entries are not uniquely sorted")
+        previous_path = path
+        if scope_kind == "recursive_tree" and not any(
+            path == root or path.startswith(f"{root}/") for root in canonical_paths
+        ):
+            raise ValueError(f"process {description} source scope entry {index} is outside its tree")
+
+    expected_digest = _source_scope_digest(
+        scope_kind, canonical_paths, canonical_pathspecs, entries
+    )
+    if identity.get("scope_digest_sha256") != expected_digest:
+        raise ValueError(f"process {description} source scope digest does not match its entries")
+
+
+def _validate_process_source_scopes(provenance: dict[str, Any]) -> None:
+    families = provenance.get("family_sources")
+    shared_present = "shared_process_source" in provenance
+    family_scope_markers = [
+        isinstance(families, dict)
+        and isinstance(families.get(family), dict)
+        and "scope_kind" in families[family]
+        for family in PROCESS_FAMILY_NAMES
+    ]
+    if not shared_present and not any(family_scope_markers):
+        return
+    if not _has_complete_process_source_scopes(provenance):
+        raise ValueError("process source ownership scopes must be present atomically")
+
+    for family, declaration in PROCESS_FAMILY_SOURCE_SCOPES.items():
+        _validate_source_scope_identity(families[family], declaration, family)
+    shared = provenance["shared_process_source"]
+    _validate_source_scope_identity(shared, PROCESS_SHARED_SOURCE_SCOPE, "shared process")
+    selected_paths = [
+        entry["path"]
+        for identity in [*(families[family] for family in PROCESS_FAMILY_NAMES), shared]
+        for entry in identity["entries"]
+    ]
+    if len(set(selected_paths)) != len(selected_paths):
+        raise ValueError("process source ownership scopes overlap")
+
+
 def validate_process_document(document: dict[str, Any]) -> None:
     if document.get("schema_version") != PROCESS_SCHEMA_VERSION or document.get("contract_version") != PROCESS_CONTRACT_VERSION:
         raise ValueError("unexpected process benchmark schema or contract version")
@@ -2328,6 +2625,7 @@ def validate_process_document(document: dict[str, Any]) -> None:
         raise ValueError("process harness provenance has the wrong contract")
     if provenance["build"].get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
         raise ValueError("process build provenance must not claim verified source embedding")
+    _validate_process_source_scopes(provenance)
 
     build_binding_fields = ("family_authorities", "benchmark_helper_build", "binary_build_binding")
     build_binding_presence = [field in provenance for field in build_binding_fields]
@@ -2646,28 +2944,8 @@ def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> 
     if runtime_reference.get("measured_production_paths_dirty") is not False:
         mismatch("runtime_reference.measured_production_paths_dirty")
 
-    family_sources = provenance["family_sources"]
-    for family, (expected_tree_path, expected_blob_paths) in PROCESS_FAMILY_SOURCE_PATHS.items():
-        identity = family_sources.get(family) if isinstance(family_sources, dict) else None
-        if not isinstance(identity, dict):
-            mismatch(f"family_sources.{family}")
-            continue
-        if identity.get("tree_path") != expected_tree_path:
-            mismatch(f"family_sources.{family}.tree_path")
-        if not _is_full_git_object_id(identity.get("tree_object")):
-            mismatch(f"family_sources.{family}.tree_object")
-        blobs = identity.get("blobs")
-        if not isinstance(blobs, list) or len(blobs) != len(expected_blob_paths):
-            mismatch(f"family_sources.{family}.blobs")
-            continue
-        for index, (blob, expected_path) in enumerate(zip(blobs, expected_blob_paths)):
-            if not isinstance(blob, dict):
-                mismatch(f"family_sources.{family}.blobs[{index}]")
-                continue
-            if blob.get("path") != expected_path:
-                mismatch(f"family_sources.{family}.blobs[{index}].path")
-            if not _is_full_git_object_id(blob.get("object")):
-                mismatch(f"family_sources.{family}.blobs[{index}].object")
+    if not _has_complete_process_source_scopes(provenance):
+        mismatch("source_ownership_scopes")
 
     authority_source = provenance.get("family_authorities")
     if not isinstance(authority_source, dict):
@@ -2807,9 +3085,16 @@ def _family_authority_mismatches(document: dict[str, Any], cohort: str) -> list[
     return mismatches
 
 
-def _family_tree_signature(document: dict[str, Any], family: str) -> tuple[str, str]:
-    identity = document["provenance"]["family_sources"][family]
-    return identity["tree_path"], identity["tree_object"]
+def _source_scope_signature(identity: dict[str, Any]) -> str:
+    return json.dumps(identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _family_scope_signature(document: dict[str, Any], family: str) -> str:
+    return _source_scope_signature(document["provenance"]["family_sources"][family])
+
+
+def _shared_process_scope_signature(document: dict[str, Any]) -> str:
+    return _source_scope_signature(document["provenance"]["shared_process_source"])
 
 
 def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
@@ -2858,7 +3143,7 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
     before_authorities = before["provenance"]["family_authorities"]["authorities"]
     after_authorities = after["provenance"]["family_authorities"]["authorities"]
     changed_authorities = [
-        family for family in PROCESS_FAMILY_SOURCE_PATHS if before_authorities[family] != after_authorities[family]
+        family for family in PROCESS_FAMILY_NAMES if before_authorities[family] != after_authorities[family]
     ]
     unexpected_transitions = [
         family
@@ -2883,22 +3168,32 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             [f"family_authorities.{family}" for family in changed_authorities],
         )
     transitioned_family = changed_authorities[0]
-    changed_family_trees = [
+    changed_family_scopes = [
         family
         for family in PROCESS_FAMILY_NAMES
-        if _family_tree_signature(before, family) != _family_tree_signature(after, family)
+        if _family_scope_signature(before, family) != _family_scope_signature(after, family)
     ]
-    if changed_family_trees != [transitioned_family]:
+    shared_process_scope_changed = (
+        _shared_process_scope_signature(before) != _shared_process_scope_signature(after)
+    )
+    source_attribution = {
+        "transitioned_family": transitioned_family,
+        "changed_family_scopes": changed_family_scopes,
+        "shared_process_scope_changed": shared_process_scope_changed,
+    }
+    if changed_family_scopes != [transitioned_family]:
         attribution_mismatches = [
             f"family_sources.{family}"
             for family in PROCESS_FAMILY_NAMES
-            if (family == transitioned_family) != (family in changed_family_trees)
+            if (family == transitioned_family) != (family in changed_family_scopes)
         ]
-        return comparison_unsupported(
+        document = comparison_unsupported(
             "family_source_attribution_mismatch",
-            "Complete family-tree changes must be attributable only to the one authority transition.",
+            "Complete family-owned scope changes must be attributable only to the one authority transition.",
             attribution_mismatches,
         )
+        document["source_attribution"] = source_attribution
+        return document
     before_results = {result["id"]: result for result in before["results"]}
     after_results = {result["id"]: result for result in after["results"]}
     comparisons: list[dict[str, Any]] = []
@@ -2969,12 +3264,14 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             "No family has a validated legacy_local to supervised authority transition.",
         )
         document["comparisons"] = comparisons
+        document["source_attribution"] = source_attribution
         return document
     return {
         "schema_version": COMPARISON_SCHEMA_VERSION,
         "contract_version": PROCESS_CONTRACT_VERSION,
         "status": "measured",
         "comparisons": comparisons,
+        "source_attribution": source_attribution,
         "investigation_thresholds": {
             "latency": {"relative_percent": 20.0, "absolute_ns": 100_000.0},
             "rss": {"relative_percent": 20.0, "absolute_kib": 4096.0},
@@ -2996,6 +3293,32 @@ def validate_comparison_document(document: dict[str, Any]) -> None:
         raise ValueError("a single paired comparison must require reversed-order confirmation")
     if document["status"] == "unsupported" and not isinstance(document.get("reason_code"), str):
         raise ValueError("unsupported process comparison lacks a reason code")
+    source_attribution = document.get("source_attribution")
+    if document["status"] == "measured" and source_attribution is None:
+        raise ValueError("measured process comparison lacks source attribution")
+    if source_attribution is not None:
+        changed_scopes = (
+            source_attribution.get("changed_family_scopes")
+            if isinstance(source_attribution, dict)
+            else None
+        )
+        invalid_attribution = (
+            not isinstance(source_attribution, dict)
+            or set(source_attribution)
+            != {"transitioned_family", "changed_family_scopes", "shared_process_scope_changed"}
+            or source_attribution.get("transitioned_family") not in PROCESS_FAMILY_NAMES
+            or not isinstance(changed_scopes, list)
+            or any(not isinstance(family, str) for family in changed_scopes)
+            or len(set(changed_scopes)) != len(changed_scopes)
+            or any(family not in PROCESS_FAMILY_NAMES for family in changed_scopes)
+            or not isinstance(source_attribution.get("shared_process_scope_changed"), bool)
+        )
+        if document["status"] == "measured" and changed_scopes != [
+            source_attribution.get("transitioned_family")
+        ]:
+            invalid_attribution = True
+        if invalid_attribution:
+            raise ValueError("process comparison has invalid source attribution")
     for comparison in document["comparisons"]:
         if comparison.get("status") == "measured":
             if comparison.get("gating") is not False or comparison.get("faster_required") is not False:

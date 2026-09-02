@@ -364,18 +364,67 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "checks": checks or {"correct": True},
         }
 
-    def process_family_sources(self):
-        identities = {}
-        for family, (tree_path, blob_paths) in self.module.PROCESS_FAMILY_SOURCE_PATHS.items():
-            identities[family] = {
-                "tree_path": tree_path,
-                "tree_object": hashlib.sha256(f"tree:{family}".encode()).hexdigest()[:40],
-                "blobs": [
-                    {"path": path, "object": hashlib.sha256(f"blob:{path}".encode()).hexdigest()[:40]}
-                    for path in blob_paths
-                ],
+    def process_source_scope(self, declaration, paths):
+        entries = [
+            {
+                "mode": "100644",
+                "type": "blob",
+                "object": hashlib.sha256(f"blob:{path}".encode()).hexdigest()[:40],
+                "path": path,
             }
-        return identities
+            for path in sorted(paths)
+        ]
+        identity = {
+            "scope_kind": declaration["scope_kind"],
+            "canonical_paths": list(declaration["canonical_paths"]),
+            "canonical_pathspecs": list(declaration["canonical_pathspecs"]),
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+        identity["scope_digest_sha256"] = self.module._source_scope_digest(
+            identity["scope_kind"],
+            identity["canonical_paths"],
+            identity["canonical_pathspecs"],
+            entries,
+        )
+        return identity
+
+    def refresh_source_scope_digest(self, identity):
+        identity["entries"].sort(key=lambda entry: entry["path"])
+        identity["entry_count"] = len(identity["entries"])
+        identity["scope_digest_sha256"] = self.module._source_scope_digest(
+            identity["scope_kind"],
+            identity["canonical_paths"],
+            identity["canonical_pathspecs"],
+            identity["entries"],
+        )
+
+    def process_family_sources(self):
+        paths = {
+            "curl": ("src/ava/http/curl_transport.cpp", "src/ava/http/curl_transport.h"),
+            "plugin": ("src/ava/plugin/runner.cpp", "src/ava/plugin/runner.h"),
+            "mcp": ("src/ava/mcp/stdio_client.cpp", "src/ava/mcp/stdio_client.h"),
+            "lsp": ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h"),
+            "bash": ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h"),
+        }
+        return {
+            family: self.process_source_scope(declaration, paths[family])
+            for family, declaration in self.module.PROCESS_FAMILY_SOURCE_SCOPES.items()
+        }
+
+    def shared_process_source(self):
+        return self.process_source_scope(
+            self.module.PROCESS_SHARED_SOURCE_SCOPE,
+            (
+                "CMakeLists.txt",
+                "config.h.in",
+                "src/ava/agent/tool_execution_options.h",
+                "src/ava/app/app.cpp",
+                "src/ava/process/supervisor.h",
+                "src/ava/tools/CMakeLists.txt",
+                "src/ava/tools/file_tools.h",
+            ),
+        )
 
     def valid_process_document(self):
         artifacts = {
@@ -480,6 +529,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                     "contract_version": self.module.PROCESS_CONTRACT_VERSION,
                 },
                 "family_sources": self.process_family_sources(),
+                "shared_process_source": self.shared_process_source(),
                 "family_authorities": {
                     "path": self.module.PROCESS_AUTHORITY_SOURCE_PATH,
                     "object": "5" * 40,
@@ -891,8 +941,12 @@ class BenchmarkHarnessTests(unittest.TestCase):
 
             before_provenance = self.module.process_source_provenance(before_root, harness_repository, "HEAD")
             after_provenance = self.module.process_source_provenance(after_root, harness_repository, "HEAD")
-            before_provenance["family_sources"] = self.module.family_source_identities(before_root)
-            after_provenance["family_sources"] = self.module.family_source_identities(after_root)
+            before_families, before_shared = self.module.process_source_scope_identities(before_root)
+            after_families, after_shared = self.module.process_source_scope_identities(after_root)
+            before_provenance["family_sources"] = before_families
+            before_provenance["shared_process_source"] = before_shared
+            after_provenance["family_sources"] = after_families
+            after_provenance["shared_process_source"] = after_shared
 
             self.assertEqual(before_provenance["measured_checkout"]["repository"], str(before_root))
             self.assertEqual(before_provenance["measured_checkout"]["commit"], before_commit)
@@ -900,14 +954,20 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.assertEqual(after_provenance["measured_checkout"]["repository"], str(after_root))
             self.assertEqual(after_provenance["measured_checkout"]["commit"], after_commit)
             self.assertEqual(after_provenance["measured_checkout"]["tree"], after_tree)
-            self.assertEqual(
-                before_provenance["family_sources"]["plugin"]["blobs"],
-                after_provenance["family_sources"]["plugin"]["blobs"],
+            self.assertNotIn(
+                "src/ava/plugin/runner_io.cpp",
+                {entry["path"] for entry in before_families["plugin"]["entries"]},
+            )
+            self.assertIn(
+                "src/ava/plugin/runner_io.cpp",
+                {entry["path"] for entry in after_families["plugin"]["entries"]},
             )
             self.assertNotEqual(
-                before_provenance["family_sources"]["plugin"]["tree_object"],
-                after_provenance["family_sources"]["plugin"]["tree_object"],
+                before_families["plugin"]["scope_digest_sha256"],
+                after_families["plugin"]["scope_digest_sha256"],
             )
+            self.assertEqual(before_families["bash"], after_families["bash"])
+            self.assertEqual(before_shared, after_shared)
             self.assertEqual(before_provenance["harness"], after_provenance["harness"])
 
             before, after = self.comparison_documents()
@@ -917,6 +977,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 document["provenance"]["harness"] = measured["harness"]
                 document["provenance"]["harness"]["dirty"] = False
                 document["provenance"]["family_sources"] = measured["family_sources"]
+                document["provenance"]["shared_process_source"] = measured["shared_process_source"]
                 for build_key in ("build", "benchmark_helper_build"):
                     document["provenance"][build_key]["cmake_source_root"] = measured["measured_checkout"]["repository"]
                 document["provenance"]["binary_build_binding"] = self.module.process_binary_build_binding(
@@ -932,6 +993,123 @@ class BenchmarkHarnessTests(unittest.TestCase):
             comparison = self.module.compare_process_documents(before, after)
             self.assertEqual(comparison["status"], "measured")
             self.assertNotIn("fixture_hashes", comparison.get("mismatches", []))
+
+    def test_git_pathspec_family_scopes_capture_new_split_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = pathlib.Path(temporary) / "repository"
+            repository.mkdir()
+
+            def git(*arguments: str) -> str:
+                completed = subprocess.run(
+                    ["git", "-C", str(repository), *arguments],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True,
+                )
+                return completed.stdout.strip()
+
+            git("init")
+            git("config", "user.name", "Benchmark Self Test")
+            git("config", "user.email", "benchmark@example.invalid")
+            initial_paths = (
+                "src/ava/http/curl_transport.cpp",
+                "src/ava/tools/bash_tool.cpp",
+                "src/ava/tools/file_tools.h",
+            )
+            for relative in initial_paths:
+                path = repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"initial:{relative}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "initial")
+            before = {
+                family: self.module.source_scope_identity(
+                    repository, self.module.PROCESS_FAMILY_SOURCE_SCOPES[family]
+                )
+                for family in ("curl", "bash")
+            }
+
+            new_paths = {
+                "curl": "src/ava/http/curl_transport_process.cpp",
+                "bash": "src/ava/tools/bash_tool_process.cpp",
+            }
+            for relative in (*new_paths.values(), "src/ava/tools/file_tools_process.cpp"):
+                path = repository / relative
+                path.write_text(f"split:{relative}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "split implementations")
+            after = {
+                family: self.module.source_scope_identity(
+                    repository, self.module.PROCESS_FAMILY_SOURCE_SCOPES[family]
+                )
+                for family in ("curl", "bash")
+            }
+
+            for family, new_path in new_paths.items():
+                with self.subTest(family=family):
+                    selected = {entry["path"] for entry in after[family]["entries"]}
+                    self.assertIn(new_path, selected)
+                    self.assertNotIn("src/ava/tools/file_tools_process.cpp", selected)
+                    self.assertEqual(after[family]["entry_count"], before[family]["entry_count"] + 1)
+                    self.assertNotEqual(
+                        after[family]["scope_digest_sha256"],
+                        before[family]["scope_digest_sha256"],
+                    )
+
+    def test_exact_plugin_pair_has_isolated_family_and_changed_shared_scopes(self) -> None:
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        before_revision = "13fb0cef5925368fa12f8bcf693235281bce099f"
+        after_revision = "2a30f40ec562b49915c3b09369cf4e6897de3d4d"
+        before_scopes, before_shared = self.module.process_source_scope_identities(
+            repository, before_revision
+        )
+        after_scopes, after_shared = self.module.process_source_scope_identities(
+            repository, after_revision
+        )
+        changed_families = [
+            family
+            for family in self.module.PROCESS_FAMILY_NAMES
+            if self.module._source_scope_signature(before_scopes[family])
+            != self.module._source_scope_signature(after_scopes[family])
+        ]
+        self.assertEqual(changed_families, ["plugin"])
+        self.assertEqual(before_scopes["bash"], after_scopes["bash"])
+        self.assertNotEqual(
+            self.module._source_scope_signature(before_shared),
+            self.module._source_scope_signature(after_shared),
+        )
+
+        before, after = self.comparison_documents()
+        for document, revision, scopes, shared in (
+            (before, before_revision, before_scopes, before_shared),
+            (after, after_revision, after_scopes, after_shared),
+        ):
+            tree = self.module._git(repository, "rev-parse", f"{revision}^{{tree}}")
+            document["provenance"]["measured_checkout"].update(
+                {"commit": revision, "tree": tree}
+            )
+            document["provenance"]["runtime_reference"].update(
+                {"commit": revision, "tree": tree}
+            )
+            document["provenance"]["family_sources"] = scopes
+            document["provenance"]["shared_process_source"] = shared
+            document["provenance"]["family_authorities"] = (
+                self.module.family_authority_source_identity(repository, revision)
+            )
+
+        self.module.validate_process_document(before)
+        self.module.validate_process_document(after)
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "measured")
+        self.assertEqual(
+            comparison["source_attribution"],
+            {
+                "transitioned_family": "plugin",
+                "changed_family_scopes": ["plugin"],
+                "shared_process_scope_changed": True,
+            },
+        )
 
     def test_force_removes_linked_worktree_with_initialized_submodule_without_deinit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1040,6 +1218,23 @@ class BenchmarkHarnessTests(unittest.TestCase):
             del document["provenance"][field]
         self.module.validate_process_document(document)
 
+    def test_historical_v3_source_identity_format_validates_but_cannot_compare(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["family_sources"] = {
+            family: {
+                "tree_path": f"src/ava/{family}",
+                "tree_object": "a" * 40,
+                "blobs": [],
+            }
+            for family in self.module.PROCESS_FAMILY_NAMES
+        }
+        del before["provenance"]["shared_process_source"]
+        self.module.validate_process_document(before)
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(comparison["mismatches"], ["before.source_ownership_scopes"])
+
     def test_historical_v3_without_provenance_split_validates_but_cannot_compare(self) -> None:
         for measured_repository_present in (False, True):
             with self.subTest(measured_repository_present=measured_repository_present):
@@ -1105,8 +1300,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
         after["provenance"]["family_authorities"]["object"] = "7" * 40
         after["provenance"]["family_authorities"]["sha256"] = "8" * 64
         after_plugin = after["provenance"]["family_sources"]["plugin"]
-        after_plugin["tree_object"] = "e" * 40
-        after_plugin["blobs"][0]["object"] = "f" * 40
+        after_plugin["entries"][0]["object"] = "f" * 40
+        self.refresh_source_scope_digest(after_plugin)
         return before, after
 
     def assert_comparison_provenance_rejected(self, before, after, mismatches) -> None:
@@ -1163,19 +1358,25 @@ class BenchmarkHarnessTests(unittest.TestCase):
             ],
         )
 
-    def test_comparison_rejects_unknown_family_objects(self) -> None:
-        before, after = self.comparison_documents()
-        plugin_source = before["provenance"]["family_sources"]["plugin"]
-        plugin_source["tree_object"] = "unknown"
-        plugin_source["blobs"][1]["object"] = "1234"
-        self.assert_comparison_provenance_rejected(
-            before,
-            after,
-            [
-                "before.family_sources.plugin.tree_object",
-                "before.family_sources.plugin.blobs[1].object",
-            ],
-        )
+    def test_process_schema_validates_complete_source_scope_identities(self) -> None:
+        document = self.valid_process_document()
+        plugin_source = document["provenance"]["family_sources"]["plugin"]
+        plugin_source["entries"][1]["object"] = "1234"
+        self.refresh_source_scope_digest(plugin_source)
+        with self.assertRaisesRegex(ValueError, "plugin source scope entry 1 has an invalid object"):
+            self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        document["provenance"]["family_sources"]["bash"]["canonical_pathspecs"] = [
+            ":(glob)src/ava/tools/*"
+        ]
+        with self.assertRaisesRegex(ValueError, "bash source scope has noncanonical pathspecs"):
+            self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        document["provenance"]["shared_process_source"]["scope_digest_sha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "shared process source scope digest"):
+            self.module.validate_process_document(document)
 
     def test_wrong_but_valid_measured_root_is_structured_unsupported(self) -> None:
         before, after = self.comparison_documents()
@@ -1340,7 +1541,6 @@ class BenchmarkHarnessTests(unittest.TestCase):
         result_id = "family_mcp_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
         after["results"][index] = self.measured_process_result(result_id, "supervised", 130.0)
-        after["provenance"]["family_sources"]["mcp"]["blobs"][0]["object"] = "a" * 40
         comparison = self.module.compare_process_documents(before, after)
         self.assertEqual(comparison["status"], "unsupported")
         self.assertEqual(comparison["reason_code"], "single_authority_transition_required")
@@ -1391,7 +1591,9 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["mismatches"], ["after.family_authorities.plugin.result"])
 
         before, after = self.comparison_documents()
-        after["provenance"]["family_sources"]["curl"]["tree_object"] = "b" * 40
+        curl_scope = after["provenance"]["family_sources"]["curl"]
+        curl_scope["entries"][0]["object"] = "b" * 40
+        self.refresh_source_scope_digest(curl_scope)
         comparison = self.module.compare_process_documents(before, after)
         self.assertEqual(comparison["status"], "unsupported")
         self.assertEqual(comparison["reason_code"], "family_source_attribution_mismatch")

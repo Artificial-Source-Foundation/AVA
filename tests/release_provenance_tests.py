@@ -250,6 +250,15 @@ class ReleaseProvenanceTests(unittest.TestCase):
         records = clean_dependencies()
         self.assertEqual(next(record for record in records if record["name"] == "aicxx")["usage"], "build-tool")
 
+    def test_memory_notice_and_license_policy_are_explicit(self) -> None:
+        self.assertEqual(
+            PROVENANCE.EXPECTED_LICENSE_SHA256["memory"],
+            "57852af0de7f40e804b4d29a9ef76e4bb7a103c354577ee52ea59373292dd1fb",
+        )
+        notices = (SOURCE / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        self.assertIn("## memory — MIT", notices)
+        self.assertIn("no production allocation path uses it", notices)
+
     def test_expected_gitlink_policy_matches_source_checkout(self) -> None:
         probe = subprocess.run(
             ["git", "-C", str(SOURCE), "rev-parse", "--is-inside-work-tree"],

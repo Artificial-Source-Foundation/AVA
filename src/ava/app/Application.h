@@ -12,7 +12,8 @@ namespace ava::app {
 class Application final : public ava::core::Application
 {
  public:
-  static constexpr std::size_t mpp_page_size = 0x8000;          // Allocate 32kB at a time (or larger powers of two).
+  // The pool uses 32 KiB pages; its first growth allocates at least two pages (64 KiB).
+  static constexpr std::size_t mpp_page_size = 0x8000;
 
  private:
   memory::MemoryPagePool mpp_;

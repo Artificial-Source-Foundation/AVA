@@ -104,7 +104,7 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 ### Pinned-harness paired baseline recipe
 
-A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `0f145211e4b0370fa44fdd1c30a0ca8f548dddbe`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
+A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `9332a106ec51504dd9fc85b014870b48ac25b99c`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
 
 The measured and harness worktrees are live comparison inputs, not collection-only paths. Keep all three present, pinned at their recorded commits and trees, and Git-clean through the forward comparison and any reversed-order comparison. Cleanup is permitted only after the last comparison has completed.
 
@@ -126,7 +126,7 @@ For a later family, set `AVA_FAMILY_BEFORE_COMMIT` and `AVA_FAMILY_MIGRATION_COM
 Run from a clean repository that contains all three pinned objects:
 
 ```sh
-harness_commit=0f145211e4b0370fa44fdd1c30a0ca8f548dddbe
+harness_commit=9332a106ec51504dd9fc85b014870b48ac25b99c
 : "${AVA_FAMILY_BEFORE_COMMIT:?set the reviewed full before commit ID}"
 : "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full migration commit ID}"
 : "${AVA_FAMILY_BEFORE_AUTHORITIES:?set the reviewed before authority map}"

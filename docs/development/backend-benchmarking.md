@@ -104,7 +104,7 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 ### Pinned-harness paired baseline recipe
 
-A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `557aab520b17488b3948ee45d26eae1879bf1003`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
+A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `cf8c9987924f077092bfadc181181a1017e83610`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
 
 For the current Plugin migration, the reviewed pair is:
 
@@ -124,7 +124,7 @@ For a later family, set `AVA_FAMILY_BEFORE_COMMIT` and `AVA_FAMILY_MIGRATION_COM
 Run from a clean repository that contains all three pinned objects:
 
 ```sh
-harness_commit=557aab520b17488b3948ee45d26eae1879bf1003
+harness_commit=cf8c9987924f077092bfadc181181a1017e83610
 : "${AVA_FAMILY_BEFORE_COMMIT:?set the reviewed full before commit ID}"
 : "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full migration commit ID}"
 : "${AVA_FAMILY_BEFORE_AUTHORITIES:?set the reviewed before authority map}"
@@ -145,6 +145,8 @@ after_src=/tmp/ava-process-after-src
 harness_build=/tmp/ava-process-harness-build
 before_build=/tmp/ava-process-before-build
 after_build=/tmp/ava-process-after-build
+benchmark_python=$(command -v python3)
+test -x "$benchmark_python"
 
 test ! -e "$harness_src"
 test ! -e "$before_src"
@@ -165,7 +167,7 @@ test "$(git -C "$before_src" rev-parse HEAD)" = "$AVA_FAMILY_BEFORE_COMMIT"
 test "$(git -C "$after_src" rev-parse HEAD)" = "$AVA_FAMILY_MIGRATION_COMMIT"
 
 check_authority_map() {
-  python3 - "$1" "$2" <<'PY'
+  "$benchmark_python" - "$1" "$2" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -187,7 +189,7 @@ PY
 check_authority_map "$before_src" "$AVA_FAMILY_BEFORE_AUTHORITIES"
 check_authority_map "$after_src" "$AVA_FAMILY_AFTER_AUTHORITIES"
 
-python3 - "$AVA_FAMILY_BEFORE_AUTHORITIES" "$AVA_FAMILY_AFTER_AUTHORITIES" <<'PY'
+"$benchmark_python" - "$AVA_FAMILY_BEFORE_AUTHORITIES" "$AVA_FAMILY_AFTER_AUTHORITIES" <<'PY'
 import sys
 
 before = dict(item.split("=", 1) for item in sys.argv[1].split(","))
@@ -199,17 +201,20 @@ print(f"verified family transition: {changes[0]}")
 PY
 ```
 
-The source-file check occurs before measurement and prevents stale cache or command-line authority values from defining the claim. The capability probe and comparison independently require each measured family result to agree with that source-owned map.
+Initializing submodules in linked worktrees shares the superproject's submodule object and configuration storage. Users who need stronger isolation may use three local clones instead. This linked-worktree recipe must not deinitialize submodules, because doing so can mutate the shared primary checkout configuration.
+
+The source-file check occurs before measurement and prevents stale cache or command-line authority values from defining the claim. The harness also records that file's Git object, byte hash, and exact map from the measured source root. The capability probe, measured AVA build provenance, independent helper build provenance, and family results must all agree with that source-owned map.
 
 #### Build once per source and collect the forward pair
 
-Use one generator, compiler, build type, and feature recipe for the measured cohorts. The harness build supplies one byte-identical process child, fake MCP server, fake LSP server, memory helper, and sample plugin to both runs. Each measured build supplies only its own AVA and authority-bearing benchmark helper; helper dependencies may build local fixture copies, but the commands below do not use them as evidence.
+Use one generator, compiler, build type, and feature recipe for the measured cohorts. The pinned harness supplies one byte-identical process child, fake provider, fake MCP server, fake LSP server, memory helper, and sample plugin to both runs, and both invocations must use the same Python executable. Each measured build supplies only its own AVA and authority-bearing benchmark helper; those two expected-to-differ artifacts come from the same measured source and CMake build tree in this recipe. Helper dependencies may build local fixture copies, but the commands below do not use them as evidence.
 
 ```sh
 cmake -S "$harness_src" -B "$harness_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$harness_build" --target \
-  ava_fake_process_child ava_fake_mcp_server ava_fake_lsp_server
+  ava_fake_process_child ava_fake_provider_server \
+  ava_fake_mcp_server ava_fake_lsp_server
 
 cmake -S "$before_src" -B "$before_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
@@ -221,11 +226,12 @@ cmake -S "$after_src" -B "$after_build" -G Ninja \
 cmake --build "$after_build" --target \
   ava ava_backend_benchmark_helper
 
-"$harness_src/scripts/benchmark-backend.py" \
+"$benchmark_python" "$harness_src/scripts/benchmark-backend.py" \
   --measured-source-root "$before_src" \
   --ava "$before_build/ava" \
   --benchmark-helper "$before_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$harness_build/tests/ava_fake_process_child" \
+  --fake-provider "$harness_build/tests/ava_fake_provider_server" \
   --fake-mcp-server "$harness_build/tests/ava_fake_mcp_server" \
   --fake-lsp-server "$harness_build/tests/ava_fake_lsp_server" \
   --memory-helper "$harness_src/scripts/benchmark-memory.py" \
@@ -236,11 +242,12 @@ cmake --build "$after_build" --target \
   --output /tmp/ava-process-before.json \
   --report /tmp/ava-process-before.md
 
-"$harness_src/scripts/benchmark-backend.py" \
+"$benchmark_python" "$harness_src/scripts/benchmark-backend.py" \
   --measured-source-root "$after_src" \
   --ava "$after_build/ava" \
   --benchmark-helper "$after_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$harness_build/tests/ava_fake_process_child" \
+  --fake-provider "$harness_build/tests/ava_fake_provider_server" \
   --fake-mcp-server "$harness_build/tests/ava_fake_mcp_server" \
   --fake-lsp-server "$harness_build/tests/ava_fake_lsp_server" \
   --memory-helper "$harness_src/scripts/benchmark-memory.py" \
@@ -261,11 +268,12 @@ Both build target sets are appropriate to their source trees, while fixture byte
 A forward item with `investigation_trigger: true` is a request to investigate, not a regression verdict. Collect a fresh pair in the reverse temporal order—after first, before second—on the same host and boot. Reusing or relabeling the forward documents is not confirmation.
 
 ```sh
-"$harness_src/scripts/benchmark-backend.py" \
+"$benchmark_python" "$harness_src/scripts/benchmark-backend.py" \
   --measured-source-root "$after_src" \
   --ava "$after_build/ava" \
   --benchmark-helper "$after_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$harness_build/tests/ava_fake_process_child" \
+  --fake-provider "$harness_build/tests/ava_fake_provider_server" \
   --fake-mcp-server "$harness_build/tests/ava_fake_mcp_server" \
   --fake-lsp-server "$harness_build/tests/ava_fake_lsp_server" \
   --memory-helper "$harness_src/scripts/benchmark-memory.py" \
@@ -276,11 +284,12 @@ A forward item with `investigation_trigger: true` is a request to investigate, n
   --output /tmp/ava-process-reverse-after.json \
   --report /tmp/ava-process-reverse-after.md
 
-"$harness_src/scripts/benchmark-backend.py" \
+"$benchmark_python" "$harness_src/scripts/benchmark-backend.py" \
   --measured-source-root "$before_src" \
   --ava "$before_build/ava" \
   --benchmark-helper "$before_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$harness_build/tests/ava_fake_process_child" \
+  --fake-provider "$harness_build/tests/ava_fake_provider_server" \
   --fake-mcp-server "$harness_build/tests/ava_fake_mcp_server" \
   --fake-lsp-server "$harness_build/tests/ava_fake_lsp_server" \
   --memory-helper "$harness_src/scripts/benchmark-memory.py" \
@@ -291,7 +300,7 @@ A forward item with `investigation_trigger: true` is a request to investigate, n
   --output /tmp/ava-process-reverse-before.json \
   --report /tmp/ava-process-reverse-before.md
 
-python3 - \
+"$benchmark_python" - \
   "$harness_src/scripts/benchmark-backend.py" \
   /tmp/ava-process-reverse-before.json \
   /tmp/ava-process-reverse-after.json \
@@ -331,16 +340,24 @@ The comparator keeps semantic before/after order even though collection order is
 
 #### Cleanup and the historical first/Curl carrier
 
-Keep evidence JSON/Markdown as needed, but remove all three builds and worktrees:
+Keep evidence JSON/Markdown as needed. First prove every linked worktree is still clean, then remove each one with the single force form that handles initialized submodules without deinitializing shared configuration:
 
 ```sh
-rm -rf "$harness_build" "$before_build" "$after_build"
 for source in "$after_src" "$before_src" "$harness_src"
 do
-  git -C "$source" submodule deinit --all --force
-  git worktree remove "$source"
+  test -z "$(git -C "$source" status --porcelain --untracked-files=normal)"
 done
+
+for source in "$after_src" "$before_src" "$harness_src"
+do
+  git worktree remove --force "$source"
+done
+
+# These are external build trees, not worktree paths; remove them separately.
+rm -rf "$harness_build" "$before_build" "$after_build"
 ```
+
+Do not run `git submodule deinit` from these linked worktrees, raw-remove their paths, or otherwise edit the primary checkout's shared submodule configuration during cleanup.
 
 The historical `971327fb66fc372f5828c5f5967e118d9374f9da` instrumentation carrier (with `dd7cb260d58beb6f2d69bc07dc0bb604d65bd3ef` and `789b100c728bd9f95a68324e8eaa8012d9b09cdb` applied) still represents production paths from all-legacy `c94ac863141975806bbab52e950a2f2499108b65`. It is useful only for a separately reviewed first/Curl migration pair. It is **not** the Plugin baseline: comparing that all-legacy carrier to the current Plugin after commit introduces Curl and Plugin transitions, which the comparator rejects as `single_authority_transition_required`. Use `13fb0cef5925368fa12f8bcf693235281bce099f` as the Plugin before anchor instead.
 
@@ -361,10 +378,14 @@ The fixed family boundaries are one stdlib-Python loopback Curl request; todo sa
 
 ### Provenance, redaction, and comparison
 
-V3 records the measured source root and checkout commit/tree/dirty state; runtime reference and production-path equality; the independent harness repository, commit/tree/dirty state, contract, and script hash; family tree/blob IDs from the measured root; CMake generator/version/cache hash/source root/build type/features; compiler path/hash/ID/version/flags; every used binary/script/fixture/plugin hash, size, mode, and mtime; OS/kernel/machine/CPU/count/RAM/page/Python; hashed boot ID; limits; monotonic resolution; start/end load; and exact driver commands and scale parameters. Paths occur only under provenance or artifacts. Provenance remains best effort: binaries do not embed a verified source commit. Historical V3 documents without the independent measured/harness split remain valid V3 artifacts, but comparison returns structured `provenance_split_required`; a partial split is invalid.
+V3 records the measured source root and checkout commit/tree/dirty state; runtime reference and production-path equality; the independent harness repository, commit/tree/dirty state, contract, and script hash; every complete scoped family tree object plus selected-blob diagnostics from the measured root; the exact source-owned authority file object/hash/map; and independent nearest-cache build provenance for both measured AVA and the benchmark helper. Each build record includes CMake generator/version/cache hash/source root/build type/features, compiler path/hash/ID/version/flags, and relevant CMake/C++ flags. Every used binary/script/fixture/plugin retains hash, size, mode, and mtime alongside OS/kernel/machine/CPU/count/RAM/page/Python, hashed boot ID, limits, monotonic resolution, start/end load, and exact driver commands and scale parameters. Paths occur only under provenance or artifacts.
+
+Build provenance remains best effort: **neither AVA nor the benchmark helper embeds a verified source commit**. Comparison nevertheless requires both identities to resolve, each binary to be inside its recorded CMake tree, both source roots to match the measured root, and the helper's cache recipe, generator, build type, compiler, flags, and features to equal AVA's recorded configuration (the same cache used below is the strongest simple case; a separately recorded equivalent configuration is also accepted). A helper from another checkout or an inconsistent cache yields structured `comparison_provenance_required`, never a measurement.
+
+Historical V3 documents without the independent measured/harness split or the newer additive authority/helper-build binding remain valid standalone V3 artifacts. Comparison still returns structured `provenance_split_required` for the former and `comparison_provenance_required` for unresolved or absent comparison-only binding; partial provenance groups are invalid.
 
 Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Redaction checks tokenize composite sample keys, so names such as `child_pid`, `request_url`, and `command_argv` are rejected without rejecting closed aggregates such as `pidfd_successes`, `stdout_bytes`, `record_count`, and `endpoint_eof`. Primary samples must be non-negative. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
 
-Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may record a developer-dirty source or harness tree; cleanliness is a comparison gate, not a smoke usability gate. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, valid full family tree/blob IDs, a matching CMake source root, and a clean resolved harness whose recorded script hash matches the script artifact. Failures return stable structured provenance reasons and mismatches rather than a measured result.
+Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may retain a developer-dirty source or harness tree, including `null` when a Git status command fails; cleanliness is a comparison gate, not a smoke usability gate. Unknown status is never recorded as false-clean. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, valid full family tree/blob IDs, qualified AVA/helper build binding, and a clean resolved harness whose recorded script hash matches the script artifact. Failures return stable structured provenance reasons and mismatches rather than a measured result.
 
-The comparator recomputes summaries from raw samples and also refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, fixture hashes, and pinned harness identity match. Exactly one source-owned authority may change, and it must be `legacy_local` to `supervised`; multiple or reverse/unexpected transitions, a capability/result authority attributed to the wrong family, or tracked family blobs changed outside the transitioned family are unsupported. A family result is comparable only when both cohorts contain every required compatibility check and every check is true. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; after any trigger, a repeatable claim requires the fresh reversed-order pair described above.
+The comparator recomputes summaries from raw samples and also refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, pinned harness identity, and every common fixture hash match. Common fixtures include the benchmark and memory scripts, Python executable, process child, optional fake provider, fake MCP/LSP servers, Curl/direct-argv executables, and sample-plugin manifest/entrypoint; measured AVA and authority-bearing helper bytes are expected to differ. Exactly one source-owned authority may change, and it must be `legacy_local` to `supervised`. The complete tree path/object for exactly that transitioned family must change, while every other scoped family tree must match; selected blob IDs remain validation and diagnostics rather than the attribution boundary. Multiple or reverse/unexpected transitions, a capability/build/result authority attributed to the wrong source map, or another family-tree change are unsupported. A family result is comparable only when both cohorts contain every required compatibility check and every check is true. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; after any trigger, a repeatable claim requires the fresh reversed-order pair described above.

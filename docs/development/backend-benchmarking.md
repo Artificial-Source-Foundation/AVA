@@ -104,7 +104,9 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 ### Pinned-harness paired baseline recipe
 
-A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `169b9525ee9b3123a0494a45c645c754b33db8b7`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
+A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `0f145211e4b0370fa44fdd1c30a0ca8f548dddbe`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
+
+The measured and harness worktrees are live comparison inputs, not collection-only paths. Keep all three present, pinned at their recorded commits and trees, and Git-clean through the forward comparison and any reversed-order comparison. Cleanup is permitted only after the last comparison has completed.
 
 For the current Plugin migration, the reviewed pair is:
 
@@ -124,7 +126,7 @@ For a later family, set `AVA_FAMILY_BEFORE_COMMIT` and `AVA_FAMILY_MIGRATION_COM
 Run from a clean repository that contains all three pinned objects:
 
 ```sh
-harness_commit=169b9525ee9b3123a0494a45c645c754b33db8b7
+harness_commit=0f145211e4b0370fa44fdd1c30a0ca8f548dddbe
 : "${AVA_FAMILY_BEFORE_COMMIT:?set the reviewed full before commit ID}"
 : "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full migration commit ID}"
 : "${AVA_FAMILY_BEFORE_AUTHORITIES:?set the reviewed before authority map}"
@@ -340,7 +342,7 @@ The comparator keeps semantic before/after order even though collection order is
 
 #### Cleanup and the historical first/Curl carrier
 
-Keep evidence JSON/Markdown as needed. First prove every linked worktree is still clean, then remove each one with the single force form that handles initialized submodules without deinitializing shared configuration:
+Keep evidence JSON/Markdown as needed. Cleanup is deliberately last and remains fail-closed: first prove every linked worktree is still clean, then remove each one with the single force form that handles initialized submodules without deinitializing shared configuration. Any failed status, worktree-removal, or build-tree-removal command stops cleanup:
 
 ```sh
 for source in "$after_src" "$before_src" "$harness_src"
@@ -372,7 +374,7 @@ if ! rm -rf "$harness_build" "$before_build" "$after_build"; then
 fi
 ```
 
-Do not run `git submodule deinit` from these linked worktrees, raw-remove their paths, or otherwise edit the primary checkout's shared submodule configuration during cleanup.
+Do not run `git submodule deinit` from these linked worktrees, raw-remove their paths, or otherwise edit the primary checkout's shared submodule configuration during cleanup. Offline re-comparison after removing the measured or harness source worktrees is intentionally unsupported unless the exact worktrees are recreated at their recorded paths and commits and are again clean.
 
 The historical `971327fb66fc372f5828c5f5967e118d9374f9da` instrumentation carrier (with `dd7cb260d58beb6f2d69bc07dc0bb604d65bd3ef` and `789b100c728bd9f95a68324e8eaa8012d9b09cdb` applied) still represents production paths from all-legacy `c94ac863141975806bbab52e950a2f2499108b65`. It is useful only for a separately reviewed first/Curl migration pair. It is **not** the Plugin baseline: comparing that all-legacy carrier to the current Plugin after commit introduces Curl and Plugin transitions, which the comparator rejects as `single_authority_transition_required`. Use `13fb0cef5925368fa12f8bcf693235281bce099f` as the Plugin before anchor instead.
 
@@ -403,7 +405,9 @@ Historical V3 documents without the independent measured/harness split, the newe
 
 Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Redaction checks tokenize composite sample keys, so names such as `child_pid`, `request_url`, and `command_argv` are rejected without rejecting closed aggregates such as `pidfd_successes`, `stdout_bytes`, `record_count`, and `endpoint_eof`. Primary samples must be non-negative. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
 
-Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may retain a developer-dirty source or harness tree, including `null` when a Git status command fails; cleanliness is a comparison gate, not a smoke usability gate. Unknown status is never recorded as false-clean. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, structurally valid complete family/shared scope identities and digests, qualified AVA/helper build binding, and a clean resolved harness whose recorded script hash matches the script artifact. Failures return stable structured provenance reasons and mismatches rather than a measured result.
+Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may retain a developer-dirty source or harness tree, including `null` when a Git status command fails; cleanliness is a comparison gate, not a smoke usability gate. Unknown status is never recorded as false-clean. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, qualified AVA/helper build binding, and a clean resolved harness whose recorded script hash matches the script artifact. The recorded measured and harness repository paths must still be Git worktrees whose current HEAD, tree, and clean state match the recorded checkout; the recorded commits and runtime-reference trees must still resolve there.
+
+Recorded source entries and digests are never accepted on their own. The pinned harness regenerates every canonical family scope and the shared process scope from each cohort's validated full measured commit, re-enforcing non-overlap and exact union coverage of all production paths, and requires exact deep equality with every recorded identity. It also regenerates the source-owned family-authority object, byte hash, and map from that commit. A missing or replaced worktree, Git failure, checkout mutation, unresolved or wrong commit/tree, omitted or extra scope entry, forged digest, or altered authority identity returns stable structured `comparison_provenance_required` mismatches rather than an exception or measurement.
 
 The comparator recomputes summaries from raw samples and also refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, pinned harness identity, and every common fixture hash match. Common fixtures include the benchmark and memory scripts, Python executable, process child, optional fake provider, fake MCP/LSP servers, Curl/direct-argv executables, and sample-plugin manifest/entrypoint; measured AVA and authority-bearing helper bytes are expected to differ. Exactly one source-owned authority may change, and it must be `legacy_local` to `supervised`. The complete scope signature for exactly that transitioned family must change, while every other family-owned scope must match. Multiple or reverse/unexpected transitions, a capability/build/result authority attributed to the wrong source map, or another family-owned scope change are unsupported.
 

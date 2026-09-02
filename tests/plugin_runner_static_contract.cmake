@@ -19,6 +19,8 @@ foreach(AVA_PLUGIN_RUNNER_FILE IN LISTS AVA_PLUGIN_RUNNER_FILES)
       "(^|[^A-Za-z0-9_])kill(pg)?[ \t\r\n]*\\("
       "(^|[^A-Za-z0-9_])wait(pid|id)[ \t\r\n]*\\("
       "(^|[^A-Za-z0-9_])fcntl[ \t\r\n]*\\("
+      "(^|[^A-Za-z0-9_])(pipe|pipe2)[ \t\r\n]*\\("
+      "(^|[^A-Za-z0-9_])(dup|dup2)[ \t\r\n]*\\("
       "(^|[^A-Za-z0-9_])poll[ \t\r\n]*\\("
       "#[ \t]*include[ \t]*[<\"][^>\"]*(poll|signal|spawn|sys/wait|unistd|fcntl)\\.h[>\"]"
       "(^|[^A-Za-z0-9_])pid_t([^A-Za-z0-9_]|$)"

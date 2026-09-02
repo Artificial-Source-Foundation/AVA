@@ -48,6 +48,49 @@ ava::core::Error process_io_error(std::string message, PluginManifest const& man
   return plugin_error(ava::core::ErrorCategory::Io, std::move(message), manifest);
 }
 
+std::size_t queued_stdout_byte_limit(std::size_t max_record_bytes) noexcept
+{
+  if (max_record_bytes > std::numeric_limits<std::size_t>::max() / kPluginRunnerQueuedByteMultiplier)
+    return std::numeric_limits<std::size_t>::max();
+  return max_record_bytes * kPluginRunnerQueuedByteMultiplier;
+}
+
+ava::core::Error stdout_limit_error(std::string message, PluginManifest const& manifest, PluginRunnerOptions const& options, std::size_t queued_bytes,
+                                    std::size_t queued_records)
+{
+  auto error = protocol_error(std::move(message), manifest);
+  error.with_context("max_bytes", std::to_string(options.max_record_bytes));
+  error.with_context("queued_bytes", std::to_string(queued_bytes));
+  error.with_context("queued_records", std::to_string(queued_records));
+  error.with_context("max_queued_bytes", std::to_string(queued_stdout_byte_limit(options.max_record_bytes)));
+  error.with_context("max_queued_records", std::to_string(kPluginRunnerQueuedRecordCap));
+  error.with_context("output_limit", "true");
+  return error;
+}
+
+ava::core::VoidResult validate_stdout_queue(std::string const& buffered, PluginManifest const& manifest, PluginRunnerOptions const& options)
+{
+  std::size_t record_begin = 0;
+  std::size_t record_count = 0;
+  while (true)
+  {
+    auto const newline = buffered.find('\n', record_begin);
+    if (newline == std::string::npos)
+      break;
+    ++record_count;
+    if (newline - record_begin > options.max_record_bytes)
+      return std::unexpected(stdout_limit_error("plugin protocol record exceeds size cap", manifest, options, buffered.size(), record_count));
+    if (record_count > kPluginRunnerQueuedRecordCap)
+      return std::unexpected(stdout_limit_error("plugin protocol queued record count exceeds cap", manifest, options, buffered.size(), record_count));
+    record_begin = newline + 1;
+  }
+  if (buffered.size() - record_begin > options.max_record_bytes)
+    return std::unexpected(stdout_limit_error("plugin protocol record exceeds size cap", manifest, options, buffered.size(), record_count));
+  if (buffered.size() > queued_stdout_byte_limit(options.max_record_bytes))
+    return std::unexpected(stdout_limit_error("plugin protocol queued bytes exceed cap", manifest, options, buffered.size(), record_count));
+  return {};
+}
+
 std::optional<ava::process::TerminationReasonV1> interruption_reason(Clock::time_point deadline, CancelCallback const& cancel_requested) noexcept
 {
   if (Clock::now() >= deadline)
@@ -71,6 +114,14 @@ void add_bounded_stream_metadata(ava::core::Error& error, std::string const& std
 ava::core::VoidResult PluginProcess::write_record(std::string_view record, Clock::time_point deadline, std::chrono::milliseconds timeout,
                                                   std::string_view timeout_message, CancelCallback cancel_requested)
 {
+  if (record.size() > options_.max_record_bytes || record.size() == std::numeric_limits<std::size_t>::max())
+  {
+    auto error = protocol_error("plugin outbound protocol record exceeds size cap", manifest_);
+    error.with_context("record_bytes", std::to_string(record.size()));
+    error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
+    error.with_context("output_limit", "true");
+    return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(error)));
+  }
   if (!standard_input_.valid())
   {
     auto error = protocol_error("plugin stdin is closed", manifest_);
@@ -134,30 +185,19 @@ ava::core::Result<std::string> PluginProcess::read_record(Clock::time_point dead
     if (is_canceled(cancel_requested))
       return std::unexpected(fail_process(ava::process::TerminationReasonV1::Canceled, canceled_error("plugin request canceled", manifest_)));
 
+    if (auto valid = validate_stdout_queue(stdout_buffer_, manifest_, options_); !valid)
+    {
+      static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, 0, true));
+      return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(valid.error())));
+    }
     if (auto const newline = stdout_buffer_.find('\n'); newline != std::string::npos)
     {
-      if (newline > options_.max_record_bytes)
-      {
-        static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, 0, true));
-        auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
-        error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
-        error.with_context("output_limit", "true");
-        return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(error)));
-      }
       auto record = stdout_buffer_.substr(0, newline);
       stdout_buffer_.erase(0, newline + 1);
       if (!record.empty() && record.back() == '\r')
         record.pop_back();
       Dout(dc::plugin, "operation=record state=read bytes=" << record.size());
       return record;
-    }
-    if (stdout_buffer_.size() > options_.max_record_bytes)
-    {
-      static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, 0, true));
-      auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
-      error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
-      error.with_context("output_limit", "true");
-      return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(error)));
     }
     if (Clock::now() >= deadline)
     {
@@ -175,7 +215,7 @@ ava::core::Result<std::string> PluginProcess::read_record(Clock::time_point dead
           output_limit_error(drained.error()) ? ava::process::TerminationReasonV1::OutputLimit : ava::process::TerminationReasonV1::ProtocolFailure;
       return std::unexpected(fail_process(reason, std::move(drained.error())));
     }
-    if (stdout_buffer_.find('\n') != std::string::npos || stdout_buffer_.size() > options_.max_record_bytes)
+    if (stdout_buffer_.find('\n') != std::string::npos)
       continue;
 
     if (!standard_output_.valid())
@@ -326,25 +366,47 @@ ava::core::VoidResult PluginProcess::drain_stdout(bool enforce_record_limit)
       return std::unexpected(process_io_error("plugin stdout returned an invalid stream state", manifest_));
 
     Dout(dc::plugin, "operation=stdout state=read bytes=" << read->bytes);
-    bool truncated = false;
+    if (enforce_record_limit)
+    {
+      auto const byte_limit = queued_stdout_byte_limit(options_.max_record_bytes);
+      if (stdout_buffer_.size() > byte_limit || read->bytes > byte_limit - std::min(stdout_buffer_.size(), byte_limit))
+      {
+        auto const queued_records = static_cast<std::size_t>(std::count(stdout_buffer_.begin(), stdout_buffer_.end(), '\n')) +
+                                    static_cast<std::size_t>(std::count(buffer.begin(), buffer.begin() + read->bytes, '\n'));
+        auto const attempted_bytes = read->bytes > std::numeric_limits<std::size_t>::max() - stdout_buffer_.size() ? std::numeric_limits<std::size_t>::max()
+                                                                                                                   : stdout_buffer_.size() + read->bytes;
+        static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, read->bytes, true));
+        return std::unexpected(stdout_limit_error("plugin protocol queued bytes exceed cap", manifest_, options_, attempted_bytes, queued_records));
+      }
+
+      try
+      {
+        stdout_buffer_.append(buffer.data(), read->bytes);
+      }
+      catch (...)
+      {
+        static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, read->bytes, true));
+        return std::unexpected(process_io_error("failed to retain bounded plugin stdout", manifest_));
+      }
+      auto valid = validate_stdout_queue(stdout_buffer_, manifest_, options_);
+      if (auto accounted = operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, read->bytes, !valid);
+          !accounted)
+      {
+        return std::unexpected(process_io_error("failed to account plugin stdout", manifest_));
+      }
+      if (!valid)
+        return std::unexpected(std::move(valid.error()));
+      continue;
+    }
+
+    bool const truncated =
+        read->bytes > options_.max_record_bytes || stdout_buffer_.size() > options_.max_record_bytes - std::min(options_.max_record_bytes, read->bytes);
     try
     {
-      stdout_buffer_.append(buffer.data(), read->bytes);
-      if (enforce_record_limit)
-      {
-        auto const newline = stdout_buffer_.find('\n');
-        truncated = (newline == std::string::npos && stdout_buffer_.size() > options_.max_record_bytes) ||
-                    (newline != std::string::npos && newline > options_.max_record_bytes);
-      }
-      else if (stdout_buffer_.size() > options_.max_record_bytes)
-      {
-        stdout_buffer_.erase(0, stdout_buffer_.size() - options_.max_record_bytes);
-        truncated = true;
-      }
+      append_stdout_tail(std::string_view(buffer.data(), read->bytes));
     }
     catch (...)
     {
-      truncated = true;
       static_cast<void>(operation_scope_.supervisor().account_output(process_handle_, ava::process::StreamKindV1::StandardOutput, read->bytes, true));
       return std::unexpected(process_io_error("failed to retain bounded plugin stdout", manifest_));
     }
@@ -352,13 +414,6 @@ ava::core::VoidResult PluginProcess::drain_stdout(bool enforce_record_limit)
         !accounted)
     {
       return std::unexpected(process_io_error("failed to account plugin stdout", manifest_));
-    }
-    if (truncated && enforce_record_limit)
-    {
-      auto error = protocol_error("plugin protocol record exceeds size cap", manifest_);
-      error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
-      error.with_context("output_limit", "true");
-      return std::unexpected(std::move(error));
     }
   }
   return {};
@@ -404,6 +459,21 @@ ava::core::VoidResult PluginProcess::drain_stderr()
     }
   }
   return {};
+}
+
+void PluginProcess::append_stdout_tail(std::string_view chunk)
+{
+  if (chunk.empty())
+    return;
+  auto const max_bytes = options_.max_record_bytes;
+  if (chunk.size() >= max_bytes)
+  {
+    stdout_buffer_.assign(chunk.substr(chunk.size() - max_bytes));
+    return;
+  }
+  if (stdout_buffer_.size() > max_bytes - chunk.size())
+    stdout_buffer_.erase(0, stdout_buffer_.size() - (max_bytes - chunk.size()));
+  stdout_buffer_.append(chunk);
 }
 
 void PluginProcess::append_stderr(std::string_view chunk)

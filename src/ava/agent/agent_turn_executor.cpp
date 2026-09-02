@@ -58,7 +58,7 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                                     *options, ToolProgressEntry{.call_id = event.call_id, .name = event.tool_name, .text = event.text, .status = event.status});
                               },
                               .announce_execution_after_permission = tool_execution.announce_execution_after_permission,
-                              .cancel_requested = options_.cancel_requested,
+                              .cancel_requested = tool_execution.cancel_requested ? tool_execution.cancel_requested : options_.cancel_requested,
                               .redact_permission_audit_arguments = tool_execution.redact_permission_audit_arguments,
                               .require_explicit_file_permissions = tool_execution.require_explicit_file_permissions,
                               .anchor_set = options_.anchor_set,

@@ -584,6 +584,38 @@ class BenchmarkHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported reason"):
             self.module.validate_helper_payload(unsupported, "process-first-spawn")
 
+    def test_process_helper_preserves_plugin_caller_not_migrated_unsupported(self) -> None:
+        args = argparse.Namespace(
+            benchmark_helper=pathlib.Path(sys.executable),
+            fake_process_child=None,
+            fake_mcp_server=None,
+            fake_lsp_server=None,
+            sample_plugin=pathlib.Path("/fixture"),
+            runs=1,
+        )
+        payload = {
+            "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
+            "case": "family-plugin-lifecycle",
+            "status": "unsupported",
+            "primary_metric": "lifecycle_ns",
+            "unit": "ns",
+            "reason_code": "caller_not_migrated",
+            "reason": self.module.PROCESS_REASON_TEXT["caller_not_migrated"],
+            "observations": [],
+            "case_metrics": {"authority": "legacy_local", "cleanup_scope": "immediate_children_only"},
+        }
+        completed = self.module.subprocess.CompletedProcess([], 0, self.module.json.dumps(payload), "")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            commands: list[dict[str, object]] = []
+            with mock.patch.object(self.module, "run_process", return_value=(1.0, completed)):
+                result = self.module.run_process_helper(args, root, project, "family_plugin_lifecycle", [], commands)
+        self.assertEqual(result["status"], "unsupported")
+        self.assertEqual(result["reason_code"], "caller_not_migrated")
+        self.assertEqual(len(commands), 1)
+
     def test_process_helper_rejects_malformed_and_truncated_output(self) -> None:
         args = argparse.Namespace(
             benchmark_helper=pathlib.Path(sys.executable),

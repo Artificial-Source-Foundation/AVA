@@ -23,6 +23,10 @@ using CancelCallback = std::function<bool()>;
 
 inline constexpr std::size_t kPluginResourceContentMaxBytes = 64 * 1024;
 inline constexpr std::size_t kPluginDynamicResourceNameMaxBytes = 96;
+inline constexpr std::size_t kPluginRunnerMaxRecordBytes = 1024 * 1024;
+inline constexpr std::size_t kPluginRunnerMaxStderrBytes = 1024 * 1024;
+inline constexpr std::size_t kPluginRunnerQueuedRecordCap = 64;
+inline constexpr std::size_t kPluginRunnerQueuedByteMultiplier = 4;
 
 enum class PluginDynamicResourceKind
 {
@@ -157,7 +161,8 @@ struct PluginUiHandler
 class PluginProcess final
 {
  public:
-  PluginProcess(PluginManifest manifest, PluginRunnerOptions options, ava::process::ProcessScopeV1 operation_scope);
+  PluginProcess(PluginManifest manifest, PluginRunnerOptions options, ava::process::ProcessScopeV1 operation_scope,
+                std::chrono::steady_clock::time_point startup_deadline = {});
   ~PluginProcess() noexcept;
 
   PluginProcess(PluginProcess const&) = delete;
@@ -219,12 +224,14 @@ class PluginProcess final
                                                    std::chrono::steady_clock::time_point observation_deadline);
   [[nodiscard]] ava::core::VoidResult settled_cleanup_result() const;
   [[nodiscard]] std::optional<ava::process::ExitStatusV1> observe_settlement() const;
+  void append_stdout_tail(std::string_view chunk);
   void append_stderr(std::string_view chunk);
   void close_endpoints() noexcept;
 
   PluginManifest manifest_;
   PluginRunnerOptions options_;
   PluginInitialization initialization_;
+  std::chrono::steady_clock::time_point startup_deadline_{};
   ava::process::ProcessScopeV1 operation_scope_;
   ava::process::ProcessHandle process_handle_;
   ava::process::PipeEndpoint standard_input_;

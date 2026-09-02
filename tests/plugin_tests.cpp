@@ -887,7 +887,7 @@ void test_plugin_runner_initializes_and_shuts_down()
   }
 }
 
-void test_plugin_runner_accepts_buffered_extra_records()
+void test_plugin_runner_rejects_oversized_buffered_extra_records()
 {
   auto const root = create_empty_root("plugin-runner-buffered");
 
@@ -907,13 +907,9 @@ void test_plugin_runner_accepts_buffered_extra_records()
   auto options = runner_options(workspace, std::chrono::milliseconds(500));
   options.max_record_bytes = 256;
   auto process = ava::plugin::PluginProcess::start(runner_manifest(plugin_dir, "com.example.buffered", "plugin.sh"), options);
-  expect(process.has_value(), process ? "plugin runner accepts buffered records after initialize"
-                                      : "plugin runner accepts buffered records after initialize: " + process.error().format());
-  if (process)
-  {
-    auto shutdown = (*process)->shutdown(std::chrono::milliseconds(500));
-    expect(shutdown.has_value(), "plugin runner shuts down after buffered records");
-  }
+  expect(!process && process.error().format().find("output_limit: true") != std::string::npos,
+         process ? "plugin runner rejects every oversized complete record already buffered after initialize"
+                 : "plugin runner rejects every oversized complete record already buffered after initialize: " + process.error().format());
 }
 
 void test_plugin_runner_contained_failures()
@@ -2309,7 +2305,7 @@ void run_plugin_tests()
   test_plugin_discovery();
   test_plugin_enablement();
   test_plugin_runner_initializes_and_shuts_down();
-  test_plugin_runner_accepts_buffered_extra_records();
+  test_plugin_runner_rejects_oversized_buffered_extra_records();
   test_plugin_runner_contained_failures();
   test_plugin_runner_tool_calls();
   test_plugin_runner_command_calls();

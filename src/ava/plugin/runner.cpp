@@ -107,13 +107,12 @@ bool is_valid_dynamic_resource_name(std::string_view name) noexcept
 
 ava::core::VoidResult PluginProcess::initialize(CancelCallback cancel_requested)
 {
-  auto const deadline = std::chrono::steady_clock::now() + options_.startup_timeout;
   std::string const request = "{\"id\":\"ava_1\",\"type\":\"initialize\",\"api_version\":" + json_string(kPluginApiVersion) +
                               ",\"plugin_id\":" + json_string(manifest_.id) + ",\"workspace\":" + json_string(options_.workspace_dir.string()) + "}";
-  if (auto written = write_record(request, deadline, options_.startup_timeout, "timed out writing plugin initialization", cancel_requested); !written)
+  if (auto written = write_record(request, startup_deadline_, options_.startup_timeout, "timed out writing plugin initialization", cancel_requested); !written)
     return std::unexpected(std::move(written.error()));
 
-  auto record = read_record(deadline, options_.startup_timeout, "timed out waiting for plugin initialization",
+  auto record = read_record(startup_deadline_, options_.startup_timeout, "timed out waiting for plugin initialization",
                             "plugin process closed stdout before initialization", cancel_requested);
   if (!record)
     return std::unexpected(std::move(record.error()));
@@ -523,22 +522,29 @@ ava::core::VoidResult PluginProcess::write_proxy_response(std::string_view reque
                                                           std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
                                                           CancelCallback cancel_requested)
 {
-  auto record = proxy_response_json(request_id, response);
-  if (record.size() > options_.max_record_bytes)
+  std::size_t raw_bytes = 0;
+  bool over_limit = false;
+  auto add_raw_bytes = [&](std::string_view value) {
+    if (value.size() > options_.max_record_bytes - std::min(raw_bytes, options_.max_record_bytes))
+      over_limit = true;
+    else
+      raw_bytes += value.size();
+  };
+  add_raw_bytes(request_id);
+  add_raw_bytes(response.content);
+  add_raw_bytes(response.metadata_json);
+  add_raw_bytes(response.error_category);
+  add_raw_bytes(response.error_message);
+  add_raw_bytes(response.error_details);
+  if (over_limit)
   {
-    auto error = plugin_error(ava::core::ErrorCategory::Tool, "plugin proxy response exceeds size cap", manifest_);
-    error.with_context("response_bytes", std::to_string(record.size()));
+    auto error = protocol_error("plugin outbound proxy response exceeds size cap", manifest_);
+    error.with_context("response_bytes", ">" + std::to_string(options_.max_record_bytes));
     error.with_context("max_bytes", std::to_string(options_.max_record_bytes));
-    auto bounded = proxy_error_response(error);
-    bounded.metadata_json = "{\"truncated\":true,\"max_record_bytes\":" + std::to_string(options_.max_record_bytes) + "}";
-    record = proxy_response_json(request_id, bounded);
-    if (record.size() > options_.max_record_bytes)
-    {
-      auto protocol = protocol_error("plugin proxy error response exceeds size cap", manifest_);
-      protocol.with_context("max_bytes", std::to_string(options_.max_record_bytes));
-      return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(protocol)));
-    }
+    error.with_context("output_limit", "true");
+    return std::unexpected(fail_process(ava::process::TerminationReasonV1::OutputLimit, std::move(error)));
   }
+  auto record = proxy_response_json(request_id, response);
   return write_record(record, deadline, timeout, "timed out writing plugin proxy response", cancel_requested);
 }
 

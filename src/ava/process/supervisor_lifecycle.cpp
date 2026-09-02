@@ -309,6 +309,8 @@ void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uin
     if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
       return;
     auto& record = *found->second;
+    if (fallback == TerminationReasonV1::Canceled)
+      static_cast<void>(commit_reason_locked(record, fallback));
     static_cast<void>(commit_due_execution_deadline_locked(record, Clock::now()));
     static_cast<void>(commit_reason_locked(record, fallback));
     mark_launch_error_locked(record);
@@ -440,8 +442,11 @@ GateReleaseDecision fail_registered_launch(std::shared_ptr<SupervisorState> cons
     return GateReleaseDecision{.reason = record.reason.value_or(fallback),
                                .cleanup_deadline = std::min(record.stop_deadline.value_or(now), now + kDefaultCleanupBudget)};
   }
+  bool canceled_committed = false;
+  if (fallback == TerminationReasonV1::Canceled)
+    canceled_committed = commit_reason_locked(record, fallback);
   bool const deadline_committed = commit_due_execution_deadline_locked(record, now);
-  bool const new_reason = commit_reason_locked(record, fallback);
+  bool const new_reason = commit_reason_locked(record, fallback) || canceled_committed;
   mark_launch_error_locked(record);
   bool const new_deadline = set_earlier_stop_deadline_locked(record, now + kDefaultCleanupBudget);
 #if !defined(_WIN32)

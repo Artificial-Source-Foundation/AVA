@@ -248,6 +248,11 @@ void benchmark_curl(BackendBenchmarkOptions const& options)
 
 void benchmark_plugin(BackendBenchmarkOptions const& options)
 {
+#if !defined(AVA_BENCHMARK_PLUGIN_AUTHORITY_SUPERVISED)
+  emit_helper_unsupported(options.benchmark_case, "lifecycle_ns", "ns", "caller_not_migrated", kCallerNotMigratedReason,
+                          family_case_metrics(authority_for(options.benchmark_case)));
+  return;
+#else
   if (options.sample_plugin.empty() || !std::filesystem::is_regular_file(options.sample_plugin / "plugin.json") ||
       !std::filesystem::is_regular_file(options.sample_plugin / "plugin.sh"))
   {
@@ -262,7 +267,6 @@ void benchmark_plugin(BackendBenchmarkOptions const& options)
   auto const workspace = temporary.path() / "workspace";
   std::filesystem::create_directories(workspace);
   bool const clean_before = no_waitable_children();
-#if defined(AVA_BENCHMARK_PLUGIN_AUTHORITY_SUPERVISED)
   auto supervisor = std::make_shared<ava::process::Supervisor>();
   auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
   if (!application_scope)
@@ -310,23 +314,6 @@ void benchmark_plugin(BackendBenchmarkOptions const& options)
                            {"supervisor_record_finished", true},
                            {"supervisor_settlement_once", true},
                            {"cleanup_scope", std::string("managed_group")}});
-#else
-  auto supervisor = std::make_shared<ava::process::Supervisor>();
-  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
-  if (!application_scope)
-    fail(application_scope.error().format());
-  auto const started = Clock::now();
-  auto process =
-      ava::plugin::PluginProcess::start(*manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace, .process_scope = *application_scope});
-  bool initialized = process && (*process)->initialization().api_version == "ava.plugin.v1";
-  auto called = process ? (*process)->call_tool("todo_add", "{\"text\":\"benchmark\"}", "benchmark")
-                        : ava::core::Result<ava::plugin::PluginToolCallResult>(std::unexpected(process.error()));
-  auto shutdown = process ? (*process)->shutdown(500ms) : ava::core::VoidResult(std::unexpected(process.error()));
-  if (process)
-    process->reset();
-  auto const elapsed = elapsed_nanoseconds(started);
-  bool const clean_after = no_waitable_children();
-  emit_family(options.benchmark_case, elapsed, initialized, called && called->ok, static_cast<bool>(shutdown), clean_before && clean_after);
 #endif
 }
 

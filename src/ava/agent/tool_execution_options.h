@@ -4,6 +4,7 @@
 #include "ava/process/scope.h"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -29,6 +30,9 @@ struct ToolExecutionOptions
   std::vector<std::filesystem::path> ava_authority_roots = {};
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
+  // The admitted run cancellation route copied into each model ToolContext.
+  // Callers that leave it empty retain AgentLoopOptions compatibility.
+  std::function<bool()> cancel_requested = nullptr;
   // Run authority copied into each model ToolContext. Child loops replace it
   // with a fresh application/session/run hierarchy before publication.
   std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;

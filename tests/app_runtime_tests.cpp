@@ -36,6 +36,7 @@ void run_app_runtime_tests()
   test_app_runtime_project_plugin_resources_follow_trust_gate();
   test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
   test_app_runtime_plugin_install_remove_commands();
+  test_runtime_plugin_event_hook_uses_admitted_run_cancellation_scope();
   test_app_context_reports_lsp_config_load_errors();
   test_app_run_prompt_isolates_ambient_extensions();
   test_project_primary_revocation_removes_authority_without_broadening_tools();

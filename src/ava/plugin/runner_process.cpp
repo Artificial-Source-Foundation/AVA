@@ -40,19 +40,33 @@ ava::core::Result<std::filesystem::path> absolute_working_directory(PluginManife
   auto working_directory = child_working_dir(manifest, options);
   if (working_directory.empty())
     return std::unexpected(plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin working directory is unavailable", manifest));
-  if (working_directory.is_absolute())
-    return working_directory;
-  std::error_code error;
-  auto absolute = std::filesystem::absolute(working_directory, error);
-  if (error || !absolute.is_absolute())
-    return std::unexpected(plugin_error(ava::core::ErrorCategory::Io, "failed to resolve the plugin working directory", manifest));
-  return absolute;
+  if (!working_directory.is_absolute())
+  {
+    std::error_code error;
+    working_directory = std::filesystem::absolute(working_directory, error);
+    if (error || !working_directory.is_absolute())
+      return std::unexpected(plugin_error(ava::core::ErrorCategory::Io, "failed to resolve the plugin working directory", manifest));
+  }
+  return working_directory.lexically_normal();
+}
+
+std::string plugin_executable(PluginManifest const& manifest, std::filesystem::path const& working_directory)
+{
+  auto const& command = manifest.entrypoint.command;
+  std::filesystem::path const requested(command);
+  if (command.find('/') == std::string::npos || requested.is_absolute())
+    return command;
+  return (working_directory / requested).lexically_normal().string();
 }
 
 }  // namespace
 
-PluginProcess::PluginProcess(PluginManifest manifest, PluginRunnerOptions options, ava::process::ProcessScopeV1 operation_scope)
-    : manifest_(std::move(manifest)), options_(std::move(options)), operation_scope_(std::move(operation_scope))
+PluginProcess::PluginProcess(PluginManifest manifest, PluginRunnerOptions options, ava::process::ProcessScopeV1 operation_scope,
+                             Clock::time_point startup_deadline)
+    : manifest_(std::move(manifest)),
+      options_(std::move(options)),
+      startup_deadline_(startup_deadline == Clock::time_point{} ? saturating_add(Clock::now(), options_.startup_timeout) : startup_deadline),
+      operation_scope_(std::move(operation_scope))
 {
   options_.process_scope.reset();
 }
@@ -62,8 +76,17 @@ PluginProcess::~PluginProcess() noexcept
   try
   {
     standard_input_.close();
-    if (process_handle_.valid() && !settlement_ && !settlement_error_)
+    if (process_handle_.valid() && !settlement_)
     {
+      if (settlement_error_)
+      {
+        // A bounded explicit wait may fail while the Supervisor still owns a
+        // runnable group. Destruction gets one fresh bounded observation so a
+        // sticky reporting error cannot suppress owner cleanup.
+        settlement_error_.reset();
+        cleanup_deadline_.reset();
+        observation_deadline_.reset();
+      }
       auto const cleanup_deadline = cleanup_deadline_.value_or(saturating_add(Clock::now(), kPluginCleanupBudget));
       auto const observation_deadline = observation_deadline_.value_or(saturating_add(cleanup_deadline, kPluginSettlementObservationBudget));
       static_cast<void>(settle_until(ava::process::TerminationReasonV1::OwnerShutdown, cleanup_deadline, observation_deadline));
@@ -100,8 +123,14 @@ ava::core::Result<std::unique_ptr<PluginProcess>> PluginProcess::start(PluginMan
     error.with_context("max_ms", "30000");
     return std::unexpected(std::move(error));
   }
-  if (options.max_record_bytes == 0 || options.max_stderr_bytes == 0)
-    return std::unexpected(plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin runner byte limits must be non-zero", manifest));
+  if (options.max_record_bytes == 0 || options.max_record_bytes > kPluginRunnerMaxRecordBytes || options.max_stderr_bytes == 0 ||
+      options.max_stderr_bytes > kPluginRunnerMaxStderrBytes)
+  {
+    auto error = plugin_error(ava::core::ErrorCategory::InvalidArgument, "plugin runner byte limits are out of bounds", manifest);
+    error.with_context("max_record_bytes", std::to_string(kPluginRunnerMaxRecordBytes));
+    error.with_context("max_stderr_bytes", std::to_string(kPluginRunnerMaxStderrBytes));
+    return std::unexpected(std::move(error));
+  }
   if (!options.process_scope)
     return std::unexpected(plugin_error(ava::core::ErrorCategory::Configuration, "plugin process authority is required", manifest));
   if (is_canceled(cancel_requested))
@@ -116,7 +145,8 @@ ava::core::Result<std::unique_ptr<PluginProcess>> PluginProcess::start(PluginMan
   }
   options.process_scope.reset();
 
-  auto process = std::make_unique<PluginProcess>(std::move(manifest), std::move(options), std::move(*operation_scope));
+  auto const startup_deadline = saturating_add(Clock::now(), options.startup_timeout);
+  auto process = std::make_unique<PluginProcess>(std::move(manifest), std::move(options), std::move(*operation_scope), startup_deadline);
   if (auto launched = process->launch(cancel_requested); !launched)
     return std::unexpected(std::move(launched.error()));
   if (auto initialized = process->initialize(cancel_requested); !initialized)
@@ -153,25 +183,33 @@ ava::core::VoidResult PluginProcess::launch(CancelCallback const& cancel_request
   if (!environment)
     return std::unexpected(plugin_error(ava::core::ErrorCategory::Configuration, "failed to create the plugin process environment", manifest_));
   auto arguments = plugin_argv(manifest_);
+  auto executable = plugin_executable(manifest_, *working_directory);
   if (is_canceled(cancel_requested))
     return std::unexpected(canceled_error("plugin startup canceled", manifest_));
+
+  auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(startup_deadline_ - Clock::now());
+  if (remaining <= 0ms)
+  {
+    auto error = protocol_error("timed out preparing plugin startup", manifest_);
+    error.with_context("timeout_ms", std::to_string(options_.startup_timeout.count()));
+    return std::unexpected(std::move(error));
+  }
 
   auto& supervisor = operation_scope_.supervisor();
   auto reservation = supervisor.reserve(
       operation_scope_.owner_prefix(), ava::process::ProcessRoleV1::Plugin,
-      {.termination_grace = kPluginTerminationGrace, .startup_timeout = options_.startup_timeout, .execution_deadline = plugin_lifetime_deadline(options_)});
+      {.termination_grace = kPluginTerminationGrace, .startup_timeout = remaining, .execution_deadline = plugin_lifetime_deadline(options_)});
   if (!reservation)
     return std::unexpected(std::move(reservation.error()));
-  if (is_canceled(cancel_requested))
-    return std::unexpected(canceled_error("plugin startup canceled", manifest_));
 
-  auto spawned = supervisor.spawn(std::move(*reservation), {.executable = manifest_.entrypoint.command,
+  auto spawned = supervisor.spawn(std::move(*reservation), {.executable = std::move(executable),
                                                             .argv = std::move(arguments),
                                                             .environment = std::move(*environment),
                                                             .cwd = working_directory->string(),
                                                             .stdin_mode = ava::process::StreamModeV1::Capture,
                                                             .stdout_mode = ava::process::StreamModeV1::Capture,
-                                                            .stderr_mode = ava::process::StreamModeV1::Capture});
+                                                            .stderr_mode = ava::process::StreamModeV1::Capture,
+                                                            .cancel_requested = cancel_requested});
   if (!spawned)
     return std::unexpected(std::move(spawned.error()));
 
@@ -236,8 +274,19 @@ ava::core::VoidResult PluginProcess::settle_until(ava::process::TerminationReaso
     settlement_ = *observed;
   if (!settlement_ && !stop_requested_)
   {
+    // The caller observation remains bounded by observation_deadline. Retain
+    // Supervisor cleanup authority for one destructor retry beyond that bound
+    // so a surfaced wait error cannot immediately strand a runnable child at
+    // the Supervisor's hard cleanup horizon.
+    auto const supervisor_cleanup_deadline = saturating_add(observation_deadline, kPluginCleanupBudget);
+    auto stopped = operation_scope_.supervisor().request_stop(process_handle_, reason, supervisor_cleanup_deadline);
+    if (!stopped)
+    {
+      settlement_error_ = cleanup_error("failed to request plugin process cleanup");
+      settlement_error_->with_context("cause", stopped.error().message());
+      return std::unexpected(*settlement_error_);
+    }
     stop_requested_ = true;
-    static_cast<void>(operation_scope_.supervisor().request_stop(process_handle_, reason, cleanup_deadline));
   }
 
   while (!settlement_ && Clock::now() < observation_deadline)

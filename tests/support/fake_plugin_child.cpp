@@ -46,10 +46,19 @@ int main(int argc, char** argv)
   std::filesystem::path const marker = argc > 2 ? argv[2] : "";
   std::string initialize_request;
 
+  if (scenario == "argv0")
+    write_marker(marker, argv[0]);
+  if (scenario == "live-destructor")
+    write_marker(marker, std::to_string(static_cast<long long>(::getpid())));
   if (scenario == "startup-hang")
     loop_forever();
   if (!std::getline(std::cin, initialize_request))
     return 2;
+  if (scenario == "initialize-delay")
+  {
+    write_marker(marker, "initialize-observed");
+    std::this_thread::sleep_for(120ms);
+  }
 
   if (scenario == "oversized-initialize")
   {
@@ -70,11 +79,29 @@ int main(int argc, char** argv)
   initialized();
   if (scenario == "endpoint-eof")
     return 7;
+  if (scenario == "blocked-stdin-short-line-flood" || scenario == "queued-byte-flood")
+  {
+    if (std::cin.peek() == std::char_traits<char>::eof())
+      return 4;
+    std::string records;
+    if (scenario == "blocked-stdin-short-line-flood")
+    {
+      for (int index = 0; index < 256; ++index)
+        records += "{}\n";
+    }
+    else
+    {
+      for (int index = 0; index < 8; ++index)
+        records += std::string(500, 'q') + '\n';
+    }
+    while (true)
+      std::cout << records << std::flush;
+  }
 
   std::string request;
   if (!std::getline(std::cin, request))
   {
-    if (scenario == "shutdown-term-refusal")
+    if (scenario == "shutdown-term-refusal" || scenario == "live-destructor")
     {
       std::signal(SIGTERM, SIG_IGN);
       loop_forever();
@@ -82,6 +109,8 @@ int main(int argc, char** argv)
     return 0;
   }
 
+  if (scenario == "request-marker")
+    write_marker(marker, "request-observed");
   if (scenario == "request-hang" || scenario == "shutdown-term-refusal")
   {
     write_marker(marker, "request-observed");

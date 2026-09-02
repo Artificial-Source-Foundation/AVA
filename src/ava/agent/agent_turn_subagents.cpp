@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -347,7 +348,9 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
         std::shared_ptr<SubagentInteractionGate> gate;
         ~FinishInteractionGate() { gate->finish(); }
       } finish_gate{run_state->interaction_gate};
-      run_state->child_options.cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+      std::function<bool()> child_cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+      run_state->child_options.cancel_requested = child_cancel_requested;
+      run_state->child_options.tool_execution.cancel_requested = std::move(child_cancel_requested);
       AgentLoop child_loop(std::move(run_state->child_options));
       auto child_result = child_loop.run_turn(run_state->prompt, run_state->child_store, *run_state->provider_instance, *run_state->transport_instance);
       if (!child_result)

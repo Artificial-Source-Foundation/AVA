@@ -31,6 +31,7 @@ void test_app_runtime_enabled_plugin_resources_autoload();
 void test_app_runtime_project_plugin_resources_follow_trust_gate();
 void test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
 void test_app_runtime_plugin_install_remove_commands();
+void test_runtime_plugin_event_hook_uses_admitted_run_cancellation_scope();
 void test_app_context_reports_lsp_config_load_errors();
 void test_debug_session_mutex_tracks_current_thread();
 void test_app_run_prompt_isolates_ambient_extensions();

@@ -356,6 +356,20 @@ using detail::Pipe;
 using detail::UniqueFd;
 using namespace std::chrono_literals;
 
+bool parent_cancel_requested(SpawnSpecV1 const& specification) noexcept
+{
+  if (!specification.cancel_requested)
+    return false;
+  try
+  {
+    return specification.cancel_requested();
+  }
+  catch (...)
+  {
+    return true;
+  }
+}
+
 #if !defined(_WIN32)
 
 struct PreparedStream
@@ -697,6 +711,11 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   if (!consumed)
     return std::unexpected(std::move(consumed.error()));
   auto const identity = *consumed;
+  if (parent_cancel_requested(specification))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+  }
   auto const role = detail::record_role(state, identity);
   if (!role || !detail::EnvironmentAccess::matches_common_launch(specification.environment, *role, specification.cwd))
   {
@@ -721,6 +740,11 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   return std::unexpected(detail::unsupported_error());
 #else
   auto prepared = prepare_spawn_checked(specification);
+  if (parent_cancel_requested(specification))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+  }
   if (!prepared)
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
@@ -751,6 +775,12 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::process_error(ava::core::ErrorCategory::Io, "failed to allocate process launch capabilities"));
+  }
+
+  if (parent_cancel_requested(specification))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
   }
 
   detail::PreForkDecision prepared_check;
@@ -784,6 +814,11 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::invalid_error("prepared common process launch lost its exact-environment binding"));
   }
+  if (parent_cancel_requested(specification))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+  }
 
   detail::PreForkDecision final_check;
   {
@@ -795,6 +830,11 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   {
     detail::finish_unregistered(state, identity, final_check.reason);
     return std::unexpected(detail::canceled_launch_error("process launch", final_check.reason));
+  }
+  if (parent_cancel_requested(specification))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
   }
 
   pid_t const parent_group = ::getpgrp();
@@ -881,6 +921,15 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   }
   detail::notify_monitor_state(state);
 
+  if (parent_cancel_requested(specification))
+  {
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::Canceled);
+    prepared->gate.write_end.reset();
+    detail::notify_monitor_state(state);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    return std::unexpected(detail::canceled_launch_error("process launch", failure.reason));
+  }
+
   if (auto hook = detail::invoke_after_fork_before_release_hook(state); !hook)
   {
     auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::LaunchFailed);
@@ -890,6 +939,14 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     if (failure.reason != TerminationReasonV1::LaunchFailed)
       return std::unexpected(detail::canceled_launch_error("process launch", failure.reason));
     return std::unexpected(std::move(hook.error()));
+  }
+  if (parent_cancel_requested(specification))
+  {
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::Canceled);
+    prepared->gate.write_end.reset();
+    detail::notify_monitor_state(state);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    return std::unexpected(detail::canceled_launch_error("process launch", failure.reason));
   }
 
   detail::GateReleaseDecision release_decision;
@@ -928,17 +985,27 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     return std::unexpected(std::move(hook.error()));
   }
 
-  auto const confirmation = detail::await_launch_exec_confirmation(prepared->launch_status.read_end.get(), startup_deadline, false);
+  auto const confirmation =
+      detail::await_launch_exec_confirmation(prepared->launch_status.read_end.get(), startup_deadline, false, -1, specification.cancel_requested);
   if (confirmation.disposition != detail::LaunchProtocolDispositionV1::ExecConfirmed)
   {
-    auto const fallback_reason =
-        confirmation.disposition == detail::LaunchProtocolDispositionV1::ExecFailed ? TerminationReasonV1::ExecFailed : TerminationReasonV1::LaunchFailed;
+    auto const fallback_reason = confirmation.problem == detail::LaunchProtocolProblemV1::Canceled
+                                     ? TerminationReasonV1::Canceled
+                                     : (confirmation.disposition == detail::LaunchProtocolDispositionV1::ExecFailed ? TerminationReasonV1::ExecFailed
+                                                                                                                    : TerminationReasonV1::LaunchFailed);
     auto const failure = detail::fail_registered_launch(state, identity, fallback_reason);
     detail::notify_monitor_state(state);
     detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
-    if (failure.reason != fallback_reason)
+    if (failure.reason != fallback_reason || fallback_reason == TerminationReasonV1::Canceled)
       return std::unexpected(detail::startup_stopped_error("process", failure.reason));
     return std::unexpected(detail::launch_protocol_error(confirmation, "process"));
+  }
+  if (parent_cancel_requested(specification))
+  {
+    auto const failure = detail::fail_registered_launch(state, identity, TerminationReasonV1::Canceled);
+    detail::notify_monitor_state(state);
+    detail::await_internal_settlement(handle_state, failure.cleanup_deadline);
+    return std::unexpected(detail::startup_stopped_error("process", failure.reason));
   }
 
   std::optional<TerminationReasonV1> startup_stop_reason;

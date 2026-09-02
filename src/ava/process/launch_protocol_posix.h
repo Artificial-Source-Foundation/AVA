@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <type_traits>
 
@@ -77,6 +78,7 @@ enum class LaunchProtocolProblemV1 : std::uint8_t
   TruncatedFrame,
   OutOfOrderFrame,
   TimedOut,
+  Canceled,
   ReadFailed,
   ContinuationFailed,
 };
@@ -104,7 +106,8 @@ struct LaunchProtocolOutcomeV1
 
 [[nodiscard]] LaunchProtocolOutcomeV1 await_launch_leader_ready(int descriptor, ProcessDeadline deadline) noexcept;
 [[nodiscard]] LaunchProtocolOutcomeV1 await_launch_exec_confirmation(int descriptor, ProcessDeadline deadline, bool containment_required,
-                                                                     int containment_continuation_descriptor = -1) noexcept;
+                                                                     int containment_continuation_descriptor = -1,
+                                                                     std::function<bool()> const& cancel_requested = {}) noexcept;
 [[nodiscard]] ava::core::Error launch_protocol_error(LaunchProtocolOutcomeV1 const& outcome, std::string_view operation);
 
 }  // namespace ava::process::detail

@@ -102,7 +102,7 @@ class PluginEventObserverState final
       ava::plugin::PluginRunnerOptions runner_options;
       runner_options.workspace_dir = options_.workspace_dir;
       runner_options.process_scope = options_.process_scope;
-      auto process = ava::plugin::PluginProcess::start(binding.manifest, runner_options);
+      auto process = ava::plugin::PluginProcess::start(binding.manifest, runner_options, options_.cancel_requested);
       if (!process)
       {
         notify_failure(binding, process.error());

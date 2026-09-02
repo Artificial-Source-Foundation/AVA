@@ -137,6 +137,20 @@ void test_absolute_deadline_timeout()
          "the launch protocol classifies an exhausted absolute deadline as a timeout");
 }
 
+void test_parent_cancellation_is_observed_in_bounded_slices()
+{
+  using namespace ava::process::detail;
+
+  TestPipe channel;
+  std::size_t observations = 0;
+  auto const started = std::chrono::steady_clock::now();
+  auto const canceled = await_launch_exec_confirmation(channel.read_descriptor(), started + 1s, false, -1, [&] { return ++observations >= 3; });
+  auto const elapsed = std::chrono::steady_clock::now() - started;
+  expect(channel.valid() && canceled.disposition == LaunchProtocolDispositionV1::LaunchFailed && canceled.problem == LaunchProtocolProblemV1::Canceled &&
+             observations == 3 && elapsed < 250ms,
+         "common spawn exec confirmation observes parent cancellation in bounded slices without a helper thread");
+}
+
 void test_malformed_truncated_and_out_of_order_protocol()
 {
   using namespace ava::process::detail;
@@ -211,6 +225,7 @@ void run_process_launch_protocol_posix_tests()
 #else
   test_fixed_protocol_success_and_failures();
   test_absolute_deadline_timeout();
+  test_parent_cancellation_is_observed_in_bounded_slices();
   test_malformed_truncated_and_out_of_order_protocol();
   test_containment_checkpoint_sequence();
 #endif

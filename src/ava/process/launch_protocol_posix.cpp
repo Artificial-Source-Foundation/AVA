@@ -33,6 +33,7 @@ enum class FrameReadKind
   Malformed,
   Truncated,
   TimedOut,
+  Canceled,
   Failed,
 };
 
@@ -54,6 +55,20 @@ int bounded_poll_timeout(ProcessDeadline deadline) noexcept
   if (remaining >= std::chrono::milliseconds(INT_MAX))
     return INT_MAX;
   return std::max(1, static_cast<int>(remaining.count()));
+}
+
+bool parent_canceled(std::function<bool()> const& cancel_requested) noexcept
+{
+  if (!cancel_requested)
+    return false;
+  try
+  {
+    return cancel_requested();
+  }
+  catch (...)
+  {
+    return true;
+  }
 }
 
 bool valid_failure_stage(std::uint8_t raw) noexcept
@@ -80,28 +95,43 @@ bool valid_frame(LaunchFrameV1 const& frame) noexcept
   return false;
 }
 
-FrameReadResult read_frame(int descriptor, ProcessDeadline deadline) noexcept
+FrameReadResult read_frame(int descriptor, ProcessDeadline deadline, std::function<bool()> const& cancel_requested = {}) noexcept
 {
+  constexpr auto cancellation_slice = std::chrono::milliseconds(10);
   std::array<std::byte, sizeof(LaunchFrameV1)> bytes{};
   std::size_t offset = 0;
   while (true)
   {
+    if (parent_canceled(cancel_requested))
+      return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
+    if (Clock::now() >= deadline)
+      return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+
     pollfd item{.fd = descriptor, .events = POLLIN, .revents = 0};
     int result = -1;
     int poll_error = 0;
+    auto const observation_deadline = cancel_requested ? std::min(deadline, Clock::now() + cancellation_slice) : deadline;
     while (true)
     {
-      result = ::poll(&item, 1, bounded_poll_timeout(deadline));
+      result = ::poll(&item, 1, bounded_poll_timeout(observation_deadline));
       if (result >= 0)
         break;
       poll_error = errno == 0 ? EIO : errno;
       if (poll_error != EINTR)
         break;
+      if (parent_canceled(cancel_requested))
+        return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
       if (Clock::now() >= deadline)
         return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
     }
     if (result == 0)
+    {
+      if (parent_canceled(cancel_requested))
+        return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
+      if (Clock::now() < deadline && observation_deadline < deadline)
+        continue;
       return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+    }
     if (result < 0)
       return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = poll_error};
     if ((item.revents & POLLNVAL) != 0)
@@ -120,11 +150,7 @@ FrameReadResult read_frame(int descriptor, ProcessDeadline deadline) noexcept
     if (count == 0)
       return FrameReadResult{.kind = offset == 0 ? FrameReadKind::End : FrameReadKind::Truncated, .frame = {}, .error_number = 0};
     if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-    {
-      if (Clock::now() >= deadline)
-        return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
       continue;
-    }
     return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = errno == 0 ? EIO : errno};
   }
 }
@@ -142,6 +168,8 @@ LaunchProtocolOutcomeV1 read_problem(FrameReadResult const& read, bool attempted
       return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::TruncatedFrame);
     case FrameReadKind::TimedOut:
       return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::TimedOut);
+    case FrameReadKind::Canceled:
+      return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::Canceled);
     case FrameReadKind::Failed:
       return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::ReadFailed, LaunchFailureStageV1::None, read.error_number);
     case FrameReadKind::Frame:
@@ -209,6 +237,8 @@ std::string_view problem_name(LaunchProtocolProblemV1 problem) noexcept
       return "out_of_order_frame";
     case LaunchProtocolProblemV1::TimedOut:
       return "startup_timeout";
+    case LaunchProtocolProblemV1::Canceled:
+      return "parent_canceled";
     case LaunchProtocolProblemV1::ReadFailed:
       return "status_read";
     case LaunchProtocolProblemV1::ContinuationFailed:
@@ -302,20 +332,21 @@ LaunchProtocolOutcomeV1 await_launch_leader_ready(int descriptor, ProcessDeadlin
 }
 
 LaunchProtocolOutcomeV1 await_launch_exec_confirmation(int descriptor, ProcessDeadline deadline, bool containment_required,
-                                                       int containment_continuation_descriptor) noexcept
+                                                       int containment_continuation_descriptor, std::function<bool()> const& cancel_requested) noexcept
 {
 #if defined(_WIN32)
   static_cast<void>(descriptor);
   static_cast<void>(deadline);
   static_cast<void>(containment_required);
   static_cast<void>(containment_continuation_descriptor);
+  static_cast<void>(cancel_requested);
   return protocol_outcome(LaunchProtocolDispositionV1::LaunchFailed, LaunchProtocolProblemV1::ReadFailed, LaunchFailureStageV1::None, ENOTSUP);
 #else
   bool checkpoint = false;
   bool attempted = false;
   while (true)
   {
-    auto const read = read_frame(descriptor, deadline);
+    auto const read = read_frame(descriptor, deadline, cancel_requested);
     if (read.kind != FrameReadKind::Frame)
       return read_problem(read, attempted);
 

@@ -873,6 +873,14 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.plugin_runner_static_contract PROPERTIES TIMEOUT 15)
 
   add_test(
+    NAME ava_tests.plugin_runner_static_contract_negative
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_PLUGIN_RUNNER_SCANNER=${CMAKE_CURRENT_SOURCE_DIR}/plugin_runner_static_contract.cmake
+            -DAVA_PLUGIN_RUNNER_NEGATIVE_ROOT=${CMAKE_BINARY_DIR}/plugin-runner-scanner-negative
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/plugin_runner_static_contract_negative.cmake)
+  set_tests_properties(ava_tests.plugin_runner_static_contract_negative PROPERTIES TIMEOUT 15)
+
+  add_test(
     NAME ava_cli.doctor_support
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/doctor_support_cli_test.py

@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -66,6 +67,9 @@ struct SpawnSpecV1
   StreamModeV1 stdin_mode = StreamModeV1::Discard;
   StreamModeV1 stdout_mode = StreamModeV1::Capture;
   StreamModeV1 stderr_mode = StreamModeV1::Capture;
+  // Optional parent-only, content-free cancellation observation. The common
+  // spawn path checks it without retaining it in process state.
+  std::function<bool()> cancel_requested = nullptr;
 
   // This type contains executable, argv, exact-environment authority, and cwd
   // content. A default-constructed environment is an invalid pre-fork state.
